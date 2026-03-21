@@ -1,0 +1,15 @@
+[Unit]
+Description=Spec Extraction Worker Service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/builder-spec-extractor
+ExecStart=/opt/builder-spec-extractor/App/scripts/run_worker.sh
+Restart=always
+RestartSec=5
+User=www-data
+Group=www-data
+
+[Install]
+WantedBy=multi-user.target

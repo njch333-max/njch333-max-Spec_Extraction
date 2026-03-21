@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <span class="eyebrow">Production Workflow</span>
+    <h2>Jobs</h2>
+    <p>Create jobs, upload specs, run extraction, and review the result.</p>
+  </div>
+</section>
+
+<section class="card">
+  <h3>Create Job</h3>
+  <form method="post" action="/jobs" class="grid-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>
+      <span>Job No.</span>
+      <input type="text" name="job_no" required>
+    </label>
+    <label>
+      <span>Builder</span>
+      <select name="builder_id" required>
+        <option value="">Select a builder</option>
+        {% for builder in builders %}
+        <option value="{{ builder.id }}">{{ builder.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>Title</span>
+      <input type="text" name="title">
+    </label>
+    <label class="wide">
+      <span>Notes</span>
+      <textarea name="notes" rows="3"></textarea>
+    </label>
+    <button type="submit" class="primary-button">Create Job</button>
+  </form>
+</section>
+
+<section class="card">
+  <h3>Job List</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Job No.</th>
+          <th>Builder</th>
+          <th>Status</th>
+          <th>Spec Files</th>
+          <th>Drawings</th>
+          <th>Created</th>
+          <th>Open</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for job in jobs %}
+        <tr>
+          <td>{{ job.job_no }}</td>
+          <td>{{ job.builder_name }}</td>
+          <td><span class="status-chip status-{{ job.status }}">{{ job.status }}</span></td>
+          <td>{{ job.spec_file_count }}</td>
+          <td>{{ job.drawing_file_count }}</td>
+          <td>{{ job.created_at }}</td>
+          <td><a href="/jobs/{{ job.id }}" class="text-link">Open</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="empty-cell">No jobs created yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

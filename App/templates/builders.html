@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <span class="eyebrow">Template Library</span>
+    <h2>Builders</h2>
+    <p>Manage builder reference files that guide future extraction runs.</p>
+  </div>
+</section>
+
+<section class="card">
+  <h3>Create Builder</h3>
+  <form method="post" action="/builders" class="grid-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>
+      <span>Builder Name</span>
+      <input type="text" name="name" required>
+    </label>
+    <label>
+      <span>Slug</span>
+      <input type="text" name="slug_value" placeholder="auto-generated if blank">
+    </label>
+    <label class="wide">
+      <span>Notes</span>
+      <textarea name="notes" rows="3"></textarea>
+    </label>
+    <button type="submit" class="primary-button">Create Builder</button>
+  </form>
+</section>
+
+<section class="stack">
+  {% for builder in builders %}
+  <article class="card">
+    <div class="split-head">
+      <div>
+        <h3>{{ builder.name }}</h3>
+        <p class="muted">Slug: {{ builder.slug }} | Templates: {{ builder.template_count }}</p>
+      </div>
+    </div>
+    <form method="post" action="/builders/{{ builder.id }}/templates" enctype="multipart/form-data" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="file" name="files" multiple required>
+      <button type="submit" class="primary-button">Upload Template Files</button>
+    </form>
+    {% if builder.notes %}
+    <p class="notes">{{ builder.notes }}</p>
+    {% endif %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Original Name</th>
+            <th>Uploaded</th>
+            <th>Size</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for file in builder.templates %}
+          <tr>
+            <td>{{ file.original_name }}</td>
+            <td>{{ file.uploaded_at }}</td>
+            <td>{{ file.size_bytes }}</td>
+            <td class="actions">
+              <a href="/builders/templates/{{ file.id }}/download" class="text-link">Download</a>
+              <form method="post" action="/templates/{{ file.id }}/delete">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button type="submit" class="ghost-button">Delete</button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4" class="empty-cell">No template files yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+  {% else %}
+  <section class="card empty-state">
+    <h3>No builders yet</h3>
+    <p>Create the first builder to start collecting template files.</p>
+  </section>
+  {% endfor %}
+</section>
+{% endblock %}

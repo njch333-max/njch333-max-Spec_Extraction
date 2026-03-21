@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }} | Spec Extraction</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail">
+      <div class="brand">
+        <div class="brand-kicker">Builder Spec Extractor</div>
+        <h1>Spec Extraction</h1>
+        <p>English-only review workspace for builder specs and production drawings.</p>
+      </div>
+      {% if current_user %}
+      <nav class="nav">
+        <a href="/jobs" class="nav-link">Jobs</a>
+        <a href="/builders" class="nav-link">Builders</a>
+      </nav>
+      <form method="post" action="/logout" class="logout-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="ghost-button">Sign Out</button>
+      </form>
+      {% endif %}
+      <div class="rail-note">
+        <span>Host:</span>
+        <strong>{{ host_domain or "local mode" }}</strong>
+      </div>
+    </aside>
+    <main class="content">
+      {% if flash %}
+      <div class="flash flash-{{ flash.level }}">{{ flash.message }}</div>
+      {% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</body>
+</html>

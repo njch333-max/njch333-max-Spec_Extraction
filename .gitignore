@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+dist/
+build/
+App/data/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+*.tmp
+App/.env
+deploy/

@@ -1,0 +1,306 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <span class="eyebrow">Job Workspace</span>
+    <h2>{{ job.job_no }}</h2>
+    <p>{{ job.builder_name }}{% if job.title %} | {{ job.title }}{% endif %}</p>
+  </div>
+  <div class="head-actions">
+    <a href="/jobs" class="ghost-button">Back to Jobs</a>
+  </div>
+</section>
+
+<section class="grid-two">
+  <article class="card">
+    <h3>Upload Spec Files</h3>
+    <form method="post" action="/jobs/{{ job.id }}/files/upload" enctype="multipart/form-data" class="stack-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="file_role" value="spec">
+      <input type="file" name="files" multiple required>
+      <button type="submit" class="primary-button">Upload Specs</button>
+    </form>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Name</th><th>Uploaded</th><th>Actions</th></tr></thead>
+        <tbody>
+          {% for file in spec_files %}
+          <tr>
+            <td>{{ file.original_name }}</td>
+            <td>{{ file.uploaded_at }}</td>
+            <td class="actions">
+              <a href="/jobs/files/{{ file.id }}/download" class="text-link">Download</a>
+              <form method="post" action="/jobs/files/{{ file.id }}/delete">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button type="submit" class="ghost-button">Delete</button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="3" class="empty-cell">No spec files uploaded.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <form method="post" action="/jobs/{{ job.id }}/runs/start" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="run_kind" value="spec">
+      <button type="submit" class="primary-button">Queue Spec Extraction</button>
+    </form>
+  </article>
+
+  <article class="card">
+    <h3>Upload Drawing Files</h3>
+    <form method="post" action="/jobs/{{ job.id }}/files/upload" enctype="multipart/form-data" class="stack-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="file_role" value="drawing">
+      <input type="file" name="files" multiple required>
+      <button type="submit" class="primary-button">Upload Drawings</button>
+    </form>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Name</th><th>Uploaded</th><th>Actions</th></tr></thead>
+        <tbody>
+          {% for file in drawing_files %}
+          <tr>
+            <td>{{ file.original_name }}</td>
+            <td>{{ file.uploaded_at }}</td>
+            <td class="actions">
+              <a href="/jobs/files/{{ file.id }}/download" class="text-link">Download</a>
+              <form method="post" action="/jobs/files/{{ file.id }}/delete">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button type="submit" class="ghost-button">Delete</button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="3" class="empty-cell">No drawing files uploaded.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <form method="post" action="/jobs/{{ job.id }}/runs/start" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="run_kind" value="drawing">
+      <button type="submit" class="primary-button">Queue Drawing Parsing</button>
+    </form>
+  </article>
+</section>
+
+<section class="card">
+  <div class="split-head">
+    <div>
+      <h3>Run History</h3>
+      <p class="muted">The worker picks queued runs and updates status here.</p>
+    </div>
+    <form method="post" action="/jobs/{{ job.id }}/export">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="primary-button">Generate Exports</button>
+    </form>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Kind</th>
+          <th>Status</th>
+          <th>Stage</th>
+          <th>Message</th>
+          <th>Requested</th>
+          <th>Finished</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for run in runs %}
+        <tr>
+          <td>{{ run.id }}</td>
+          <td>{{ run.run_kind }}</td>
+          <td><span class="status-chip status-{{ run.status }}">{{ run.status }}</span></td>
+          <td>{{ run.stage }}</td>
+          <td>{{ run.message or run.error_text }}</td>
+          <td>{{ run.requested_at }}</td>
+          <td>{{ run.finished_at }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="empty-cell">No runs queued yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="grid-two">
+  <article class="card">
+    <h3>Available Exports</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>File</th><th>Size</th><th>Download</th></tr></thead>
+        <tbody>
+          {% for file in exports %}
+          <tr>
+            <td>{{ file.name }}</td>
+            <td>{{ file.size_bytes }}</td>
+            <td><a href="/jobs/{{ job.id }}/exports/{{ file.name }}" class="text-link">Download</a></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="3" class="empty-cell">No exports generated yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+
+  <article class="card">
+    <h3>Diagnostics</h3>
+    {% if raw_snapshot %}
+    <ul class="plain-list">
+      <li><strong>Source kind:</strong> {{ raw_snapshot.source_kind }}</li>
+      <li><strong>Rooms:</strong> {{ raw_snapshot.rooms|length }}</li>
+      <li><strong>Appliances:</strong> {{ raw_snapshot.appliances|length }}</li>
+      <li><strong>Warnings:</strong> {{ raw_snapshot.warnings|length }}</li>
+    </ul>
+    {% if raw_snapshot.warnings %}
+    <div class="warning-box">
+      {% for warning in raw_snapshot.warnings %}
+      <div>{{ warning }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% else %}
+    <p class="muted">No spec snapshot yet.</p>
+    {% endif %}
+    {% if drawing_snapshot %}
+    <div class="subcard">
+      <h4>Drawing Snapshot</h4>
+      <p class="muted">Compare-ready drawing data is present.</p>
+      <p>Rooms: {{ drawing_snapshot.rooms|length }} | Appliances: {{ drawing_snapshot.appliances|length }}</p>
+    </div>
+    {% endif %}
+  </article>
+</section>
+
+<form method="post" action="/jobs/{{ job.id }}/review/save" class="stack">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <section class="card">
+    <div class="split-head">
+      <div>
+        <span class="eyebrow">Review</span>
+        <h3>Rooms</h3>
+      </div>
+      <button type="submit" class="primary-button">Save Reviewed Data</button>
+    </div>
+    <input type="hidden" name="room_count" value="{{ room_rows|length }}">
+    <div class="table-wrap wide-table">
+      <table>
+        <thead>
+          <tr>
+            <th>Room Key</th>
+            <th>Original Label</th>
+            <th>Bench Tops</th>
+            <th>Door Colours</th>
+            <th>Toe Kick</th>
+            <th>Bulkheads</th>
+            <th>Handles</th>
+            <th>Drawers</th>
+            <th>Hinges</th>
+            <th>Splashback</th>
+            <th>Flooring</th>
+            <th>Source</th>
+            <th>Pages</th>
+            <th>Evidence</th>
+            <th>Confidence</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in room_rows %}
+          <tr>
+            <td><input name="room_key_{{ loop.index0 }}" value="{{ row.room_key }}"></td>
+            <td><input name="original_room_label_{{ loop.index0 }}" value="{{ row.original_room_label }}"></td>
+            <td><input name="bench_tops_{{ loop.index0 }}" value="{{ row.bench_tops }}"></td>
+            <td><input name="door_panel_colours_{{ loop.index0 }}" value="{{ row.door_panel_colours }}"></td>
+            <td><input name="toe_kick_{{ loop.index0 }}" value="{{ row.toe_kick }}"></td>
+            <td><input name="bulkheads_{{ loop.index0 }}" value="{{ row.bulkheads }}"></td>
+            <td><input name="handles_{{ loop.index0 }}" value="{{ row.handles }}"></td>
+            <td><input name="drawers_soft_close_{{ loop.index0 }}" value="{{ row.drawers_soft_close }}"></td>
+            <td><input name="hinges_soft_close_{{ loop.index0 }}" value="{{ row.hinges_soft_close }}"></td>
+            <td><input name="splashback_{{ loop.index0 }}" value="{{ row.splashback }}"></td>
+            <td><input name="flooring_{{ loop.index0 }}" value="{{ row.flooring }}"></td>
+            <td><input name="source_file_{{ loop.index0 }}" value="{{ row.source_file }}"></td>
+            <td><input name="page_refs_{{ loop.index0 }}" value="{{ row.page_refs }}"></td>
+            <td><textarea name="evidence_snippet_{{ loop.index0 }}" rows="2">{{ row.evidence_snippet }}</textarea></td>
+            <td><input name="confidence_{{ loop.index0 }}" value="{{ row.confidence }}"></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="15" class="empty-cell">No room rows yet. Run a spec extraction first.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="split-head">
+      <div>
+        <span class="eyebrow">Review</span>
+        <h3>Appliances</h3>
+      </div>
+    </div>
+    <input type="hidden" name="appliance_count" value="{{ appliance_rows|length }}">
+    <div class="table-wrap wide-table">
+      <table>
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Make</th>
+            <th>Model</th>
+            <th>Website</th>
+            <th>Overall Size</th>
+            <th>Source</th>
+            <th>Pages</th>
+            <th>Evidence</th>
+            <th>Confidence</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in appliance_rows %}
+          <tr>
+            <td><input name="appliance_type_{{ loop.index0 }}" value="{{ row.appliance_type }}"></td>
+            <td><input name="make_{{ loop.index0 }}" value="{{ row.make }}"></td>
+            <td><input name="model_no_{{ loop.index0 }}" value="{{ row.model_no }}"></td>
+            <td><input name="website_url_{{ loop.index0 }}" value="{{ row.website_url }}"></td>
+            <td><input name="overall_size_{{ loop.index0 }}" value="{{ row.overall_size }}"></td>
+            <td><input name="appliance_source_file_{{ loop.index0 }}" value="{{ row.source_file }}"></td>
+            <td><input name="appliance_page_refs_{{ loop.index0 }}" value="{{ row.page_refs }}"></td>
+            <td><textarea name="appliance_evidence_snippet_{{ loop.index0 }}" rows="2">{{ row.evidence_snippet }}</textarea></td>
+            <td><input name="appliance_confidence_{{ loop.index0 }}" value="{{ row.confidence }}"></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="9" class="empty-cell">No appliance rows yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <span class="eyebrow">Review</span>
+    <h3>Others</h3>
+    <div class="grid-form">
+      <label class="wide">
+        <span>Flooring Notes</span>
+        <textarea name="others_flooring_notes" rows="3">{{ review_snapshot.others.flooring_notes if review_snapshot.others else '' }}</textarea>
+      </label>
+      <label class="wide">
+        <span>Splashback Notes</span>
+        <textarea name="others_splashback_notes" rows="3">{{ review_snapshot.others.splashback_notes if review_snapshot.others else '' }}</textarea>
+      </label>
+      <label class="wide">
+        <span>Manual Notes</span>
+        <textarea name="others_manual_notes" rows="4">{{ review_snapshot.others.manual_notes if review_snapshot.others else '' }}</textarea>
+      </label>
+    </div>
+    <button type="submit" class="primary-button">Save Reviewed Data</button>
+  </section>
+</form>
+{% endblock %}

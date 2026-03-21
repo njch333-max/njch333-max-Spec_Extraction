@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+jinja2
+openpyxl
+pypdf
+python-multipart
+httpx
+itsdangerous

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero-card auth-card">
+  <div class="section-head">
+    <span class="eyebrow">Secure Access</span>
+    <h2>Sign in to the Builder Spec workspace</h2>
+    <p>Use the admin credentials configured for this deployment.</p>
+  </div>
+  <form method="post" action="/login" class="stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>
+      <span>Username</span>
+      <input type="text" name="username" autocomplete="username" required>
+    </label>
+    <label>
+      <span>Password</span>
+      <input type="password" name="password" autocomplete="current-password" required>
+    </label>
+    <button type="submit" class="primary-button">Sign In</button>
+  </form>
+</section>
+{% endblock %}
