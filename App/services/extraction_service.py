@@ -828,7 +828,7 @@ def _collect_clarendon_polish_overlays(documents: list[dict[str, object]]) -> di
             text = parsing.normalize_space(str(page.get("text") or ""))
             if not text:
                 continue
-            schedule_room_key = _clarendon_schedule_room_key(text)
+            schedule_room_key = _clarendon_schedule_room_key(_clarendon_spacing_normalize(text))
             if schedule_room_key:
                 _merge_clarendon_overlay(
                     overlays.setdefault(schedule_room_key, _blank_clarendon_overlay()),
@@ -886,9 +886,9 @@ def _merge_clarendon_overlay(target: dict[str, Any], candidate: dict[str, Any]) 
         "sink_info",
         "basin_info",
         "tap_info",
-        "splashback",
     ):
         target[key] = parsing._merge_text(target.get(key, ""), candidate.get(key, ""))
+    target["splashback"] = _merge_clarendon_splashback(target.get("splashback", ""), candidate.get("splashback", ""))
     target["drawers_soft_close"] = _merge_soft_close_field(
         target.get("drawers_soft_close", ""),
         candidate.get("drawers_soft_close", ""),
@@ -970,6 +970,27 @@ def _clarendon_detect_template_family(text: str) -> str:
     if any(marker in lowered for marker in ("square edge handleless", "mirror splashback", "door/panel colour", "tightform edge laminate")):
         return "luxe_single_line"
     return "reference_37016"
+
+
+def _clarendon_spacing_normalize(text: str) -> str:
+    normalized = parsing.normalize_space(text)
+    normalized = re.sub(r"(?i)(COLOUR SCHEDULE)(?=[A-Z])", r"\1 ", normalized)
+    normalized = re.sub(r"(?i)(SUPPLIER DESCRIPTION DESIGN COMMENTS)(?=[A-Z])", r"\1 ", normalized)
+    return normalized
+
+
+def _merge_clarendon_splashback(left: Any, right: Any) -> str:
+    left_text = parsing.normalize_space(str(left or ""))
+    right_text = parsing.normalize_space(str(right or ""))
+    merged = parsing._merge_text(left_text, right_text)
+    candidates = [part.strip() for part in merged.split("|") if part.strip()]
+    for candidate in candidates:
+        if "mirror splashback" in candidate.lower():
+            return candidate
+    for candidate in candidates:
+        if candidate:
+            return candidate
+    return ""
 
 
 def _merge_clarendon_benchtop_segment(overlay: dict[str, Any], room_key: str, segment: str, template_family: str) -> None:
