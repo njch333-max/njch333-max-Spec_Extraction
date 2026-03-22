@@ -29,8 +29,10 @@
   - automatic `room master` selection for multi-file spec jobs, with supplement files limited to enriching rooms defined by the room-master document
   - glued room-schedule headings such as `KITCHEN COLOUR SCHEDULEBENCHTOP...` are now normalized before room-master extraction so noisy heading text no longer becomes a room name
   - grouped room-master headings such as `Vanities` remain grouped while supplement bathroom/ensuite/powder fixture pages enrich that grouped room instead of creating extra room rows
+  - supplement-file upload order no longer matters because the room-master room set is precomputed before supplement files are parsed
   - snapshot and run metadata now record parser strategy, worker PID, and app build ID
   - single-worker lease guard to prevent stale local worker processes from racing newer code on queued jobs
+  - online-first deployment helper scripts that push the current repo state to `/opt/spec-extraction`, restart production services, and verify live health
   - legacy builder-rules routes retired from the UI and redirected back to the Builders page
   - vertically stacked wide horizontal room-card layout on the raw Spec List page
   - room-card fixture rows for sink, basin, and tap
@@ -84,6 +86,7 @@
 - Old snapshots without expanded appliance link fields or bench-top split fields should still render safely in the UI and exports
 - New parse runs always use the fixed global conservative profile
 - Smoke tests must not touch the real local app database
+- Confirmed implementation work is only done after production deployment and live verification succeed on `spec.lxtransport.online`
 
 ## Remaining Work
 - Refine OCR fallback for image-heavy PDFs
@@ -98,6 +101,7 @@
 - Expand model-number coverage for more appliance naming patterns beyond the current explicit rules
 - Build the future comparison UI and diff logic
 - Decide whether to add a global all-job Spec List index in a later phase
+- Continue validating parsing changes through fresh online reruns on the affected jobs instead of relying on older snapshots
 
 ## Risks
 - OCR fallback is currently warning-driven unless stronger OCR infrastructure or OpenAI vision is configured
@@ -123,6 +127,10 @@
   - create builder
   - create job
   - open job detail page
+- Production verification now includes:
+  - `spec-extraction-web.service` active after restart
+  - `spec-extraction-worker.service` active after restart
+  - `https://spec.lxtransport.online/api/health` returns `{"status":"ok"}`
 - Raw Spec List smoke coverage added for:
   - login protection
   - empty-state rendering

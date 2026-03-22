@@ -65,6 +65,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Merge information across multiple spec files in the same job.
 - For multi-file spec jobs, select one authoritative room-master file automatically and use it to define the room list; other spec files may only enrich existing rooms and appliances.
 - Room-master detection must normalize glued headings such as `KITCHEN COLOUR SCHEDULEBENCHTOP...` so only the clean room heading becomes the room label.
+- The room-master room set must be established before supplement files are processed, so supplement-file upload order cannot create extra rooms.
 - If OpenAI is configured, use it to improve structured extraction.
 - All builders must use the fixed `Global Conservative` profile based on the accepted `37016` output style.
 - Under `Global Conservative`, heuristic room structure and cleaning remain primary, room identity is source-driven, OpenAI fills missing fields conservatively, and AI must not inject extra rooms, collapse distinct rooms into broad buckets, or overwrite already-clean room text with noisier duplicates.
@@ -168,6 +169,16 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Provide local Git helper scripts to initialize, checkpoint, inspect history, and restore from previous commits.
 - Require synchronized doc updates for major changes.
 
+### 4.14 Online-First Delivery Workflow
+- `https://spec.lxtransport.online/` is the only formal running environment.
+- Confirmed implementation work is only complete after:
+  - local checks pass,
+  - the latest code is deployed to production,
+  - production web and worker services restart successfully,
+  - the affected live page or job is verified.
+- Parsing changes must be validated through a fresh online parse run for the affected job, not by inspecting an older snapshot.
+- The repo should provide a repeatable local deployment helper so production updates do not rely on ad hoc terminal commands.
+
 ## 5. Canonical Data Requirements
 
 ### 5.0 Snapshot Metadata
@@ -225,6 +236,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - User can tell from the Job page which global extraction profile, worker PID, and build ID generated the latest snapshot.
 - Clarendon jobs use an additional deterministic post-polish step so repeated parses keep the stable 6-room structure while stripping handle-location noise, fixture line breaks, and noisy field spillover.
 - Clarendon jobs support both the original `37016` schedule family and the denser single-line `handleless / mirror splashback / laminate` family, with the same compact-summary output style.
+- The completion workflow for confirmed changes includes deployment to `spec.lxtransport.online`, successful service restarts, and live verification on the affected page or job.
 - SQLite persists Builders, Jobs, files, run history, raw results, and reviewed results.
 - Worker can process queued spec and drawing runs separately from the web process.
 - Repeated parses should be traceable through recorded parser strategy, worker PID, and app build metadata.

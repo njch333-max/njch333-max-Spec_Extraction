@@ -1239,6 +1239,60 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("Study", warning_text)
         self.assertNotIn("KITCHEN COLOUR SCHEDULEBENCHTOP", " ".join(room["original_room_label"] for room in snapshot["rooms"]))
 
+    def test_parse_documents_prefilters_supplement_rooms_even_when_master_file_is_second(self) -> None:
+        snapshot = parse_documents(
+            job_no="37736",
+            builder_name="Clarendon",
+            source_kind="spec",
+            documents=[
+                {
+                    "file_name": "colours-afc.pdf",
+                    "role": "spec",
+                    "pages": [
+                        {
+                            "page_no": 1,
+                            "text": (
+                                "Kitchen/Pantry/Family/Meals\n"
+                                "Theatre\n"
+                                "Rumpus\n"
+                                "WIR/S & Robes\n"
+                                "Main Bathroom\n"
+                                "Vanity Inset Basin JOHNSON SUISSE Emilia Basin (JBSE250.PW6)\n"
+                            ),
+                            "needs_ocr": False,
+                        }
+                    ],
+                },
+                {
+                    "file_name": "drawings-and-colours.pdf",
+                    "role": "spec",
+                    "pages": [
+                        {
+                            "page_no": 1,
+                            "text": (
+                                "KITCHEN COLOUR SCHEDULEBENCHTOP - QUANTUM ZERO BELLA CARRARA - 20MM PENCIL ROUND EDGE\n"
+                                "ROOM BUTLERS PANTRY COLOUR SCHEDULEPANTRY\n"
+                                "VANITIES COLOUR SCHEDULENOTE : ALL PLUMBING SETOUT DIMENSIONS ARE FROM THE TIMBER FRAME\n"
+                                "LAUNDRY COLOUR SCHEDULEBENCHTOP - POLYTEC ARGENTO STONE - 21MM TIGHTFORM EDGE LAMINATE\n"
+                            ),
+                            "needs_ocr": False,
+                        }
+                    ],
+                },
+            ],
+        )
+        rooms = {row["room_key"]: row for row in snapshot["rooms"]}
+        analysis = snapshot["analysis"]
+        warning_text = " | ".join(snapshot["warnings"])
+        self.assertEqual(set(rooms.keys()), {"kitchen", "butlers_pantry", "vanities", "laundry"})
+        self.assertEqual(analysis["room_master_file"], "drawings-and-colours.pdf")
+        self.assertEqual(analysis["supplement_files"], ["colours-afc.pdf"])
+        self.assertGreaterEqual(analysis["ignored_room_like_lines_count"], 2)
+        self.assertTrue(str(rooms["vanities"]["basin_info"]).startswith("Johnson Suisse Emilia"))
+        self.assertEqual(rooms["vanities"]["original_room_label"], "VANITIES")
+        self.assertIn("Kitchen/Pantry/Family/Meals", warning_text)
+        self.assertIn("Theatre", warning_text)
+
     def test_builder_defaults_to_global_conservative_for_all_builders(self) -> None:
         clarendon_id = store.create_builder("Clarendon", "clarendon", "")
         yellowwood_id = store.create_builder("Yellowwood", "yellowwood", "")

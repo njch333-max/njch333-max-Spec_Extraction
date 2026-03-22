@@ -39,3 +39,19 @@ curl -I https://spec.lxtransport.online/
 - `SPEC_EXTRACTION_HTTPS_ONLY=1` must stay enabled in production so session cookies are marked secure behind Nginx HTTPS.
 - Keep `SPEC_EXTRACTION_MAX_UPLOAD_MB` in `/etc/spec-extraction.env` aligned with the Nginx `client_max_body_size` value in `spec.lxtransport.online.nginx.conf`.
 - If `curl -I https://spec.lxtransport.online/` shows a certificate mismatch, finish the `certbot --nginx -d spec.lxtransport.online` step before testing login or uploads.
+
+## Routine Update Workflow
+Use production as the default target after confirmed implementation work.
+
+Preferred local helper:
+```powershell
+$env:SPEC_EXTRACTION_DEPLOY_PASSWORD="..."
+.\tools\deploy_online.ps1
+```
+
+Definition of done for confirmed changes:
+1. Local verification passes.
+2. The latest code is deployed to `/opt/spec-extraction`.
+3. `spec-extraction-web.service` and `spec-extraction-worker.service` restart successfully.
+4. `https://spec.lxtransport.online/api/health` returns OK.
+5. If parsing changed, re-run the affected job online and verify the latest run uses the new build.

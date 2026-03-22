@@ -78,6 +78,7 @@
   - room identity is source-driven for every builder, so only the same detected room merges across pages/files
   - for multi-file spec jobs, automatically pick one room-master file by schedule density and only let that file define the room set
   - room-master detection first normalizes glued schedule headings such as `KITCHEN COLOUR SCHEDULEBENCHTOP...` or `VANITIES COLOUR SCHEDULENOTE...` so the clean heading is extracted before room matching
+  - the room-master room set is precomputed before supplement files are parsed, so supplement-file ordering cannot accidentally create extra rooms
 11. Merge OpenAI output conservatively: keep the heuristic room set as the primary layout, merge room fields into that layout, and preserve heuristic appliance `model_no` values instead of replacing them with weaker guesses.
 12. For Clarendon-only spec runs, apply a deterministic post-polish stage after source-driven room detection:
   - rebuild stable room text from colour-schedule and fixture pages for each detected room
@@ -178,6 +179,8 @@
 - Recommended production data path: `/var/lib/spec-extraction`
 - Recommended environment file: `/etc/spec-extraction.env`
 - Production Nginx and FastAPI upload limits should stay aligned at `100 MB`
+- Routine updates are online-first: after local verification, deploy the current repo state to `/opt/spec-extraction`, restart both production services, verify `/api/health`, and then re-run any job whose parsing output should change.
+- The repo now includes `tools/deploy_online.py` and `tools/deploy_online.ps1` to stage selected repo files to the LXtransport host, install them into `/opt/spec-extraction`, restart `spec-extraction-web.service` and `spec-extraction-worker.service`, and validate the live health endpoint.
 
 ## 7. Implemented Route Map
 - `GET /`: redirect to login or jobs

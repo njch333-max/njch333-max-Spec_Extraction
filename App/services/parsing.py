@@ -642,6 +642,15 @@ def parse_documents(
     supplement_files: list[str] = []
     ignored_room_like_lines_count = 0
 
+    if room_master_document:
+        master_full_text = _document_full_text(room_master_document)
+        master_sections = _collect_schedule_room_sections([room_master_document]) or _find_room_sections(master_full_text)
+        for detected_room_key, chunk in master_sections:
+            original_room_label = source_room_label(chunk.split("\n", 1)[0], fallback_key=detected_room_key)[:80]
+            room_key = source_room_key(original_room_label, fallback_key=detected_room_key)
+            if room_key:
+                room_master_keys.add(room_key)
+
     for document in documents:
         file_name = str(document["file_name"])
         pages = list(document["pages"])
@@ -673,12 +682,16 @@ def parse_documents(
                 ignored_room_like_lines_count += 1
                 warnings.append(f"Ignored room-like section '{original_room_label}' from {file_name}: {ignore_reason}.")
                 continue
-            room_master_keys.add(target_room_key) if is_room_master else None
+            if is_room_master:
+                room_master_keys.add(target_room_key)
             row = rooms.get(target_room_key) or RoomRow(
                 room_key=target_room_key,
                 original_room_label=original_room_label,
                 source_file=file_name,
             )
+            if is_room_master:
+                row.original_room_label = original_room_label
+                row.source_file = file_name
             _merge_room_section_into_row(row, lines, chunk, file_name, pages)
             rooms[target_room_key] = row
         appliances.extend(_extract_appliances(full_text, file_name, pages))

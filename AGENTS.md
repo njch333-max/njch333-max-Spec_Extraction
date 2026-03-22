@@ -33,6 +33,8 @@ If a change affects user-visible behavior, architecture, storage, deployment, wo
 4. Do not hardcode production passwords, domains, or OpenAI keys into source files.
 5. Before major commits, update `PRD.md`, `Arch.md`, and `Project_state.md`.
 6. Prefer the local Git helper scripts instead of ad hoc Git commands when creating checkpoints or reviewing history.
+7. `spec.lxtransport.online` is the default live environment. After a confirmed implementation change, deploy to production unless the user explicitly says not to.
+8. Treat a task as complete only after local checks pass, production services are restarted successfully, and the affected live page or job is verified.
 
 ## Verification Expectations
 - The app should boot with `uvicorn App.main:app`
@@ -50,3 +52,14 @@ Use these scripts from `tools/`:
 
 For major changes, use:
 - `tools/checkpoint.ps1 -MajorChange -Message "..."`
+
+## Online Deployment
+Use the online deploy helper from `tools/`:
+- `tools/deploy_online.ps1`
+
+Expected workflow after confirmed implementation:
+1. Run local verification.
+2. Deploy to `spec.lxtransport.online`.
+3. Restart `spec-extraction-web.service` and `spec-extraction-worker.service`.
+4. Verify `/api/health`.
+5. If parsing logic changed, re-run the affected online job and confirm the latest run uses the new build.
