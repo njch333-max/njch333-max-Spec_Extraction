@@ -1028,17 +1028,17 @@ def _polish_clarendon_room(row: dict[str, Any], overlay: dict[str, Any]) -> dict
     overlay_present = _clarendon_overlay_has_content(overlay)
 
     current_benchtops = " | ".join(_clarendon_clean_benchtop_text(value) for value in parsing._coerce_string_list(row.get("bench_tops", [])) if _clarendon_clean_benchtop_text(value))
-    wall_run = parsing.normalize_space(overlay.get("bench_tops_wall_run", ""))
-    island = parsing.normalize_space(overlay.get("bench_tops_island", ""))
-    other = parsing.normalize_space(overlay.get("bench_tops_other", ""))
+    wall_run = _clarendon_clean_benchtop_text(overlay.get("bench_tops_wall_run", ""))
+    island = _clarendon_clean_benchtop_text(overlay.get("bench_tops_island", ""))
+    other = _clarendon_clean_benchtop_text(overlay.get("bench_tops_other", ""))
     if room_key == "kitchen":
-        polished["bench_tops_wall_run"] = wall_run or parsing.normalize_space(str(row.get("bench_tops_wall_run", "") or ""))
-        polished["bench_tops_island"] = island or parsing.normalize_space(str(row.get("bench_tops_island", "") or ""))
-        polished["bench_tops_other"] = other if (wall_run or island or other) else parsing.normalize_space(str(row.get("bench_tops_other", "") or ""))
+        polished["bench_tops_wall_run"] = wall_run or _clarendon_clean_benchtop_text(row.get("bench_tops_wall_run", ""))
+        polished["bench_tops_island"] = island or _clarendon_clean_benchtop_text(row.get("bench_tops_island", ""))
+        polished["bench_tops_other"] = other if (wall_run or island or other) else _clarendon_clean_benchtop_text(row.get("bench_tops_other", ""))
         if not polished["bench_tops_other"] and current_benchtops and not (polished["bench_tops_wall_run"] or polished["bench_tops_island"]):
             polished["bench_tops_other"] = current_benchtops
     else:
-        folded = parsing._merge_text(other, parsing._merge_text(wall_run, island)) or " | ".join(overlay.get("bench_tops", []))
+        folded = parsing._merge_text(other, parsing._merge_text(wall_run, island)) or " | ".join(_clarendon_clean_benchtop_text(value) for value in overlay.get("bench_tops", []) if _clarendon_clean_benchtop_text(value))
         polished["bench_tops_other"] = folded or current_benchtops
         polished["bench_tops_wall_run"] = ""
         polished["bench_tops_island"] = ""
@@ -1077,16 +1077,8 @@ def _polish_clarendon_room(row: dict[str, Any], overlay: dict[str, Any]) -> dict
     overlay_splashback = _clarendon_clean_splashback_text(overlay.get("splashback", ""), room_key=room_key)
     current_splashback = _clarendon_clean_splashback_text(row.get("splashback", ""), room_key=room_key)
     polished["splashback"] = overlay_splashback or (current_splashback if room_key in {"kitchen", "laundry"} else "")
-    polished["drawers_soft_close"] = (
-        overlay.get("drawers_soft_close", "")
-        if overlay_present
-        else parsing.normalize_soft_close_value(row.get("drawers_soft_close", ""), keyword="drawer") or parsing.normalize_soft_close_value(row.get("drawers_soft_close", ""))
-    )
-    polished["hinges_soft_close"] = (
-        overlay.get("hinges_soft_close", "")
-        if overlay_present
-        else parsing.normalize_soft_close_value(row.get("hinges_soft_close", ""), keyword="hinge") or parsing.normalize_soft_close_value(row.get("hinges_soft_close", ""))
-    )
+    polished["drawers_soft_close"] = _clarendon_select_soft_close(overlay.get("drawers_soft_close", "") if overlay_present else "", row.get("drawers_soft_close", ""), keyword="drawer")
+    polished["hinges_soft_close"] = _clarendon_select_soft_close(overlay.get("hinges_soft_close", "") if overlay_present else "", row.get("hinges_soft_close", ""), keyword="hinge")
     return polished
 
 
@@ -1160,6 +1152,7 @@ def _clarendon_clean_benchtop_text(value: Any) -> str:
     text = re.sub(r"(?i)\s*-\s*TO\s+(?:THE\s+)?(?:COOKTOP RUN|WALL RUN|WALL BENCH|WALL SIDE|ISLAND BENCH|ISLAND)\b.*$", "", text)
     text = parsing.normalize_brand_casing_text(text)
     text = _clarendon_to_readable_text(text)
+    text = _clarendon_inline_text(text)
     if _looks_like_clarendon_noise(text):
         return ""
     return text.strip(" -;,")
@@ -1173,6 +1166,7 @@ def _clarendon_clean_door_group_text(value: Any) -> str:
         text = re.sub(r"(?i)\b(?:plain glass|'?glazing bar'?) display cabinet with.*$", "", text)
         text = re.sub(r"(?i)\bto tall open shelves\b.*$", "", text)
         text = _clarendon_to_readable_text(text)
+        text = _clarendon_inline_text(text)
         if text:
             cleaned.append(text.strip(" -;,'\""))
     return " | ".join(entry for entry in cleaned if entry)
@@ -1211,6 +1205,7 @@ def _clarendon_clean_note_text(value: Any) -> str:
     text = re.sub(r"(?i)\b\d{4,}\b.*$", "", text)
     text = parsing.normalize_brand_casing_text(text)
     text = _clarendon_to_readable_text(text)
+    text = _clarendon_inline_text(text)
     if _looks_like_clarendon_noise(text):
         return ""
     return text.strip(" -;,")
@@ -1230,6 +1225,7 @@ def _clarendon_clean_splashback_text(value: Any, room_key: str = "") -> str:
     text = re.sub(r"(?i)KICKBOARD.*$", "", text)
     text = parsing.normalize_brand_casing_text(text)
     text = _clarendon_to_readable_text(text)
+    text = _clarendon_inline_text(text)
     if _looks_like_clarendon_noise(text):
         return ""
     return text.strip(" -;,")
@@ -1242,31 +1238,46 @@ def _clarendon_clean_handles(value: Any) -> list[str]:
         text = _clarendon_strip_metadata(entry)
         if any(noise in text.lower() for noise in CLARENDON_EXTERNAL_HANDLE_NOISE):
             continue
+        text = re.sub(r"(?i)\s*-\s*\d+MM\s+IN\s+AND\s+\d+MM\s+UP\s*/?\s*DOWN\s+TO\s+DOORS\b.*$", "", text)
+        text = re.sub(r"(?i)\s*-\s*DOOR LOCATION\s*:.*$", "", text)
+        text = re.sub(r"(?i)\s*DRAWER LOCATION\s*:.*$", "", text)
         text = parsing.normalize_brand_casing_text(text)
         text = _clarendon_to_readable_text(text)
+        text = _clarendon_inline_text(text)
         if text and text not in result and not _looks_like_clarendon_noise(text):
             result.append(text)
     return result
 
 
 def _clarendon_clean_fixture_text(value: Any, fixture_kind: str) -> str:
-    text = parsing._string_value(value)
-    if not text:
-        return ""
-    text = text.replace("_", " ")
-    text = _clarendon_strip_metadata(text)
-    text = re.sub(r"(?i)^&\s*TAP TOCABINET UNDER CUT OUT DETAIL FOR\s*", "", text)
-    text = re.sub(r"(?i)^TOCABINET UNDER CUT OUT DETAIL FOR\s*", "", text)
-    text = re.sub(r"(?i)^Washing Machine Taps\s*:\s*", "", text)
-    text = parsing.normalize_brand_casing_text(text)
-    text = _clarendon_to_readable_text(text)
-    if fixture_kind == "sink":
-        return _clarendon_clean_sink_text(text)
-    if fixture_kind == "basin":
-        return _clarendon_clean_basin_text(text)
-    if fixture_kind == "tap":
-        return _clarendon_clean_tap_text(text)
-    return text.strip(" -;,")
+    entries = parsing._split_group_entries(value)
+    if not entries:
+        text = parsing._string_value(value)
+        entries = [text] if text else []
+    cleaned_entries: list[str] = []
+    for entry in entries:
+        text = entry.replace("_", " ")
+        text = _clarendon_strip_metadata(text)
+        text = re.sub(r"(?i)^&\s*TAP TOCABINET UNDER CUT OUT DETAIL FOR\s*", "", text)
+        text = re.sub(r"(?i)^TOCABINET UNDER CUT OUT DETAIL FOR\s*", "", text)
+        text = re.sub(r"(?i)^Washing Machine Taps\s*:\s*", "", text)
+        text = parsing.normalize_brand_casing_text(text)
+        text = _clarendon_to_readable_text(text)
+        text = _clarendon_inline_text(text)
+        if fixture_kind == "sink":
+            text = _clarendon_clean_sink_text(text)
+        elif fixture_kind == "basin":
+            text = _clarendon_clean_basin_text(text)
+        elif fixture_kind == "tap":
+            text = _clarendon_clean_tap_text(text)
+        text = text.strip(" -;,")
+        if not text or _looks_like_clarendon_noise(text):
+            continue
+        if any(text.lower() in existing.lower() for existing in cleaned_entries):
+            continue
+        cleaned_entries = [existing for existing in cleaned_entries if existing.lower() not in text.lower()]
+        cleaned_entries.append(text)
+    return " | ".join(cleaned_entries)
 
 
 def _clarendon_clean_sink_text(value: Any) -> str:
@@ -1274,19 +1285,19 @@ def _clarendon_clean_sink_text(value: Any) -> str:
     text = re.sub(r"(?i)\bUndermount\s*-\s*", "", text)
     text = re.sub(r"(?i)\bUNDERMOUNT\b$", "undermount sink", text)
     text = re.sub(r"(?i)\bDROP IN TUB\b$", "drop-in tub", text)
-    return parsing.normalize_space(text).strip(" -;,")
+    return _clarendon_inline_text(text).strip(" -;,")
 
 
 def _clarendon_clean_basin_text(value: Any) -> str:
     text = _clarendon_to_readable_text(parsing.normalize_brand_casing_text(str(value or "").replace("_", " ")))
     text = re.sub(r"(?i)\bVanity\b$", "", text)
-    return parsing.normalize_space(text).strip(" -;,")
+    return _clarendon_inline_text(text).strip(" -;,")
 
 
 def _clarendon_clean_tap_text(value: Any) -> str:
     text = _clarendon_to_readable_text(parsing.normalize_brand_casing_text(str(value or "").replace("_", " ")))
     text = re.sub(r"(?is)\bBasin Mixer to Be Installed.*$", "", text)
-    return parsing.normalize_space(text).strip(" -;,")
+    return _clarendon_inline_text(text).strip(" -;,")
 
 
 def _clarendon_strip_metadata(value: Any) -> str:
@@ -1306,6 +1317,10 @@ def _clarendon_strip_metadata(value: Any) -> str:
     text = re.sub(r"(?i)\bNOTE\s*:\s*ALL PLUMBING SETOUT DIMENSIONS.*$", "", text)
     text = re.sub(r"(?i)\bNOTE\s*:\s*DRAWINGS ARE INDICATIVE.*$", "", text)
     return parsing.normalize_space(text)
+
+
+def _clarendon_inline_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", parsing.normalize_space(str(value or ""))).strip()
 
 
 def _clarendon_to_readable_text(value: Any) -> str:
@@ -1356,6 +1371,13 @@ def _looks_like_clarendon_noise(value: Any) -> bool:
     if re.search(r"(?i)\b(?:frame wall|ctr to basin|profiled end panel|docusign)\b", text):
         return True
     return False
+
+
+def _clarendon_select_soft_close(overlay_value: Any, row_value: Any, keyword: str) -> str:
+    overlay_clean = parsing.normalize_soft_close_value(overlay_value, keyword=keyword) or parsing.normalize_soft_close_value(overlay_value)
+    if overlay_clean:
+        return overlay_clean
+    return parsing.normalize_soft_close_value(row_value, keyword=keyword) or parsing.normalize_soft_close_value(row_value)
 
 
 def _clarendon_merge_unique_list(left: list[str], right: list[str]) -> list[str]:

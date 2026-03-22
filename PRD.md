@@ -218,6 +218,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - User can open a dedicated single-job raw Spec List page and export it to Excel.
 - User can tell from the Job page whether the latest extraction used heuristic parsing only, OpenAI merge, or OpenAI fallback.
 - User can tell from the Job page which global extraction profile, worker PID, and build ID generated the latest snapshot.
+- Clarendon jobs use an additional deterministic post-polish step so repeated parses keep the stable 6-room structure while stripping handle-location noise, fixture line breaks, and noisy field spillover.
 - SQLite persists Builders, Jobs, files, run history, raw results, and reviewed results.
 - Worker can process queued spec and drawing runs separately from the web process.
 - Repeated parses should be traceable through recorded parser strategy, worker PID, and app build metadata.

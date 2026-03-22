@@ -442,8 +442,18 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(rooms["kitchen"]["bench_tops_wall_run"], "Quantum Zero Midnight Black - 20MM Pencil Round Edge")
         self.assertEqual(rooms["kitchen"]["bench_tops_island"], "Quantum Zero Venatino Statuario - 40MM Mitred Apron Edge")
         self.assertEqual(rooms["kitchen"]["splashback"], "Tiled splashback by others")
+        self.assertEqual(
+            rooms["kitchen"]["handles"],
+            [
+                "Hettich Cipri 9070585 Gloss Chrome Plated 30MM Knob",
+                "Momo Florencia Ctcp .Cp .Fg Chrome Plated 104MM Long - Centre to Drawer Profile",
+            ],
+        )
+        self.assertEqual(rooms["kitchen"]["drawers_soft_close"], "Soft Close")
+        self.assertEqual(rooms["kitchen"]["hinges_soft_close"], "Not Soft Close")
+        self.assertNotIn("\n", str(rooms["kitchen"]["sink_info"]))
         self.assertEqual(rooms["butlers_pantry"]["door_colours_base"], "Polytec Classic White Matt Finish Thermolaminate - Atlanta EM2 Profile")
-        self.assertEqual(rooms["butlers_pantry"]["drawers_soft_close"], "")
+        self.assertEqual(rooms["butlers_pantry"]["drawers_soft_close"], "Not Soft Close")
         self.assertEqual(rooms["vanities"]["toe_kick"], ["N/A floating - no kickboard"])
         self.assertTrue(str(rooms["vanities"]["basin_info"]).startswith("Johnson Suisse Emilia"))
         self.assertEqual(rooms["laundry"]["splashback"], "Tiled splashback by others")
@@ -858,7 +868,7 @@ class SmokeTest(unittest.TestCase):
             )
         self.assertEqual([row["room_key"] for row in snapshot["rooms"]], ["kitchen", "vanities"])
         self.assertEqual(snapshot["analysis"]["parser_strategy"], "global_conservative")
-        self.assertEqual(snapshot["rooms"][0]["bench_tops"], ["20mm stone"])
+        self.assertEqual(snapshot["rooms"][0]["bench_tops"], ["20MM Stone"])
 
     def test_build_spec_snapshot_compacts_clarendon_rooms_under_stable_hybrid(self) -> None:
         base_snapshot = {

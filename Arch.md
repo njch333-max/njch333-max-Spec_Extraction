@@ -135,6 +135,7 @@
 - Array-like fields are stored as lists in JSON and flattened with ` | ` in the review UI
 - `room_key` is normalized, `original_room_label` preserves the original label
 - Room rows also carry fixture fields for sinks, basins, and taps plus split door-colour and bench-top display fields.
+- Clarendon rows pass through a deterministic post-polish layer after layout stabilization so handle strings, fixture text, splashback notes, and soft-close fallbacks stay readable without changing the settled room layout.
 
 ### Appliances
 - One row per appliance

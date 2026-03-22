@@ -167,6 +167,9 @@
   - clean kitchen wall-run / island benchtop reconstruction
   - stable pantry / vanities / laundry field rebuilding from schedule and fixture pages
   - splashback cleanup to `Tiled splashback by others` when the source clearly indicates builder-tile handoff
+  - handle cleanup that strips mounting-position noise while keeping the model/finish text
+  - fixture cleanup that collapses multiline OCR fragments into single readable lines
+  - soft-close fallback logic that prefers overlay values but still falls back to the parsed room field when the overlay is blank
 - Smoke tests now use an isolated temporary data directory instead of `App/data/`
 - Worker smoke test passed for:
   - upload DOCX spec
