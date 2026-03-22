@@ -34,6 +34,7 @@ ROOM_ALIASES: dict[str, list[str]] = {
 }
 
 ROOM_HEADING_CLEANUP_PATTERNS = (
+    r"(?i)^\s*room\b",
     r"(?i)\bcolour schedule\b",
     r"(?i)\bsupplier description design comments\b",
     r"(?i)\bjoinery\b",
@@ -244,6 +245,30 @@ JOINERY_PAGE_HINTS = (
     "as supplied by cabinetmaker",
 )
 
+ROOM_SCHEDULE_PATTERNS = (
+    r"butler'?s pantry",
+    r"vanities",
+    r"vanity",
+    r"main bathroom",
+    r"bathrooms?",
+    r"ensuite(?:\s+\d+)?",
+    r"powder(?:\s+room)?(?:\s+\d+)?",
+    r"laundry",
+    r"kitchen",
+    r"pantry",
+    r"wip",
+    r"walk in pantry",
+    r"robe(?:s)?",
+    r"wir",
+    r"theatre(?:\s+room)?",
+    r"rumpus(?:\s+room)?",
+    r"study",
+    r"office",
+    r"kitchenette",
+)
+
+ROOM_SCHEDULE_PATTERN = "|".join(sorted(ROOM_SCHEDULE_PATTERNS, key=len, reverse=True))
+
 
 def extract_pdf_pages(path: Path) -> list[dict[str, str | bool | int]]:
     pages: list[dict[str, str | bool | int]] = []
@@ -443,6 +468,16 @@ def _looks_like_joinery_schedule_page(text: str) -> bool:
     return any(hint in lowered for hint in JOINERY_PAGE_HINTS)
 
 
+def _inject_schedule_heading_breaks(text: str) -> str:
+    normalized = re.sub(
+        rf"(?i)({ROOM_SCHEDULE_PATTERN})\s+colour\s+schedule(?=\s|[A-Z]|$)",
+        lambda match: f"\n{normalize_space(match.group(0))}\n",
+        text,
+    )
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    return normalized
+
+
 def _looks_like_non_joinery_room_label(label: str) -> bool:
     text = normalize_space(label)
     if not text:
@@ -479,15 +514,29 @@ def _collect_schedule_room_sections(documents: list[dict[str, object]]) -> list[
 
     for document in documents:
         for page in document.get("pages", []):
-            page_text = str(page.get("text") or "")
+            page_text = _inject_schedule_heading_breaks(str(page.get("text") or ""))
             if not _looks_like_joinery_schedule_page(page_text):
                 continue
             for line in _preprocess_chunk(page_text):
                 if not line or _skip_continuation_line(line):
                     continue
                 if _is_schedule_room_heading(line):
+                    candidate_key = _schedule_room_key(line)
+                    lowered_line = line.lower()
+                    if (
+                        current_key
+                        and "colour schedule" not in lowered_line
+                        and candidate_key
+                        and (
+                            candidate_key == current_key
+                            or current_key.endswith(candidate_key)
+                            or candidate_key.endswith(current_key)
+                        )
+                    ):
+                        current_lines.append(line)
+                        continue
                     flush()
-                    current_key = _schedule_room_key(line)
+                    current_key = candidate_key
                     current_lines = [line]
                     continue
                 if current_key:
@@ -748,6 +797,7 @@ def _find_room_sections(text: str) -> list[tuple[str, str]]:
 
 
 def _preprocess_chunk(chunk: str) -> list[str]:
+    chunk = _inject_schedule_heading_breaks(chunk)
     for label in sorted(FIELD_LABELS, key=len, reverse=True):
         chunk = re.sub(rf"(?i)\b{re.escape(label)}\b", f"\n{label}", chunk)
     lines = [normalize_space(line) for line in chunk.split("\n") if normalize_space(line)]

@@ -77,6 +77,7 @@
   - OpenAI must not introduce extra room splits or overwrite already-clean fields with noisier text
   - room identity is source-driven for every builder, so only the same detected room merges across pages/files
   - for multi-file spec jobs, automatically pick one room-master file by schedule density and only let that file define the room set
+  - room-master detection first normalizes glued schedule headings such as `KITCHEN COLOUR SCHEDULEBENCHTOP...` or `VANITIES COLOUR SCHEDULENOTE...` so the clean heading is extracted before room matching
 11. Merge OpenAI output conservatively: keep the heuristic room set as the primary layout, merge room fields into that layout, and preserve heuristic appliance `model_no` values instead of replacing them with weaker guesses.
 12. For Clarendon-only spec runs, apply a deterministic post-polish stage after source-driven room detection:
   - rebuild stable room text from colour-schedule and fixture pages for each detected room
@@ -133,6 +134,7 @@
   - only the same normalized room identity merges across pages/files
   - fixed Clarendon room compaction buckets such as `vanities` and preallocated rooms such as `theatre`/`rumpus` are no longer injected by layout stabilization
   - in multi-file spec jobs, supplement files cannot create new rooms; unmatched room-like sections are ignored and surfaced through warnings/diagnostics
+  - when the room-master file already groups a room family such as `Vanities`, supplement bathroom/ensuite/powder vanity pages can enrich that grouped room without splitting it apart
 
 ## 4. Canonical Schema
 

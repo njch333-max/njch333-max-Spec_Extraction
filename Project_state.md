@@ -27,6 +27,8 @@
   - global `37016`-style conservative parsing profile for all builders
   - source-driven room detection for all builders, with same-room-only merge behavior across pages/files
   - automatic `room master` selection for multi-file spec jobs, with supplement files limited to enriching rooms defined by the room-master document
+  - glued room-schedule headings such as `KITCHEN COLOUR SCHEDULEBENCHTOP...` are now normalized before room-master extraction so noisy heading text no longer becomes a room name
+  - grouped room-master headings such as `Vanities` remain grouped while supplement bathroom/ensuite/powder fixture pages enrich that grouped room instead of creating extra room rows
   - snapshot and run metadata now record parser strategy, worker PID, and app build ID
   - single-worker lease guard to prevent stale local worker processes from racing newer code on queued jobs
   - legacy builder-rules routes retired from the UI and redirected back to the Builders page
@@ -91,6 +93,7 @@
 - Continue tightening noisy field cleanup inside the fixed global conservative profile without reintroducing per-builder configuration
 - Continue tightening Clarendon field wording so kitchen/bathroom/laundry text stays close to the accepted `37016` readability standard without relying on manual snapshot restores or fixed room buckets
 - Continue refining room-master scoring for builders that use multiple spec files so the joinery schedule file consistently wins over appliance/fixture miscellany files
+- Continue tightening supplement-file room mapping so only clearly related fixture pages enrich grouped rooms while unrelated finish/glazing notes stay ignored
 - Extend deterministic model-page probing beyond the currently supported appliance brand patterns
 - Expand model-number coverage for more appliance naming patterns beyond the current explicit rules
 - Build the future comparison UI and diff logic
@@ -173,6 +176,11 @@
   - handle cleanup that strips mounting-position noise while keeping the model/finish text
   - fixture cleanup that collapses multiline OCR fragments into single readable lines
   - soft-close fallback logic that prefers overlay values but still falls back to the parsed room field when the overlay is blank
+- Multi-file room-master coverage added for:
+  - automatic selection of a schedule-heavy room-master file over miscellany supplement files
+  - recovery of glued `COLOUR SCHEDULE` headings into clean room labels
+  - grouped `Vanities` master-room preservation while supplement bathroom pages enrich the grouped row
+  - warning-driven ignore behavior for unmatched supplement room-like headings
 - Clarendon multi-template coverage added for:
   - dense single-line schedule pages with `Mirror Splashback`
   - `Square Edge Handleless` extraction into `handles`
