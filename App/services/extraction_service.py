@@ -974,6 +974,11 @@ def _clarendon_detect_template_family(text: str) -> str:
 
 def _clarendon_spacing_normalize(text: str) -> str:
     normalized = parsing.normalize_space(text)
+    normalized = re.sub(
+        r"(?i)(?<=\w)(KITCHEN COLOUR SCHEDULE|BUTLERS?\s+PANTRY COLOUR SCHEDULE|VANITIES COLOUR SCHEDULE|LAUNDRY COLOUR SCHEDULE|THEATRE(?: ROOM)? COLOUR SCHEDULE|RUMPUS(?: ROOM)? COLOUR SCHEDULE|RUMPUS\s*-\s*DESK JOINERY COLOUR SCHEDULE|STUDY COLOUR SCHEDULE|OFFICE COLOUR SCHEDULE|KITCHENETTE COLOUR SCHEDULE)",
+        r" \1",
+        normalized,
+    )
     normalized = re.sub(r"(?i)(COLOUR SCHEDULE)(?=[A-Z])", r"\1 ", normalized)
     normalized = re.sub(r"(?i)(SUPPLIER DESCRIPTION DESIGN COMMENTS)(?=[A-Z])", r"\1 ", normalized)
     return normalized
