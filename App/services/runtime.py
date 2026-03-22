@@ -4,7 +4,9 @@ import json
 import os
 import re
 import secrets
-from datetime import UTC, datetime
+import hashlib
+import subprocess
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
@@ -15,25 +17,6 @@ APP_DIR = BASE_DIR / "App"
 ENV_PATH = BASE_DIR / ".env"
 STATIC_DIR = APP_DIR / "static"
 TEMPLATES_DIR = APP_DIR / "templates"
-
-DEFAULT_DATA_DIR = APP_DIR / "data"
-DATA_DIR = Path(os.getenv("SPEC_EXTRACTION_DATA_DIR", "") or DEFAULT_DATA_DIR)
-DB_PATH = DATA_DIR / "spec_extraction.sqlite3"
-TEMPLATES_ROOT = DATA_DIR / "templates"
-JOBS_ROOT = DATA_DIR / "jobs"
-EXPORTS_ROOT = DATA_DIR / "exports"
-
-SECRET_KEY = os.getenv("SPEC_EXTRACTION_SECRET_KEY", "") or secrets.token_urlsafe(32)
-ADMIN_USERNAME = os.getenv("SPEC_EXTRACTION_ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.getenv("SPEC_EXTRACTION_ADMIN_PASSWORD", "admin")
-ADMIN_PASSWORD_HASH = os.getenv("SPEC_EXTRACTION_ADMIN_PASSWORD_HASH", "")
-SESSION_DOMAIN = os.getenv("SPEC_EXTRACTION_SESSION_DOMAIN", "").strip()
-HOST_DOMAIN = os.getenv("SPEC_EXTRACTION_HOST_DOMAIN", "").strip()
-OPENAI_ENABLED = os.getenv("SPEC_EXTRACTION_ENABLE_OPENAI", "0").strip().lower() in {"1", "true", "yes", "on"}
-OPENAI_MODEL = os.getenv("SPEC_EXTRACTION_OPENAI_MODEL", "gpt-4.1-mini")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
-WEB_PORT = int(os.getenv("SPEC_EXTRACTION_WEB_PORT", "8010"))
-MAX_UPLOAD_MB = int(os.getenv("SPEC_EXTRACTION_MAX_UPLOAD_MB", "50"))
 
 
 def load_env_file() -> None:
@@ -54,6 +37,63 @@ def load_env_file() -> None:
             os.environ[key] = value
 
 
+load_env_file()
+
+DEFAULT_DATA_DIR = APP_DIR / "data"
+DATA_DIR = Path(os.getenv("SPEC_EXTRACTION_DATA_DIR", "") or DEFAULT_DATA_DIR)
+DB_PATH = DATA_DIR / "spec_extraction.sqlite3"
+TEMPLATES_ROOT = DATA_DIR / "templates"
+JOBS_ROOT = DATA_DIR / "jobs"
+EXPORTS_ROOT = DATA_DIR / "exports"
+
+SECRET_KEY = os.getenv("SPEC_EXTRACTION_SECRET_KEY", "") or secrets.token_urlsafe(32)
+ADMIN_USERNAME = os.getenv("SPEC_EXTRACTION_ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.getenv("SPEC_EXTRACTION_ADMIN_PASSWORD", "admin")
+ADMIN_PASSWORD_HASH = os.getenv("SPEC_EXTRACTION_ADMIN_PASSWORD_HASH", "")
+SESSION_DOMAIN = os.getenv("SPEC_EXTRACTION_SESSION_DOMAIN", "").strip()
+HOST_DOMAIN = os.getenv("SPEC_EXTRACTION_HOST_DOMAIN", "").strip()
+HTTPS_ONLY = os.getenv("SPEC_EXTRACTION_HTTPS_ONLY", "0").strip().lower() in {"1", "true", "yes", "on"}
+OPENAI_ENABLED = os.getenv("SPEC_EXTRACTION_ENABLE_OPENAI", "0").strip().lower() in {"1", "true", "yes", "on"}
+OPENAI_MODEL = os.getenv("SPEC_EXTRACTION_OPENAI_MODEL", "gpt-4.1-mini")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+WEB_PORT = int(os.getenv("SPEC_EXTRACTION_WEB_PORT", "8010"))
+MAX_UPLOAD_MB = int(os.getenv("SPEC_EXTRACTION_MAX_UPLOAD_MB", "50"))
+WORKER_LEASE_TTL_SECONDS = int(os.getenv("SPEC_EXTRACTION_WORKER_LEASE_TTL_SECONDS", "240"))
+
+
+def _detect_git_short_head() -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(BASE_DIR),
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        return result.stdout.strip()
+    except Exception:
+        return ""
+
+
+def _source_tree_fingerprint() -> str:
+    digest = hashlib.sha1()
+    for path in sorted(APP_DIR.rglob("*")):
+        if not path.is_file() or path.suffix.lower() not in {".py", ".html", ".css"}:
+            continue
+        relative = path.relative_to(BASE_DIR).as_posix()
+        stat = path.stat()
+        digest.update(relative.encode("utf-8"))
+        digest.update(str(stat.st_mtime_ns).encode("utf-8"))
+        digest.update(str(stat.st_size).encode("utf-8"))
+    return digest.hexdigest()[:8]
+
+
+APP_BUILD_ID = os.getenv("SPEC_EXTRACTION_APP_BUILD_ID", "").strip() or (
+    f"{_detect_git_short_head() or 'local'}-{_source_tree_fingerprint()}"
+)
+
+
 def ensure_runtime_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     TEMPLATES_ROOT.mkdir(parents=True, exist_ok=True)
@@ -67,6 +107,10 @@ def utc_now() -> datetime:
 
 def utc_now_iso() -> str:
     return utc_now().replace(microsecond=0).isoformat()
+
+
+def utc_after_seconds_iso(seconds: int) -> str:
+    return (utc_now() + timedelta(seconds=seconds)).replace(microsecond=0).isoformat()
 
 
 def slugify(value: str) -> str:
@@ -127,6 +171,4 @@ def write_bytes_atomic(path: Path, content: bytes) -> None:
         handle.write(content)
     temp_path.replace(path)
 
-
-load_env_file()
 ensure_runtime_dirs()

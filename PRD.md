@@ -19,12 +19,15 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 1. Log into the web app.
 2. Create a Builder entry or upload Builder template files.
 3. Create a new job with a unique `job_no` and selected Builder.
-4. Upload one or more spec files for the job.
-5. Start spec extraction and wait for the worker to finish.
+4. Choose one or more spec or drawing files and let the page upload them immediately.
+5. Click `Parse Spec Files` to create a parse run, then wait for the worker to finish.
 6. Review the extracted `Rooms`, `Hardware`, `Appliances`, and `Others`.
 7. Edit incorrect values and save the reviewed result.
 8. Export the reviewed result to Excel or CSV.
-9. Upload production drawing PDFs so compare-ready data is stored for a future release.
+9. Open a dedicated raw Spec List page for a job.
+10. Export the raw Spec List page to Excel.
+11. Search finished jobs by `job_no` from the main Jobs page.
+12. Upload production drawing PDFs so compare-ready data is stored for a future release.
 
 ## 4. Functional Requirements
 
@@ -32,11 +35,14 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Create Builder records with name, slug, and notes.
 - Upload, list, and delete template files for each Builder.
 - Store template files under a Builder-specific folder.
+- All builders must use the same fixed global parsing profile.
+- Builder records no longer expose user-editable parsing rules or parser-strategy settings.
 
 ### 4.2 Job Management
 - Create jobs with unique `job_no`.
 - Each job must belong to exactly one Builder.
 - List jobs with status summary.
+- Allow `job_no` search from the main job list using partial-match input and explicit submit.
 - View a job detail page with files, runs, results, and exports.
 
 ### 4.3 File Support
@@ -48,6 +54,8 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 ### 4.4 Extraction
 - Extract text directly from digital PDFs and DOCX files.
 - Mark low-text PDF pages for OCR or vision fallback.
+- Only allow parsing to start when the job already has at least one matching uploaded file.
+- Store extraction metadata for each raw snapshot, including whether OpenAI was attempted, whether it succeeded, and which model was used.
 - Produce a canonical JSON result containing:
   - room rows,
   - appliance rows,
@@ -56,6 +64,31 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
   - source references.
 - Merge information across multiple spec files in the same job.
 - If OpenAI is configured, use it to improve structured extraction.
+- All builders must use the fixed `Global Conservative` profile based on the accepted `37016` output style.
+- Under `Global Conservative`, heuristic room structure and cleaning remain primary, OpenAI fills missing fields conservatively, and AI must not reshape already-stable room layouts or inject noisier duplicate content.
+- When OpenAI and heuristic room sets disagree, keep the heuristic room layout as the primary room skeleton and merge AI fields conservatively into that layout so repeated parses of the same spec stay visually stable.
+- Appliance parsing must prefer explicit `model_no` values from labeled rows or table columns and must not use brand-only words or generic notes as model numbers.
+- Sink, basin, and tap selections must be captured as room-level fixture fields instead of appliance rows.
+- Door colour information should expose room-level splits for `Overheads`, `Base`, `Island`, and `Bar Back` whenever the source text makes those categories explicit.
+- Door-colour display should trim obvious installation-context suffixes and suppress OCR noise so room cards show material names instead of repeated positional phrases or unrelated kickboard/benchtop text.
+- Kitchen and similar room bench-top data should split into `Wall Run Bench Top` and `Island Bench Top` when the source text clearly describes separate wall-run and island materials.
+- Yellowwood-style joinery schedules must map `Back Benchtops` to `Wall Run Bench Top` and preserve `Waterfall Ends` as part of `Island Bench Top`.
+- Joinery schedule parsing must ignore non-cabinet finish pages and exclude colours that only appear in paint, Colorbond, garage-door, entry-door, window-frame, or other non-joinery contexts.
+- Drawer and hinge states must normalize to `Soft Close`, `Not Soft Close`, or blank.
+- OpenAI extraction should tolerate markdown code fences or short explanatory prefixes around JSON instead of failing the whole AI pass immediately.
+- Brand names must normalize to canonical casing for supported brands such as `Polytec`, `Westinghouse`, `AEG`, `Fisher & Paykel`, `Phoenix`, `Johnson Suisse`, `Parisi`, and `Everhard`.
+- Benchtop text should preserve the full material wording, including thickness, edge, apron, and waterfall language, instead of shortening material descriptions aggressively.
+- Official overall-size extraction should support structured product-page metadata blocks such as JSON-LD `height/width/depth` objects in addition to visible page text and official PDFs.
+- Production deployment target is `https://spec.lxtransport.online/`, using the same fixed `Global Conservative` profile as local runs.
+- After extraction, appliance enrichment must look up official model resources and store:
+  - product page URL
+  - spec sheet URL
+  - user manual URL
+  - overall size from official resources only
+- For supported brands, official product lookup should probe deterministic brand-site model URLs before falling back to external search engines.
+- If no exact official model match is found, appliance links and overall size should stay blank instead of falling back to guessed spec-text values.
+- The visible appliance link in the UI and exports only needs the official product page URL; spec and manual files may still be used internally for size extraction when needed.
+- Official overall size extraction must support both single-line `W x D x H` style text and labeled `51 mm (H) / 900 mm (W) / 520 mm (D)` style product-page dimensions.
 
 ### 4.5 Review
 - Show reviewable data in English-only sections:
@@ -71,23 +104,72 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
   - one Excel workbook with multiple sheets
   - one CSV file
 - Include source file and page references in the exported data.
+- Export the raw spec snapshot from a dedicated Spec List page as a standalone Excel workbook.
+- Preserve Unicode content, including Chinese and special characters, in Excel and CSV outputs.
+- Export official `Product`, `Spec`, and `Manual` appliance links as dedicated columns and keep them clickable in Excel.
 
-### 4.7 Drawing Foundation
+### 4.7 Raw Spec List Page
+- Provide a separate login-protected page for a single job that displays the raw spec snapshot as read-only lists/tables.
+- The page must show:
+  - `Rooms`
+  - `Appliances`
+  - `Others`
+  - `Warnings`
+  - source documents
+  - `Material Summary`
+- The page must use `raw_spec` only and must not switch to reviewed data.
+- The `Rooms` section should use one wide horizontal block per room on desktop, stacked vertically one below the next, so each field can be read without cramped narrow cards.
+- Each room card must show room fixture rows for `Sink`, `Basin`, and `Tap`.
+- Each room card must show `Door Colours` as separate `Overheads`, `Base`, `Island`, and `Bar Back` rows.
+- Each room card should prefer separate `Wall Run Bench Top` and `Island Bench Top` rows when the source text supports that split.
+- Only the `Kitchen` room card should render split `Wall Run Bench Top` and `Island Bench Top` rows; other rooms should render a single `Benchtop` row even when internal split fields exist.
+- Plumbing fixtures shown on room cards must not also appear in the `Appliances` table.
+- The `Material Summary` block must deduplicate and count room-level `Door Colours`, `Handles`, and `Bench Tops` using smart normalization.
+- Appliance rows on the page must expose a clickable official `Product` link and allow long URLs to wrap across multiple lines.
+
+### 4.8 Upload UX
+- Job detail uploads should start automatically as soon as files are selected.
+- Separate `Upload Specs` and `Upload Drawings` submit buttons should not be required.
+- The file list should update after upload and existing files must remain visible if an upload fails.
+
+### 4.9 Run History
+- The Job page run history must refresh automatically while parsing is active.
+- Run messages should show real worker progress such as loading files, heuristic extraction, OpenAI request, merge/fallback, and snapshot save.
+- Run stages should also show official resource work such as model lookup, spec/manual discovery, and official size extraction.
+- Run metadata must also show the parser strategy, worker PID, and app build ID that handled the run.
+- Only one worker should actively lease the queue at a time, so stale local processes cannot race newer code on queued jobs.
+
+### 4.10 Drawing Foundation
 - Upload drawing PDFs from the job page.
 - Parse drawing-side summary blocks into the same canonical schema.
 - Save compare-ready data, but do not expose a formal comparison UI in v1.
 
-### 4.8 Security
+### 4.11 Security
 - Require login for all working pages.
 - Use CSRF protection for forms.
 - Keep session cookies scoped to the app domain.
+- Support secure HTTPS-only cookies in production through environment configuration.
 - Keep secrets in environment variables or config files outside source control.
+- Automated test runs must use isolated temporary app data and must never modify the live local job database.
 
-### 4.9 Git Rollback Tooling
+### 4.12 Frontend Delivery
+- Static CSS assets should include cache-busting so layout changes become visible immediately after restart or deploy.
+
+### 4.13 Git Rollback Tooling
 - Provide local Git helper scripts to initialize, checkpoint, inspect history, and restore from previous commits.
 - Require synchronized doc updates for major changes.
 
 ## 5. Canonical Data Requirements
+
+### 5.0 Snapshot Metadata
+- `analysis.mode`
+- `analysis.parser_strategy`
+- `analysis.openai_attempted`
+- `analysis.openai_succeeded`
+- `analysis.openai_model`
+- `analysis.note`
+- `analysis.worker_pid`
+- `analysis.app_build_id`
 
 ### 5.1 Room Fields
 - `room_key`
@@ -110,6 +192,9 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - `appliance_type`
 - `make`
 - `model_no`
+- `product_url`
+- `spec_url`
+- `manual_url`
 - `website_url`
 - `overall_size`
 - `source_file`
@@ -126,27 +211,34 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 
 ## 7. Acceptance Criteria
 - User can log in, create Builders, upload template files, create Jobs, upload files, trigger extraction, review results, save edits, and export files.
+- User can open a dedicated single-job raw Spec List page and export it to Excel.
+- User can tell from the Job page whether the latest extraction used heuristic parsing only, OpenAI merge, or OpenAI fallback.
+- User can tell from the Job page which global extraction profile, worker PID, and build ID generated the latest snapshot.
 - SQLite persists Builders, Jobs, files, run history, raw results, and reviewed results.
 - Worker can process queued spec and drawing runs separately from the web process.
+- Repeated parses should be traceable through recorded parser strategy, worker PID, and app build metadata.
 - The app boots locally with documented commands.
 - Git helper scripts work inside the project folder.
 
 ## 8. Implemented V1 Surface
 - Pages:
   - `/login`
-  - `/builders`
-  - `/jobs`
-  - `/jobs/{job_id}`
+- `/builders`
+- `/jobs`
+- `/jobs?q=<job_no_fragment>`
+- `/jobs/{job_id}`
+- `/jobs/{job_id}/spec-list`
 - Actions:
   - create builder
   - upload and delete template files
   - create job
   - upload and delete spec files
   - upload and delete drawing files
-  - queue spec extraction
-  - queue drawing parsing
+  - parse spec files
+  - parse drawing files
   - save reviewed result
   - generate Excel and CSV exports
+  - export raw spec list Excel
 - Diagnostics:
   - `/api/health`
 

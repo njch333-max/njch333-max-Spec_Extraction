@@ -4,12 +4,13 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/builder-spec-extractor
-ExecStart=/opt/builder-spec-extractor/App/scripts/run_server.sh
+EnvironmentFile=-/etc/spec-extraction.env
+WorkingDirectory=/opt/spec-extraction
+ExecStart=/bin/bash /opt/spec-extraction/App/scripts/run_server.sh
 Restart=always
 RestartSec=5
-User=www-data
-Group=www-data
+User=ubuntu
+Group=ubuntu
 
 [Install]
 WantedBy=multi-user.target

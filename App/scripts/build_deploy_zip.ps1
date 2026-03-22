@@ -47,7 +47,25 @@ if (Test-Path $outputZip) {
     Remove-Item $outputZip -Force
 }
 
-Compress-Archive -Path (Join-Path $stagingRoot "*") -DestinationPath $outputZip -Force
+$pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+if (-not $pythonCmd) {
+    throw "python is required to build a Linux-safe deployment zip."
+}
+
+@'
+from pathlib import Path
+from zipfile import ZipFile, ZIP_DEFLATED
+import sys
+
+root = Path(sys.argv[1])
+output = Path(sys.argv[2])
+with ZipFile(output, "w", compression=ZIP_DEFLATED) as archive:
+    for path in sorted(root.rglob("*")):
+        if path.is_dir():
+            continue
+        archive.write(path, arcname=path.relative_to(root).as_posix())
+'@ | & $pythonCmd.Source - $stagingRoot $outputZip
+
 Remove-Item $stagingRoot -Recurse -Force
 
 Write-Output $outputZip

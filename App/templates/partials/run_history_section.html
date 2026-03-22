@@ -1,0 +1,52 @@
+<section
+  class="card"
+  id="run-history-section"
+  hx-get="/jobs/{{ job.id }}/run-history"
+  hx-trigger="load, every 2s"
+  hx-swap="outerHTML"
+>
+  <div class="split-head">
+    <div>
+      <h3>Run History</h3>
+      <p class="muted">This section refreshes automatically while the worker is running so you can see the current parsing step.</p>
+    </div>
+    <form method="post" action="/jobs/{{ job.id }}/export">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="primary-button">Generate Exports</button>
+    </form>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Kind</th>
+          <th>Status</th>
+          <th>Profile</th>
+          <th>Runtime</th>
+          <th>Stage</th>
+          <th>Message</th>
+          <th>Requested</th>
+          <th>Finished</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for run in runs %}
+        <tr>
+          <td>{{ run.id }}</td>
+          <td>{{ run.kind_label }}</td>
+          <td><span class="status-chip status-{{ run.status }}">{{ run.status_label }}</span></td>
+          <td>{{ run.parser_strategy_label }}</td>
+          <td>{{ run.runtime_display }}</td>
+          <td>{{ run.stage_label }}</td>
+          <td>{{ run.message_display }}</td>
+          <td>{{ run.requested_at }}</td>
+          <td>{{ run.finished_at }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="9" class="empty-cell">No runs queued yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>

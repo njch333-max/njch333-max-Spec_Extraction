@@ -7,6 +7,7 @@
     <p>{{ job.builder_name }}{% if job.title %} | {{ job.title }}{% endif %}</p>
   </div>
   <div class="head-actions">
+    <a href="/jobs/{{ job.id }}/spec-list" class="primary-button" target="_blank" rel="noopener">Open Spec List</a>
     <a href="/jobs" class="ghost-button">Back to Jobs</a>
   </div>
 </section>
@@ -17,9 +18,9 @@
     <form method="post" action="/jobs/{{ job.id }}/files/upload" enctype="multipart/form-data" class="stack-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="file_role" value="spec">
-      <input type="file" name="files" multiple required>
-      <button type="submit" class="primary-button">Upload Specs</button>
+      <input type="file" name="files" accept=".pdf,.docx" multiple required onchange="if (this.files.length) this.form.requestSubmit();">
     </form>
+    <p class="muted">Choose one or more spec files to upload immediately, then click Parse Spec Files to start a worker run.</p>
     <div class="table-wrap">
       <table>
         <thead><tr><th>Name</th><th>Uploaded</th><th>Actions</th></tr></thead>
@@ -45,7 +46,7 @@
     <form method="post" action="/jobs/{{ job.id }}/runs/start" class="inline-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="run_kind" value="spec">
-      <button type="submit" class="primary-button">Queue Spec Extraction</button>
+      <button type="submit" class="primary-button">Parse Spec Files</button>
     </form>
   </article>
 
@@ -54,9 +55,9 @@
     <form method="post" action="/jobs/{{ job.id }}/files/upload" enctype="multipart/form-data" class="stack-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="file_role" value="drawing">
-      <input type="file" name="files" multiple required>
-      <button type="submit" class="primary-button">Upload Drawings</button>
+      <input type="file" name="files" accept=".pdf" multiple required onchange="if (this.files.length) this.form.requestSubmit();">
     </form>
+    <p class="muted">Choose drawing PDFs to upload immediately, then click Parse Drawing Files to prepare compare-ready data.</p>
     <div class="table-wrap">
       <table>
         <thead><tr><th>Name</th><th>Uploaded</th><th>Actions</th></tr></thead>
@@ -82,53 +83,12 @@
     <form method="post" action="/jobs/{{ job.id }}/runs/start" class="inline-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="run_kind" value="drawing">
-      <button type="submit" class="primary-button">Queue Drawing Parsing</button>
+      <button type="submit" class="primary-button">Parse Drawing Files</button>
     </form>
   </article>
 </section>
 
-<section class="card">
-  <div class="split-head">
-    <div>
-      <h3>Run History</h3>
-      <p class="muted">The worker picks queued runs and updates status here.</p>
-    </div>
-    <form method="post" action="/jobs/{{ job.id }}/export">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <button type="submit" class="primary-button">Generate Exports</button>
-    </form>
-  </div>
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Kind</th>
-          <th>Status</th>
-          <th>Stage</th>
-          <th>Message</th>
-          <th>Requested</th>
-          <th>Finished</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for run in runs %}
-        <tr>
-          <td>{{ run.id }}</td>
-          <td>{{ run.run_kind }}</td>
-          <td><span class="status-chip status-{{ run.status }}">{{ run.status }}</span></td>
-          <td>{{ run.stage }}</td>
-          <td>{{ run.message or run.error_text }}</td>
-          <td>{{ run.requested_at }}</td>
-          <td>{{ run.finished_at }}</td>
-        </tr>
-        {% else %}
-        <tr><td colspan="7" class="empty-cell">No runs queued yet.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
+{% include "partials/run_history_section.html" %}
 
 <section class="grid-two">
   <article class="card">
@@ -156,10 +116,27 @@
     {% if raw_snapshot %}
     <ul class="plain-list">
       <li><strong>Source kind:</strong> {{ raw_snapshot.source_kind }}</li>
+      <li><strong>Extraction mode:</strong> {{ raw_analysis.label }}</li>
+      <li><strong>Parser strategy:</strong> {{ raw_analysis.parser_strategy_label }}</li>
+      <li><strong>OpenAI attempted:</strong> {{ "Yes" if raw_analysis.openai_attempted else "No" }}</li>
+      <li><strong>OpenAI succeeded:</strong> {{ "Yes" if raw_analysis.openai_succeeded else "No" }}</li>
+      <li><strong>Model:</strong> {{ raw_analysis.openai_model or "Not used" }}</li>
+      <li><strong>Worker PID:</strong> {{ raw_analysis.worker_pid or "Not recorded" }}</li>
+      <li><strong>Build ID:</strong> {{ raw_analysis.app_build_id or "Not recorded" }}</li>
       <li><strong>Rooms:</strong> {{ raw_snapshot.rooms|length }}</li>
       <li><strong>Appliances:</strong> {{ raw_snapshot.appliances|length }}</li>
       <li><strong>Warnings:</strong> {{ raw_snapshot.warnings|length }}</li>
     </ul>
+    <div class="subcard">
+      <h4>Global Extraction Profile</h4>
+      <p class="muted">All builders now use the same 37016-style conservative parsing profile. Builder-specific rules are no longer configurable.</p>
+    </div>
+    {% if raw_analysis.note %}
+    <div class="subcard">
+      <h4>Analysis Note</h4>
+      <p class="muted">{{ raw_analysis.note }}</p>
+    </div>
+    {% endif %}
     {% if raw_snapshot.warnings %}
     <div class="warning-box">
       {% for warning in raw_snapshot.warnings %}
@@ -174,6 +151,7 @@
     <div class="subcard">
       <h4>Drawing Snapshot</h4>
       <p class="muted">Compare-ready drawing data is present.</p>
+      <p>Mode: {{ drawing_analysis.label }} | OpenAI attempted: {{ "Yes" if drawing_analysis.openai_attempted else "No" }}</p>
       <p>Rooms: {{ drawing_snapshot.rooms|length }} | Appliances: {{ drawing_snapshot.appliances|length }}</p>
     </div>
     {% endif %}
@@ -254,7 +232,7 @@
             <th>Type</th>
             <th>Make</th>
             <th>Model</th>
-            <th>Website</th>
+            <th>Product URL</th>
             <th>Overall Size</th>
             <th>Source</th>
             <th>Pages</th>
@@ -268,7 +246,7 @@
             <td><input name="appliance_type_{{ loop.index0 }}" value="{{ row.appliance_type }}"></td>
             <td><input name="make_{{ loop.index0 }}" value="{{ row.make }}"></td>
             <td><input name="model_no_{{ loop.index0 }}" value="{{ row.model_no }}"></td>
-            <td><input name="website_url_{{ loop.index0 }}" value="{{ row.website_url }}"></td>
+            <td><input name="product_url_{{ loop.index0 }}" value="{{ row.product_url }}"></td>
             <td><input name="overall_size_{{ loop.index0 }}" value="{{ row.overall_size }}"></td>
             <td><input name="appliance_source_file_{{ loop.index0 }}" value="{{ row.source_file }}"></td>
             <td><input name="appliance_page_refs_{{ loop.index0 }}" value="{{ row.page_refs }}"></td>

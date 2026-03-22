@@ -13,6 +13,34 @@
   - Jinja templates
   - separate worker loop
   - Excel and CSV export
+  - raw Spec List page and dedicated Excel export
+  - Material Summary block on the raw Spec List page
+  - split wall-run and island bench-top display on room cards and exports
+  - official appliance product-page link display plus official-size enrichment
+  - deterministic Westinghouse-style official product-page probing before search fallback
+  - deterministic AEG Australia product-page probing on `aegaustralia.com.au`
+  - Fisher & Paykel official product-page matching with official-size extraction from structured product metadata
+  - job-page Parse buttons with clearer run-status wording
+  - live-polling run history with granular worker stage messages
+  - extraction diagnostics showing heuristic/OpenAI mode
+  - global `37016`-style conservative parsing profile for all builders
+  - snapshot and run metadata now record parser strategy, worker PID, and app build ID
+  - single-worker lease guard to prevent stale local worker processes from racing newer code on queued jobs
+  - legacy builder-rules routes retired from the UI and redirected back to the Builders page
+  - vertically stacked wide horizontal room-card layout on the raw Spec List page
+  - room-card fixture rows for sink, basin, and tap
+  - split door-colour rows for overheads, base, island, and bar back
+  - normalized drawer/hinge soft-close states
+  - canonical brand casing cleanup for supported brands such as Polytec, AEG, Westinghouse, and Fisher & Paykel
+  - Yellowwood joinery-page parsing that maps `Back Benchtops` to kitchen wall-run bench tops and keeps island waterfall notes together
+  - cabinet-only colour filtering that excludes external paint / Colorbond / garage / door / window finish colours from room joinery output
+  - kitchen-only split benchtop display on the raw Spec List page, with non-kitchen rooms collapsed back to one benchtop row
+  - heuristic-first room-layout merging so OpenAI can enrich fields without collapsing Yellowwood room sections
+  - cleaned door-colour display that removes duplicated location suffixes and common OCR noise
+  - plumbing fixtures filtered out of appliance presentation/export
+  - auto-upload on file selection for spec and drawing files
+  - Jobs-page `job_no` search
+  - cache-busted CSS delivery so updated layouts are visible after restart/reload
   - Git helper scripts
 - Deployment scripts are present:
   - `run_server.*`
@@ -20,13 +48,22 @@
   - `install_systemd.sh`
   - `spec-extraction-web.service`
   - `spec-extraction-worker.service`
+  - `spec.lxtransport.online.nginx.conf`
+  - `spec-extraction.env.example`
+  - `DEPLOY_LXTRANSPORT.md`
   - `build_deploy_zip.ps1`
+- A production deployment bundle is now built locally as `spec-extraction-deploy.zip`.
+- `spec.lxtransport.online` resolves to `43.160.209.86` and is now deployed live on the LXtransport Tencent Cloud server.
+- The production stack is running through `nginx + systemd + uvicorn`, with `spec-extraction-web.service` and `spec-extraction-worker.service` active on the server.
+- HTTPS for `spec.lxtransport.online` is now issued by Certbot and terminates correctly at Nginx.
 
 ## Current Goals
 1. Keep Builder and Job flows stable while iterating extraction quality
-2. Improve extraction accuracy with better parsing and OpenAI prompts
-3. Expand product-link enrichment beyond brand homepages
-4. Add formal comparison UI in a later version
+2. Improve extraction accuracy with better appliance parsing, smart material normalization, and bench-top splitting
+3. Keep all builders on the same conservative, human-readable output style without reintroducing Builder-level configuration
+4. Improve official model lookup coverage across more appliance brands and site structures
+5. Add formal comparison UI in a later version
+6. Decide later whether the raw Spec List page also needs a reviewed-data variant
 
 ## Important Constraints
 - Major changes must update:
@@ -36,17 +73,28 @@
 - UI must remain English-only
 - Secrets must stay outside source control
 - The app should work even when OpenAI is not configured, using heuristic extraction
+- Parse requests should fail fast on the job page if no matching spec or drawing files have been uploaded yet
+- Old snapshots without `analysis` metadata should still render safely in the UI
+- Old snapshots without expanded appliance link fields or bench-top split fields should still render safely in the UI and exports
+- New parse runs always use the fixed global conservative profile
+- Smoke tests must not touch the real local app database
 
 ## Remaining Work
 - Refine OCR fallback for image-heavy PDFs
 - Improve room-section detection for more builder formats
-- Improve official product URL lookup accuracy
+- Improve official product URL lookup accuracy, size extraction coverage, and brand coverage
+- Continue tightening handle cleanup for AI-merged Yellowwood rows where verbose combined handle descriptions still appear
+- Continue tightening noisy field cleanup inside the fixed global conservative profile without reintroducing per-builder configuration
+- Extend deterministic model-page probing beyond the currently supported appliance brand patterns
+- Expand model-number coverage for more appliance naming patterns beyond the current explicit rules
 - Build the future comparison UI and diff logic
-- Verify Linux deployment on the actual Tencent Cloud server
+- Deploy the prepared package and Nginx config to the actual LXtransport Tencent Cloud server once server access is available
+- Decide whether to add a global all-job Spec List index in a later phase
 
 ## Risks
 - OCR fallback is currently warning-driven unless stronger OCR infrastructure or OpenAI vision is configured
-- Product link enrichment currently starts from brand-domain defaults and heuristic guesses
+- Official appliance lookup and size extraction depend on brand sites and search-result structures that may change over time
+- Old workers can still exist locally, but the app now leases a single active worker at a time and records runtime metadata so stale-code runs are visible
 - The OpenAI Responses integration is optional and depends on valid API credentials and model access
 
 ## Verification Completed
@@ -67,6 +115,52 @@
   - create builder
   - create job
   - open job detail page
+- Raw Spec List smoke coverage added for:
+  - login protection
+  - empty-state rendering
+  - raw-only rendering even when reviewed data exists
+  - material summary rendering
+  - split wall-run / island bench-top rendering
+  - clickable official appliance-link rendering
+  - Unicode-preserving Excel export
+- Job-page smoke coverage added for:
+  - visible Parse action buttons
+  - auto-upload inputs with no separate upload buttons
+  - run creation blocked when the matching upload set is empty
+  - `job_no` search filter
+- Runtime and extraction smoke coverage added for:
+  - `.env` OpenAI settings load before runtime constants
+  - OpenAI fallback metadata when a request fails
+  - fenced OpenAI JSON is accepted instead of falling back
+  - malformed OpenAI field shapes no longer crash the whole run
+  - explicit appliance model parsing for oven, dishwasher, and fridge rows
+  - normalized soft-close parsing for drawers and hinges
+  - canonical brand-casing cleanup and preserved benchtop text for Clarendon-style rows
+  - official appliance-resource enrichment path
+  - labeled H/W/D product-page size extraction
+  - structured `height/width/depth` product-page size extraction
+  - room fixture enrichment and door-colour split overlays
+- Strategy and worker-runtime coverage added for:
+  - all builders default to the global conservative profile
+  - single-worker lease blocking a second owner
+  - run-history rendering of parser strategy and runtime metadata
+  - stable-hybrid preservation of heuristic Clarendon room shape when OpenAI proposes extra room splits
+- UI coverage added for:
+  - retired Builder rules routes redirect to `/builders`
+  - Builders page no longer exposes a Cleaning Rules button
+  - Job page shows the global extraction profile instead of Builder-specific rule summaries
+- Spec List UI coverage added for:
+  - room-card rendering
+  - sink/basin/tap room display
+  - plumbing appliance filtering
+  - material summary counts
+  - official product-link export column
+  - analysis metadata export in the Excel Meta sheet
+- Run History UI coverage added for:
+  - htmx partial polling route
+  - live OpenAI-stage message rendering
+  - official-size stage rendering
+- Smoke tests now use an isolated temporary data directory instead of `App/data/`
 - Worker smoke test passed for:
   - upload DOCX spec
   - queue spec extraction

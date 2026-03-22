@@ -13,3 +13,4 @@ systemctl daemon-reload
 systemctl enable spec-extraction-web.service
 systemctl enable spec-extraction-worker.service
 echo "Installed systemd unit files for Spec_Extraction."
+echo "Edit /etc/spec-extraction.env if your deploy path, domain, or secrets differ from the defaults."

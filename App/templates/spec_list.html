@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <span class="eyebrow">Raw Snapshot</span>
+    <h2>Spec List for {{ job.job_no }}</h2>
+    <p>{{ job.builder_name }}{% if job.title %} | {{ job.title }}{% endif %}</p>
+  </div>
+  <div class="head-actions">
+    {% if raw_snapshot %}
+    <a href="/jobs/{{ job.id }}/spec-list.xlsx" class="primary-button">Export Excel</a>
+    {% endif %}
+    <a href="/jobs/{{ job.id }}" class="ghost-button">Back to Job</a>
+  </div>
+</section>
+
+{% if not raw_snapshot %}
+<section class="card empty-state">
+  <h3>No raw spec snapshot yet</h3>
+  <p>Run and complete a spec parse first, then reopen this page.</p>
+</section>
+{% else %}
+<section class="grid-two">
+  <article class="card">
+    <h3>Snapshot Summary</h3>
+    <ul class="plain-list">
+      <li><strong>Source kind:</strong> {{ raw_snapshot.source_kind }}</li>
+      <li><strong>Extraction mode:</strong> {{ raw_analysis.label }}</li>
+      <li><strong>OpenAI attempted:</strong> {{ "Yes" if raw_analysis.openai_attempted else "No" }}</li>
+      <li><strong>OpenAI succeeded:</strong> {{ "Yes" if raw_analysis.openai_succeeded else "No" }}</li>
+      <li><strong>Model:</strong> {{ raw_analysis.openai_model or "Not used" }}</li>
+      <li><strong>Generated at:</strong> {{ raw_snapshot.generated_at }}</li>
+      <li><strong>Rooms:</strong> {{ raw_spec_rooms|length }}</li>
+      <li><strong>Appliances:</strong> {{ raw_spec_appliances|length }}</li>
+      <li><strong>Warnings:</strong> {{ raw_spec_warnings|length }}</li>
+    </ul>
+    {% if raw_analysis.note %}
+    <div class="subcard">
+      <h4>Analysis Note</h4>
+      <p class="muted">{{ raw_analysis.note }}</p>
+    </div>
+    {% endif %}
+  </article>
+
+  <article class="card">
+    <h3>Source Documents</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Role</th>
+            <th>File Name</th>
+            <th>Pages</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in raw_source_documents %}
+          <tr>
+            <td>{{ row.role }}</td>
+            <td>{{ row.file_name }}</td>
+            <td>{{ row.page_count }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="3" class="empty-cell">No source document entries.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+
+<section class="card">
+  <span class="eyebrow">Raw Snapshot</span>
+  <h3>Rooms</h3>
+  <div class="room-card-grid room-card-grid-horizontal room-card-stack">
+    {% for row in raw_spec_rooms %}
+    <article class="room-card">
+      <div class="room-card-head">
+        <div>
+          <h4>{{ row.original_room_label or row.room_key }}</h4>
+          <p class="muted">{{ row.room_key }}</p>
+        </div>
+        <span class="status-chip status-ready">Room</span>
+      </div>
+      <div class="room-field-list">
+        {% if row.show_split_benchtops %}
+        <div class="room-field-row"><strong>Wall Run Bench Top</strong><span>{{ row.bench_tops_wall_run }}</span></div>
+        <div class="room-field-row"><strong>Island Bench Top</strong><span>{{ row.bench_tops_island }}</span></div>
+        {% if row.bench_tops_other %}
+        <div class="room-field-row"><strong>Other Bench Tops</strong><span>{{ row.bench_tops_other }}</span></div>
+        {% endif %}
+        {% else %}
+        <div class="room-field-row"><strong>Bench Tops</strong><span>{{ row.bench_tops_other or row.bench_tops or "-" }}</span></div>
+        {% endif %}
+        <div class="room-field-row"><strong>Overheads</strong><span>{{ row.door_colours_overheads or "-" }}</span></div>
+        <div class="room-field-row"><strong>Base</strong><span>{{ row.door_colours_base or "-" }}</span></div>
+        <div class="room-field-row"><strong>Island</strong><span>{{ row.door_colours_island or "-" }}</span></div>
+        <div class="room-field-row"><strong>Bar Back</strong><span>{{ row.door_colours_bar_back or "-" }}</span></div>
+        <div class="room-field-row"><strong>Toe Kick</strong><span>{{ row.toe_kick or "-" }}</span></div>
+        <div class="room-field-row"><strong>Bulkheads</strong><span>{{ row.bulkheads or "-" }}</span></div>
+        <div class="room-field-row"><strong>Handles</strong><span>{{ row.handles or "-" }}</span></div>
+        <div class="room-field-row"><strong>Sink</strong><span>{{ row.sink_info or "-" }}</span></div>
+        <div class="room-field-row"><strong>Basin</strong><span>{{ row.basin_info or "-" }}</span></div>
+        <div class="room-field-row"><strong>Tap</strong><span>{{ row.tap_info or "-" }}</span></div>
+        <div class="room-field-row"><strong>Drawers</strong><span>{{ row.drawers_soft_close }}</span></div>
+        <div class="room-field-row"><strong>Hinges</strong><span>{{ row.hinges_soft_close }}</span></div>
+        <div class="room-field-row"><strong>Splashback</strong><span>{{ row.splashback or "-" }}</span></div>
+        <div class="room-field-row"><strong>Flooring</strong><span>{{ row.flooring or "-" }}</span></div>
+      </div>
+      <div class="room-meta-list">
+        <div class="room-field-row"><strong>Source</strong><span>{{ row.source_file or "-" }}</span></div>
+        <div class="room-field-row"><strong>Pages</strong><span>{{ row.page_refs or "-" }}</span></div>
+        <div class="room-field-row"><strong>Confidence</strong><span>{{ row.confidence or "-" }}</span></div>
+        <div class="room-field-row room-field-stack"><strong>Evidence</strong><span>{{ row.evidence_snippet or "-" }}</span></div>
+      </div>
+    </article>
+    {% else %}
+    <div class="empty-cell">No room rows available.</div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="card">
+  <span class="eyebrow">Raw Snapshot</span>
+  <h3>Appliances</h3>
+  <div class="table-wrap wide-table">
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Make</th>
+          <th>Model</th>
+          <th>Product</th>
+          <th>Overall Size</th>
+          <th>Source</th>
+          <th>Pages</th>
+          <th>Evidence</th>
+          <th>Confidence</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in raw_spec_appliances %}
+        <tr>
+          <td>{{ row.appliance_type }}</td>
+          <td>{{ row.make }}</td>
+          <td>{{ row.model_no }}</td>
+          <td>{% if row.product_url %}<a href="{{ row.product_url }}" class="wrap-link" target="_blank" rel="noopener">{{ row.product_url }}</a>{% endif %}</td>
+          <td>{{ row.overall_size }}</td>
+          <td>{{ row.source_file }}</td>
+          <td>{{ row.page_refs }}</td>
+          <td>{{ row.evidence_snippet }}</td>
+          <td>{{ row.confidence }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="9" class="empty-cell">No appliance rows available.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="grid-two">
+  <article class="card">
+    <span class="eyebrow">Raw Snapshot</span>
+    <h3>Others</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Key</th>
+            <th>Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in raw_spec_others %}
+          <tr>
+            <td>{{ row.key }}</td>
+            <td>{{ row.value }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="2" class="empty-cell">No extra notes available.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+
+  <article class="card">
+    <span class="eyebrow">Raw Snapshot</span>
+    <h3>Warnings</h3>
+    {% if raw_spec_warnings %}
+    <div class="warning-box">
+      {% for warning in raw_spec_warnings %}
+      <div>{{ warning }}</div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="muted">No warnings for this snapshot.</p>
+    {% endif %}
+  </article>
+</section>
+
+<section class="card">
+  <span class="eyebrow">Raw Snapshot</span>
+  <h3>Material Summary</h3>
+  <div class="summary-grid">
+    <article class="summary-card">
+      <h4>{{ material_summary.door_colours.label }}</h4>
+      <p class="muted">{{ material_summary.door_colours.count }} distinct item{{ "" if material_summary.door_colours.count == 1 else "s" }}</p>
+      <ul class="summary-list">
+        {% for item in material_summary.door_colours.entries %}
+        <li>{{ item }}</li>
+        {% else %}
+        <li class="muted">No door colours found.</li>
+        {% endfor %}
+      </ul>
+    </article>
+    <article class="summary-card">
+      <h4>{{ material_summary.handles.label }}</h4>
+      <p class="muted">{{ material_summary.handles.count }} distinct item{{ "" if material_summary.handles.count == 1 else "s" }}</p>
+      <ul class="summary-list">
+        {% for item in material_summary.handles.entries %}
+        <li>{{ item }}</li>
+        {% else %}
+        <li class="muted">No handles found.</li>
+        {% endfor %}
+      </ul>
+    </article>
+    <article class="summary-card">
+      <h4>{{ material_summary.bench_tops.label }}</h4>
+      <p class="muted">{{ material_summary.bench_tops.count }} distinct item{{ "" if material_summary.bench_tops.count == 1 else "s" }}</p>
+      <ul class="summary-list">
+        {% for item in material_summary.bench_tops.entries %}
+        <li>{{ item }}</li>
+        {% else %}
+        <li class="muted">No bench tops found.</li>
+        {% endfor %}
+      </ul>
+    </article>
+  </div>
+</section>
+{% endif %}
+{% endblock %}
