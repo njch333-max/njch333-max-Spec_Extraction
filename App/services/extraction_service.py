@@ -49,12 +49,28 @@ def build_spec_snapshot(
         merged = _merge_ai_result(heuristic, ai_result, parser_strategy=parser_strategy, rule_flags=rule_flags)
         merged = parsing.enrich_snapshot_rooms(merged, documents, rule_flags=rule_flags)
         merged = _stabilize_snapshot_layout(merged, builder_name=str(builder.get("name", "")), parser_strategy=parser_strategy)
+        merged = _apply_builder_specific_polish(
+            merged,
+            documents,
+            builder_name=str(builder.get("name", "")),
+            parser_strategy=parser_strategy,
+            rule_flags=rule_flags,
+            progress_callback=progress_callback,
+        )
         merged = _enrich_snapshot_appliances(merged, progress_callback, rule_flags=rule_flags)
         merged["analysis"] = analysis
         return merged
     _report_progress(progress_callback, "room_enrichment", "Applying room fixture and door-colour overlays")
     heuristic = parsing.enrich_snapshot_rooms(heuristic, documents, rule_flags=rule_flags)
     heuristic = _stabilize_snapshot_layout(heuristic, builder_name=str(builder.get("name", "")), parser_strategy=parser_strategy)
+    heuristic = _apply_builder_specific_polish(
+        heuristic,
+        documents,
+        builder_name=str(builder.get("name", "")),
+        parser_strategy=parser_strategy,
+        rule_flags=rule_flags,
+        progress_callback=progress_callback,
+    )
     heuristic = _enrich_snapshot_appliances(heuristic, progress_callback, rule_flags=rule_flags)
     heuristic["analysis"] = analysis
     return heuristic
@@ -652,6 +668,712 @@ CLARENDON_ROOM_PRIORITY = {
     "office": 100,
     "kitchenette": 100,
 }
+
+CLARENDON_SCHEDULE_PAGE_PATTERNS: tuple[tuple[str, str], ...] = (
+    (r"\bKITCHEN COLOUR SCHEDULE\b", "kitchen"),
+    (r"\bBUTLERS?\s+PANTRY COLOUR SCHEDULE\b", "butlers_pantry"),
+    (r"\bVANITIES COLOUR SCHEDULE\b", "vanities"),
+    (r"\bLAUNDRY COLOUR SCHEDULE\b", "laundry"),
+    (r"\bTHEATRE(?: ROOM)? COLOUR SCHEDULE\b", "theatre"),
+    (r"\bRUMPUS(?: ROOM)? COLOUR SCHEDULE\b", "rumpus"),
+    (r"\bRUMPUS\s*-\s*DESK JOINERY COLOUR SCHEDULE\b", "rumpus"),
+    (r"\bSTUDY COLOUR SCHEDULE\b", "study"),
+    (r"\bOFFICE COLOUR SCHEDULE\b", "office"),
+    (r"\bKITCHENETTE COLOUR SCHEDULE\b", "kitchenette"),
+)
+
+CLARENDON_FIELD_STOP_MARKERS = (
+    r"BENCHTOP(?: COLOUR \d+)?\s*-",
+    r"DOOR COLOUR(?: \d+)?\s*-",
+    r"THERMOLAMINATE NOTES",
+    r"CARCASS",
+    r"STANDARD WHITE",
+    r"HANDLES?\s*-",
+    r"HANDLE \d+\s*-",
+    r"DOOR HINGES",
+    r"DRAWER RUNNERS",
+    r"ACCESSORIES",
+    r"APPLIANCES",
+    r"Sink Type/Model:",
+    r"Vanity Inset Basin",
+    r"Drop in Tub:",
+    r"Docusign Envelope ID",
+    r"Client Signature",
+)
+
+CLARENDON_METADATA_MARKERS = (
+    "client signature",
+    "date of signed dwgs",
+    "dwg. by",
+    "scale:",
+    "sheet ",
+    "product:",
+    "job no",
+    "site address",
+    "forstan pty ltd",
+    "docusign envelope id",
+    "aest",
+    "page ",
+    "category supplier description design comments",
+    "all dimensions in millimetres",
+    "drawings are indicative",
+    "po. box 8248",
+    "phone :",
+    "fax :",
+    "abn :",
+)
+
+CLARENDON_NOISE_PATTERNS = (
+    r"(?i)SINKCUT OUTCENTRE.*$",
+    r"(?i)\b\d+\s*MM\s*UP/?\s*DOWN TO DOORS?.*$",
+    r"(?i)\bCUT-?OUT\b.*$",
+    r"(?i)\bBENCHCUT-?OUT\b.*$",
+    r"(?i)\bTO CABINET UNDER CUT OUT DETAIL FOR\b",
+    r"(?i)\bCABINETRY - REFER TO [\"']?YOUR HOME KITCHENS[\"']?\b.*$",
+    r"(?i)\bNOTE\s*:\s*35mm DIA\.? TAP CUT OUT\b.*$",
+    r"(?i)\bFRAME WALL TO CTR OF BASIN\b.*$",
+    r"(?i)\bCTR TO BASIN\b.*$",
+    r"(?i)\bPROFILED END PANEL\b.*$",
+    r"(?i)\bTHERMO FILLER\b.*$",
+    r"(?i)\b865SLAB\b.*$",
+)
+
+CLARENDON_EXTERNAL_HANDLE_NOISE = (
+    "external laundry door",
+    "external garage door",
+    "acrylic render",
+    "entry frame",
+    "entry door",
+    "meter box",
+    "eaves:",
+    "lightweight cladding",
+    "gainsborough",
+    "garage door",
+    "deadbolt",
+    "painted",
+    "corinthian",
+    "hume",
+)
+
+CLARENDON_MINOR_WORDS = {
+    "and",
+    "or",
+    "of",
+    "to",
+    "the",
+    "by",
+    "as",
+    "with",
+    "on",
+    "in",
+    "at",
+    "for",
+    "up",
+    "down",
+}
+
+
+def _apply_builder_specific_polish(
+    snapshot: dict[str, Any],
+    documents: list[dict[str, object]],
+    builder_name: str,
+    parser_strategy: str,
+    rule_flags: Any = None,
+    progress_callback: ProgressCallback = None,
+) -> dict[str, Any]:
+    if "clarendon" not in builder_name.strip().lower():
+        return snapshot
+    return _apply_clarendon_reference_polish(
+        snapshot,
+        documents,
+        builder_name=builder_name,
+        parser_strategy=parser_strategy,
+        rule_flags=rule_flags,
+        progress_callback=progress_callback,
+    )
+
+
+def _apply_clarendon_reference_polish(
+    snapshot: dict[str, Any],
+    documents: list[dict[str, object]],
+    builder_name: str,
+    parser_strategy: str,
+    rule_flags: Any = None,
+    progress_callback: ProgressCallback = None,
+) -> dict[str, Any]:
+    if parser_strategy not in {"stable_hybrid", cleaning_rules.global_parser_strategy()} or "clarendon" not in builder_name.strip().lower():
+        return snapshot
+    _report_progress(progress_callback, "clarendon_polish", "Applying Clarendon 37016-style field polish")
+    overlays = _collect_clarendon_polish_overlays(documents)
+    polished_rooms = [
+        _polish_clarendon_room(dict(room), overlays.get(str(room.get("room_key", "")), {}))
+        for room in snapshot.get("rooms", [])
+        if isinstance(room, dict)
+    ]
+    polished = dict(snapshot)
+    polished["rooms"] = polished_rooms
+    return parsing.apply_snapshot_cleaning_rules(polished, rule_flags=rule_flags)
+
+
+def _collect_clarendon_polish_overlays(documents: list[dict[str, object]]) -> dict[str, dict[str, Any]]:
+    overlays: dict[str, dict[str, Any]] = {}
+    for document in documents:
+        for page in document.get("pages", []):
+            text = parsing.normalize_space(str(page.get("text") or ""))
+            if not text:
+                continue
+            schedule_room_key = _clarendon_schedule_room_key(text)
+            if schedule_room_key:
+                _merge_clarendon_overlay(
+                    overlays.setdefault(schedule_room_key, _blank_clarendon_overlay()),
+                    _extract_clarendon_schedule_overlay(schedule_room_key, text),
+                )
+            for room_key, overlay in _extract_clarendon_fixture_overlays(text).items():
+                _merge_clarendon_overlay(
+                    overlays.setdefault(room_key, _blank_clarendon_overlay()),
+                    overlay,
+                )
+    return overlays
+
+
+def _blank_clarendon_overlay() -> dict[str, Any]:
+    return {
+        "bench_tops_wall_run": "",
+        "bench_tops_island": "",
+        "bench_tops_other": "",
+        "bench_tops": [],
+        "door_panel_colours": [],
+        "door_colours_overheads": "",
+        "door_colours_base": "",
+        "door_colours_island": "",
+        "door_colours_bar_back": "",
+        "toe_kick": "",
+        "bulkheads": "",
+        "handles": [],
+        "sink_info": "",
+        "basin_info": "",
+        "tap_info": "",
+        "splashback": "",
+        "drawers_soft_close": "",
+        "hinges_soft_close": "",
+    }
+
+
+def _merge_clarendon_overlay(target: dict[str, Any], candidate: dict[str, Any]) -> None:
+    for key in ("bench_tops", "door_panel_colours", "handles"):
+        values = list(target.get(key, []))
+        for value in candidate.get(key, []):
+            text = parsing.normalize_space(str(value or ""))
+            if text and text not in values:
+                values.append(text)
+        target[key] = values
+    for key in (
+        "bench_tops_wall_run",
+        "bench_tops_island",
+        "bench_tops_other",
+        "door_colours_overheads",
+        "door_colours_base",
+        "door_colours_island",
+        "door_colours_bar_back",
+        "toe_kick",
+        "bulkheads",
+        "sink_info",
+        "basin_info",
+        "tap_info",
+        "splashback",
+    ):
+        target[key] = parsing._merge_text(target.get(key, ""), candidate.get(key, ""))
+    target["drawers_soft_close"] = _merge_soft_close_field(
+        target.get("drawers_soft_close", ""),
+        candidate.get("drawers_soft_close", ""),
+        keyword="drawer",
+    )
+    target["hinges_soft_close"] = _merge_soft_close_field(
+        target.get("hinges_soft_close", ""),
+        candidate.get("hinges_soft_close", ""),
+        keyword="hinge",
+    )
+
+
+def _clarendon_schedule_room_key(text: str) -> str:
+    for pattern, room_key in CLARENDON_SCHEDULE_PAGE_PATTERNS:
+        if re.search(pattern, text, re.IGNORECASE):
+            return room_key
+    return ""
+
+
+def _extract_clarendon_schedule_overlay(room_key: str, text: str) -> dict[str, Any]:
+    overlay = _blank_clarendon_overlay()
+    benchtop_segments = _extract_clarendon_labeled_segments(
+        text,
+        r"BENCHTOP(?: COLOUR \d+)?",
+        CLARENDON_FIELD_STOP_MARKERS,
+    )
+    for segment in benchtop_segments:
+        cleaned = _clarendon_clean_benchtop_text(segment)
+        if not cleaned:
+            continue
+        lowered = segment.lower()
+        if room_key == "kitchen" and any(token in lowered for token in ("cooktop run", "wall run", "wall bench", "wall side")):
+            overlay["bench_tops_wall_run"] = parsing._merge_text(overlay["bench_tops_wall_run"], cleaned)
+        elif room_key == "kitchen" and "island" in lowered:
+            overlay["bench_tops_island"] = parsing._merge_text(overlay["bench_tops_island"], cleaned)
+        else:
+            overlay["bench_tops_other"] = parsing._merge_text(overlay["bench_tops_other"], cleaned)
+        overlay["bench_tops"].append(cleaned)
+
+    door_segments = _extract_clarendon_labeled_segments(
+        text,
+        r"DOOR COLOUR(?: \d+)?",
+        CLARENDON_FIELD_STOP_MARKERS,
+    )
+    if door_segments:
+        groups = parsing._split_door_colour_groups(door_segments)
+        overlay["door_panel_colours"] = list(parsing._rebuild_door_panel_colours(groups))
+        for key in ("door_colours_overheads", "door_colours_base", "door_colours_island", "door_colours_bar_back"):
+            overlay[key] = parsing._merge_text(overlay[key], groups.get(key, ""))
+
+    notes_block = _extract_clarendon_notes_block(text)
+    if notes_block:
+        toe_kick = _clarendon_extract_note_value(notes_block, "KICKBOARDS")
+        bulkhead = _clarendon_extract_note_value(notes_block, "BULKHEAD SHADOWLINE")
+        if toe_kick:
+            overlay["toe_kick"] = parsing._merge_text(overlay["toe_kick"], _clarendon_clean_toe_kick_text(toe_kick))
+        if bulkhead:
+            overlay["bulkheads"] = parsing._merge_text(overlay["bulkheads"], _clarendon_clean_bulkhead_text(bulkhead))
+
+    handle_segments = _extract_clarendon_handle_segments(text)
+    overlay["handles"] = _clarendon_merge_unique_list(overlay["handles"], handle_segments)
+
+    hinges_segment = _extract_clarendon_single_segment(text, r"DOOR HINGES", CLARENDON_FIELD_STOP_MARKERS)
+    drawers_segment = _extract_clarendon_single_segment(text, r"DRAWER RUNNERS", CLARENDON_FIELD_STOP_MARKERS)
+    if hinges_segment:
+        overlay["hinges_soft_close"] = parsing.normalize_soft_close_value(hinges_segment, keyword="hinge") or parsing.normalize_soft_close_value(hinges_segment)
+    if drawers_segment:
+        overlay["drawers_soft_close"] = parsing.normalize_soft_close_value(drawers_segment, keyword="drawer") or parsing.normalize_soft_close_value(drawers_segment)
+    return overlay
+
+
+def _extract_clarendon_fixture_overlays(text: str) -> dict[str, dict[str, Any]]:
+    overlays: dict[str, dict[str, Any]] = {}
+    kitchen_segment = _extract_between_markers(
+        text,
+        start_marker=r"KITCHEN SUPPLIER DESCRIPTION DESIGN COMMENTS",
+        end_markers=(r"Sink Type/Model\s*:", r"BUTLERS PANTRY", r"WALK IN PANTRY"),
+    )
+    if kitchen_segment:
+        overlay = overlays.setdefault("kitchen", _blank_clarendon_overlay())
+        sink = _extract_clarendon_value_after_label(kitchen_segment, r"Sink Type")
+        tap = _extract_clarendon_value_after_label(kitchen_segment, r"Tap Type")
+        if sink:
+            overlay["sink_info"] = parsing._merge_text(overlay["sink_info"], _clarendon_clean_sink_text(sink))
+        if tap:
+            overlay["tap_info"] = parsing._merge_text(overlay["tap_info"], _clarendon_clean_tap_text(tap))
+        if "splashback:" in kitchen_segment.lower():
+            overlay["splashback"] = parsing._merge_text(overlay["splashback"], "Tiled splashback by others")
+
+    butlers_segment = _extract_between_markers(
+        text,
+        start_marker=r"Sink Type/Model\s*:",
+        end_markers=(r"BUTLERS PANTRY", r"Client Signature", r"$"),
+        include_start=True,
+    )
+    if butlers_segment:
+        overlay = overlays.setdefault("butlers_pantry", _blank_clarendon_overlay())
+        sink = _extract_clarendon_value_after_label(butlers_segment, r"Sink Type/Model")
+        tap = _extract_clarendon_value_after_label(butlers_segment, r"Tap Type")
+        if sink:
+            overlay["sink_info"] = parsing._merge_text(overlay["sink_info"], _clarendon_clean_sink_text(sink))
+        if tap:
+            overlay["tap_info"] = parsing._merge_text(overlay["tap_info"], _clarendon_clean_tap_text(tap))
+
+    if re.search(r"Vanity Inset Basin", text, re.IGNORECASE):
+        overlay = overlays.setdefault("vanities", _blank_clarendon_overlay())
+        basin = _extract_clarendon_value_after_label(text, r"Vanity Inset Basin")
+        tap = _extract_clarendon_value_after_label(text, r"Vanity Tap Style")
+        if basin:
+            overlay["basin_info"] = parsing._merge_text(overlay["basin_info"], _clarendon_clean_basin_text(basin))
+        if tap:
+            overlay["tap_info"] = parsing._merge_text(overlay["tap_info"], _clarendon_clean_tap_text(tap))
+
+    laundry_segment = _extract_between_markers(
+        text,
+        start_marker=r"LAUNDRY SUPPLIER DESCRIPTION DESIGN COMMENTS",
+        end_markers=(r"ENSUITE\s+\d+", r"Client Signature", r"$"),
+    )
+    if laundry_segment:
+        overlay = overlays.setdefault("laundry", _blank_clarendon_overlay())
+        sink = _extract_clarendon_value_after_label(laundry_segment, r"Drop in Tub")
+        sink_detail = _extract_first_pattern(laundry_segment, r"EVERHARD INDUSTRIES.+?\([A-Z0-9.-]+\)")
+        tap_detail = _extract_first_pattern(laundry_segment, r"PINA SINK MIXER.+?\([A-Z0-9.-]+\)")
+        washing_tap = _extract_first_pattern(laundry_segment, r"\d+MM CP QUARTER TURN WASHING MACHINE COCK\s*\([A-Z0-9.-]+\)")
+        if sink_detail:
+            overlay["sink_info"] = parsing._merge_text(overlay["sink_info"], _clarendon_clean_sink_text(f"{sink_detail} drop-in tub"))
+        elif sink:
+            overlay["sink_info"] = parsing._merge_text(overlay["sink_info"], _clarendon_clean_sink_text(sink))
+        if tap_detail:
+            cleaned_tap = _clarendon_clean_tap_text(tap_detail)
+            if washing_tap:
+                cleaned_tap = f"{cleaned_tap}; {_clarendon_clean_tap_text(washing_tap)}"
+            overlay["tap_info"] = parsing._merge_text(overlay["tap_info"], cleaned_tap)
+        if "splashback:" in laundry_segment.lower():
+            overlay["splashback"] = parsing._merge_text(overlay["splashback"], "Tiled splashback by others")
+
+    return overlays
+
+
+def _polish_clarendon_room(row: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    room_key = parsing.normalize_space(str(row.get("room_key", "")))
+    polished = dict(row)
+    overlay_present = _clarendon_overlay_has_content(overlay)
+
+    current_benchtops = " | ".join(_clarendon_clean_benchtop_text(value) for value in parsing._coerce_string_list(row.get("bench_tops", [])) if _clarendon_clean_benchtop_text(value))
+    wall_run = parsing.normalize_space(overlay.get("bench_tops_wall_run", ""))
+    island = parsing.normalize_space(overlay.get("bench_tops_island", ""))
+    other = parsing.normalize_space(overlay.get("bench_tops_other", ""))
+    if room_key == "kitchen":
+        polished["bench_tops_wall_run"] = wall_run or parsing.normalize_space(str(row.get("bench_tops_wall_run", "") or ""))
+        polished["bench_tops_island"] = island or parsing.normalize_space(str(row.get("bench_tops_island", "") or ""))
+        polished["bench_tops_other"] = other if (wall_run or island or other) else parsing.normalize_space(str(row.get("bench_tops_other", "") or ""))
+        if not polished["bench_tops_other"] and current_benchtops and not (polished["bench_tops_wall_run"] or polished["bench_tops_island"]):
+            polished["bench_tops_other"] = current_benchtops
+    else:
+        folded = parsing._merge_text(other, parsing._merge_text(wall_run, island)) or " | ".join(overlay.get("bench_tops", []))
+        polished["bench_tops_other"] = folded or current_benchtops
+        polished["bench_tops_wall_run"] = ""
+        polished["bench_tops_island"] = ""
+    polished["bench_tops"] = parsing._rebuild_benchtop_entries(polished)
+
+    overlay_has_door_groups = any(parsing.normalize_space(overlay.get(key, "")) for key in ("door_colours_overheads", "door_colours_base", "door_colours_island", "door_colours_bar_back")) or bool(overlay.get("door_panel_colours"))
+    grouped_doors = {
+        "door_colours_overheads": _clarendon_clean_door_group_text(overlay.get("door_colours_overheads", "")) if overlay_has_door_groups else _clarendon_clean_door_group_text(row.get("door_colours_overheads", "")),
+        "door_colours_base": _clarendon_clean_door_group_text(overlay.get("door_colours_base", "")) if overlay_has_door_groups else _clarendon_clean_door_group_text(row.get("door_colours_base", "")),
+        "door_colours_island": _clarendon_clean_door_group_text(overlay.get("door_colours_island", "")) if overlay_has_door_groups else _clarendon_clean_door_group_text(row.get("door_colours_island", "")),
+        "door_colours_bar_back": _clarendon_clean_door_group_text(overlay.get("door_colours_bar_back", "")) if overlay_has_door_groups else _clarendon_clean_door_group_text(row.get("door_colours_bar_back", "")),
+    }
+    grouped_doors = parsing._prune_door_group_overlap(grouped_doors)
+    for key, value in grouped_doors.items():
+        polished[key] = value
+    overlay_door_entries = overlay.get("door_panel_colours", [])
+    if overlay_door_entries:
+        polished["door_panel_colours"] = [_clarendon_clean_door_group_text(entry) for entry in overlay_door_entries if _clarendon_clean_door_group_text(entry)]
+    else:
+        polished["door_panel_colours"] = parsing._rebuild_door_panel_colours(polished)
+
+    toe_kick = _clarendon_clean_toe_kick_text(overlay.get("toe_kick", "")) if overlay_present else _clarendon_clean_toe_kick_text(row.get("toe_kick", ""))
+    bulkheads = _clarendon_clean_bulkhead_text(overlay.get("bulkheads", "")) if overlay_present else _clarendon_clean_bulkhead_text(row.get("bulkheads", ""))
+    handles = _clarendon_clean_handles(overlay.get("handles", [])) if overlay_present else _clarendon_clean_handles(row.get("handles", []))
+    polished["toe_kick"] = [toe_kick] if toe_kick else []
+    polished["bulkheads"] = [bulkheads] if bulkheads else []
+    polished["handles"] = handles
+
+    polished["sink_info"] = _clarendon_clean_fixture_text(overlay.get("sink_info", ""), fixture_kind="sink") if overlay_present else _clarendon_clean_fixture_text(row.get("sink_info", ""), fixture_kind="sink")
+    polished["basin_info"] = (
+        _clarendon_clean_fixture_text(overlay.get("basin_info", ""), fixture_kind="basin")
+        if room_key == "vanities" and overlay_present
+        else (_clarendon_clean_fixture_text(row.get("basin_info", ""), fixture_kind="basin") if room_key == "vanities" else "")
+    )
+    polished["tap_info"] = _clarendon_clean_fixture_text(overlay.get("tap_info", ""), fixture_kind="tap") if overlay_present else _clarendon_clean_fixture_text(row.get("tap_info", ""), fixture_kind="tap")
+    overlay_splashback = _clarendon_clean_splashback_text(overlay.get("splashback", ""), room_key=room_key)
+    current_splashback = _clarendon_clean_splashback_text(row.get("splashback", ""), room_key=room_key)
+    polished["splashback"] = overlay_splashback or (current_splashback if room_key in {"kitchen", "laundry"} else "")
+    polished["drawers_soft_close"] = (
+        overlay.get("drawers_soft_close", "")
+        if overlay_present
+        else parsing.normalize_soft_close_value(row.get("drawers_soft_close", ""), keyword="drawer") or parsing.normalize_soft_close_value(row.get("drawers_soft_close", ""))
+    )
+    polished["hinges_soft_close"] = (
+        overlay.get("hinges_soft_close", "")
+        if overlay_present
+        else parsing.normalize_soft_close_value(row.get("hinges_soft_close", ""), keyword="hinge") or parsing.normalize_soft_close_value(row.get("hinges_soft_close", ""))
+    )
+    return polished
+
+
+def _extract_clarendon_labeled_segments(text: str, label_pattern: str, stop_markers: tuple[str, ...]) -> list[str]:
+    pattern = re.compile(
+        rf"(?is)(?:{label_pattern})\s*-\s*(.+?)(?=(?:{'|'.join(stop_markers)})|$)"
+    )
+    return [parsing.normalize_space(match.group(1)) for match in pattern.finditer(text) if parsing.normalize_space(match.group(1))]
+
+
+def _extract_clarendon_single_segment(text: str, label_pattern: str, stop_markers: tuple[str, ...]) -> str:
+    segments = _extract_clarendon_labeled_segments(text, label_pattern, stop_markers)
+    return segments[0] if segments else ""
+
+
+def _extract_clarendon_notes_block(text: str) -> str:
+    match = re.search(
+        rf"(?is)THERMOLAMINATE NOTES\s*:\s*(.+?)(?=(?:CARCASS|STANDARD WHITE|HANDLES?\s*-|HETTICH|DOOR HINGES|DRAWER RUNNERS|Docusign Envelope ID|Client Signature|$))",
+        text,
+    )
+    return parsing.normalize_space(match.group(1)) if match else ""
+
+
+def _clarendon_extract_note_value(notes_block: str, label: str) -> str:
+    match = re.search(rf"(?is){re.escape(label)}\s*:\s*([^*]+)", notes_block)
+    return parsing.normalize_space(match.group(1)) if match else ""
+
+
+def _extract_clarendon_handle_segments(text: str) -> list[str]:
+    segments = _extract_clarendon_labeled_segments(text, r"HANDLES?|HANDLE \d+", CLARENDON_FIELD_STOP_MARKERS)
+    return _clarendon_clean_handles(segments)
+
+
+def _extract_between_markers(text: str, start_marker: str, end_markers: tuple[str, ...], include_start: bool = False) -> str:
+    start_match = re.search(start_marker, text, re.IGNORECASE)
+    if not start_match:
+        return ""
+    start_index = start_match.start() if include_start else start_match.end()
+    remainder = text[start_index:]
+    end_index = len(remainder)
+    for marker in end_markers:
+        match = re.search(marker, remainder, re.IGNORECASE)
+        if match and match.start() < end_index:
+            end_index = match.start()
+    return parsing.normalize_space(remainder[:end_index])
+
+
+def _extract_clarendon_value_after_label(text: str, label_pattern: str) -> str:
+    match = re.search(
+        rf"(?is){label_pattern}\s*:?\s*(.+?)(?=(?:Sink Type/Model|Sink Type|Tap Type|Tap Style|Vanity Tap Style|Tap for Fridge|Splashback|APPLIANCES|Vanity Waste Colour|Shower Tap Style|Drop in Tub|Washing Machine Taps|BUTLERS PANTRY|WALK IN PANTRY|LAUNDRY SUPPLIER DESCRIPTION DESIGN COMMENTS|Client Signature|$))",
+        text,
+    )
+    return parsing.normalize_space(match.group(1)) if match else ""
+
+
+def _extract_first_pattern(text: str, pattern: str) -> str:
+    match = re.search(pattern, text, re.IGNORECASE)
+    return parsing.normalize_space(match.group(0)) if match else ""
+
+
+def _clarendon_clean_benchtop_text(value: Any) -> str:
+    text = parsing.normalize_space(str(value or ""))
+    if not text:
+        return ""
+    text = text.replace("_", " ")
+    text = _clarendon_strip_metadata(text)
+    for pattern in CLARENDON_NOISE_PATTERNS:
+        text = re.sub(pattern, "", text)
+    text = re.sub(r"(?i)^BENCHTOP COLOUR \d+\s*-\s*", "", text)
+    text = re.sub(r"(?i)^BENCHTOP\s*-\s*", "", text)
+    text = re.sub(r"(?i)\s*-\s*TO\s+(?:THE\s+)?(?:COOKTOP RUN|WALL RUN|WALL BENCH|WALL SIDE|ISLAND BENCH|ISLAND)\b.*$", "", text)
+    text = parsing.normalize_brand_casing_text(text)
+    text = _clarendon_to_readable_text(text)
+    if _looks_like_clarendon_noise(text):
+        return ""
+    return text.strip(" -;,")
+
+
+def _clarendon_clean_door_group_text(value: Any) -> str:
+    entries = parsing._split_group_entries(value)
+    cleaned = []
+    for entry in entries:
+        text = parsing._clean_door_colour_value(entry)
+        text = re.sub(r"(?i)\b(?:plain glass|'?glazing bar'?) display cabinet with.*$", "", text)
+        text = re.sub(r"(?i)\bto tall open shelves\b.*$", "", text)
+        text = _clarendon_to_readable_text(text)
+        if text:
+            cleaned.append(text.strip(" -;,'\""))
+    return " | ".join(entry for entry in cleaned if entry)
+
+
+def _clarendon_clean_toe_kick_text(value: Any) -> str:
+    text = _clarendon_clean_note_text(value)
+    if not text:
+        return ""
+    lowered = text.lower()
+    if "n/a" in lowered and "floating" in lowered:
+        return "N/A floating - no kickboard"
+    return text
+
+
+def _clarendon_clean_bulkhead_text(value: Any) -> str:
+    text = _clarendon_clean_note_text(value)
+    lowered = text.lower()
+    if "bulkhead shadowline" in lowered and "matching" in lowered:
+        cleaned = re.sub(r"(?i)^bulkhead shadowline\s*:?\s*", "", text)
+        cleaned = cleaned.strip(" -;,.")
+        if cleaned:
+            cleaned = re.sub(r"(?i)^as\s+", "", cleaned)
+            return f"Bulkhead shadowline as {cleaned[:1].lower() + cleaned[1:]}"
+    if "matching melamine finish" in lowered:
+        return "Bulkhead shadowline as matching Melamine finish"
+    return text
+
+
+def _clarendon_clean_note_text(value: Any) -> str:
+    text = parsing._string_value(value)
+    text = _clarendon_strip_metadata(text)
+    text = re.sub(r"(?i)^BY BUILDER", "", text)
+    text = re.sub(r"(?i)BENCHTOP SHADOWLINE.*$", "", text)
+    text = re.sub(r"(?i)TILED.*$", "", text)
+    text = re.sub(r"(?i)\b\d{4,}\b.*$", "", text)
+    text = parsing.normalize_brand_casing_text(text)
+    text = _clarendon_to_readable_text(text)
+    if _looks_like_clarendon_noise(text):
+        return ""
+    return text.strip(" -;,")
+
+
+def _clarendon_clean_splashback_text(value: Any, room_key: str = "") -> str:
+    text = parsing._string_value(value)
+    text = _clarendon_strip_metadata(text)
+    if re.search(r"(?i)\bBY OTHERS\b", text) or re.search(r"(?i)\bBY OTHERS\d", text) or re.search(r"(?i)\bBEAUMONT TILES\b", text):
+        if room_key in {"kitchen", "laundry"}:
+            return "Tiled splashback by others"
+        return ""
+    if room_key in {"kitchen", "laundry"} and re.search(r"(?i)\bSPLASHBACK\b", text):
+        return "Tiled splashback by others"
+    text = re.sub(r"(?i)\b20MM STONE\b.*$", "", text)
+    text = re.sub(r"(?i)BENCHTOP SHADOWLINE.*$", "", text)
+    text = re.sub(r"(?i)KICKBOARD.*$", "", text)
+    text = parsing.normalize_brand_casing_text(text)
+    text = _clarendon_to_readable_text(text)
+    if _looks_like_clarendon_noise(text):
+        return ""
+    return text.strip(" -;,")
+
+
+def _clarendon_clean_handles(value: Any) -> list[str]:
+    cleaned = parsing._clean_handle_entries(parsing._coerce_string_list(value))
+    result: list[str] = []
+    for entry in cleaned:
+        text = _clarendon_strip_metadata(entry)
+        if any(noise in text.lower() for noise in CLARENDON_EXTERNAL_HANDLE_NOISE):
+            continue
+        text = parsing.normalize_brand_casing_text(text)
+        text = _clarendon_to_readable_text(text)
+        if text and text not in result and not _looks_like_clarendon_noise(text):
+            result.append(text)
+    return result
+
+
+def _clarendon_clean_fixture_text(value: Any, fixture_kind: str) -> str:
+    text = parsing._string_value(value)
+    if not text:
+        return ""
+    text = text.replace("_", " ")
+    text = _clarendon_strip_metadata(text)
+    text = re.sub(r"(?i)^&\s*TAP TOCABINET UNDER CUT OUT DETAIL FOR\s*", "", text)
+    text = re.sub(r"(?i)^TOCABINET UNDER CUT OUT DETAIL FOR\s*", "", text)
+    text = re.sub(r"(?i)^Washing Machine Taps\s*:\s*", "", text)
+    text = parsing.normalize_brand_casing_text(text)
+    text = _clarendon_to_readable_text(text)
+    if fixture_kind == "sink":
+        return _clarendon_clean_sink_text(text)
+    if fixture_kind == "basin":
+        return _clarendon_clean_basin_text(text)
+    if fixture_kind == "tap":
+        return _clarendon_clean_tap_text(text)
+    return text.strip(" -;,")
+
+
+def _clarendon_clean_sink_text(value: Any) -> str:
+    text = _clarendon_to_readable_text(parsing.normalize_brand_casing_text(str(value or "").replace("_", " ")))
+    text = re.sub(r"(?i)\bUndermount\s*-\s*", "", text)
+    text = re.sub(r"(?i)\bUNDERMOUNT\b$", "undermount sink", text)
+    text = re.sub(r"(?i)\bDROP IN TUB\b$", "drop-in tub", text)
+    return parsing.normalize_space(text).strip(" -;,")
+
+
+def _clarendon_clean_basin_text(value: Any) -> str:
+    text = _clarendon_to_readable_text(parsing.normalize_brand_casing_text(str(value or "").replace("_", " ")))
+    text = re.sub(r"(?i)\bVanity\b$", "", text)
+    return parsing.normalize_space(text).strip(" -;,")
+
+
+def _clarendon_clean_tap_text(value: Any) -> str:
+    text = _clarendon_to_readable_text(parsing.normalize_brand_casing_text(str(value or "").replace("_", " ")))
+    text = re.sub(r"(?is)\bBasin Mixer to Be Installed.*$", "", text)
+    return parsing.normalize_space(text).strip(" -;,")
+
+
+def _clarendon_strip_metadata(value: Any) -> str:
+    text = parsing.normalize_space(str(value or ""))
+    if not text:
+        return ""
+    lowered = text.lower()
+    cut_index = len(text)
+    for marker in CLARENDON_METADATA_MARKERS:
+        index = lowered.find(marker)
+        if index != -1:
+            cut_index = min(cut_index, index)
+    text = text[:cut_index]
+    text = re.sub(r"(?i)\bDocusign Envelope ID\b.*$", "", text)
+    text = re.sub(r"(?i)\bClient:\b.*$", "", text)
+    text = re.sub(r"(?i)\bClient Signature\b.*$", "", text)
+    text = re.sub(r"(?i)\bNOTE\s*:\s*ALL PLUMBING SETOUT DIMENSIONS.*$", "", text)
+    text = re.sub(r"(?i)\bNOTE\s*:\s*DRAWINGS ARE INDICATIVE.*$", "", text)
+    return parsing.normalize_space(text)
+
+
+def _clarendon_to_readable_text(value: Any) -> str:
+    text = parsing.normalize_space(str(value or ""))
+    if not text:
+        return ""
+    parts = re.split(r"(\s+)", text)
+    normalized: list[str] = []
+    for part in parts:
+        if not part or part.isspace():
+            normalized.append(part)
+            continue
+        prefix_match = re.match(r"^([^A-Za-z0-9]*)(.*?)([^A-Za-z0-9]*)$", part)
+        if not prefix_match:
+            normalized.append(part)
+            continue
+        prefix, core, suffix = prefix_match.groups()
+        normalized.append(f"{prefix}{_clarendon_case_token(core)}{suffix}")
+    return parsing.normalize_space("".join(normalized))
+
+
+def _clarendon_case_token(token: str) -> str:
+    if not token:
+        return token
+    lowered = token.lower()
+    if lowered in CLARENDON_MINOR_WORDS:
+        return lowered
+    if re.fullmatch(r"\d+(?:MM|CM|L)", token, re.IGNORECASE):
+        return token.upper()
+    if re.search(r"\d", token):
+        return token.upper()
+    if token.upper() in {"N/A", "PVC", "ABS", "ABSE", "GPO", "CTR", "EQ"}:
+        return token.upper()
+    if token.isupper() or token.islower():
+        return token[:1].upper() + token[1:].lower()
+    return token
+
+
+def _looks_like_clarendon_noise(value: Any) -> bool:
+    text = parsing.normalize_space(str(value or ""))
+    if not text:
+        return True
+    lowered = text.lower()
+    if any(marker in lowered for marker in CLARENDON_METADATA_MARKERS):
+        return True
+    if len(re.findall(r"\d{4,}", text)) >= 2:
+        return True
+    if re.search(r"(?i)\b(?:frame wall|ctr to basin|profiled end panel|docusign)\b", text):
+        return True
+    return False
+
+
+def _clarendon_merge_unique_list(left: list[str], right: list[str]) -> list[str]:
+    result = list(left)
+    for value in right:
+        text = parsing.normalize_space(str(value or ""))
+        if text and text not in result:
+            result.append(text)
+    return result
+
+
+def _clarendon_overlay_has_content(overlay: dict[str, Any]) -> bool:
+    for key, value in overlay.items():
+        if isinstance(value, list) and any(parsing.normalize_space(str(item or "")) for item in value):
+            return True
+        if not isinstance(value, list) and parsing.normalize_space(str(value or "")):
+            return True
+    return False
 
 
 def _stabilize_snapshot_layout(snapshot: dict[str, Any], builder_name: str, parser_strategy: str) -> dict[str, Any]:

@@ -77,11 +77,15 @@
   - OpenAI must not introduce extra room splits or overwrite already-clean fields with noisier text
   - Clarendon keeps its conservative room compaction behavior, while Yellowwood and other builders keep their own heuristic room taxonomy/parsing branches
 11. Merge OpenAI output conservatively: keep the heuristic room set as the primary layout, merge room fields into that layout, and preserve heuristic appliance `model_no` values instead of replacing them with weaker guesses.
-12. Apply the fixed global cleaning rules after heuristic and post-merge enrichment so brand casing, door-colour cleanup, kitchen-only bench-top splitting, and soft-close normalization stay consistent across all builders.
-13. Record analysis metadata in the snapshot: mode, parser strategy, attempted, succeeded, model, note, and runtime identifiers (`worker_pid`, `app_build_id`).
-14. Normalize drawer and hinge states to `Soft Close`, `Not Soft Close`, or blank.
-15. Look up official appliance resources by `make + model_no`, first probing deterministic brand-site model URLs where supported and then falling back to search-based discovery; AEG, Westinghouse, and Fisher & Paykel now extract official dimensions from product pages when available, including JSON-like structured metadata.
-16. Save the raw snapshot.
+12. For Clarendon-only spec runs, apply a deterministic post-polish stage after room compaction:
+  - rebuild stable room text from colour-schedule and fixture pages
+  - prefer clean schedule-page values over OCR-noisy field fragments
+  - keep the 6-room Clarendon layout while replacing noisy field text with cleaner deterministic values
+13. Apply the fixed global cleaning rules after heuristic, merge, and Clarendon post-polish so brand casing, door-colour cleanup, kitchen-only bench-top splitting, and soft-close normalization stay consistent across all builders.
+14. Record analysis metadata in the snapshot: mode, parser strategy, attempted, succeeded, model, note, and runtime identifiers (`worker_pid`, `app_build_id`).
+15. Normalize drawer and hinge states to `Soft Close`, `Not Soft Close`, or blank.
+16. Look up official appliance resources by `make + model_no`, first probing deterministic brand-site model URLs where supported and then falling back to search-based discovery; AEG, Westinghouse, and Fisher & Paykel now extract official dimensions from product pages when available, including JSON-like structured metadata.
+17. Save the raw snapshot.
 
 ### 3.5 Review Pipeline
 1. Load latest raw snapshot.
@@ -110,7 +114,7 @@
 ### 3.8 Run History Refresh
 1. The Job page renders the run history as an htmx partial.
 2. The browser polls `/jobs/{job_id}/run-history` every few seconds.
-3. The worker updates `runs.stage` and `runs.message` at key checkpoints such as loading, heuristic extraction, OpenAI request, merge/fallback, official model lookup, spec/manual discovery, official size extraction, and saving.
+3. The worker updates `runs.stage` and `runs.message` at key checkpoints such as loading, heuristic extraction, Clarendon polish, OpenAI request, merge/fallback, official model lookup, spec/manual discovery, official size extraction, and saving.
 4. The partial replaces only the run-history card instead of reloading the full page.
 
 ### 3.9 Job Search

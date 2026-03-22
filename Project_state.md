@@ -20,6 +20,7 @@
   - deterministic Westinghouse-style official product-page probing before search fallback
   - deterministic AEG Australia product-page probing on `aegaustralia.com.au`
   - Fisher & Paykel official product-page matching with official-size extraction from structured product metadata
+  - Clarendon-only deterministic post-polish that rebuilds stable 6-room output from schedule and fixture pages so fresh Clarendon parses read closer to the accepted `37016` reference
   - job-page Parse buttons with clearer run-status wording
   - live-polling run history with granular worker stage messages
   - extraction diagnostics showing heuristic/OpenAI mode
@@ -86,10 +87,10 @@
 - Improve official product URL lookup accuracy, size extraction coverage, and brand coverage
 - Continue tightening handle cleanup for AI-merged Yellowwood rows where verbose combined handle descriptions still appear
 - Continue tightening noisy field cleanup inside the fixed global conservative profile without reintroducing per-builder configuration
+- Continue tightening Clarendon field wording so kitchen/vanity/laundry text stays close to the accepted `37016` readability standard without relying on manual snapshot restores
 - Extend deterministic model-page probing beyond the currently supported appliance brand patterns
 - Expand model-number coverage for more appliance naming patterns beyond the current explicit rules
 - Build the future comparison UI and diff logic
-- Deploy the prepared package and Nginx config to the actual LXtransport Tencent Cloud server once server access is available
 - Decide whether to add a global all-job Spec List index in a later phase
 
 ## Risks
@@ -160,7 +161,12 @@
 - Run History UI coverage added for:
   - htmx partial polling route
   - live OpenAI-stage message rendering
+  - Clarendon polish stage rendering
   - official-size stage rendering
+- Clarendon deterministic-polish coverage added for:
+  - clean kitchen wall-run / island benchtop reconstruction
+  - stable pantry / vanities / laundry field rebuilding from schedule and fixture pages
+  - splashback cleanup to `Tiled splashback by others` when the source clearly indicates builder-tile handoff
 - Smoke tests now use an isolated temporary data directory instead of `App/data/`
 - Worker smoke test passed for:
   - upload DOCX spec

@@ -210,6 +210,245 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("Quantum Zero Venatino Statuario - 40mm mitred apron edge", room["bench_tops_island"])
         self.assertEqual(room["door_panel_colours"][0], "Polytec Classic White Matt Finish Thermolaminate")
 
+    def test_clarendon_reference_polish_rebuilds_clean_room_fields(self) -> None:
+        snapshot = {
+            "job_no": "37031",
+            "builder_name": "Clarendon",
+            "source_kind": "spec",
+            "generated_at": "2026-03-22T00:00:00+00:00",
+            "analysis": {"mode": "openai_merged", "parser_strategy": "global_conservative"},
+            "rooms": [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "Kitchen",
+                    "bench_tops": ["SINKCUT OUTCENTRE", "QUANTUM ZERO MIDNIGHT - 20MM PENCIL ROUND EDGE", "60MM UP/ DOWN TO DOORS DOOR"],
+                    "bench_tops_wall_run": "",
+                    "bench_tops_island": "",
+                    "bench_tops_other": "SINKCUT OUTCENTRE | QUANTUM ZERO MIDNIGHT - 20MM PENCIL ROUND EDGE | 60MM UP/ DOWN TO DOORS DOOR",
+                    "door_panel_colours": [],
+                    "door_colours_overheads": "",
+                    "door_colours_base": "",
+                    "door_colours_island": "",
+                    "door_colours_bar_back": "",
+                    "toe_kick": ["MATCHING MELAMINE FINISH / MATCHING THERMO FINISH"],
+                    "bulkheads": ["BY BUILDERBULKHEAD SHADOWLINE AS MATCHING MELAMINE"],
+                    "handles": [],
+                    "drawers_soft_close": "Soft Close",
+                    "hinges_soft_close": "Not Soft Close",
+                    "splashback": "BY OTHERS20MM STONE",
+                    "flooring": "",
+                    "sink_info": "& TAP TOCABINET UNDER CUT OUT DETAIL FOR PARISI QUADRO PK8644 DOUBLE BOWL UNDERMOUNT",
+                    "basin_info": "",
+                    "tap_info": "",
+                    "source_file": "schedule.pdf",
+                    "page_refs": "1",
+                    "evidence_snippet": "",
+                    "confidence": 0.6,
+                },
+                {
+                    "room_key": "butlers_pantry",
+                    "original_room_label": "Butler's Pantry",
+                    "bench_tops": ["bad"],
+                    "bench_tops_wall_run": "",
+                    "bench_tops_island": "",
+                    "bench_tops_other": "bad",
+                    "door_panel_colours": [],
+                    "door_colours_overheads": "",
+                    "door_colours_base": "",
+                    "door_colours_island": "",
+                    "door_colours_bar_back": "",
+                    "toe_kick": ["bad"],
+                    "bulkheads": ["bad"],
+                    "handles": [],
+                    "drawers_soft_close": "Not Soft Close",
+                    "hinges_soft_close": "",
+                    "splashback": "bad",
+                    "flooring": "",
+                    "sink_info": "bad",
+                    "basin_info": "bad",
+                    "tap_info": "bad",
+                    "source_file": "schedule.pdf",
+                    "page_refs": "2",
+                    "evidence_snippet": "",
+                    "confidence": 0.6,
+                },
+                {
+                    "room_key": "vanities",
+                    "original_room_label": "Vanities",
+                    "bench_tops": ["bad"],
+                    "bench_tops_wall_run": "",
+                    "bench_tops_island": "",
+                    "bench_tops_other": "bad",
+                    "door_panel_colours": [],
+                    "door_colours_overheads": "",
+                    "door_colours_base": "",
+                    "door_colours_island": "",
+                    "door_colours_bar_back": "",
+                    "toe_kick": ["bad"],
+                    "bulkheads": ["bad"],
+                    "handles": [],
+                    "drawers_soft_close": "",
+                    "hinges_soft_close": "",
+                    "splashback": "",
+                    "flooring": "",
+                    "sink_info": "",
+                    "basin_info": "",
+                    "tap_info": "",
+                    "source_file": "schedule.pdf",
+                    "page_refs": "3",
+                    "evidence_snippet": "",
+                    "confidence": 0.6,
+                },
+                {
+                    "room_key": "laundry",
+                    "original_room_label": "Laundry",
+                    "bench_tops": ["bad"],
+                    "bench_tops_wall_run": "",
+                    "bench_tops_island": "",
+                    "bench_tops_other": "bad",
+                    "door_panel_colours": [],
+                    "door_colours_overheads": "",
+                    "door_colours_base": "",
+                    "door_colours_island": "",
+                    "door_colours_bar_back": "",
+                    "toe_kick": ["bad"],
+                    "bulkheads": ["bad"],
+                    "handles": [],
+                    "drawers_soft_close": "",
+                    "hinges_soft_close": "",
+                    "splashback": "BY OTHERS20MM STONE BENCHTOP",
+                    "flooring": "",
+                    "sink_info": "bad",
+                    "basin_info": "",
+                    "tap_info": "bad",
+                    "source_file": "schedule.pdf",
+                    "page_refs": "4",
+                    "evidence_snippet": "",
+                    "confidence": 0.6,
+                },
+            ],
+            "appliances": [],
+            "others": {},
+            "warnings": [],
+        }
+        documents = [
+            {
+                "file_name": "drawings.pdf",
+                "role": "spec",
+                "pages": [
+                    {
+                        "page_no": 1,
+                        "text": (
+                            "BENCHTOP COLOUR 1 - QUANTUM ZERO MIDNIGHT BLACK - 20MM PENCIL ROUND EDGE - TO COOKTOP RUN"
+                            "BENCHTOP COLOUR 2 - QUANTUM ZERO VENATINO STATUARIO - 40MM MITRED APRON EDGE - TO ISLAND BENCH"
+                            "DOOR COLOUR 1 - POL YTEC CLASSIC WHITE MATT FINISH THERMOLAMINATE - ATLANTA EM2 PROFILE - TO COOKTOP RUN BASE, UPPER + TALL CABINETRY "
+                            "DOOR COLOUR 2 - POL YTEC TEMPEST WOODGRAIN FINISH THERMOLAMINATE - ATLANTA EM2 PROFILE (VERTICAL GRAIN DIRECTION) - ISLAND BASE CABINETRY + BAR BACK PANELS "
+                            "HANDLE 1 - HETTICH CIPRI 9070585 GLOSS CHROME PLATED 30MM KNOB - 30MM IN AND 60MM UP/ DOWN TO DOORS "
+                            "HANDLE 2 - MOMO FLORENCIA CTCP .CP .FG CHROME PLATED 104MM LONG - CENTRE TO DRAWER PROFILE "
+                            "DOOR HINGES - HETTICH STANDARD HINGES - NOT SOFT CLOSE "
+                            "DRAWER RUNNERS - HETTICH INNOTECH ATIRA SOFT CLOSE RUNNERS "
+                            "KITCHEN COLOUR SCHEDULE THERMOLAMINATE NOTES : * BULKHEAD SHADOWLINE : MATCHING MELAMINE FINISH* KICKBOARDS : MATCHING MELAMINE FINISH / MATCHING THERMO FINISH"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 2,
+                        "text": (
+                            "BENCHTOP - QUANTUM ZERO MIDNIGHT - 20MM PENCIL ROUND EDGE "
+                            "DOOR COLOUR - POL YTEC CLASSIC WHITE MATT FINISH THERMOLAMINATE - ATLANTA EM2 PROFILE "
+                            "THERMOLAMINATE NOTES : * BULKHEAD SHADOWLINE : MATCHING MELAMINE FINISH* KICKBOARDS : MATCHING MELAMINE FINISH "
+                            "HANDLES - HETTICH CIPRI 9070585 GLOSS CHROME PLATED 30MM KNOB - 30MM IN AND 60MM UP/ DOWN TO DOORS "
+                            "DOOR HINGES - HETTICH STANDARD HINGES - NOT SOFT CLOSE "
+                            "BUTLERS PANTRY COLOUR SCHEDULE"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 3,
+                        "text": (
+                            "BENCHTOP - QUANTUM ZERO MIDNIGHT - 20MM PENCIL ROUND EDGE "
+                            "DOOR COLOUR - POL YTEC CLASSIC WHITE MATT FINISH THERMOLAMINATE - ATLANTA EM2 PROFILE "
+                            "THERMOLAMINATE NOTES : * KICKBOARDS : N/A FLOATING "
+                            "HANDLES - HETTICH CIPRI 9070585 GLOSS CHROME PLATED 30MM KNOB - DOOR LOCATION : 30MM IN AND 60MM UP/ DOWN TO DOORS DRAWER LOCATION : CTR TO PROFILE "
+                            "DOOR HINGES - HETTICH STANDARD HINGES - NOT SOFT CLOSE "
+                            "DRAWER RUNNERS - HETTICH MUL TITECH STANDARD CONSTRUCTION RUNNERS - NOT SOFT CLOSE "
+                            "VANITIES COLOUR SCHEDULE"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 4,
+                        "text": (
+                            "BENCHTOP - QUANTUM ZERO MIDNIGHT - 20MM PENCIL ROUND EDGE "
+                            "DOOR COLOUR - POL YTEC CLASSIC WHITE MATT FINISH THERMOLAMINATE - ATLANTA EM2 PROFILE "
+                            "THERMOLAMINATE NOTES : * BULKHEAD SHADOWLINE : MATCHING MELAMINE FINISH* KICKBOARDS : MATCHING MELAMINE FINISH "
+                            "HANDLES - HETTICH CIPRI 9070585 GLOSS CHROME PLATED 30MM KNOB - 30MM IN AND 60MM UP/ DOWN TO DOORS "
+                            "DOOR HINGES - HETTICH STANDARD HINGES - NOT SOFT CLOSE "
+                            "LAUNDRY COLOUR SCHEDULE"
+                        ),
+                        "needs_ocr": False,
+                    },
+                ],
+            },
+            {
+                "file_name": "fixtures.pdf",
+                "role": "spec",
+                "pages": [
+                    {
+                        "page_no": 5,
+                        "text": (
+                            "KITCHEN SUPPLIER DESCRIPTION DESIGN COMMENTS "
+                            "Sink Type: PARISI QUADRO_DOUBLE BOWL_STAINLESS STEEL (PK8644) UNDERMOUNT "
+                            "Tap Type: PHOENIX Nostalgia Twin Handle Sink Mixer 230mm Shepherds Crook NS714-62 CHROME & WHITE "
+                            "Splashback: "
+                            "Sink Type/Model: PARISI UNDERMOUNT - QUADRO SINGLE BOWL STAINLESS STEEL (PK4444) UNDERMOUNT "
+                            "Tap Type: PHOENIX Nostalgia Sink Mixer 220mm Shepherds Crook NS738-62 CHROME & WHITE "
+                            "BUTLERS PANTRY"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 6,
+                        "text": (
+                            "Vanity Inset Basin JOHNSON SUISSE Emilia Rectangular Undercounter Basin (JBSE250.PW6) WHITE "
+                            "Vanity Tap Style: PHOENIX NOSTALGIA BASIN MIXER 160MM SHEPHERDS CROOK (NS748-62) CHROME & WHITE "
+                            "Vanity Waste Colour: CHROME"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 7,
+                        "text": (
+                            "LAUNDRY SUPPLIER DESCRIPTION DESIGN COMMENTS "
+                            "Drop in Tub: EVERHARD "
+                            "Splashback: "
+                            "EVERHARD INDUSTRIES CLASSIC 45L UTILITY SINK (71245) "
+                            "PINA SINK MIXER GOOSENECK 200MM_CHROME (153-7330-00) "
+                            "15MM CP QUARTER TURN WASHING MACHINE COCK (60822)"
+                        ),
+                        "needs_ocr": False,
+                    },
+                ],
+            },
+        ]
+        polished = extraction_service._apply_clarendon_reference_polish(
+            snapshot,
+            documents,
+            builder_name="Clarendon",
+            parser_strategy="global_conservative",
+        )
+        rooms = {row["room_key"]: row for row in polished["rooms"]}
+        self.assertNotIn("SINKCUT", " ".join(rooms["kitchen"]["bench_tops"]))
+        self.assertEqual(rooms["kitchen"]["bench_tops_wall_run"], "Quantum Zero Midnight Black - 20MM Pencil Round Edge")
+        self.assertEqual(rooms["kitchen"]["bench_tops_island"], "Quantum Zero Venatino Statuario - 40MM Mitred Apron Edge")
+        self.assertEqual(rooms["kitchen"]["splashback"], "Tiled splashback by others")
+        self.assertEqual(rooms["butlers_pantry"]["door_colours_base"], "Polytec Classic White Matt Finish Thermolaminate - Atlanta EM2 Profile")
+        self.assertEqual(rooms["butlers_pantry"]["drawers_soft_close"], "")
+        self.assertEqual(rooms["vanities"]["toe_kick"], ["N/A floating - no kickboard"])
+        self.assertTrue(str(rooms["vanities"]["basin_info"]).startswith("Johnson Suisse Emilia"))
+        self.assertEqual(rooms["laundry"]["splashback"], "Tiled splashback by others")
+        self.assertTrue(str(rooms["laundry"]["tap_info"]).startswith("Pina Sink Mixer Gooseneck"))
+
     def test_room_fixture_enrichment_splits_door_colours_and_filters_plumbing_appliances(self) -> None:
         documents = [
             {
@@ -665,8 +904,8 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual([row["room_key"] for row in snapshot["rooms"]], ["kitchen", "butlers_pantry", "vanities", "laundry", "theatre", "rumpus"])
         vanities = next(row for row in snapshot["rooms"] if row["room_key"] == "vanities")
         self.assertEqual(vanities["original_room_label"], "Vanities")
-        self.assertEqual(vanities["bench_tops"], ["20mm stone"])
-        self.assertEqual(vanities["basin_info"], "Primary vanity basin")
+        self.assertEqual(vanities["bench_tops"], ["20MM Stone"])
+        self.assertEqual(vanities["basin_info"], "Primary Vanity Basin")
 
     def test_builder_defaults_to_global_conservative_for_all_builders(self) -> None:
         clarendon_id = store.create_builder("Clarendon", "clarendon", "")

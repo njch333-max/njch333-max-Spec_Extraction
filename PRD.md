@@ -67,6 +67,8 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - All builders must use the fixed `Global Conservative` profile based on the accepted `37016` output style.
 - Under `Global Conservative`, heuristic room structure and cleaning remain primary, OpenAI fills missing fields conservatively, and AI must not reshape already-stable room layouts or inject noisier duplicate content.
 - When OpenAI and heuristic room sets disagree, keep the heuristic room layout as the primary room skeleton and merge AI fields conservatively into that layout so repeated parses of the same spec stay visually stable.
+- Clarendon jobs must also pass through a deterministic post-polish stage after room compaction so kitchen, pantry, vanity, laundry, theatre, and rumpus rows keep the stable 6-room structure while rebuilding cleaner field text from schedule and fixture pages.
+- Clarendon post-polish should prefer clean schedule-page text for benchtops, door colours, toe kicks, bulkheads, handles, sink/basin/tap fixtures, and soft-close states instead of falling back to OCR-noisy field fragments when the schedule pages already provide a cleaner source.
 - Appliance parsing must prefer explicit `model_no` values from labeled rows or table columns and must not use brand-only words or generic notes as model numbers.
 - Sink, basin, and tap selections must be captured as room-level fixture fields instead of appliance rows.
 - Door colour information should expose room-level splits for `Overheads`, `Base`, `Island`, and `Bar Back` whenever the source text makes those categories explicit.
@@ -135,6 +137,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 ### 4.9 Run History
 - The Job page run history must refresh automatically while parsing is active.
 - Run messages should show real worker progress such as loading files, heuristic extraction, OpenAI request, merge/fallback, and snapshot save.
+- Clarendon runs should expose a dedicated `Clarendon polish` stage in Run History when the deterministic post-polish step executes.
 - Run stages should also show official resource work such as model lookup, spec/manual discovery, and official size extraction.
 - Run metadata must also show the parser strategy, worker PID, and app build ID that handled the run.
 - Only one worker should actively lease the queue at a time, so stale local processes cannot race newer code on queued jobs.

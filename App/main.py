@@ -809,6 +809,7 @@ def _present_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "openai_fallback": "OpenAI fallback",
             "openai_skipped": "OpenAI skipped",
             "room_enrichment": "Assigning room fixtures",
+            "clarendon_polish": "Clarendon polish",
             "official_model_lookup": "Official model lookup",
             "spec_manual_discovery": "Spec/manual discovery",
             "official_size_extraction": "Official size extraction",
