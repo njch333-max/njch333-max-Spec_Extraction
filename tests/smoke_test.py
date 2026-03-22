@@ -601,10 +601,10 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(rooms["kitchen"]["door_colours_bar_back"], "Polytec Tempest Woodgrain")
         self.assertEqual(rooms["butlers_pantry"]["sink_info"], "Parisi Quadro Single Bowl (PK4444)")
         self.assertEqual(
-            rooms["vanity"]["basin_info"],
+            rooms["vanities"]["basin_info"],
             "Johnson Suisse Emilia Rectangular Undercounter Basin (JBSE250.PW6)",
         )
-        self.assertEqual(rooms["vanity"]["tap_info"], "Phoenix Nostalgia Basin Mixer NS748-62")
+        self.assertEqual(rooms["vanities"]["tap_info"], "Phoenix Nostalgia Basin Mixer NS748-62")
         appliance_types = [row["appliance_type"].lower() for row in enriched["appliances"]]
         self.assertIn("cooktop", appliance_types)
         self.assertNotIn("sink", appliance_types)
@@ -974,7 +974,7 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(snapshot["analysis"]["parser_strategy"], "global_conservative")
         self.assertEqual(snapshot["rooms"][0]["bench_tops"], ["20MM Stone"])
 
-    def test_build_spec_snapshot_compacts_clarendon_rooms_under_stable_hybrid(self) -> None:
+    def test_build_spec_snapshot_keeps_source_driven_rooms_under_global_conservative(self) -> None:
         base_snapshot = {
             "job_no": "37017",
             "builder_name": "Clarendon",
@@ -1015,11 +1015,124 @@ class SmokeTest(unittest.TestCase):
                 files=[],
                 template_files=[],
             )
-        self.assertEqual([row["room_key"] for row in snapshot["rooms"]], ["kitchen", "butlers_pantry", "vanities", "laundry", "theatre", "rumpus"])
-        vanities = next(row for row in snapshot["rooms"] if row["room_key"] == "vanities")
-        self.assertEqual(vanities["original_room_label"], "Vanities")
-        self.assertEqual(vanities["bench_tops"], ["20MM Stone"])
-        self.assertEqual(vanities["basin_info"], "Primary Vanity Basin")
+        self.assertEqual(
+            [row["room_key"] for row in snapshot["rooms"]],
+            ["powder", "bathroom", "ensuite", "vanity", "laundry", "butlers_pantry", "wip", "theatre", "rumpus", "kitchen", "pantry", "wir"],
+        )
+        bathroom = next(row for row in snapshot["rooms"] if row["room_key"] == "bathroom")
+        vanity = next(row for row in snapshot["rooms"] if row["room_key"] == "vanity")
+        self.assertEqual(bathroom["basin_info"], "Bathroom Basin")
+        self.assertEqual(vanity["bench_tops"], ["20MM Stone"])
+        self.assertEqual(vanity["basin_info"], "Primary Vanity Basin")
+
+    def test_parse_documents_keeps_bathroom_ensuite_and_powder_separate(self) -> None:
+        snapshot = parse_documents(
+            job_no="39001",
+            builder_name="Clarendon",
+            source_kind="spec",
+            documents=[
+                {
+                    "file_name": "rooms.txt",
+                    "role": "spec",
+                    "pages": [
+                        {
+                            "page_no": 1,
+                            "text": (
+                                "Main Bathroom\n"
+                                "Bench Tops 20mm stone\n"
+                                "Ensuite 1\n"
+                                "Bench Tops 30mm stone\n"
+                                "Powder Room 3\n"
+                                "Bench Tops 40mm stone\n"
+                            ),
+                            "needs_ocr": False,
+                        }
+                    ],
+                }
+            ],
+        )
+        rooms = {row["room_key"]: row for row in snapshot["rooms"]}
+        self.assertIn("main_bathroom", rooms)
+        self.assertIn("ensuite_1", rooms)
+        self.assertIn("powder_room_3", rooms)
+        self.assertEqual(rooms["main_bathroom"]["bench_tops"], ["20mm stone"])
+        self.assertEqual(rooms["ensuite_1"]["bench_tops"], ["30mm stone"])
+        self.assertEqual(rooms["powder_room_3"]["bench_tops"], ["40mm stone"])
+
+    def test_source_driven_room_matching_does_not_bleed_vanity_overlay_between_rooms(self) -> None:
+        snapshot = {
+            "job_no": "39002",
+            "builder_name": "Clarendon",
+            "source_kind": "spec",
+            "generated_at": "2026-03-22T10:00:00+00:00",
+            "rooms": [
+                {
+                    "room_key": "main_bathroom",
+                    "original_room_label": "Main Bathroom",
+                    "bench_tops": ["20mm stone"],
+                    "door_panel_colours": [],
+                    "toe_kick": [],
+                    "bulkheads": [],
+                    "handles": [],
+                    "drawers_soft_close": "",
+                    "hinges_soft_close": "",
+                    "splashback": "",
+                    "flooring": "",
+                    "sink_info": "",
+                    "basin_info": "Bathroom basin",
+                    "tap_info": "",
+                    "source_file": "sample.pdf",
+                    "page_refs": "1",
+                    "evidence_snippet": "",
+                    "confidence": 0.7,
+                },
+                {
+                    "room_key": "powder_room_3",
+                    "original_room_label": "Powder Room 3",
+                    "bench_tops": ["30mm stone"],
+                    "door_panel_colours": [],
+                    "toe_kick": [],
+                    "bulkheads": [],
+                    "handles": [],
+                    "drawers_soft_close": "",
+                    "hinges_soft_close": "",
+                    "splashback": "",
+                    "flooring": "",
+                    "sink_info": "",
+                    "basin_info": "",
+                    "tap_info": "Powder tap",
+                    "source_file": "sample.pdf",
+                    "page_refs": "2",
+                    "evidence_snippet": "",
+                    "confidence": 0.7,
+                },
+            ],
+            "appliances": [],
+            "others": {},
+            "warnings": [],
+            "source_documents": [],
+            "analysis": {"mode": "heuristic_only"},
+        }
+        with (
+            mock.patch.object(extraction_service.runtime, "OPENAI_ENABLED", False),
+            mock.patch("App.services.extraction_service._load_documents", return_value=[]),
+            mock.patch("App.services.extraction_service.parsing.parse_documents", return_value=snapshot),
+            mock.patch(
+                "App.services.extraction_service.parsing.enrich_snapshot_rooms",
+                side_effect=lambda payload, _documents, rule_flags=None: payload,
+            ),
+        ):
+            result = extraction_service.build_spec_snapshot(
+                job={"job_no": "39002"},
+                builder={"name": "Clarendon"},
+                files=[],
+                template_files=[],
+            )
+        rooms = {row["room_key"]: row for row in result["rooms"]}
+        self.assertIn("main_bathroom", rooms)
+        self.assertIn("powder_room_3", rooms)
+        self.assertEqual(rooms["main_bathroom"]["basin_info"], "Bathroom Basin")
+        self.assertEqual(rooms["powder_room_3"]["tap_info"], "Powder Tap")
 
     def test_builder_defaults_to_global_conservative_for_all_builders(self) -> None:
         clarendon_id = store.create_builder("Clarendon", "clarendon", "")

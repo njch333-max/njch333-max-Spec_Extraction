@@ -65,9 +65,10 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Merge information across multiple spec files in the same job.
 - If OpenAI is configured, use it to improve structured extraction.
 - All builders must use the fixed `Global Conservative` profile based on the accepted `37016` output style.
-- Under `Global Conservative`, heuristic room structure and cleaning remain primary, OpenAI fills missing fields conservatively, and AI must not reshape already-stable room layouts or inject noisier duplicate content.
+- Under `Global Conservative`, heuristic room structure and cleaning remain primary, room identity is source-driven, OpenAI fills missing fields conservatively, and AI must not inject extra rooms, collapse distinct rooms into broad buckets, or overwrite already-clean room text with noisier duplicates.
 - When OpenAI and heuristic room sets disagree, keep the heuristic room layout as the primary room skeleton and merge AI fields conservatively into that layout so repeated parses of the same spec stay visually stable.
-- Clarendon jobs must also pass through a deterministic post-polish stage after room compaction so kitchen, pantry, vanity, laundry, theatre, and rumpus rows keep the stable 6-room structure while rebuilding cleaner field text from schedule and fixture pages.
+- Room rows must come from actual source headings or labels, and only the same room should merge across pages/files. Bathroom, ensuite, powder, vanity, pantry, WIP, theatre, rumpus, study, office, and similar rooms must stay separate unless the source clearly uses the same room label.
+- Clarendon jobs must still pass through a deterministic post-polish stage, but that polish now runs per detected room instead of compressing output into a fixed 6-room layout.
 - Clarendon post-polish should prefer clean schedule-page text for benchtops, door colours, toe kicks, bulkheads, handles, sink/basin/tap fixtures, and soft-close states instead of falling back to OCR-noisy field fragments when the schedule pages already provide a cleaner source.
 - Appliance parsing must prefer explicit `model_no` values from labeled rows or table columns and must not use brand-only words or generic notes as model numbers.
 - Sink, basin, and tap selections must be captured as room-level fixture fields instead of appliance rows.

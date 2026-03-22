@@ -33,6 +33,13 @@ ROOM_ALIASES: dict[str, list[str]] = {
     "bathroom": ["bathroom", "bathrooms", "main bathroom"],
 }
 
+ROOM_HEADING_CLEANUP_PATTERNS = (
+    r"(?i)\bcolour schedule\b",
+    r"(?i)\bsupplier description design comments\b",
+    r"(?i)\bjoinery\b",
+    r"(?i)\bthermolaminate notes\b.*$",
+)
+
 APPLIANCE_TYPES = ["sink", "cooktop", "oven", "rangehood", "dishwasher", "microwave", "fridge", "refrigerator"]
 
 APPLIANCE_LABEL_SPECS: list[tuple[str, list[str]]] = [
@@ -281,6 +288,81 @@ def normalize_room_key(label: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", candidate).strip("_") or "room"
 
 
+def source_room_label(label: str, fallback_key: str = "") -> str:
+    text = normalize_space(label)
+    if not text and fallback_key:
+        text = fallback_key.replace("_", " ")
+    if not text:
+        return "Room"
+    for pattern in ROOM_HEADING_CLEANUP_PATTERNS:
+        text = re.sub(pattern, "", text)
+    text = re.sub(r"(?i)\broom specifications?\b", "", text)
+    text = re.sub(r"\s*[:\-]+\s*$", "", text)
+    text = normalize_space(text)
+    if not text and fallback_key:
+        return fallback_key.replace("_", " ").title()
+    return text or "Room"
+
+
+def source_room_key(label: str, fallback_key: str = "") -> str:
+    text = source_room_label(label, fallback_key=fallback_key)
+    lowered = normalize_space(text).lower()
+    lowered = lowered.replace("&", " and ")
+    lowered = re.sub(r"[’']", "", lowered)
+    lowered = re.sub(r"\btheatre room\b", "theatre", lowered)
+    lowered = re.sub(r"\bmedia room\b", "media room", lowered)
+    lowered = re.sub(r"\bwalk in pantry\b", "wip", lowered)
+    lowered = re.sub(r"\bwalk in robe\b", "wir", lowered)
+    lowered = re.sub(r"\bbutlers pantry\b", "butlers pantry", lowered)
+    lowered = re.sub(r"\bpowder room\b", "powder room", lowered)
+    bed_ensuite_match = re.search(r"\bbed\s*(\d+)\s+ensuite\b", lowered)
+    if bed_ensuite_match:
+        return f"ensuite_{bed_ensuite_match.group(1)}"
+    ensuite_match = re.search(r"\bensuite\s*(\d+)\b", lowered)
+    if ensuite_match:
+        return f"ensuite_{ensuite_match.group(1)}"
+    powder_match = re.search(r"\bpowder(?:\s+room)?\s*(\d+)\b", lowered)
+    if powder_match:
+        return f"powder_room_{powder_match.group(1)}"
+    if "butlers pantry" in lowered or "butler pantry" in lowered:
+        return "butlers_pantry"
+    if "main bathroom vanity" in lowered:
+        return "main_bathroom"
+    if "bathroom vanity" in lowered:
+        return "bathroom"
+    powder_vanity_match = re.search(r"\bpowder(?:\s+room)?\s*(\d+)?\s+vanity\b", lowered)
+    if powder_vanity_match:
+        room_no = powder_vanity_match.group(1)
+        return f"powder_room_{room_no}" if room_no else "powder"
+    ensuite_vanity_match = re.search(r"\bensuite\s*(\d+)?\s+vanity\b", lowered)
+    if ensuite_vanity_match:
+        room_no = ensuite_vanity_match.group(1)
+        return f"ensuite_{room_no}" if room_no else "ensuite"
+    if lowered in {"wip", "walk in pantry"}:
+        return "wip"
+    if lowered in {"wir", "walk in robe"}:
+        return "wir"
+    if lowered in {"robe", "robes"}:
+        return "robe"
+    if "main bathroom" in lowered:
+        return "main_bathroom"
+    if lowered in {"bathroom", "bathrooms"}:
+        return "bathroom"
+    if lowered in {"ensuite"}:
+        return "ensuite"
+    if lowered.startswith("powder"):
+        return "powder"
+    return re.sub(r"[^a-z0-9]+", "_", lowered).strip("_") or (fallback_key or "room")
+
+
+def same_room_identity(*values: str) -> str:
+    for value in values:
+        key = source_room_key(value)
+        if key and key != "room":
+            return key
+    return "room"
+
+
 def _looks_like_field_label(line: str) -> bool:
     text = normalize_space(line)
     if not text:
@@ -427,9 +509,11 @@ def parse_documents(
             if page.get("needs_ocr"):
                 warnings.append(f"Low-text page detected in {file_name} page {page['page_no']}.")
         room_sections = _collect_schedule_room_sections([document]) or _find_room_sections(full_text)
-        for room_key, chunk in room_sections:
+        for detected_room_key, chunk in room_sections:
             lines = _preprocess_chunk(chunk)
-            row = rooms.get(room_key) or RoomRow(room_key=room_key, original_room_label=chunk.split("\n", 1)[0][:80], source_file=file_name)
+            original_room_label = source_room_label(chunk.split("\n", 1)[0], fallback_key=detected_room_key)[:80]
+            room_key = source_room_key(original_room_label, fallback_key=detected_room_key)
+            row = rooms.get(room_key) or RoomRow(room_key=room_key, original_room_label=original_room_label, source_file=file_name)
             generic_bench_tops = _collect_field(lines, ["Bench Tops", "Benchtop"])
             wall_run_bench_top = _first_value(_collect_field(lines, ["Back Benchtops", "Wall Run Bench Top"]))
             island_bench_top = _first_value(_collect_field(lines, ["Island Benchtop", "Island Bench Top"]))
@@ -1073,64 +1157,66 @@ def _collect_room_overlays(documents: list[dict[str, object]]) -> dict[str, dict
             if not full_text.strip():
                 continue
             sections_by_document.extend(_find_room_sections(full_text))
-    for room_key, chunk in sections_by_document:
-            lines = _preprocess_chunk(chunk)
-            overlay = overlays.setdefault(
-                room_key,
-                {
-                    "bench_tops_wall_run": "",
-                    "bench_tops_island": "",
-                    "bench_tops_other": "",
-                    "door_colours_overheads": "",
-                    "door_colours_base": "",
-                    "door_colours_island": "",
-                    "door_colours_bar_back": "",
-                    "sink_info": "",
-                    "basin_info": "",
-                    "tap_info": "",
-                },
-            )
-            generic_bench_tops = _collect_field(lines, ["Bench Tops", "Benchtop"])
-            explicit_bench_values = _unique(
-                [
-                    *(f"Back Benchtops {value}" for value in _collect_field(lines, ["Back Benchtops", "Wall Run Bench Top"])),
-                    *(f"Island Benchtop {value}" for value in _collect_field(lines, ["Island Benchtop", "Island Bench Top"])),
-                ]
-            )
-            benchtop_groups = _split_benchtop_groups(generic_bench_tops + explicit_bench_values)
-            for key, value in benchtop_groups.items():
-                overlay[key] = value or overlay[key]
-            overlay["door_colours_overheads"] = _merge_clean_group_text(
-                overlay["door_colours_overheads"],
-                _first_value(_collect_field(lines, ["Overhead Cupboards"])),
-                cleaner=_clean_door_colour_value,
-            )
-            overlay["door_colours_base"] = _merge_clean_group_text(
-                overlay["door_colours_base"],
-                _first_value(_collect_field(lines, ["Base Cupboards & Drawers", "Floor Mounted Vanity"])),
-                cleaner=_clean_door_colour_value,
-            )
-            overlay["door_colours_island"] = _merge_clean_group_text(
-                overlay["door_colours_island"],
-                _first_value(_collect_field(lines, ["Island Bench Base Cupboards & Drawers"])),
-                cleaner=_clean_door_colour_value,
-            )
-            overlay["door_colours_bar_back"] = _merge_clean_group_text(
-                overlay["door_colours_bar_back"],
-                _first_value(_collect_field(lines, ["Island Bar Back"])),
-                cleaner=_clean_door_colour_value,
-            )
-            if not any(overlay[key] for key in ("door_colours_overheads", "door_colours_base", "door_colours_island", "door_colours_bar_back")):
-                door_groups = _split_door_colour_groups(_collect_field(lines, ["Door/Panel Colour", "Door/Panel Colours", "Door Colour"]))
-                for key, value in door_groups.items():
-                    overlay[key] = _merge_clean_group_text(overlay[key], value, cleaner=_clean_door_colour_value)
-            overlay["sink_info"] = _merge_text(overlay["sink_info"], _first_value(_collect_field(lines, ["Sink Type/Model", "Sink Type", "Drop in Tub", "Sink"])))
-            basin_value = _first_value(_collect_field(lines, ["Vanity Inset Basin"])) or _first_value(_collect_field(lines, ["Basin"]))
-            overlay["basin_info"] = _merge_text(overlay["basin_info"], basin_value)
-            overlay["tap_info"] = _merge_text(
-                overlay["tap_info"],
-                _first_value(_collect_field(lines, ["Vanity Tap Style", "Tap Type", "Tap Style", "Sink Mixer", "Pull-Out Mixer", "Mixer"])),
-            )
+    for detected_room_key, chunk in sections_by_document:
+        room_label = source_room_label(chunk.split("\n", 1)[0], fallback_key=detected_room_key)
+        room_key = source_room_key(room_label, fallback_key=detected_room_key)
+        lines = _preprocess_chunk(chunk)
+        overlay = overlays.setdefault(
+            room_key,
+            {
+                "bench_tops_wall_run": "",
+                "bench_tops_island": "",
+                "bench_tops_other": "",
+                "door_colours_overheads": "",
+                "door_colours_base": "",
+                "door_colours_island": "",
+                "door_colours_bar_back": "",
+                "sink_info": "",
+                "basin_info": "",
+                "tap_info": "",
+            },
+        )
+        generic_bench_tops = _collect_field(lines, ["Bench Tops", "Benchtop"])
+        explicit_bench_values = _unique(
+            [
+                *(f"Back Benchtops {value}" for value in _collect_field(lines, ["Back Benchtops", "Wall Run Bench Top"])),
+                *(f"Island Benchtop {value}" for value in _collect_field(lines, ["Island Benchtop", "Island Bench Top"])),
+            ]
+        )
+        benchtop_groups = _split_benchtop_groups(generic_bench_tops + explicit_bench_values)
+        for key, value in benchtop_groups.items():
+            overlay[key] = value or overlay[key]
+        overlay["door_colours_overheads"] = _merge_clean_group_text(
+            overlay["door_colours_overheads"],
+            _first_value(_collect_field(lines, ["Overhead Cupboards"])),
+            cleaner=_clean_door_colour_value,
+        )
+        overlay["door_colours_base"] = _merge_clean_group_text(
+            overlay["door_colours_base"],
+            _first_value(_collect_field(lines, ["Base Cupboards & Drawers", "Floor Mounted Vanity"])),
+            cleaner=_clean_door_colour_value,
+        )
+        overlay["door_colours_island"] = _merge_clean_group_text(
+            overlay["door_colours_island"],
+            _first_value(_collect_field(lines, ["Island Bench Base Cupboards & Drawers"])),
+            cleaner=_clean_door_colour_value,
+        )
+        overlay["door_colours_bar_back"] = _merge_clean_group_text(
+            overlay["door_colours_bar_back"],
+            _first_value(_collect_field(lines, ["Island Bar Back"])),
+            cleaner=_clean_door_colour_value,
+        )
+        if not any(overlay[key] for key in ("door_colours_overheads", "door_colours_base", "door_colours_island", "door_colours_bar_back")):
+            door_groups = _split_door_colour_groups(_collect_field(lines, ["Door/Panel Colour", "Door/Panel Colours", "Door Colour"]))
+            for key, value in door_groups.items():
+                overlay[key] = _merge_clean_group_text(overlay[key], value, cleaner=_clean_door_colour_value)
+        overlay["sink_info"] = _merge_text(overlay["sink_info"], _first_value(_collect_field(lines, ["Sink Type/Model", "Sink Type", "Drop in Tub", "Sink"])))
+        basin_value = _first_value(_collect_field(lines, ["Vanity Inset Basin"])) or _first_value(_collect_field(lines, ["Basin"]))
+        overlay["basin_info"] = _merge_text(overlay["basin_info"], basin_value)
+        overlay["tap_info"] = _merge_text(
+            overlay["tap_info"],
+            _first_value(_collect_field(lines, ["Vanity Tap Style", "Tap Type", "Tap Style", "Sink Mixer", "Pull-Out Mixer", "Mixer"])),
+        )
     return overlays
 
 
@@ -1156,23 +1242,10 @@ def _room_lookup_candidates(row: dict[str, Any]) -> list[str]:
     texts = [_string_value(row.get("room_key", "")), _string_value(row.get("original_room_label", ""))]
     candidates: list[str] = []
     for text in texts:
-        lowered = normalize_space(text).lower()
-        if not lowered:
+        normalized = source_room_key(text)
+        if not normalized:
             continue
-        candidates.append(normalize_room_key(text))
-        if "butler" in lowered and "pantry" in lowered:
-            candidates.extend(["butlers_pantry", "pantry"])
-        if "vanit" in lowered:
-            candidates.extend(["vanity", "bathroom"])
-        if "bathroom" in lowered:
-            candidates.extend(["bathroom", "vanity"])
-        if "ensuite" in lowered:
-            candidates.extend(["ensuite", "vanity"])
-        if "powder" in lowered:
-            candidates.extend(["powder", "vanity"])
-        for room_key, aliases in ROOM_ALIASES.items():
-            if any(alias in lowered for alias in aliases):
-                candidates.append(room_key)
+        candidates.append(normalized)
     deduped: list[str] = []
     seen: set[str] = set()
     for candidate in candidates:

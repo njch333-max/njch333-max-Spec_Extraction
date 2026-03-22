@@ -432,6 +432,7 @@ def _merge_rooms(
 def _find_best_room_match(base_row: dict[str, Any], ai_rows: list[dict[str, Any]], used_ai: set[int]) -> int | None:
     base_key = _norm(base_row.get("room_key", ""))
     base_label = _norm(base_row.get("original_room_label", ""))
+    base_identity = parsing.same_room_identity(str(base_row.get("original_room_label", "")), str(base_row.get("room_key", "")))
     best_index: int | None = None
     best_score = 0
     for index, ai_row in enumerate(ai_rows):
@@ -440,6 +441,9 @@ def _find_best_room_match(base_row: dict[str, Any], ai_rows: list[dict[str, Any]
         score = 0
         ai_key = _norm(ai_row.get("room_key", ""))
         ai_label = _norm(ai_row.get("original_room_label", ""))
+        ai_identity = parsing.same_room_identity(str(ai_row.get("original_room_label", "")), str(ai_row.get("room_key", "")))
+        if base_identity and ai_identity and base_identity == ai_identity:
+            score += 8
         if base_key and ai_key and base_key == ai_key:
             score += 6
         if base_label and ai_label and base_label == ai_label:
@@ -627,48 +631,6 @@ def _report_progress(progress_callback: ProgressCallback, stage: str, message: s
         progress_callback(stage, message)
 
 
-CLARENDON_STABLE_GROUPS = {
-    "pantry": "butlers_pantry",
-    "wip": "butlers_pantry",
-    "bathroom": "vanities",
-    "ensuite": "vanities",
-    "powder": "vanities",
-    "vanity": "vanities",
-    "wir": "",
-    "robe": "",
-}
-
-CLARENDON_STABLE_ORDER = ["kitchen", "butlers_pantry", "vanities", "laundry", "theatre", "rumpus", "study", "office", "kitchenette"]
-
-CLARENDON_STABLE_LABELS = {
-    "kitchen": "Kitchen",
-    "butlers_pantry": "Butler's Pantry",
-    "vanities": "Vanities",
-    "laundry": "Laundry",
-    "theatre": "Theatre",
-    "rumpus": "Rumpus",
-    "study": "Study",
-    "office": "Office",
-    "kitchenette": "Kitchenette",
-}
-
-CLARENDON_ROOM_PRIORITY = {
-    "kitchen": 100,
-    "butlers_pantry": 100,
-    "pantry": 80,
-    "wip": 60,
-    "vanity": 100,
-    "bathroom": 80,
-    "ensuite": 70,
-    "powder": 60,
-    "laundry": 100,
-    "theatre": 100,
-    "rumpus": 100,
-    "study": 100,
-    "office": 100,
-    "kitchenette": 100,
-}
-
 CLARENDON_SCHEDULE_PAGE_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"\bKITCHEN COLOUR SCHEDULE\b", "kitchen"),
     (r"\bBUTLERS?\s+PANTRY COLOUR SCHEDULE\b", "butlers_pantry"),
@@ -812,13 +774,25 @@ def _apply_clarendon_reference_polish(
     _report_progress(progress_callback, "clarendon_polish", "Applying Clarendon 37016-style field polish")
     overlays = _collect_clarendon_polish_overlays(documents)
     polished_rooms = [
-        _polish_clarendon_room(dict(room), overlays.get(str(room.get("room_key", "")), {}))
+        _polish_clarendon_room(dict(room), _select_clarendon_room_overlay(dict(room), overlays))
         for room in snapshot.get("rooms", [])
         if isinstance(room, dict)
     ]
     polished = dict(snapshot)
     polished["rooms"] = polished_rooms
     return parsing.apply_snapshot_cleaning_rules(polished, rule_flags=rule_flags)
+
+
+def _select_clarendon_room_overlay(room: dict[str, Any], overlays: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    room_key = str(room.get("room_key", ""))
+    overlay = _blank_clarendon_overlay()
+    if room_key in overlays:
+        _merge_clarendon_overlay(overlay, overlays[room_key])
+    if room_key in {"vanity", "vanities"}:
+        for fallback_key in ("vanities", "vanity"):
+            if fallback_key != room_key and fallback_key in overlays:
+                _merge_clarendon_overlay(overlay, overlays[fallback_key])
+    return overlay if _clarendon_overlay_has_content(overlay) else {}
 
 
 def _collect_clarendon_polish_overlays(documents: list[dict[str, object]]) -> dict[str, dict[str, Any]]:
@@ -905,6 +879,13 @@ def _clarendon_schedule_room_key(text: str) -> str:
     for pattern, room_key in CLARENDON_SCHEDULE_PAGE_PATTERNS:
         if re.search(pattern, text, re.IGNORECASE):
             return room_key
+    generic_match = re.search(r"(?is)\b([A-Z][A-Z0-9/&' \-]{2,80}?)\s+COLOUR SCHEDULE\b", text)
+    if generic_match:
+        label = parsing.normalize_space(generic_match.group(1))
+        label = re.sub(r"(?i)\s*-\s*DESK JOINERY\s*$", "", label)
+        key = parsing.source_room_key(label)
+        if key:
+            return key
     return ""
 
 
@@ -1082,7 +1063,7 @@ def _extract_clarendon_fixture_overlays(text: str) -> dict[str, dict[str, Any]]:
             overlay["tap_info"] = parsing._merge_text(overlay["tap_info"], _clarendon_clean_tap_text(tap))
 
     if re.search(r"Vanity Inset Basin", text, re.IGNORECASE):
-        overlay = overlays.setdefault("vanities", _blank_clarendon_overlay())
+        overlay = overlays.setdefault(_clarendon_detect_fixture_room_key(text), _blank_clarendon_overlay())
         basin = _extract_clarendon_value_after_label(text, r"Vanity Inset Basin")
         tap = _extract_clarendon_value_after_label(text, r"Vanity Tap Style")
         if basin:
@@ -1116,10 +1097,31 @@ def _extract_clarendon_fixture_overlays(text: str) -> dict[str, dict[str, Any]]:
     return overlays
 
 
+def _clarendon_detect_fixture_room_key(text: str) -> str:
+    normalized = _clarendon_spacing_normalize(text)
+    patterns = (
+        r"\bBED\s*\d+\s+ENSUITE\b",
+        r"\bENSUITE\s*\d+\b",
+        r"\bPOWDER(?:\s+ROOM)?\s*\d+\b",
+        r"\bMAIN BATHROOM\b",
+        r"\bBATHROOM\b",
+        r"\bENSUITE\b",
+        r"\bPOWDER(?:\s+ROOM)?\b",
+        r"\bVANITIES\b",
+        r"\bVANITY\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, normalized, re.IGNORECASE)
+        if match:
+            return parsing.source_room_key(match.group(0))
+    return "vanity"
+
+
 def _polish_clarendon_room(row: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
     room_key = parsing.normalize_space(str(row.get("room_key", "")))
     polished = dict(row)
     overlay_present = _clarendon_overlay_has_content(overlay)
+    is_vanity_room = _clarendon_is_vanity_room(room_key, str(row.get("original_room_label", "")))
 
     current_benchtops = " | ".join(_clarendon_clean_benchtop_text(value) for value in parsing._coerce_string_list(row.get("bench_tops", [])) if _clarendon_clean_benchtop_text(value))
     wall_run = _clarendon_clean_benchtop_text(overlay.get("bench_tops_wall_run", ""))
@@ -1164,8 +1166,8 @@ def _polish_clarendon_room(row: dict[str, Any], overlay: dict[str, Any]) -> dict
     polished["sink_info"] = _clarendon_clean_fixture_text(overlay.get("sink_info", ""), fixture_kind="sink") if overlay_present else _clarendon_clean_fixture_text(row.get("sink_info", ""), fixture_kind="sink")
     polished["basin_info"] = (
         _clarendon_clean_fixture_text(overlay.get("basin_info", ""), fixture_kind="basin")
-        if room_key == "vanities" and overlay_present
-        else (_clarendon_clean_fixture_text(row.get("basin_info", ""), fixture_kind="basin") if room_key == "vanities" else "")
+        if is_vanity_room and overlay_present
+        else (_clarendon_clean_fixture_text(row.get("basin_info", ""), fixture_kind="basin") if is_vanity_room else "")
     )
     polished["tap_info"] = _clarendon_clean_fixture_text(overlay.get("tap_info", ""), fixture_kind="tap") if overlay_present else _clarendon_clean_fixture_text(row.get("tap_info", ""), fixture_kind="tap")
     overlay_splashback = _clarendon_clean_splashback_text(overlay.get("splashback", ""), room_key=room_key)
@@ -1174,6 +1176,11 @@ def _polish_clarendon_room(row: dict[str, Any], overlay: dict[str, Any]) -> dict
     polished["drawers_soft_close"] = _clarendon_select_soft_close(overlay.get("drawers_soft_close", "") if overlay_present else "", row.get("drawers_soft_close", ""), keyword="drawer")
     polished["hinges_soft_close"] = _clarendon_select_soft_close(overlay.get("hinges_soft_close", "") if overlay_present else "", row.get("hinges_soft_close", ""), keyword="hinge")
     return polished
+
+
+def _clarendon_is_vanity_room(room_key: str, original_room_label: str) -> bool:
+    identity = parsing.same_room_identity(room_key, original_room_label)
+    return identity == "vanities" or any(token in identity for token in ("vanity", "bathroom", "ensuite", "powder"))
 
 
 def _extract_clarendon_labeled_segments(text: str, label_pattern: str, stop_markers: tuple[str, ...]) -> list[str]:
@@ -1502,42 +1509,27 @@ def _clarendon_overlay_has_content(overlay: dict[str, Any]) -> bool:
 
 
 def _stabilize_snapshot_layout(snapshot: dict[str, Any], builder_name: str, parser_strategy: str) -> dict[str, Any]:
-    if parser_strategy not in {"stable_hybrid", cleaning_rules.global_parser_strategy()} or "clarendon" not in builder_name.strip().lower():
-        return snapshot
     rooms = [dict(row) for row in snapshot.get("rooms", []) if isinstance(row, dict)]
-    snapshot["rooms"] = _compact_clarendon_rooms(rooms)
+    snapshot["rooms"] = _merge_rooms_by_source_identity(rooms)
     return snapshot
 
 
-def _compact_clarendon_rooms(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    grouped: dict[str, list[dict[str, Any]]] = {}
+def _merge_rooms_by_source_identity(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
     for row in rows:
-        source_key = parsing.normalize_room_key(str(row.get("room_key", "")))
-        target_key = CLARENDON_STABLE_GROUPS.get(source_key, source_key)
+        target_key = parsing.same_room_identity(str(row.get("original_room_label", "")), str(row.get("room_key", "")))
         if not target_key:
             continue
-        grouped.setdefault(target_key, []).append(dict(row))
-
-    compacted: list[dict[str, Any]] = []
-    for room_key in CLARENDON_STABLE_ORDER:
-        if room_key not in grouped:
+        current = dict(row)
+        current["room_key"] = target_key
+        current["original_room_label"] = parsing.source_room_label(str(row.get("original_room_label", "")), fallback_key=target_key)
+        if target_key not in grouped:
+            grouped[target_key] = current
+            order.append(target_key)
             continue
-        candidates = sorted(
-            grouped[room_key],
-            key=lambda row: (
-                CLARENDON_ROOM_PRIORITY.get(parsing.normalize_room_key(str(row.get("room_key", ""))), 0),
-                _room_content_score(row),
-            ),
-            reverse=True,
-        )
-        merged = dict(candidates[0])
-        for candidate in candidates[1:]:
-            merged = _merge_single_room(merged, candidate, stable_hybrid=True)
-        merged["room_key"] = room_key
-        merged["original_room_label"] = CLARENDON_STABLE_LABELS.get(room_key, merged.get("original_room_label", room_key.title()))
-        if room_key == "kitchen" or _room_has_meaningful_content(merged):
-            compacted.append(merged)
-    return compacted
+        grouped[target_key] = _merge_single_room(grouped[target_key], current, stable_hybrid=True)
+    return [grouped[room_key] for room_key in order]
 
 
 def _room_has_meaningful_content(row: dict[str, Any]) -> bool:
@@ -1569,32 +1561,6 @@ def _field_has_value(value: Any) -> bool:
     if isinstance(value, (list, tuple, set)):
         return any(bool(parsing.normalize_space(str(item))) for item in value)
     return bool(parsing.normalize_space(str(value or "")))
-
-
-def _room_content_score(row: dict[str, Any]) -> int:
-    score = 0
-    for field_name in (
-        "bench_tops",
-        "bench_tops_wall_run",
-        "bench_tops_island",
-        "bench_tops_other",
-        "door_panel_colours",
-        "door_colours_overheads",
-        "door_colours_base",
-        "door_colours_island",
-        "door_colours_bar_back",
-        "toe_kick",
-        "bulkheads",
-        "handles",
-        "sink_info",
-        "basin_info",
-        "tap_info",
-        "splashback",
-        "flooring",
-    ):
-        if _field_has_value(row.get(field_name)):
-            score += 1
-    return score
 
 
 def _enrich_snapshot_appliances(snapshot: dict[str, Any], progress_callback: ProgressCallback = None, rule_flags: Any = None) -> dict[str, Any]:

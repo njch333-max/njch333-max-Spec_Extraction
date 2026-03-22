@@ -20,11 +20,12 @@
   - deterministic Westinghouse-style official product-page probing before search fallback
   - deterministic AEG Australia product-page probing on `aegaustralia.com.au`
   - Fisher & Paykel official product-page matching with official-size extraction from structured product metadata
-  - Clarendon-only deterministic post-polish that rebuilds stable 6-room output from schedule and fixture pages so fresh Clarendon parses read closer to the accepted `37016` reference
+  - Clarendon-only deterministic post-polish that rebuilds cleaner room text from schedule and fixture pages while preserving source-driven room ownership
   - job-page Parse buttons with clearer run-status wording
   - live-polling run history with granular worker stage messages
   - extraction diagnostics showing heuristic/OpenAI mode
   - global `37016`-style conservative parsing profile for all builders
+  - source-driven room detection for all builders, with same-room-only merge behavior across pages/files
   - snapshot and run metadata now record parser strategy, worker PID, and app build ID
   - single-worker lease guard to prevent stale local worker processes from racing newer code on queued jobs
   - legacy builder-rules routes retired from the UI and redirected back to the Builders page
@@ -87,7 +88,7 @@
 - Improve official product URL lookup accuracy, size extraction coverage, and brand coverage
 - Continue tightening handle cleanup for AI-merged Yellowwood rows where verbose combined handle descriptions still appear
 - Continue tightening noisy field cleanup inside the fixed global conservative profile without reintroducing per-builder configuration
-- Continue tightening Clarendon field wording so kitchen/vanity/laundry text stays close to the accepted `37016` readability standard without relying on manual snapshot restores
+- Continue tightening Clarendon field wording so kitchen/bathroom/laundry text stays close to the accepted `37016` readability standard without relying on manual snapshot restores or fixed room buckets
 - Extend deterministic model-page probing beyond the currently supported appliance brand patterns
 - Expand model-number coverage for more appliance naming patterns beyond the current explicit rules
 - Build the future comparison UI and diff logic
@@ -165,7 +166,7 @@
   - official-size stage rendering
 - Clarendon deterministic-polish coverage added for:
   - clean kitchen wall-run / island benchtop reconstruction
-  - stable pantry / vanities / laundry field rebuilding from schedule and fixture pages
+  - stable source-driven room field rebuilding from schedule and fixture pages, without forcing pantry/vanities/theatre/rumpus buckets
   - splashback cleanup to `Tiled splashback by others` when the source clearly indicates builder-tile handoff
   - handle cleanup that strips mounting-position noise while keeping the model/finish text
   - fixture cleanup that collapses multiline OCR fragments into single readable lines

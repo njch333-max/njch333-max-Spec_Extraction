@@ -75,12 +75,12 @@
   - heuristic room structure and cleaning stay primary
   - OpenAI may fill missing fields and improve sparse evidence
   - OpenAI must not introduce extra room splits or overwrite already-clean fields with noisier text
-  - Clarendon keeps its conservative room compaction behavior, while Yellowwood and other builders keep their own heuristic room taxonomy/parsing branches
+  - room identity is source-driven for every builder, so only the same detected room merges across pages/files
 11. Merge OpenAI output conservatively: keep the heuristic room set as the primary layout, merge room fields into that layout, and preserve heuristic appliance `model_no` values instead of replacing them with weaker guesses.
-12. For Clarendon-only spec runs, apply a deterministic post-polish stage after room compaction:
-  - rebuild stable room text from colour-schedule and fixture pages
+12. For Clarendon-only spec runs, apply a deterministic post-polish stage after source-driven room detection:
+  - rebuild stable room text from colour-schedule and fixture pages for each detected room
   - prefer clean schedule-page values over OCR-noisy field fragments
-  - keep the 6-room Clarendon layout while replacing noisy field text with cleaner deterministic values
+  - keep source-driven room ownership while replacing noisy field text with cleaner deterministic values
 13. Apply the fixed global cleaning rules after heuristic, merge, and Clarendon post-polish so brand casing, door-colour cleanup, kitchen-only bench-top splitting, and soft-close normalization stay consistent across all builders.
 14. Record analysis metadata in the snapshot: mode, parser strategy, attempted, succeeded, model, note, and runtime identifiers (`worker_pid`, `app_build_id`).
 15. Normalize drawer and hinge states to `Soft Close`, `Not Soft Close`, or blank.
@@ -127,15 +127,19 @@
 2. Every parse run uses the same fixed `Global Conservative` profile, which reflects the accepted `37016` output style.
 3. Legacy `/builders/{builder_id}/rules` requests redirect back to `/builders` so old bookmarks do not break the app.
 4. Snapshots and runs still store parser strategy and runtime metadata so output remains traceable.
+5. Source-driven room detection is now the default for all builders:
+  - room rows are created from the actual source heading/label
+  - only the same normalized room identity merges across pages/files
+  - fixed Clarendon room compaction buckets such as `vanities` and preallocated rooms such as `theatre`/`rumpus` are no longer injected by layout stabilization
 
 ## 4. Canonical Schema
 
 ### Rooms
-- One row per normalized room
+- One row per source-driven room
 - Array-like fields are stored as lists in JSON and flattened with ` | ` in the review UI
-- `room_key` is normalized, `original_room_label` preserves the original label
+- `room_key` is a source-driven normalized identity, `original_room_label` preserves the detected source label
 - Room rows also carry fixture fields for sinks, basins, and taps plus split door-colour and bench-top display fields.
-- Clarendon rows pass through a deterministic post-polish layer after layout stabilization so handle strings, fixture text, splashback notes, and soft-close fallbacks stay readable without changing the settled room layout.
+- Clarendon rows pass through a deterministic post-polish layer after layout stabilization so handle strings, fixture text, splashback notes, and soft-close fallbacks stay readable without changing source-driven room ownership.
 - That Clarendon post-polish now detects at least two schedule families: the `37016` reference family and the denser single-line `LUXE / handleless / mirror splashback` family, then applies family-specific field splitting before the shared compact-summary cleanup.
 
 ### Appliances
