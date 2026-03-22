@@ -14,6 +14,10 @@ class AnalysisMeta(BaseModel):
     rule_flags: dict[str, bool] = Field(default_factory=dict)
     worker_pid: int = 0
     app_build_id: str = ""
+    room_master_file: str = ""
+    room_master_reason: str = ""
+    supplement_files: list[str] = Field(default_factory=list)
+    ignored_room_like_lines_count: int = 0
 
 
 class RoomRow(BaseModel):

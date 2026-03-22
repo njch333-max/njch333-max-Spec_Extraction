@@ -40,6 +40,29 @@ ROOM_HEADING_CLEANUP_PATTERNS = (
     r"(?i)\bthermolaminate notes\b.*$",
 )
 
+ROOM_HEADING_TRIM_MARKERS = (
+    r"(?i)\bbench tops?\b.*$",
+    r"(?i)\bbenchtop\b.*$",
+    r"(?i)\bdoor(?:/panel)? colours?\b.*$",
+    r"(?i)\bglazing\b.*$",
+    r"(?i)\bdoor\b.*$",
+    r"(?i)\bfinish\b.*$",
+    r"(?i)\bwaste colour\b.*$",
+    r"(?i)\bflooring\b.*$",
+)
+
+ROOM_LIKE_NOISE_PATTERNS = (
+    r"(?i)\bglazing\b",
+    r"(?i)\bdoor\b",
+    r"(?i)\bfinish\b",
+    r"(?i)\bwaste colour\b",
+    r"(?i)\bflooring\b",
+    r"(?i)\bwindows?\b",
+    r"(?i)\bframe\b",
+    r"(?i)\bpaint(?:ed)?\b",
+    r"(?i)\bcolorbond\b",
+)
+
 APPLIANCE_TYPES = ["sink", "cooktop", "oven", "rangehood", "dishwasher", "microwave", "fridge", "refrigerator"]
 
 APPLIANCE_LABEL_SPECS: list[tuple[str, list[str]]] = [
@@ -211,6 +234,7 @@ CABINET_ONLY_EXCLUDE_PATTERNS = (
 
 JOINERY_PAGE_HINTS = (
     "joinery - refer to cabinetry plans",
+    "colour schedule",
     "overhead cupboards",
     "base cupboards & drawers",
     "base cabinet handles",
@@ -294,8 +318,13 @@ def source_room_label(label: str, fallback_key: str = "") -> str:
         text = fallback_key.replace("_", " ")
     if not text:
         return "Room"
+    text = re.sub(r"(?i)(colour schedule)(?=[A-Z])", r"\1 ", text)
     for pattern in ROOM_HEADING_CLEANUP_PATTERNS:
         text = re.sub(pattern, "", text)
+    for pattern in ROOM_HEADING_TRIM_MARKERS:
+        text = re.sub(pattern, "", text)
+    if ":" in text:
+        text = text.split(":", 1)[0]
     text = re.sub(r"(?i)\broom specifications?\b", "", text)
     text = re.sub(r"\s*[:\-]+\s*$", "", text)
     text = normalize_space(text)
@@ -414,42 +443,26 @@ def _looks_like_joinery_schedule_page(text: str) -> bool:
     return any(hint in lowered for hint in JOINERY_PAGE_HINTS)
 
 
+def _looks_like_non_joinery_room_label(label: str) -> bool:
+    text = normalize_space(label)
+    if not text:
+        return False
+    return any(re.search(pattern, text) for pattern in ROOM_LIKE_NOISE_PATTERNS)
+
+
 def _is_schedule_room_heading(line: str) -> bool:
     text = normalize_space(line)
     if not text or _looks_like_field_label(text) or len(text) > 80:
         return False
     lowered = text.lower()
-    if not any(token in lowered for token in ("kitchen", "pantry", "laundry", "ensuite", "bathroom", "vanity", "powder")):
+    if not any(token in lowered for token in ("kitchen", "pantry", "laundry", "ensuite", "bathroom", "vanity", "vanities", "powder", "butler", "wip", "theatre", "rumpus", "study", "office", "kitchenette")):
         return False
     stripped = re.sub(r"[^A-Za-z0-9 ]+", "", text)
     return bool(stripped and stripped == stripped.upper())
 
 
 def _schedule_room_key(line: str) -> str:
-    lowered = normalize_space(line).lower()
-    if "kitchen" in lowered:
-        return "kitchen"
-    if "butler" in lowered and "pantry" in lowered:
-        return "butlers_pantry"
-    if "pantry" in lowered:
-        return "pantry"
-    if "laundry" in lowered:
-        return "laundry"
-    if "bed 1" in lowered and "ensuite" in lowered:
-        return "bed1_ensuite"
-    if "bed 2" in lowered and "ensuite" in lowered:
-        return "bed2_ensuite"
-    if "bed 3" in lowered and "ensuite" in lowered:
-        return "bed3_ensuite"
-    if "bed 4" in lowered and "ensuite" in lowered:
-        return "bed4_ensuite"
-    if "bathroom" in lowered:
-        return "bathroom"
-    if "ensuite" in lowered:
-        return "ensuite"
-    if "powder" in lowered:
-        return "powder"
-    return normalize_room_key(line)
+    return source_room_key(line)
 
 
 def _collect_schedule_room_sections(documents: list[dict[str, object]]) -> list[tuple[str, str]]:
@@ -483,6 +496,84 @@ def _collect_schedule_room_sections(documents: list[dict[str, object]]) -> list[
     return sections
 
 
+def _document_full_text(document: dict[str, object]) -> str:
+    return "\n\n".join(str(page["text"]) for page in document.get("pages", []) if page.get("text"))
+
+
+def _document_room_master_score(document: dict[str, object]) -> dict[str, Any]:
+    pages = list(document.get("pages", []))
+    full_text = _document_full_text(document)
+    schedule_sections = _collect_schedule_room_sections([document])
+    schedule_pages = sum(1 for page in pages if _looks_like_joinery_schedule_page(str(page.get("text") or "")))
+    colour_schedule_hits = len(re.findall(r"(?i)\bcolour schedule\b", full_text))
+    room_heading_hits = sum(
+        1
+        for page in pages
+        for line in _preprocess_chunk(str(page.get("text") or ""))
+        if _is_schedule_room_heading(line)
+    )
+    generic_sections = len(_find_room_sections(full_text))
+    score = (
+        len(schedule_sections) * 40
+        + schedule_pages * 25
+        + colour_schedule_hits * 10
+        + room_heading_hits * 6
+        + generic_sections
+    )
+    reason = (
+        f"{len(schedule_sections)} schedule sections, "
+        f"{schedule_pages} schedule page(s), "
+        f"{colour_schedule_hits} colour-schedule hit(s)"
+    )
+    return {
+        "score": score,
+        "reason": reason,
+        "schedule_sections": schedule_sections,
+        "generic_sections": generic_sections,
+    }
+
+
+def select_room_master_document(documents: list[dict[str, object]], source_kind: str) -> tuple[dict[str, object] | None, str]:
+    if source_kind != "spec" or len(documents) <= 1:
+        return None, ""
+    best_document: dict[str, object] | None = None
+    best_reason = ""
+    best_score = -1
+    for document in documents:
+        metrics = _document_room_master_score(document)
+        if metrics["score"] > best_score:
+            best_document = document
+            best_score = int(metrics["score"])
+            best_reason = f"{document['file_name']} selected as room master by schedule density ({metrics['reason']})."
+    return best_document, best_reason
+
+
+def _map_to_existing_master_room(detected_room_key: str, master_room_keys: set[str]) -> str:
+    if detected_room_key in master_room_keys:
+        return detected_room_key
+    if "vanities" in master_room_keys and any(token in detected_room_key for token in ("vanity", "bathroom", "ensuite", "powder")):
+        return "vanities"
+    if "butlers_pantry" in master_room_keys and detected_room_key in {"pantry", "wip"}:
+        return "butlers_pantry"
+    return ""
+
+
+def _resolve_room_target(
+    detected_room_key: str,
+    original_room_label: str,
+    room_master_keys: set[str],
+    is_room_master: bool,
+) -> tuple[str, str]:
+    if is_room_master or not room_master_keys:
+        return detected_room_key, ""
+    mapped = _map_to_existing_master_room(detected_room_key, room_master_keys)
+    if mapped:
+        return mapped, ""
+    if _looks_like_non_joinery_room_label(original_room_label):
+        return "", "non-joinery/non-fixture noise"
+    return "", "not in room master"
+
+
 def parse_documents(
     job_no: str,
     builder_name: str,
@@ -496,11 +587,26 @@ def parse_documents(
     source_documents: list[dict[str, str]] = []
     flooring_notes: list[str] = []
     splashback_notes: list[str] = []
+    room_master_document, room_master_reason = select_room_master_document(documents, source_kind)
+    room_master_file = str(room_master_document["file_name"]) if room_master_document else ""
+    room_master_keys: set[str] = set()
+    supplement_files: list[str] = []
+    ignored_room_like_lines_count = 0
 
     for document in documents:
         file_name = str(document["file_name"])
         pages = list(document["pages"])
-        source_documents.append({"file_name": file_name, "role": str(document["role"]), "page_count": str(len(pages))})
+        is_room_master = not room_master_document or document is room_master_document
+        if not is_room_master:
+            supplement_files.append(file_name)
+        source_documents.append(
+            {
+                "file_name": file_name,
+                "role": str(document["role"]),
+                "page_count": str(len(pages)),
+                "room_role": "room_master" if is_room_master else "supplement",
+            }
+        )
         full_text = "\n\n".join(str(page["text"]) for page in pages if page["text"])
         if not full_text.strip():
             warnings.append(f"No extractable text found in {file_name}.")
@@ -513,51 +619,19 @@ def parse_documents(
             lines = _preprocess_chunk(chunk)
             original_room_label = source_room_label(chunk.split("\n", 1)[0], fallback_key=detected_room_key)[:80]
             room_key = source_room_key(original_room_label, fallback_key=detected_room_key)
-            row = rooms.get(room_key) or RoomRow(room_key=room_key, original_room_label=original_room_label, source_file=file_name)
-            generic_bench_tops = _collect_field(lines, ["Bench Tops", "Benchtop"])
-            wall_run_bench_top = _first_value(_collect_field(lines, ["Back Benchtops", "Wall Run Bench Top"]))
-            island_bench_top = _first_value(_collect_field(lines, ["Island Benchtop", "Island Bench Top"]))
-            row.bench_tops_wall_run = _merge_text(row.bench_tops_wall_run, wall_run_bench_top)
-            row.bench_tops_island = _merge_text(row.bench_tops_island, island_bench_top)
-            row.bench_tops_other = _merge_text(row.bench_tops_other, " | ".join(generic_bench_tops))
-            if wall_run_bench_top:
-                generic_bench_tops.append(f"Back Benchtops {wall_run_bench_top}")
-            if island_bench_top:
-                generic_bench_tops.append(f"Island Benchtop {island_bench_top}")
-            row.bench_tops = _merge_lists(row.bench_tops, _unique(generic_bench_tops))
-            row.door_panel_colours = _merge_lists(row.door_panel_colours, _collect_field(lines, ["Door/Panel Colour", "Door/Panel Colours", "Door Colour"]))
-            row.door_colours_overheads = _merge_clean_group_text(row.door_colours_overheads, _first_value(_collect_field(lines, ["Overhead Cupboards"])), cleaner=_clean_door_colour_value)
-            row.door_colours_base = _merge_clean_group_text(
-                row.door_colours_base,
-                _first_value(_collect_field(lines, ["Base Cupboards & Drawers", "Floor Mounted Vanity"])),
-                cleaner=_clean_door_colour_value,
+            target_room_key, ignore_reason = _resolve_room_target(room_key, original_room_label, room_master_keys, is_room_master)
+            if ignore_reason:
+                ignored_room_like_lines_count += 1
+                warnings.append(f"Ignored room-like section '{original_room_label}' from {file_name}: {ignore_reason}.")
+                continue
+            room_master_keys.add(target_room_key) if is_room_master else None
+            row = rooms.get(target_room_key) or RoomRow(
+                room_key=target_room_key,
+                original_room_label=original_room_label,
+                source_file=file_name,
             )
-            row.door_colours_island = _merge_clean_group_text(
-                row.door_colours_island,
-                _first_value(_collect_field(lines, ["Island Bench Base Cupboards & Drawers"])),
-                cleaner=_clean_door_colour_value,
-            )
-            row.door_colours_bar_back = _merge_clean_group_text(
-                row.door_colours_bar_back,
-                _first_value(_collect_field(lines, ["Island Bar Back"])),
-                cleaner=_clean_door_colour_value,
-            )
-            _apply_door_colour_groups(row, row.door_panel_colours)
-            row.toe_kick = _merge_lists(row.toe_kick, _collect_field(lines, ["Toe Kick", "Kickboard", "Island Bench Kickboard"]))
-            row.bulkheads = _merge_lists(row.bulkheads, _collect_field(lines, ["Bulkheads", "Bulkhead"]))
-            row.handles = _merge_lists(row.handles, _clean_handle_entries(_collect_field(lines, ["Handles", "Handle", "Base Cabinet Handles", "Overhead Handles"])))
-            row.sink_info = _merge_text(row.sink_info, _first_value(_collect_field(lines, ["Sink Type/Model", "Sink Type", "Drop in Tub", "Sink"])))
-            basin_value = _first_value(_collect_field(lines, ["Vanity Inset Basin"])) or _first_value(_collect_field(lines, ["Basin"]))
-            row.basin_info = _merge_text(row.basin_info, basin_value)
-            row.tap_info = _merge_text(row.tap_info, _first_value(_collect_field(lines, ["Vanity Tap Style", "Tap Type", "Tap Style", "Sink Mixer", "Pull-Out Mixer", "Mixer"])))
-            row.drawers_soft_close = merge_soft_close_values(row.drawers_soft_close, _extract_soft_close(lines, "drawer"))
-            row.hinges_soft_close = merge_soft_close_values(row.hinges_soft_close, _extract_soft_close(lines, "hinge"))
-            row.splashback = row.splashback or _first_value(_collect_field(lines, ["Splashback"]))
-            row.flooring = row.flooring or _first_value(_collect_field(lines, ["Flooring"]))
-            row.page_refs = row.page_refs or _guess_page_refs(chunk, pages)
-            row.evidence_snippet = row.evidence_snippet or chunk[:300]
-            row.confidence = max(row.confidence, 0.55)
-            rooms[room_key] = row
+            _merge_room_section_into_row(row, lines, chunk, file_name, pages)
+            rooms[target_room_key] = row
         appliances.extend(_extract_appliances(full_text, file_name, pages))
         flooring_text = _extract_global_value(full_text, "flooring")
         splashback_text = _extract_global_value(full_text, "splashback")
@@ -571,7 +645,13 @@ def parse_documents(
         builder_name=builder_name,
         source_kind=source_kind,
         generated_at=utc_now_iso(),
-        analysis=AnalysisMeta(parser_strategy=cleaning_rules.global_parser_strategy()),
+        analysis=AnalysisMeta(
+            parser_strategy=cleaning_rules.global_parser_strategy(),
+            room_master_file=room_master_file,
+            room_master_reason=room_master_reason,
+            supplement_files=supplement_files,
+            ignored_room_like_lines_count=ignored_room_like_lines_count,
+        ),
         rooms=list(rooms.values()),
         appliances=_dedupe_appliances(appliances),
         others={
@@ -582,6 +662,59 @@ def parse_documents(
         source_documents=source_documents,
     )
     return apply_snapshot_cleaning_rules(payload.model_dump(), rule_flags=rule_flags)
+
+
+def _merge_room_section_into_row(
+    row: RoomRow,
+    lines: list[str],
+    chunk: str,
+    file_name: str,
+    pages: list[dict[str, object]],
+) -> None:
+    generic_bench_tops = _collect_field(lines, ["Bench Tops", "Benchtop"])
+    wall_run_bench_top = _first_value(_collect_field(lines, ["Back Benchtops", "Wall Run Bench Top"]))
+    island_bench_top = _first_value(_collect_field(lines, ["Island Benchtop", "Island Bench Top"]))
+    row.bench_tops_wall_run = _merge_text(row.bench_tops_wall_run, wall_run_bench_top)
+    row.bench_tops_island = _merge_text(row.bench_tops_island, island_bench_top)
+    row.bench_tops_other = _merge_text(row.bench_tops_other, " | ".join(generic_bench_tops))
+    if wall_run_bench_top:
+        generic_bench_tops.append(f"Back Benchtops {wall_run_bench_top}")
+    if island_bench_top:
+        generic_bench_tops.append(f"Island Benchtop {island_bench_top}")
+    row.bench_tops = _merge_lists(row.bench_tops, _unique(generic_bench_tops))
+    row.door_panel_colours = _merge_lists(row.door_panel_colours, _collect_field(lines, ["Door/Panel Colour", "Door/Panel Colours", "Door Colour"]))
+    row.door_colours_overheads = _merge_clean_group_text(row.door_colours_overheads, _first_value(_collect_field(lines, ["Overhead Cupboards"])), cleaner=_clean_door_colour_value)
+    row.door_colours_base = _merge_clean_group_text(
+        row.door_colours_base,
+        _first_value(_collect_field(lines, ["Base Cupboards & Drawers", "Floor Mounted Vanity"])),
+        cleaner=_clean_door_colour_value,
+    )
+    row.door_colours_island = _merge_clean_group_text(
+        row.door_colours_island,
+        _first_value(_collect_field(lines, ["Island Bench Base Cupboards & Drawers"])),
+        cleaner=_clean_door_colour_value,
+    )
+    row.door_colours_bar_back = _merge_clean_group_text(
+        row.door_colours_bar_back,
+        _first_value(_collect_field(lines, ["Island Bar Back"])),
+        cleaner=_clean_door_colour_value,
+    )
+    _apply_door_colour_groups(row, row.door_panel_colours)
+    row.toe_kick = _merge_lists(row.toe_kick, _collect_field(lines, ["Toe Kick", "Kickboard", "Island Bench Kickboard"]))
+    row.bulkheads = _merge_lists(row.bulkheads, _collect_field(lines, ["Bulkheads", "Bulkhead"]))
+    row.handles = _merge_lists(row.handles, _clean_handle_entries(_collect_field(lines, ["Handles", "Handle", "Base Cabinet Handles", "Overhead Handles"])))
+    row.sink_info = _merge_text(row.sink_info, _first_value(_collect_field(lines, ["Sink Type/Model", "Sink Type", "Drop in Tub", "Sink"])))
+    basin_value = _first_value(_collect_field(lines, ["Vanity Inset Basin"])) or _first_value(_collect_field(lines, ["Basin"]))
+    row.basin_info = _merge_text(row.basin_info, basin_value)
+    row.tap_info = _merge_text(row.tap_info, _first_value(_collect_field(lines, ["Vanity Tap Style", "Tap Type", "Tap Style", "Sink Mixer", "Pull-Out Mixer", "Mixer"])))
+    row.drawers_soft_close = merge_soft_close_values(row.drawers_soft_close, _extract_soft_close(lines, "drawer"))
+    row.hinges_soft_close = merge_soft_close_values(row.hinges_soft_close, _extract_soft_close(lines, "hinge"))
+    row.splashback = row.splashback or _first_value(_collect_field(lines, ["Splashback"]))
+    row.flooring = row.flooring or _first_value(_collect_field(lines, ["Flooring"]))
+    row.source_file = row.source_file or file_name
+    row.page_refs = row.page_refs or _guess_page_refs(chunk, pages)
+    row.evidence_snippet = row.evidence_snippet or chunk[:300]
+    row.confidence = max(row.confidence, 0.55)
 
 
 def _find_room_sections(text: str) -> list[tuple[str, str]]:

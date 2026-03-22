@@ -26,6 +26,7 @@ def build_spec_snapshot(
     documents = _load_documents(files, role="spec")
     _report_progress(progress_callback, "heuristic", f"Running heuristic extraction on {len(documents)} spec file(s)")
     heuristic = parsing.parse_documents(job_no=job["job_no"], builder_name=builder["name"], source_kind="spec", documents=documents, rule_flags=rule_flags)
+    heuristic_analysis = dict(heuristic.get("analysis") or {})
     ai_result, analysis = _try_openai(
         job,
         builder,
@@ -42,6 +43,10 @@ def build_spec_snapshot(
             "rule_flags": rule_flags,
             "worker_pid": os.getpid(),
             "app_build_id": runtime.APP_BUILD_ID,
+            "room_master_file": heuristic_analysis.get("room_master_file", ""),
+            "room_master_reason": heuristic_analysis.get("room_master_reason", ""),
+            "supplement_files": heuristic_analysis.get("supplement_files", []),
+            "ignored_room_like_lines_count": heuristic_analysis.get("ignored_room_like_lines_count", 0),
         }
     )
     if ai_result:
@@ -87,6 +92,7 @@ def build_drawing_snapshot(
     documents = _load_documents(files, role="drawing")
     _report_progress(progress_callback, "heuristic", f"Running heuristic extraction on {len(documents)} drawing file(s)")
     heuristic = parsing.parse_documents(job_no=job["job_no"], builder_name=builder["name"], source_kind="drawing", documents=documents, rule_flags=rule_flags)
+    heuristic_analysis = dict(heuristic.get("analysis") or {})
     ai_result, analysis = _try_openai(
         job,
         builder,
@@ -103,6 +109,10 @@ def build_drawing_snapshot(
             "rule_flags": rule_flags,
             "worker_pid": os.getpid(),
             "app_build_id": runtime.APP_BUILD_ID,
+            "room_master_file": heuristic_analysis.get("room_master_file", ""),
+            "room_master_reason": heuristic_analysis.get("room_master_reason", ""),
+            "supplement_files": heuristic_analysis.get("supplement_files", []),
+            "ignored_room_like_lines_count": heuristic_analysis.get("ignored_room_like_lines_count", 0),
         }
     )
     if ai_result:

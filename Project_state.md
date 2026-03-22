@@ -26,6 +26,7 @@
   - extraction diagnostics showing heuristic/OpenAI mode
   - global `37016`-style conservative parsing profile for all builders
   - source-driven room detection for all builders, with same-room-only merge behavior across pages/files
+  - automatic `room master` selection for multi-file spec jobs, with supplement files limited to enriching rooms defined by the room-master document
   - snapshot and run metadata now record parser strategy, worker PID, and app build ID
   - single-worker lease guard to prevent stale local worker processes from racing newer code on queued jobs
   - legacy builder-rules routes retired from the UI and redirected back to the Builders page
@@ -89,6 +90,7 @@
 - Continue tightening handle cleanup for AI-merged Yellowwood rows where verbose combined handle descriptions still appear
 - Continue tightening noisy field cleanup inside the fixed global conservative profile without reintroducing per-builder configuration
 - Continue tightening Clarendon field wording so kitchen/bathroom/laundry text stays close to the accepted `37016` readability standard without relying on manual snapshot restores or fixed room buckets
+- Continue refining room-master scoring for builders that use multiple spec files so the joinery schedule file consistently wins over appliance/fixture miscellany files
 - Extend deterministic model-page probing beyond the currently supported appliance brand patterns
 - Expand model-number coverage for more appliance naming patterns beyond the current explicit rules
 - Build the future comparison UI and diff logic

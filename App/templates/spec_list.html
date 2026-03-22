@@ -33,7 +33,16 @@
       <li><strong>Rooms:</strong> {{ raw_spec_rooms|length }}</li>
       <li><strong>Appliances:</strong> {{ raw_spec_appliances|length }}</li>
       <li><strong>Warnings:</strong> {{ raw_spec_warnings|length }}</li>
+      <li><strong>Room master file:</strong> {{ raw_analysis.room_master_file or "Single-file parse" }}</li>
+      <li><strong>Supplement files:</strong> {{ raw_analysis.supplement_files|join(", ") if raw_analysis.supplement_files else "None" }}</li>
+      <li><strong>Ignored unmatched room-like lines:</strong> {{ raw_analysis.ignored_room_like_lines_count }}</li>
     </ul>
+    {% if raw_analysis.room_master_reason %}
+    <div class="subcard">
+      <h4>Room Master Reason</h4>
+      <p class="muted">{{ raw_analysis.room_master_reason }}</p>
+    </div>
+    {% endif %}
     {% if raw_analysis.note %}
     <div class="subcard">
       <h4>Analysis Note</h4>
@@ -49,6 +58,7 @@
         <thead>
           <tr>
             <th>Role</th>
+            <th>Room Role</th>
             <th>File Name</th>
             <th>Pages</th>
           </tr>
@@ -57,11 +67,12 @@
           {% for row in raw_source_documents %}
           <tr>
             <td>{{ row.role }}</td>
+            <td>{{ row.room_role or "-" }}</td>
             <td>{{ row.file_name }}</td>
             <td>{{ row.page_count }}</td>
           </tr>
           {% else %}
-          <tr><td colspan="3" class="empty-cell">No source document entries.</td></tr>
+          <tr><td colspan="4" class="empty-cell">No source document entries.</td></tr>
           {% endfor %}
         </tbody>
       </table>

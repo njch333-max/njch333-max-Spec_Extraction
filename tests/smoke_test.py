@@ -1134,6 +1134,59 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(rooms["main_bathroom"]["basin_info"], "Bathroom Basin")
         self.assertEqual(rooms["powder_room_3"]["tap_info"], "Powder Tap")
 
+    def test_parse_documents_uses_room_master_file_for_multifile_clarendon(self) -> None:
+        snapshot = parse_documents(
+            job_no="37868",
+            builder_name="Clarendon",
+            source_kind="spec",
+            documents=[
+                {
+                    "file_name": "drawings-and-colours.pdf",
+                    "role": "spec",
+                    "pages": [
+                        {
+                            "page_no": 1,
+                            "text": (
+                                "KITCHEN COLOUR SCHEDULE\n"
+                                "Bench Tops Quantum Zero Bella Carrara - 20MM Pencil Round Edge\n"
+                                "VANITIES COLOUR SCHEDULE\n"
+                                "Bench Tops Quantum Zero Luna White - 20MM Pencil Round Edge\n"
+                            ),
+                            "needs_ocr": False,
+                        }
+                    ],
+                },
+                {
+                    "file_name": "colours-afc.pdf",
+                    "role": "spec",
+                    "pages": [
+                        {
+                            "page_no": 1,
+                            "text": (
+                                "Main Bathroom\n"
+                                "Vanity Inset Basin JOHNSON SUISSE Emilia Basin (JBSE250.PW6)\n"
+                                "Laundry Door Glazing: CLEAR GLAZING\n"
+                                "Vanity Waste Colour: CHROME POP UP\n"
+                                "Powder Room 3: TRANSLUCENT LAMINATE P/C Windows & Doors\n"
+                            ),
+                            "needs_ocr": False,
+                        }
+                    ],
+                },
+            ],
+        )
+        rooms = {row["room_key"]: row for row in snapshot["rooms"]}
+        analysis = snapshot["analysis"]
+        warning_text = " | ".join(snapshot["warnings"])
+        self.assertEqual(set(rooms.keys()), {"kitchen", "vanities"})
+        self.assertEqual(analysis["room_master_file"], "drawings-and-colours.pdf")
+        self.assertIn("drawings-and-colours.pdf selected as room master", analysis["room_master_reason"])
+        self.assertEqual(analysis["supplement_files"], ["colours-afc.pdf"])
+        self.assertGreaterEqual(analysis["ignored_room_like_lines_count"], 1)
+        self.assertTrue(str(rooms["vanities"]["basin_info"]).startswith("Johnson Suisse Emilia"))
+        self.assertIn("Ignored room-like section", warning_text)
+        self.assertNotIn("Laundry Door", " ".join(rooms.keys()))
+
     def test_builder_defaults_to_global_conservative_for_all_builders(self) -> None:
         clarendon_id = store.create_builder("Clarendon", "clarendon", "")
         yellowwood_id = store.create_builder("Yellowwood", "yellowwood", "")
@@ -1165,6 +1218,10 @@ class SmokeTest(unittest.TestCase):
                 "note": "OpenAI result merged with heuristic parsing.",
                 "worker_pid": 4242,
                 "app_build_id": "build-test",
+                "room_master_file": "drawings-and-colours.pdf",
+                "room_master_reason": "drawings-and-colours.pdf selected as room master by schedule density.",
+                "supplement_files": ["colours-afc.pdf"],
+                "ignored_room_like_lines_count": 7,
             },
             "rooms": [],
             "appliances": [],
@@ -1183,6 +1240,8 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("Global Conservative", response.text)
         self.assertIn("build-test", response.text)
         self.assertIn("gpt-4.1-mini", response.text)
+        self.assertIn("drawings-and-colours.pdf", response.text)
+        self.assertIn("Ignored unmatched room-like lines", response.text)
         self.assertIn("requestSubmit()", response.text)
         self.assertNotIn("Upload Specs", response.text)
         self.assertNotIn("Upload Drawings", response.text)

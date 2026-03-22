@@ -123,10 +123,19 @@
       <li><strong>Model:</strong> {{ raw_analysis.openai_model or "Not used" }}</li>
       <li><strong>Worker PID:</strong> {{ raw_analysis.worker_pid or "Not recorded" }}</li>
       <li><strong>Build ID:</strong> {{ raw_analysis.app_build_id or "Not recorded" }}</li>
+      <li><strong>Room master file:</strong> {{ raw_analysis.room_master_file or "Single-file parse" }}</li>
+      <li><strong>Supplement files:</strong> {{ raw_analysis.supplement_files|join(", ") if raw_analysis.supplement_files else "None" }}</li>
+      <li><strong>Ignored unmatched room-like lines:</strong> {{ raw_analysis.ignored_room_like_lines_count }}</li>
       <li><strong>Rooms:</strong> {{ raw_snapshot.rooms|length }}</li>
       <li><strong>Appliances:</strong> {{ raw_snapshot.appliances|length }}</li>
       <li><strong>Warnings:</strong> {{ raw_snapshot.warnings|length }}</li>
     </ul>
+    {% if raw_analysis.room_master_reason %}
+    <div class="subcard">
+      <h4>Room Master Reason</h4>
+      <p class="muted">{{ raw_analysis.room_master_reason }}</p>
+    </div>
+    {% endif %}
     <div class="subcard">
       <h4>Global Extraction Profile</h4>
       <p class="muted">All builders now use the same 37016-style conservative parsing profile. Builder-specific rules are no longer configurable.</p>

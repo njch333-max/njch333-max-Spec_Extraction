@@ -663,12 +663,13 @@ def _source_document_rows(value: Any) -> list[dict[str, str]]:
                     "role": _display_value(item.get("role", "")),
                     "file_name": _display_value(item.get("file_name", "")),
                     "page_count": _display_value(item.get("page_count", "")),
+                    "room_role": _display_value(item.get("room_role", "")),
                 }
             )
             continue
         text = _display_value(item)
         if text:
-            rows.append({"role": "", "file_name": text, "page_count": ""})
+            rows.append({"role": "", "file_name": text, "page_count": "", "room_role": ""})
     return rows
 
 
@@ -862,6 +863,10 @@ def _analysis_from_snapshot(snapshot: dict[str, Any] | None) -> dict[str, Any]:
         "note": analysis.get("note", ""),
         "worker_pid": int(analysis.get("worker_pid", 0) or 0),
         "app_build_id": analysis.get("app_build_id", ""),
+        "room_master_file": str(analysis.get("room_master_file", "") or ""),
+        "room_master_reason": str(analysis.get("room_master_reason", "") or ""),
+        "supplement_files": [str(item) for item in analysis.get("supplement_files", []) if item],
+        "ignored_room_like_lines_count": int(analysis.get("ignored_room_like_lines_count", 0) or 0),
     }
 
 

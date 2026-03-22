@@ -76,6 +76,7 @@
   - OpenAI may fill missing fields and improve sparse evidence
   - OpenAI must not introduce extra room splits or overwrite already-clean fields with noisier text
   - room identity is source-driven for every builder, so only the same detected room merges across pages/files
+  - for multi-file spec jobs, automatically pick one room-master file by schedule density and only let that file define the room set
 11. Merge OpenAI output conservatively: keep the heuristic room set as the primary layout, merge room fields into that layout, and preserve heuristic appliance `model_no` values instead of replacing them with weaker guesses.
 12. For Clarendon-only spec runs, apply a deterministic post-polish stage after source-driven room detection:
   - rebuild stable room text from colour-schedule and fixture pages for each detected room
@@ -131,6 +132,7 @@
   - room rows are created from the actual source heading/label
   - only the same normalized room identity merges across pages/files
   - fixed Clarendon room compaction buckets such as `vanities` and preallocated rooms such as `theatre`/`rumpus` are no longer injected by layout stabilization
+  - in multi-file spec jobs, supplement files cannot create new rooms; unmatched room-like sections are ignored and surfaced through warnings/diagnostics
 
 ## 4. Canonical Schema
 
