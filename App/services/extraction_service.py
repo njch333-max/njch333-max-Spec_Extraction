@@ -684,7 +684,13 @@ CLARENDON_SCHEDULE_PAGE_PATTERNS: tuple[tuple[str, str], ...] = (
 
 CLARENDON_FIELD_STOP_MARKERS = (
     r"BENCHTOP(?: COLOUR \d+)?\s*-",
+    r"BENCHTOPS?\s*-",
     r"DOOR COLOUR(?: \d+)?\s*-",
+    r"DOOR/PANEL COLOUR(?: \d+)?\s*-",
+    r"(?:MIRROR\s+)?SPLASHBACK\s*-",
+    r"KICKBOARDS?\s*-",
+    r"SQUARE EDGE RAILS\s*-",
+    r"BULKHEAD SHADOWLINE\s*-",
     r"THERMOLAMINATE NOTES",
     r"CARCASS",
     r"STANDARD WHITE",
@@ -904,27 +910,18 @@ def _clarendon_schedule_room_key(text: str) -> str:
 
 def _extract_clarendon_schedule_overlay(room_key: str, text: str) -> dict[str, Any]:
     overlay = _blank_clarendon_overlay()
+    template_family = _clarendon_detect_template_family(text)
     benchtop_segments = _extract_clarendon_labeled_segments(
         text,
-        r"BENCHTOP(?: COLOUR \d+)?",
+        r"BENCHTOP(?: COLOUR \d+)?(?:S)?",
         CLARENDON_FIELD_STOP_MARKERS,
     )
     for segment in benchtop_segments:
-        cleaned = _clarendon_clean_benchtop_text(segment)
-        if not cleaned:
-            continue
-        lowered = segment.lower()
-        if room_key == "kitchen" and any(token in lowered for token in ("cooktop run", "wall run", "wall bench", "wall side")):
-            overlay["bench_tops_wall_run"] = parsing._merge_text(overlay["bench_tops_wall_run"], cleaned)
-        elif room_key == "kitchen" and "island" in lowered:
-            overlay["bench_tops_island"] = parsing._merge_text(overlay["bench_tops_island"], cleaned)
-        else:
-            overlay["bench_tops_other"] = parsing._merge_text(overlay["bench_tops_other"], cleaned)
-        overlay["bench_tops"].append(cleaned)
+        _merge_clarendon_benchtop_segment(overlay, room_key, segment, template_family)
 
     door_segments = _extract_clarendon_labeled_segments(
         text,
-        r"DOOR COLOUR(?: \d+)?",
+        r"DOOR(?:/PANEL)? COLOUR(?: \d+)?",
         CLARENDON_FIELD_STOP_MARKERS,
     )
     if door_segments:
@@ -941,6 +938,20 @@ def _extract_clarendon_schedule_overlay(room_key: str, text: str) -> dict[str, A
             overlay["toe_kick"] = parsing._merge_text(overlay["toe_kick"], _clarendon_clean_toe_kick_text(toe_kick))
         if bulkhead:
             overlay["bulkheads"] = parsing._merge_text(overlay["bulkheads"], _clarendon_clean_bulkhead_text(bulkhead))
+    else:
+        toe_kick = _extract_clarendon_single_segment(text, r"KICKBOARDS?", CLARENDON_FIELD_STOP_MARKERS)
+        bulkhead = _extract_clarendon_single_segment(text, r"BULKHEAD SHADOWLINE", CLARENDON_FIELD_STOP_MARKERS)
+        if toe_kick:
+            overlay["toe_kick"] = parsing._merge_text(overlay["toe_kick"], _clarendon_clean_toe_kick_text(toe_kick))
+        if bulkhead:
+            overlay["bulkheads"] = parsing._merge_text(overlay["bulkheads"], _clarendon_clean_bulkhead_text(bulkhead))
+
+    splashback = _extract_clarendon_single_segment(text, r"(?:MIRROR\s+)?SPLASHBACK", CLARENDON_FIELD_STOP_MARKERS)
+    if splashback:
+        raw_splashback = f"Mirror Splashback - {splashback}" if re.search(r"(?i)\bMIRROR\s+SPLASHBACK\s*-", text) else splashback
+        cleaned_splashback = _clarendon_clean_splashback_text(raw_splashback, room_key=room_key)
+        if cleaned_splashback:
+            overlay["splashback"] = parsing._merge_text(overlay["splashback"], cleaned_splashback)
 
     handle_segments = _extract_clarendon_handle_segments(text)
     overlay["handles"] = _clarendon_merge_unique_list(overlay["handles"], handle_segments)
@@ -952,6 +963,63 @@ def _extract_clarendon_schedule_overlay(room_key: str, text: str) -> dict[str, A
     if drawers_segment:
         overlay["drawers_soft_close"] = parsing.normalize_soft_close_value(drawers_segment, keyword="drawer") or parsing.normalize_soft_close_value(drawers_segment)
     return overlay
+
+
+def _clarendon_detect_template_family(text: str) -> str:
+    lowered = parsing.normalize_space(text).lower()
+    if any(marker in lowered for marker in ("square edge handleless", "mirror splashback", "door/panel colour", "tightform edge laminate")):
+        return "luxe_single_line"
+    return "reference_37016"
+
+
+def _merge_clarendon_benchtop_segment(overlay: dict[str, Any], room_key: str, segment: str, template_family: str) -> None:
+    cleaned = _clarendon_clean_benchtop_text(segment)
+    if not cleaned:
+        return
+    lowered = parsing.normalize_space(segment).lower()
+    if room_key == "kitchen":
+        extracted = _extract_clarendon_kitchen_benchtops(segment, template_family)
+        if extracted["wall_run"]:
+            overlay["bench_tops_wall_run"] = parsing._merge_text(overlay["bench_tops_wall_run"], extracted["wall_run"])
+        if extracted["island"]:
+            overlay["bench_tops_island"] = parsing._merge_text(overlay["bench_tops_island"], extracted["island"])
+        if extracted["other"]:
+            overlay["bench_tops_other"] = parsing._merge_text(overlay["bench_tops_other"], extracted["other"])
+        if any(extracted.values()):
+            for value in extracted.values():
+                if value:
+                    overlay["bench_tops"].append(value)
+            return
+    if room_key == "kitchen" and any(token in lowered for token in ("cooktop run", "wall run", "wall bench", "wall side")):
+        overlay["bench_tops_wall_run"] = parsing._merge_text(overlay["bench_tops_wall_run"], cleaned)
+    elif room_key == "kitchen" and "island" in lowered:
+        overlay["bench_tops_island"] = parsing._merge_text(overlay["bench_tops_island"], cleaned)
+    else:
+        overlay["bench_tops_other"] = parsing._merge_text(overlay["bench_tops_other"], cleaned)
+    overlay["bench_tops"].append(cleaned)
+
+
+def _extract_clarendon_kitchen_benchtops(segment: str, template_family: str) -> dict[str, str]:
+    result = {"wall_run": "", "island": "", "other": ""}
+    normalized = parsing.normalize_space(segment)
+    if not normalized:
+        return result
+    if template_family != "luxe_single_line":
+        return result
+    match = re.search(
+        r"(?is)^(?P<material>.+?)\s*-\s*(?P<wall>.+?)\s*-\s*TO\s+(?:THE\s+)?(?:COOKTOP RUN|WALL RUN|WALL BENCH|WALL SIDE)\s*(?:/|$)\s*(?P<island>.+?)\s*-\s*TO\s+(?:THE\s+)?ISLAND(?:\s+BENCH(?:TOP)?)?(?P<tail>.*)$",
+        normalized,
+    )
+    if not match:
+        return result
+    material = _clarendon_clean_benchtop_text(match.group("material"))
+    wall_detail = _clarendon_inline_text(match.group("wall"))
+    island_detail = _clarendon_inline_text(f"{match.group('island')} {match.group('tail')}")
+    if material and wall_detail:
+        result["wall_run"] = _clarendon_clean_benchtop_text(f"{material} - {wall_detail}")
+    if material and island_detail:
+        result["island"] = _clarendon_clean_benchtop_text(f"{material} - {island_detail}")
+    return result
 
 
 def _extract_clarendon_fixture_overlays(text: str) -> dict[str, dict[str, Any]]:
@@ -1214,6 +1282,13 @@ def _clarendon_clean_note_text(value: Any) -> str:
 def _clarendon_clean_splashback_text(value: Any, room_key: str = "") -> str:
     text = parsing._string_value(value)
     text = _clarendon_strip_metadata(text)
+    if re.search(r"(?i)\bmirror splashback\b", text):
+        text = re.sub(r"(?i)^mirror splashback\s*:?\s*-?\s*", "", text)
+        text = parsing.normalize_brand_casing_text(text)
+        text = _clarendon_to_readable_text(text)
+        text = _clarendon_inline_text(text)
+        text = re.sub(r"(?i)\bkickboards?\b.*$", "", text).strip(" -;,")
+        return f"Mirror Splashback - {text}" if text else "Mirror Splashback"
     if re.search(r"(?i)\bBY OTHERS\b", text) or re.search(r"(?i)\bBY OTHERS\d", text) or re.search(r"(?i)\bBEAUMONT TILES\b", text):
         if room_key in {"kitchen", "laundry"}:
             return "Tiled splashback by others"
@@ -1238,6 +1313,8 @@ def _clarendon_clean_handles(value: Any) -> list[str]:
         text = _clarendon_strip_metadata(entry)
         if any(noise in text.lower() for noise in CLARENDON_EXTERNAL_HANDLE_NOISE):
             continue
+        text = re.sub(r"(?i)\*\s*NOTE\s*:.*$", "", text)
+        text = re.sub(r"(?i)\b10MM DOOR OVERHANG TO UPPER CABINETS\b.*$", "", text)
         text = re.sub(r"(?i)\s*-\s*\d+MM\s+IN\s+AND\s+\d+MM\s+UP\s*/?\s*DOWN\s+TO\s+DOORS\b.*$", "", text)
         text = re.sub(r"(?i)\s*-\s*DOOR LOCATION\s*:.*$", "", text)
         text = re.sub(r"(?i)\s*DRAWER LOCATION\s*:.*$", "", text)

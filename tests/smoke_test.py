@@ -459,6 +459,110 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(rooms["laundry"]["splashback"], "Tiled splashback by others")
         self.assertTrue(str(rooms["laundry"]["tap_info"]).startswith("Pina Sink Mixer Gooseneck"))
 
+    def test_clarendon_reference_polish_handles_luxe_single_line_schedule_family(self) -> None:
+        snapshot = {
+            "job_no": "37868",
+            "builder_name": "Clarendon",
+            "source_kind": "spec",
+            "generated_at": "2026-03-22T00:00:00+00:00",
+            "analysis": {"mode": "openai_merged", "parser_strategy": "global_conservative"},
+            "rooms": [
+                {"room_key": "kitchen", "original_room_label": "Kitchen", "bench_tops": ["noisy"], "bench_tops_wall_run": "", "bench_tops_island": "", "bench_tops_other": "noisy", "door_panel_colours": [], "door_colours_overheads": "", "door_colours_base": "", "door_colours_island": "", "door_colours_bar_back": "", "toe_kick": [], "bulkheads": [], "handles": [], "drawers_soft_close": "", "hinges_soft_close": "", "splashback": "", "flooring": "", "sink_info": "", "basin_info": "", "tap_info": "", "source_file": "schedule.pdf", "page_refs": "1", "evidence_snippet": "", "confidence": 0.6},
+                {"room_key": "butlers_pantry", "original_room_label": "Butler's Pantry", "bench_tops": ["noisy"], "bench_tops_wall_run": "", "bench_tops_island": "", "bench_tops_other": "noisy", "door_panel_colours": [], "door_colours_overheads": "", "door_colours_base": "", "door_colours_island": "", "door_colours_bar_back": "", "toe_kick": [], "bulkheads": [], "handles": [], "drawers_soft_close": "", "hinges_soft_close": "", "splashback": "", "flooring": "", "sink_info": "", "basin_info": "", "tap_info": "", "source_file": "schedule.pdf", "page_refs": "2", "evidence_snippet": "", "confidence": 0.6},
+                {"room_key": "vanities", "original_room_label": "Vanities", "bench_tops": ["noisy"], "bench_tops_wall_run": "", "bench_tops_island": "", "bench_tops_other": "noisy", "door_panel_colours": [], "door_colours_overheads": "", "door_colours_base": "", "door_colours_island": "", "door_colours_bar_back": "", "toe_kick": [], "bulkheads": [], "handles": [], "drawers_soft_close": "", "hinges_soft_close": "", "splashback": "", "flooring": "", "sink_info": "", "basin_info": "", "tap_info": "", "source_file": "schedule.pdf", "page_refs": "3", "evidence_snippet": "", "confidence": 0.6},
+                {"room_key": "laundry", "original_room_label": "Laundry", "bench_tops": ["noisy"], "bench_tops_wall_run": "", "bench_tops_island": "", "bench_tops_other": "noisy", "door_panel_colours": [], "door_colours_overheads": "", "door_colours_base": "", "door_colours_island": "", "door_colours_bar_back": "", "toe_kick": [], "bulkheads": [], "handles": [], "drawers_soft_close": "", "hinges_soft_close": "", "splashback": "", "flooring": "", "sink_info": "", "basin_info": "", "tap_info": "", "source_file": "schedule.pdf", "page_refs": "4", "evidence_snippet": "", "confidence": 0.6},
+            ],
+            "appliances": [],
+            "others": {},
+            "warnings": [],
+        }
+        documents = [
+            {
+                "file_name": "luxe-drawings.pdf",
+                "role": "spec",
+                "pages": [
+                    {
+                        "page_no": 1,
+                        "text": (
+                            "KITCHEN COLOUR SCHEDULE "
+                            "BENCHTOP - QUANTUM ZERO BELLA CARRARA - 20MM PENCIL ROUND EDGE - TO COOKTOP RUN / 40MM MITRED APRON EDGE - TO ISLAND BENCHTOP "
+                            "WATERFALL ENDS (MITRED JOIN) "
+                            "MIRROR SPLASHBACK - BRONZE MIRRORKOTE "
+                            "DOOR COLOUR - POL YTEC SOFT WALNUT MATT FINISH MELAMINE WITH MATCHING 1MM ABS EDGES (VERTICAL GRAIN DIRECTION) "
+                            "KICKBOARDS - AS POL YTEC CLASSIC WHITE 'MATT' FINISH MELAMINE "
+                            "SQUARE EDGE RAILS - AS POL YTEC CLASSIC WHITE 'MATT' FINISH MELAMINE "
+                            "BULKHEAD SHADOWLINE - AS POL YTEC CLASSIC WHITE 'MATT' FINISH MELAMINE "
+                            "HANDLES - SQUARE EDGE HANDLELESS* NOTE : 10MM DOOR OVERHANG TO UPPER CABINETS "
+                            "DOOR HINGES - HETTICH SOFT CLOSE "
+                            "DRAWER RUNNERS - HETTICH INNOTECH ATIRA SOFT CLOSE RUNNERS"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 2,
+                        "text": (
+                            "BUTLERS PANTRY COLOUR SCHEDULE "
+                            "BENCHTOP - POL YTEC ARGENTO STONE MATT FINISH - 21MM TIGHTFORM EDGE LAMINATE "
+                            "DOOR COLOUR - POL YTEC SOFT WALNUT MATT FINISH MELAMINE WITH MATCHING 1MM ABS EDGES (VERTICAL GRAIN DIRECTION) "
+                            "KICKBOARDS - AS POL YTEC CLASSIC WHITE 'MATT' FINISH MELAMINE "
+                            "BULKHEAD SHADOWLINE - AS POL YTEC CLASSIC WHITE 'MATT' FINISH MELAMINE "
+                            "HANDLES - SQUARE EDGE HANDLELESS* NOTE : 10MM DOOR OVERHANG TO UPPER CABINETS "
+                            "DOOR HINGES - HETTICH SOFT CLOSE"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 3,
+                        "text": (
+                            "VANITIES COLOUR SCHEDULE "
+                            "BENCHTOP - QUANTUM ZERO LUNA WHITE - 20MM PENCIL ROUND EDGE / 140MM MITRED APRON EDGE (POWDER ROOM 3) "
+                            "DOOR/PANEL COLOUR - POL YTEC SOFT WALNUT MATT FINISH MELAMINE WITH MATCHING 1MM ABS EDGES (VERTICAL GRAIN DIRECTION) "
+                            "KICKBOARDS - N/A FLOATING "
+                            "SQUARE EDGE RAILS - AS POL YTEC CLASSIC WHITE 'MATT' FINISH MELAMINE "
+                            "HANDLES - SQUARE EDGE HANDLELESS "
+                            "DOOR HINGES - HETTICH STANDARD HINGES - NOT SOFT CLOSE"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 4,
+                        "text": (
+                            "LAUNDRY COLOUR SCHEDULE "
+                            "BENCHTOP - POL YTEC ARGENTO STONE MATT FINISH - 21MM TIGHTFORM EDGE LAMINATE "
+                            "DOOR COLOUR - POL YTEC SOFT WALNUT MATT FINISH MELAMINE WITH MATCHING 1MM ABS EDGES (VERTICAL GRAIN DIRECTION) "
+                            "KICKBOARDS - AS POL YTEC CLASSIC WHITE MATT FINISH MELAMINE "
+                            "HANDLES - SQUARE EDGE HANDLELESS* NOTE : 10MM DOOR OVERHANG TO UPPER CABINETS "
+                            "DOOR HINGES - HETTICH STANDARD HINGES - NOT SOFT CLOSE "
+                            "SPLASHBACK - TILED SPLASHBACK BY OTHERS"
+                        ),
+                        "needs_ocr": False,
+                    },
+                ],
+            }
+        ]
+        polished = extraction_service._apply_clarendon_reference_polish(
+            snapshot,
+            documents,
+            builder_name="Clarendon",
+            parser_strategy="global_conservative",
+        )
+        rooms = {row["room_key"]: row for row in polished["rooms"]}
+        self.assertEqual(rooms["kitchen"]["bench_tops_wall_run"], "Quantum Zero Bella Carrara - 20MM Pencil Round Edge")
+        self.assertEqual(rooms["kitchen"]["bench_tops_island"], "Quantum Zero Bella Carrara - 40MM Mitred Apron Edge Waterfall Ends (Mitred Join)")
+        self.assertEqual(rooms["kitchen"]["splashback"], "Mirror Splashback - Bronze Mirrorkote")
+        self.assertEqual(rooms["kitchen"]["handles"], ["Square Edge Handleless"])
+        self.assertEqual(rooms["kitchen"]["door_colours_base"], "Polytec Soft Walnut Matt Finish Melamine with Matching 1MM ABS Edges (Vertical Grain Direction)")
+        self.assertEqual(rooms["kitchen"]["hinges_soft_close"], "Soft Close")
+        self.assertEqual(rooms["kitchen"]["drawers_soft_close"], "Soft Close")
+        self.assertEqual(rooms["butlers_pantry"]["bench_tops"], ["Polytec Argento Stone Matt Finish - 21MM Tightform Edge Laminate"])
+        self.assertEqual(rooms["butlers_pantry"]["handles"], ["Square Edge Handleless"])
+        self.assertEqual(rooms["vanities"]["bench_tops"], ["Quantum Zero Luna White - 20MM Pencil Round Edge / 140MM Mitred Apron Edge (Powder Room 3)"])
+        self.assertEqual(rooms["vanities"]["door_colours_base"], "Polytec Soft Walnut Matt Finish Melamine with Matching 1MM ABS Edges (Vertical Grain Direction)")
+        self.assertEqual(rooms["vanities"]["handles"], ["Square Edge Handleless"])
+        self.assertEqual(rooms["laundry"]["bench_tops"], ["Polytec Argento Stone Matt Finish - 21MM Tightform Edge Laminate"])
+        self.assertEqual(rooms["laundry"]["splashback"], "Tiled splashback by others")
+        self.assertEqual(rooms["laundry"]["hinges_soft_close"], "Not Soft Close")
+
     def test_room_fixture_enrichment_splits_door_colours_and_filters_plumbing_appliances(self) -> None:
         documents = [
             {

@@ -136,6 +136,7 @@
 - `room_key` is normalized, `original_room_label` preserves the original label
 - Room rows also carry fixture fields for sinks, basins, and taps plus split door-colour and bench-top display fields.
 - Clarendon rows pass through a deterministic post-polish layer after layout stabilization so handle strings, fixture text, splashback notes, and soft-close fallbacks stay readable without changing the settled room layout.
+- That Clarendon post-polish now detects at least two schedule families: the `37016` reference family and the denser single-line `LUXE / handleless / mirror splashback` family, then applies family-specific field splitting before the shared compact-summary cleanup.
 
 ### Appliances
 - One row per appliance

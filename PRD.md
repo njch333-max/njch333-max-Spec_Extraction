@@ -219,6 +219,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - User can tell from the Job page whether the latest extraction used heuristic parsing only, OpenAI merge, or OpenAI fallback.
 - User can tell from the Job page which global extraction profile, worker PID, and build ID generated the latest snapshot.
 - Clarendon jobs use an additional deterministic post-polish step so repeated parses keep the stable 6-room structure while stripping handle-location noise, fixture line breaks, and noisy field spillover.
+- Clarendon jobs support both the original `37016` schedule family and the denser single-line `handleless / mirror splashback / laminate` family, with the same compact-summary output style.
 - SQLite persists Builders, Jobs, files, run history, raw results, and reviewed results.
 - Worker can process queued spec and drawing runs separately from the web process.
 - Repeated parses should be traceable through recorded parser strategy, worker PID, and app build metadata.
