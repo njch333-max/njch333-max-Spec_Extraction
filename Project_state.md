@@ -74,6 +74,7 @@
 - Secrets must stay outside source control
 - The app should work even when OpenAI is not configured, using heuristic extraction
 - Parse requests should fail fast on the job page if no matching spec or drawing files have been uploaded yet
+- Production upload limits must stay aligned between Nginx and FastAPI, currently at `100 MB`
 - Old snapshots without `analysis` metadata should still render safely in the UI
 - Old snapshots without expanded appliance link fields or bench-top split fields should still render safely in the UI and exports
 - New parse runs always use the fixed global conservative profile

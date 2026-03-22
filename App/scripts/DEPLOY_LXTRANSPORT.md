@@ -37,4 +37,5 @@ curl -I https://spec.lxtransport.online/
 ## Notes
 - Keep `/etc/spec-extraction.env` outside the repo and set real values for `SPEC_EXTRACTION_SECRET_KEY`, admin credentials, and `OPENAI_API_KEY`.
 - `SPEC_EXTRACTION_HTTPS_ONLY=1` must stay enabled in production so session cookies are marked secure behind Nginx HTTPS.
+- Keep `SPEC_EXTRACTION_MAX_UPLOAD_MB` in `/etc/spec-extraction.env` aligned with the Nginx `client_max_body_size` value in `spec.lxtransport.online.nginx.conf`.
 - If `curl -I https://spec.lxtransport.online/` shows a certificate mismatch, finish the `certbot --nginx -d spec.lxtransport.online` step before testing login or uploads.

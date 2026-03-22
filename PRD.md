@@ -150,6 +150,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Keep session cookies scoped to the app domain.
 - Support secure HTTPS-only cookies in production through environment configuration.
 - Keep secrets in environment variables or config files outside source control.
+- Production uploads must support a consistent 100 MB limit through both Nginx and the FastAPI validation layer.
 - Automated test runs must use isolated temporary app data and must never modify the live local job database.
 
 ### 4.12 Frontend Delivery

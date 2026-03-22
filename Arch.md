@@ -163,6 +163,7 @@
 - Recommended production code path: `/opt/spec-extraction`
 - Recommended production data path: `/var/lib/spec-extraction`
 - Recommended environment file: `/etc/spec-extraction.env`
+- Production Nginx and FastAPI upload limits should stay aligned at `100 MB`
 
 ## 7. Implemented Route Map
 - `GET /`: redirect to login or jobs
