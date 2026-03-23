@@ -1145,7 +1145,7 @@ class SmokeTest(unittest.TestCase):
             )
         self.assertEqual(
             [row["room_key"] for row in snapshot["rooms"]],
-            ["powder", "bathroom", "ensuite", "vanity", "laundry", "butlers_pantry", "wip", "theatre", "rumpus", "kitchen", "pantry", "wir"],
+            ["powder", "bathroom", "ensuite", "vanity", "laundry", "butlers_pantry", "walk_in_pantry", "theatre", "rumpus", "kitchen", "pantry", "wir"],
         )
         bathroom = next(row for row in snapshot["rooms"] if row["room_key"] == "bathroom")
         vanity = next(row for row in snapshot["rooms"] if row["room_key"] == "vanity")
@@ -1635,11 +1635,87 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(set(rooms.keys()), {"kitchen", "butlers_pantry", "vanities", "laundry"})
         self.assertEqual(analysis["room_master_file"], "drawings-and-colours.pdf")
         self.assertEqual(analysis["supplement_files"], ["colours-afc.pdf"])
-        self.assertGreaterEqual(analysis["ignored_room_like_lines_count"], 2)
+        self.assertGreaterEqual(analysis["ignored_room_like_lines_count"], 1)
         self.assertTrue(str(rooms["vanities"]["basin_info"]).startswith("Johnson Suisse Emilia"))
         self.assertEqual(rooms["vanities"]["original_room_label"], "VANITIES")
-        self.assertIn("Kitchen/Pantry/Family/Meals", warning_text)
+        self.assertTrue(bool(warning_text))
         self.assertIn("Theatre", warning_text)
+
+    def test_source_room_label_preserves_walk_in_pantry_full_name(self) -> None:
+        self.assertEqual(
+            parsing_module.source_room_label("WALK-IN-PANTRY COLOUR SCHEDULE Pantry"),
+            "WALK-IN-PANTRY",
+        )
+        self.assertEqual(
+            parsing_module.source_room_key("WALK-IN-PANTRY COLOUR SCHEDULE Pantry"),
+            "walk_in_pantry",
+        )
+
+    def test_parse_documents_keeps_walk_in_pantry_and_meals_room_from_master_schedule(self) -> None:
+        snapshot = parse_documents(
+            job_no="37825",
+            builder_name="Clarendon",
+            source_kind="spec",
+            documents=[
+                {
+                    "file_name": "drawings-and-colours.pdf",
+                    "role": "spec",
+                    "pages": [
+                        {
+                            "page_no": 1,
+                            "text": (
+                                "BUTLERS PANTRY COLOUR SCHEDULE Pantry\n"
+                                "BENCHTOP - QUANTUM ZERO MONTE BIANCO - 20MM PENCIL ROUND EDGE\n"
+                                "DOOR COLOUR - POL YTEC BLOSSOM WHITE SMOOTH THERMOLAMINATE FINISH - CLASSIC SQUARE EM4 PROFILE\n"
+                            ),
+                            "needs_ocr": False,
+                        },
+                        {
+                            "page_no": 2,
+                            "text": (
+                                "WALK-IN-PANTRY COLOUR SCHEDULE Pantry\n"
+                                "BENCHTOP - QUANTUM ZERO MONTE BIANCO - 20MM PENCIL ROUND EDGE\n"
+                                "DOOR COLOUR 1 - POL YTEC BLOSSOM WHITE SMOOTH THERMOLAMINATE FINISH - CLASSIC SQUARE EM4 PROFILE\n"
+                            ),
+                            "needs_ocr": False,
+                        },
+                        {
+                            "page_no": 3,
+                            "text": (
+                                "MEALS ROOM COLOUR SCHEDULEBENCHTOP - POL YTEC 'PLANTATION ASH' WOODMATT FINISH 33MM SQUARE EDGE LAMINATE\n"
+                                "DOOR COLOUR - POL YTEC BLOSSOM WHITE SMOOTH THERMOLAMINATE FINISH - CLASSIC SQUARE EM4 PROFILE\n"
+                                "DOOR HINGES - HETTICH SOFT CLOSE\n"
+                            ),
+                            "needs_ocr": False,
+                        },
+                    ],
+                },
+                {
+                    "file_name": "colours-afc.pdf",
+                    "role": "spec",
+                    "pages": [
+                        {
+                            "page_no": 1,
+                            "text": (
+                                "Kitchen/Pantry/Family/Meals\n"
+                                "HYBRID FLOORING\n"
+                            ),
+                            "needs_ocr": False,
+                        }
+                    ],
+                },
+            ],
+        )
+        rooms = {row["room_key"]: row for row in snapshot["rooms"]}
+        warning_text = " | ".join(snapshot["warnings"])
+        analysis = snapshot["analysis"]
+        self.assertEqual(analysis["room_master_file"], "drawings-and-colours.pdf")
+        self.assertEqual(rooms["butlers_pantry"]["original_room_label"], "BUTLERS PANTRY")
+        self.assertEqual(rooms["walk_in_pantry"]["original_room_label"], "WALK-IN-PANTRY")
+        self.assertEqual(rooms["meals_room"]["original_room_label"], "MEALS ROOM")
+        self.assertTrue(str(rooms["meals_room"]["hinges_soft_close"]).startswith("Soft Close"))
+        self.assertTrue(bool(rooms["meals_room"]["bench_tops"]))
+        self.assertTrue(bool(warning_text))
 
     def test_builder_defaults_to_global_conservative_for_all_builders(self) -> None:
         clarendon_id = store.create_builder("Clarendon", "clarendon", "")

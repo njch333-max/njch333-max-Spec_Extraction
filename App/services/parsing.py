@@ -18,12 +18,13 @@ ROOM_ALIASES: dict[str, list[str]] = {
     "kitchen": ["kitchen"],
     "pantry": ["pantry"],
     "butlers_pantry": ["butler's pantry", "butlers pantry", "butler pantry"],
+    "walk_in_pantry": ["walk in pantry", "walk-in-pantry", "wip"],
     "laundry": ["laundry"],
     "robe": ["robe", "robes"],
     "wir": ["walk in robe", "wir"],
-    "wip": ["walk in pantry", "wip"],
     "vanity": ["vanity", "vanities", "ensuite vanity", "bathroom vanity", "powder vanity"],
     "study": ["study"],
+    "meals_room": ["meals room"],
     "rumpus": ["rumpus"],
     "office": ["office"],
     "theatre": ["theatre", "theatre room", "media room"],
@@ -264,6 +265,7 @@ JOINERY_PAGE_HINTS = (
 
 ROOM_SCHEDULE_PATTERNS = (
     r"butler'?s pantry",
+    r"walk[- ]in[- ]pantry",
     r"vanities",
     r"vanity",
     r"main bathroom",
@@ -271,10 +273,11 @@ ROOM_SCHEDULE_PATTERNS = (
     r"ensuite(?:\s+\d+)?",
     r"powder(?:\s+room)?(?:\s+\d+)?",
     r"laundry",
+    r"meals room",
+    r"family room",
     r"kitchen",
     r"pantry",
     r"wip",
-    r"walk in pantry",
     r"robe(?:s)?",
     r"wir",
     r"theatre(?:\s+room)?",
@@ -285,6 +288,7 @@ ROOM_SCHEDULE_PATTERNS = (
 )
 
 ROOM_SCHEDULE_PATTERN = "|".join(sorted(ROOM_SCHEDULE_PATTERNS, key=len, reverse=True))
+ROOM_HEADING_MATCH_PATTERNS = tuple(sorted(ROOM_SCHEDULE_PATTERNS, key=len, reverse=True))
 
 
 def extract_pdf_pages(path: Path) -> list[dict[str, str | bool | int]]:
@@ -370,19 +374,34 @@ def source_room_label(label: str, fallback_key: str = "") -> str:
     text = re.sub(r"(?i)\broom specifications?\b", "", text)
     text = re.sub(r"\s*[:\-]+\s*$", "", text)
     text = normalize_space(text)
+    specific_match = _extract_specific_room_heading(text)
+    if specific_match:
+        return specific_match
     if not text and fallback_key:
         return fallback_key.replace("_", " ").title()
     return text or "Room"
 
 
+def _extract_specific_room_heading(text: str) -> str:
+    for pattern in ROOM_HEADING_MATCH_PATTERNS:
+        match = re.search(rf"(?i)\b{pattern}\b", text)
+        if not match:
+            continue
+        value = normalize_space(match.group(0))
+        if value.lower() == "wip":
+            return "WIP"
+        return value
+    return ""
+
+
 def source_room_key(label: str, fallback_key: str = "") -> str:
     text = source_room_label(label, fallback_key=fallback_key)
     lowered = normalize_space(text).lower()
+    lowered = lowered.replace("-", " ")
     lowered = lowered.replace("&", " and ")
     lowered = re.sub(r"[’']", "", lowered)
     lowered = re.sub(r"\btheatre room\b", "theatre", lowered)
     lowered = re.sub(r"\bmedia room\b", "media room", lowered)
-    lowered = re.sub(r"\bwalk in pantry\b", "wip", lowered)
     lowered = re.sub(r"\bwalk in robe\b", "wir", lowered)
     lowered = re.sub(r"\bbutlers pantry\b", "butlers pantry", lowered)
     lowered = re.sub(r"\bpowder room\b", "powder room", lowered)
@@ -410,9 +429,13 @@ def source_room_key(label: str, fallback_key: str = "") -> str:
         room_no = ensuite_vanity_match.group(1)
         return f"ensuite_{room_no}" if room_no else "ensuite"
     if lowered in {"wip", "walk in pantry"}:
-        return "wip"
+        return "walk_in_pantry"
     if lowered in {"wir", "walk in robe"}:
         return "wir"
+    if lowered in {"meals room"}:
+        return "meals_room"
+    if lowered in {"family room"}:
+        return "family_room"
     if lowered in {"robe", "robes"}:
         return "robe"
     if "main bathroom" in lowered:
@@ -509,7 +532,7 @@ def _is_schedule_room_heading(line: str) -> bool:
     if not text or _looks_like_field_label(text) or len(text) > 80:
         return False
     lowered = text.lower()
-    if not any(token in lowered for token in ("kitchen", "pantry", "laundry", "ensuite", "bathroom", "vanity", "vanities", "powder", "butler", "wip", "theatre", "rumpus", "study", "office", "kitchenette")):
+    if not any(token in lowered for token in ("kitchen", "pantry", "laundry", "ensuite", "bathroom", "vanity", "vanities", "powder", "butler", "wip", "walk", "theatre", "rumpus", "study", "office", "kitchenette", "meals", "family")):
         return False
     stripped = re.sub(r"[^A-Za-z0-9 ]+", "", text)
     return bool(stripped and stripped == stripped.upper())
@@ -643,8 +666,6 @@ def _map_to_existing_master_room(detected_room_key: str, master_room_keys: set[s
         return detected_room_key
     if "vanities" in master_room_keys and any(token in detected_room_key for token in ("vanity", "bathroom", "ensuite", "powder")):
         return "vanities"
-    if "butlers_pantry" in master_room_keys and detected_room_key in {"pantry", "wip"}:
-        return "butlers_pantry"
     return ""
 
 

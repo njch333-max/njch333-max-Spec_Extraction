@@ -77,11 +77,13 @@
   - OpenAI may fill missing fields and improve sparse evidence
   - OpenAI must not introduce extra room splits or overwrite already-clean fields with noisier text
   - room identity is source-driven for every builder, so only the same detected room merges across pages/files
+  - authoritative schedule labels are preserved as the display label, so rooms like `WALK-IN-PANTRY` and `MEALS ROOM` survive normalization without being shortened to generic pantry buckets
   - for multi-file spec jobs, automatically pick one room-master file by schedule density and only let that file define the room set
   - room material fields remain room-local, so supplement files can enrich fixtures/appliances but must not inject another room's material text into the current room
   - grouped rooms such as `Vanities` still follow the same-room-only rule: grouped-room material fields come only from that grouped room's authoritative schedule section, while `vanity`/bathroom fixture pages may contribute fixture fields only
   - room-master detection first normalizes glued schedule headings such as `KITCHEN COLOUR SCHEDULEBENCHTOP...` or `VANITIES COLOUR SCHEDULENOTE...` so the clean heading is extracted before room matching
   - the room-master room set is precomputed before supplement files are parsed, so supplement-file ordering cannot accidentally create extra rooms
+  - composite supplement headings such as `Kitchen/Pantry/Family/Meals` are treated as room-like noise unless the room-master file also contains explicit room-specific schedule pages for those rooms
 11. Merge OpenAI output conservatively: keep the heuristic room set as the primary layout, merge room fields into that layout, and preserve heuristic appliance `model_no` values instead of replacing them with weaker guesses.
 12. For Clarendon-only spec runs, apply a deterministic post-polish stage after source-driven room detection:
   - rebuild stable room text from colour-schedule and fixture pages for each detected room

@@ -32,6 +32,9 @@
   - grouped room-master headings such as `Vanities` remain grouped while supplement bathroom/ensuite/powder fixture pages enrich that grouped room instead of creating extra room rows
   - grouped-room material ownership is now same-room-only, so `Vanities` benchtops and door colours can only come from the authoritative `VANITIES COLOUR SCHEDULE` section while grouped fixture fallback remains limited to basin/tap/sink details
   - supplement-file upload order no longer matters because the room-master room set is precomputed before supplement files are parsed
+  - authoritative schedule labels such as `WALK-IN-PANTRY` and `MEALS ROOM` are now preserved as display labels instead of being shortened to generic pantry names
+  - multi-file Clarendon parsing now keeps `BUTLERS PANTRY` and `WALK-IN-PANTRY` separate when the room-master schedule defines both
+  - composite supplement headings such as `Kitchen/Pantry/Family/Meals` no longer create synthetic rooms; only explicit room-master schedule pages can add rooms like `MEALS ROOM`
   - snapshot and run metadata now record parser strategy, worker PID, and app build ID
   - single-worker lease guard to prevent stale local worker processes from racing newer code on queued jobs
   - online-first deployment helper scripts that push the current repo state to `/opt/spec-extraction`, restart production services, and verify live health
