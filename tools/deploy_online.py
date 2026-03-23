@@ -129,14 +129,14 @@ def run_remote(client: paramiko.SSHClient, command: str, password: str, require_
 def install_staged_files(client: paramiko.SSHClient, staged: list[tuple[str, str, int]], password: str) -> None:
     for stage_path, remote_path, mode in staged:
         remote_dir = posixpath.dirname(remote_path)
-        exit_code, out, err = run_remote(client, f"mkdir -p {remote_dir}", password, require_sudo=True)
+        exit_code, out, err = run_remote(client, f"mkdir -p {remote_dir}", password, require_sudo=False)
         if exit_code != 0:
             raise RuntimeError(f"Failed to create remote directory {remote_dir}: {out}{err}")
         exit_code, out, err = run_remote(
             client,
-            f"install -o ubuntu -g ubuntu -m {mode:o} {stage_path} {remote_path}",
+            f"install -m {mode:o} {stage_path} {remote_path}",
             password,
-            require_sudo=True,
+            require_sudo=False,
         )
         if exit_code != 0:
             raise RuntimeError(f"Failed to install {remote_path}: {out}{err}")

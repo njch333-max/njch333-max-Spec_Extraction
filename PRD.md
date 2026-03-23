@@ -67,6 +67,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Room-master detection must normalize glued headings such as `KITCHEN COLOUR SCHEDULEBENCHTOP...` so only the clean room heading becomes the room label.
 - The room-master room set must be established before supplement files are processed, so supplement-file upload order cannot create extra rooms.
 - If OpenAI is configured, use it to improve structured extraction.
+- The default OpenAI extraction model is `gpt-5.4-mini`; production and local environments should stay aligned unless a deliberate override is documented.
 - All builders must use the fixed `Global Conservative` profile based on the accepted `37016` output style.
 - Under `Global Conservative`, heuristic room structure and cleaning remain primary, room identity is source-driven, OpenAI fills missing fields conservatively, and AI must not inject extra rooms, collapse distinct rooms into broad buckets, or overwrite already-clean room text with noisier duplicates.
 - When OpenAI and heuristic room sets disagree, keep the heuristic room layout as the primary room skeleton and merge AI fields conservatively into that layout so repeated parses of the same spec stay visually stable.

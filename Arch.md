@@ -70,6 +70,7 @@
 6. For Yellowwood-style schedule PDFs, parse room sections page-by-page from joinery schedule pages instead of scanning the whole document blindly, so `Back Benchtops`, island bench fields, vanity colours, and cabinet-only materials are mapped from the correct pages.
 7. Remove plumbing fixtures from appliance rows so they only appear on room rows.
 8. If OpenAI is enabled, send consolidated text and template context for higher-quality structured output.
+   Default model target: `gpt-5.4-mini` unless an environment override is explicitly applied.
 9. Normalize OpenAI text output before JSON parsing so fenced JSON or small prefatory text does not trigger an unnecessary fallback.
 10. Apply the fixed `Global Conservative` profile for every Builder:
   - heuristic room structure and cleaning stay primary

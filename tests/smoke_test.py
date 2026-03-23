@@ -61,13 +61,13 @@ class SmokeTest(unittest.TestCase):
         try:
             env_path.write_text(
                 "SPEC_EXTRACTION_ENABLE_OPENAI=1\n"
-                "SPEC_EXTRACTION_OPENAI_MODEL=gpt-4.1-mini\n"
+                "SPEC_EXTRACTION_OPENAI_MODEL=gpt-5.4-mini\n"
                 "OPENAI_API_KEY=test-openai-key\n",
                 encoding="utf-8",
             )
             runtime = importlib.reload(runtime)
             self.assertTrue(runtime.OPENAI_ENABLED)
-            self.assertEqual(runtime.OPENAI_MODEL, "gpt-4.1-mini")
+            self.assertEqual(runtime.OPENAI_MODEL, "gpt-5.4-mini")
             self.assertEqual(runtime.OPENAI_API_KEY, "test-openai-key")
         finally:
             if original_text is None:
@@ -613,7 +613,7 @@ class SmokeTest(unittest.TestCase):
         with (
             mock.patch.object(extraction_service.runtime, "OPENAI_ENABLED", True),
             mock.patch.object(extraction_service.runtime, "OPENAI_API_KEY", "test-key"),
-            mock.patch.object(extraction_service.runtime, "OPENAI_MODEL", "gpt-4.1-mini"),
+            mock.patch.object(extraction_service.runtime, "OPENAI_MODEL", "gpt-5.4-mini"),
             mock.patch("App.services.extraction_service._post_responses_api", side_effect=RuntimeError("boom")),
         ):
             snapshot = extraction_service.build_spec_snapshot(
@@ -637,7 +637,7 @@ class SmokeTest(unittest.TestCase):
         with (
             mock.patch.object(extraction_service.runtime, "OPENAI_ENABLED", True),
             mock.patch.object(extraction_service.runtime, "OPENAI_API_KEY", "test-key"),
-            mock.patch.object(extraction_service.runtime, "OPENAI_MODEL", "gpt-4.1-mini"),
+            mock.patch.object(extraction_service.runtime, "OPENAI_MODEL", "gpt-5.4-mini"),
             mock.patch("App.services.extraction_service._post_responses_api", return_value=openai_payload),
         ):
             snapshot = extraction_service.build_spec_snapshot(
@@ -658,7 +658,7 @@ class SmokeTest(unittest.TestCase):
         with (
             mock.patch.object(extraction_service.runtime, "OPENAI_ENABLED", True),
             mock.patch.object(extraction_service.runtime, "OPENAI_API_KEY", "test-key"),
-            mock.patch.object(extraction_service.runtime, "OPENAI_MODEL", "gpt-4.1-mini"),
+            mock.patch.object(extraction_service.runtime, "OPENAI_MODEL", "gpt-5.4-mini"),
             mock.patch("App.services.extraction_service._post_responses_api", return_value=openai_payload),
         ):
             snapshot = extraction_service.build_spec_snapshot(
@@ -955,7 +955,7 @@ class SmokeTest(unittest.TestCase):
         with (
             mock.patch.object(extraction_service.runtime, "OPENAI_ENABLED", True),
             mock.patch.object(extraction_service.runtime, "OPENAI_API_KEY", "test-key"),
-            mock.patch.object(extraction_service.runtime, "OPENAI_MODEL", "gpt-4.1-mini"),
+            mock.patch.object(extraction_service.runtime, "OPENAI_MODEL", "gpt-5.4-mini"),
             mock.patch("App.services.extraction_service._load_documents", return_value=[]),
             mock.patch("App.services.extraction_service.parsing.parse_documents", return_value=base_snapshot),
             mock.patch(
@@ -1320,7 +1320,7 @@ class SmokeTest(unittest.TestCase):
                 "parser_strategy": "global_conservative",
                 "openai_attempted": True,
                 "openai_succeeded": True,
-                "openai_model": "gpt-4.1-mini",
+                "openai_model": "gpt-5.4-mini",
                 "note": "OpenAI result merged with heuristic parsing.",
                 "worker_pid": 4242,
                 "app_build_id": "build-test",
@@ -1345,7 +1345,7 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("OpenAI merged", response.text)
         self.assertIn("Global Conservative", response.text)
         self.assertIn("build-test", response.text)
-        self.assertIn("gpt-4.1-mini", response.text)
+        self.assertIn("gpt-5.4-mini", response.text)
         self.assertIn("drawings-and-colours.pdf", response.text)
         self.assertIn("Ignored unmatched room-like lines", response.text)
         self.assertIn("requestSubmit()", response.text)
@@ -1365,7 +1365,7 @@ class SmokeTest(unittest.TestCase):
                 "mode": "openai_merged",
                 "openai_attempted": True,
                 "openai_succeeded": True,
-                "openai_model": "gpt-4.1-mini",
+                "openai_model": "gpt-5.4-mini",
                 "note": "Legacy scalar room fields should still render.",
             },
             "rooms": [
@@ -1522,7 +1522,7 @@ class SmokeTest(unittest.TestCase):
                 "mode": "heuristic_only",
                 "openai_attempted": False,
                 "openai_succeeded": False,
-                "openai_model": "gpt-4.1-mini",
+                "openai_model": "gpt-5.4-mini",
                 "note": "OpenAI is disabled in runtime settings.",
             },
             "rooms": [
