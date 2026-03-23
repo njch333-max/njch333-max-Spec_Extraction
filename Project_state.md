@@ -108,7 +108,8 @@
 - Official appliance lookup and size extraction depend on brand sites and search-result structures that may change over time
 - Old workers can still exist locally, but the app now leases a single active worker at a time and records runtime metadata so stale-code runs are visible
 - The OpenAI Responses integration is optional and depends on valid API credentials and model access
-- The default configured extraction model is `gpt-5.4-mini`; local and production deployments should be kept in sync.
+- The default configured extraction model is `gpt-4.1-mini`; local and production deployments should be kept in sync.
+- Room material fields should remain room-local so supplement files cannot leak another room's benchtop or door-colour text into the current room.
 
 ## Verification Completed
 - Local `.venv` created inside the project

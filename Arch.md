@@ -70,7 +70,7 @@
 6. For Yellowwood-style schedule PDFs, parse room sections page-by-page from joinery schedule pages instead of scanning the whole document blindly, so `Back Benchtops`, island bench fields, vanity colours, and cabinet-only materials are mapped from the correct pages.
 7. Remove plumbing fixtures from appliance rows so they only appear on room rows.
 8. If OpenAI is enabled, send consolidated text and template context for higher-quality structured output.
-   Default model target: `gpt-5.4-mini` unless an environment override is explicitly applied.
+   Default model target: `gpt-4.1-mini` unless an environment override is explicitly applied.
 9. Normalize OpenAI text output before JSON parsing so fenced JSON or small prefatory text does not trigger an unnecessary fallback.
 10. Apply the fixed `Global Conservative` profile for every Builder:
   - heuristic room structure and cleaning stay primary
@@ -78,6 +78,7 @@
   - OpenAI must not introduce extra room splits or overwrite already-clean fields with noisier text
   - room identity is source-driven for every builder, so only the same detected room merges across pages/files
   - for multi-file spec jobs, automatically pick one room-master file by schedule density and only let that file define the room set
+  - room material fields remain room-local, so supplement files can enrich fixtures/appliances but must not inject another room's material text into the current room
   - room-master detection first normalizes glued schedule headings such as `KITCHEN COLOUR SCHEDULEBENCHTOP...` or `VANITIES COLOUR SCHEDULENOTE...` so the clean heading is extracted before room matching
   - the room-master room set is precomputed before supplement files are parsed, so supplement-file ordering cannot accidentally create extra rooms
 11. Merge OpenAI output conservatively: keep the heuristic room set as the primary layout, merge room fields into that layout, and preserve heuristic appliance `model_no` values instead of replacing them with weaker guesses.

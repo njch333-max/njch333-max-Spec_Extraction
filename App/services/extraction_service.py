@@ -659,6 +659,7 @@ CLARENDON_FIELD_STOP_MARKERS = (
     r"BENCHTOPS?\s*-",
     r"DOOR COLOUR(?: \d+)?\s*-",
     r"DOOR/PANEL COLOUR(?: \d+)?\s*-",
+    r"DOORS?/PANELS?\s*-",
     r"(?:MIRROR\s+)?SPLASHBACK\s*-",
     r"KICKBOARDS?\s*-",
     r"SQUARE EDGE RAILS\s*-",
@@ -782,7 +783,9 @@ def _apply_clarendon_reference_polish(
     if parser_strategy not in {"stable_hybrid", cleaning_rules.global_parser_strategy()} or "clarendon" not in builder_name.strip().lower():
         return snapshot
     _report_progress(progress_callback, "clarendon_polish", "Applying Clarendon 37016-style field polish")
-    overlays = _collect_clarendon_polish_overlays(documents)
+    analysis = snapshot.get("analysis") or {}
+    room_master_file = str(analysis.get("room_master_file", "") or "")
+    overlays = _collect_clarendon_polish_overlays(documents, room_master_file=room_master_file)
     polished_rooms = [
         _polish_clarendon_room(dict(room), _select_clarendon_room_overlay(dict(room), overlays))
         for room in snapshot.get("rooms", [])
@@ -805,15 +808,17 @@ def _select_clarendon_room_overlay(room: dict[str, Any], overlays: dict[str, dic
     return overlay if _clarendon_overlay_has_content(overlay) else {}
 
 
-def _collect_clarendon_polish_overlays(documents: list[dict[str, object]]) -> dict[str, dict[str, Any]]:
+def _collect_clarendon_polish_overlays(documents: list[dict[str, object]], room_master_file: str = "") -> dict[str, dict[str, Any]]:
     overlays: dict[str, dict[str, Any]] = {}
     for document in documents:
+        file_name = str(document.get("file_name", ""))
+        material_allowed = not room_master_file or file_name == room_master_file
         for page in document.get("pages", []):
             text = parsing.normalize_space(str(page.get("text") or ""))
             if not text:
                 continue
             schedule_room_key = _clarendon_schedule_room_key(_clarendon_spacing_normalize(text))
-            if schedule_room_key:
+            if schedule_room_key and material_allowed:
                 _merge_clarendon_overlay(
                     overlays.setdefault(schedule_room_key, _blank_clarendon_overlay()),
                     _extract_clarendon_schedule_overlay(schedule_room_key, text),
@@ -1020,8 +1025,6 @@ def _extract_clarendon_kitchen_benchtops(segment: str, template_family: str) -> 
     result = {"wall_run": "", "island": "", "other": ""}
     normalized = parsing.normalize_space(segment)
     if not normalized:
-        return result
-    if template_family != "luxe_single_line":
         return result
     match = re.search(
         r"(?is)^(?P<material>.+?)\s*-\s*(?P<wall>.+?)\s*-\s*TO\s+(?:THE\s+)?(?:COOKTOP RUN|WALL RUN|WALL BENCH|WALL SIDE)\s*(?:/|$)\s*(?P<island>.+?)\s*-\s*TO\s+(?:THE\s+)?ISLAND(?:\s+BENCH(?:TOP)?)?(?P<tail>.*)$",

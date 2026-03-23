@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 
 from App.main import _flatten_rooms, app
-from App.services import extraction_service, store
+from App.services import extraction_service, parsing as parsing_module, store
 from App.services.appliance_official import _build_direct_product_candidates, _extract_size_from_text, _primary_model_token
 from App.services.parsing import enrich_snapshot_rooms, parse_documents
 
@@ -61,13 +61,13 @@ class SmokeTest(unittest.TestCase):
         try:
             env_path.write_text(
                 "SPEC_EXTRACTION_ENABLE_OPENAI=1\n"
-                "SPEC_EXTRACTION_OPENAI_MODEL=gpt-5.4-mini\n"
+                "SPEC_EXTRACTION_OPENAI_MODEL=gpt-4.1-mini\n"
                 "OPENAI_API_KEY=test-openai-key\n",
                 encoding="utf-8",
             )
             runtime = importlib.reload(runtime)
             self.assertTrue(runtime.OPENAI_ENABLED)
-            self.assertEqual(runtime.OPENAI_MODEL, "gpt-5.4-mini")
+            self.assertEqual(runtime.OPENAI_MODEL, "gpt-4.1-mini")
             self.assertEqual(runtime.OPENAI_API_KEY, "test-openai-key")
         finally:
             if original_text is None:
@@ -209,6 +209,134 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("Quantum Zero Midnight Black - 20mm pencil round edge", room["bench_tops_wall_run"])
         self.assertIn("Quantum Zero Venatino Statuario - 40mm mitred apron edge", room["bench_tops_island"])
         self.assertEqual(room["door_panel_colours"][0], "Polytec Classic White Matt Finish Thermolaminate")
+
+    def test_parser_splits_inline_kitchen_benchtop_sentence_into_wall_run_and_island(self) -> None:
+        snapshot = parse_documents(
+            job_no="37050",
+            builder_name="Clarendon",
+            source_kind="spec",
+            documents=[
+                {
+                    "file_name": "clarendon-kitchen.txt",
+                    "role": "spec",
+                    "pages": [
+                        {
+                            "page_no": 1,
+                            "text": (
+                                "Kitchen\n"
+                                "Benchtop - Quantum Zero White Swirl - 20MM Pencil Round Edge - TO Cooktop Run / "
+                                "40MM Mitred Apron Edge - TO Island Bench\n"
+                            ),
+                            "needs_ocr": False,
+                        }
+                    ],
+                }
+            ],
+        )
+        room = snapshot["rooms"][0]
+        self.assertEqual(room["bench_tops_wall_run"], "Quantum Zero White Swirl - 20MM Pencil Round Edge")
+        self.assertEqual(room["bench_tops_island"], "Quantum Zero White Swirl - 40MM Mitred Apron Edge")
+        self.assertIn("Back Benchtops Quantum Zero White Swirl - 20MM Pencil Round Edge", room["bench_tops"])
+        self.assertIn("Island Benchtop Quantum Zero White Swirl - 40MM Mitred Apron Edge", room["bench_tops"])
+
+    def test_parser_stops_benchtop_before_doors_panels_field(self) -> None:
+        snapshot = parse_documents(
+            job_no="37051",
+            builder_name="Clarendon",
+            source_kind="spec",
+            documents=[
+                {
+                    "file_name": "vanities.txt",
+                    "role": "spec",
+                    "pages": [
+                        {
+                            "page_no": 1,
+                            "text": (
+                                "Vanities\n"
+                                "Benchtop Quantum Zero Luna White - 20MM Pencil Round Edge / 140MM Mitred Apron Edge - to Powder Room 2\n"
+                                "Doors/Panels - Polytec Jamaican Oak Matt Finish Melamine with Matching 1MM ABS Edges (Vertical Grain Direction)\n"
+                            ),
+                            "needs_ocr": False,
+                        }
+                    ],
+                }
+            ],
+        )
+        room = snapshot["rooms"][0]
+        self.assertNotIn("Doors/Panels", " ".join(room["bench_tops"]))
+        self.assertNotIn("Polytec Jamaican Oak", " ".join(room["bench_tops"]))
+        self.assertIn("Polytec Jamaican Oak Matt Finish Melamine with Matching 1MM ABS Edges", room["door_colours_base"])
+        self.assertEqual(room["door_colours_overheads"], "")
+
+    def test_multi_file_parse_keeps_room_materials_from_room_master_only(self) -> None:
+        snapshot = parse_documents(
+            job_no="37052",
+            builder_name="Clarendon",
+            source_kind="spec",
+            documents=[
+                {
+                    "file_name": "supplement.pdf",
+                    "role": "spec",
+                    "pages": [
+                        {
+                            "page_no": 1,
+                            "text": (
+                                "Kitchen\n"
+                                "Benchtop Wrong Stone 40mm\n"
+                                "Sink Type/Model Franke Box Sink\n"
+                            ),
+                            "needs_ocr": False,
+                        }
+                    ],
+                },
+                {
+                    "file_name": "master.pdf",
+                    "role": "spec",
+                    "pages": [
+                        {
+                            "page_no": 1,
+                            "text": (
+                                "KITCHEN COLOUR SCHEDULE\n"
+                                "Benchtop Master Stone 20mm Pencil Round Edge\n"
+                            ),
+                            "needs_ocr": False,
+                        }
+                    ],
+                },
+            ],
+        )
+        room = snapshot["rooms"][0]
+        self.assertIn("Master Stone 20mm Pencil Round Edge", " ".join(room["bench_tops"]))
+        self.assertNotIn("Wrong Stone", " ".join(room["bench_tops"]))
+        self.assertIn("Franke Box", room["sink_info"])
+
+    def test_labeled_appliance_details_do_not_jump_to_next_row_context(self) -> None:
+        snapshot = parse_documents(
+            job_no="37053",
+            builder_name="Clarendon",
+            source_kind="spec",
+            documents=[
+                {
+                    "file_name": "appliance-table.txt",
+                    "role": "spec",
+                    "pages": [
+                        {
+                            "page_no": 1,
+                            "text": (
+                                "Rangehood:\n"
+                                "Westinghouse\n"
+                                "HP280L\n"
+                            ),
+                            "needs_ocr": False,
+                        }
+                    ],
+                }
+            ],
+        )
+        self.assertEqual(snapshot["appliances"][0]["appliance_type"], "Rangehood")
+        self.assertEqual(snapshot["appliances"][0]["make"], "Westinghouse")
+        self.assertEqual(snapshot["appliances"][0]["model_no"], "")
+        self.assertEqual(parsing_module._limit_appliance_details_to_local_context("Westinghouse\nHP280L\n"), "Westinghouse")
 
     def test_clarendon_reference_polish_rebuilds_clean_room_fields(self) -> None:
         snapshot = {
@@ -613,7 +741,7 @@ class SmokeTest(unittest.TestCase):
         with (
             mock.patch.object(extraction_service.runtime, "OPENAI_ENABLED", True),
             mock.patch.object(extraction_service.runtime, "OPENAI_API_KEY", "test-key"),
-            mock.patch.object(extraction_service.runtime, "OPENAI_MODEL", "gpt-5.4-mini"),
+            mock.patch.object(extraction_service.runtime, "OPENAI_MODEL", "gpt-4.1-mini"),
             mock.patch("App.services.extraction_service._post_responses_api", side_effect=RuntimeError("boom")),
         ):
             snapshot = extraction_service.build_spec_snapshot(
@@ -637,7 +765,7 @@ class SmokeTest(unittest.TestCase):
         with (
             mock.patch.object(extraction_service.runtime, "OPENAI_ENABLED", True),
             mock.patch.object(extraction_service.runtime, "OPENAI_API_KEY", "test-key"),
-            mock.patch.object(extraction_service.runtime, "OPENAI_MODEL", "gpt-5.4-mini"),
+            mock.patch.object(extraction_service.runtime, "OPENAI_MODEL", "gpt-4.1-mini"),
             mock.patch("App.services.extraction_service._post_responses_api", return_value=openai_payload),
         ):
             snapshot = extraction_service.build_spec_snapshot(
@@ -658,7 +786,7 @@ class SmokeTest(unittest.TestCase):
         with (
             mock.patch.object(extraction_service.runtime, "OPENAI_ENABLED", True),
             mock.patch.object(extraction_service.runtime, "OPENAI_API_KEY", "test-key"),
-            mock.patch.object(extraction_service.runtime, "OPENAI_MODEL", "gpt-5.4-mini"),
+            mock.patch.object(extraction_service.runtime, "OPENAI_MODEL", "gpt-4.1-mini"),
             mock.patch("App.services.extraction_service._post_responses_api", return_value=openai_payload),
         ):
             snapshot = extraction_service.build_spec_snapshot(
@@ -955,7 +1083,7 @@ class SmokeTest(unittest.TestCase):
         with (
             mock.patch.object(extraction_service.runtime, "OPENAI_ENABLED", True),
             mock.patch.object(extraction_service.runtime, "OPENAI_API_KEY", "test-key"),
-            mock.patch.object(extraction_service.runtime, "OPENAI_MODEL", "gpt-5.4-mini"),
+            mock.patch.object(extraction_service.runtime, "OPENAI_MODEL", "gpt-4.1-mini"),
             mock.patch("App.services.extraction_service._load_documents", return_value=[]),
             mock.patch("App.services.extraction_service.parsing.parse_documents", return_value=base_snapshot),
             mock.patch(
@@ -1320,7 +1448,7 @@ class SmokeTest(unittest.TestCase):
                 "parser_strategy": "global_conservative",
                 "openai_attempted": True,
                 "openai_succeeded": True,
-                "openai_model": "gpt-5.4-mini",
+                "openai_model": "gpt-4.1-mini",
                 "note": "OpenAI result merged with heuristic parsing.",
                 "worker_pid": 4242,
                 "app_build_id": "build-test",
@@ -1345,7 +1473,7 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("OpenAI merged", response.text)
         self.assertIn("Global Conservative", response.text)
         self.assertIn("build-test", response.text)
-        self.assertIn("gpt-5.4-mini", response.text)
+        self.assertIn("gpt-4.1-mini", response.text)
         self.assertIn("drawings-and-colours.pdf", response.text)
         self.assertIn("Ignored unmatched room-like lines", response.text)
         self.assertIn("requestSubmit()", response.text)
@@ -1365,7 +1493,7 @@ class SmokeTest(unittest.TestCase):
                 "mode": "openai_merged",
                 "openai_attempted": True,
                 "openai_succeeded": True,
-                "openai_model": "gpt-5.4-mini",
+                "openai_model": "gpt-4.1-mini",
                 "note": "Legacy scalar room fields should still render.",
             },
             "rooms": [
@@ -1522,7 +1650,7 @@ class SmokeTest(unittest.TestCase):
                 "mode": "heuristic_only",
                 "openai_attempted": False,
                 "openai_succeeded": False,
-                "openai_model": "gpt-5.4-mini",
+                "openai_model": "gpt-4.1-mini",
                 "note": "OpenAI is disabled in runtime settings.",
             },
             "rooms": [

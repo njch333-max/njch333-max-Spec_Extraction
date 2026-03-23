@@ -67,12 +67,13 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Room-master detection must normalize glued headings such as `KITCHEN COLOUR SCHEDULEBENCHTOP...` so only the clean room heading becomes the room label.
 - The room-master room set must be established before supplement files are processed, so supplement-file upload order cannot create extra rooms.
 - If OpenAI is configured, use it to improve structured extraction.
-- The default OpenAI extraction model is `gpt-5.4-mini`; production and local environments should stay aligned unless a deliberate override is documented.
+- The default OpenAI extraction model is `gpt-4.1-mini`; production and local environments should stay aligned unless a deliberate override is documented.
 - All builders must use the fixed `Global Conservative` profile based on the accepted `37016` output style.
 - Under `Global Conservative`, heuristic room structure and cleaning remain primary, room identity is source-driven, OpenAI fills missing fields conservatively, and AI must not inject extra rooms, collapse distinct rooms into broad buckets, or overwrite already-clean room text with noisier duplicates.
 - When OpenAI and heuristic room sets disagree, keep the heuristic room layout as the primary room skeleton and merge AI fields conservatively into that layout so repeated parses of the same spec stay visually stable.
 - Room rows must come from actual source headings or labels, and only the same room should merge across pages/files. Bathroom, ensuite, powder, vanity, pantry, WIP, theatre, rumpus, study, office, and similar rooms must stay separate unless the source clearly uses the same room label.
 - When a room-master file uses grouped room headings such as `Vanities`, grouped output should be preserved and supplement files must enrich that grouped room instead of splitting it into extra bathroom/ensuite/powder rows.
+- Room material fields must remain room-local. Benchtops, door colours, handles, toe kicks, bulkheads, and splashbacks should come only from the matched room section, and supplement files must not leak another room's material text into the current room.
 - Supplement-file room-like lines that do not belong to the room-master set, such as glazing, door-finish, waste-colour, or stray room headings, must be ignored and surfaced as warnings instead of becoming new rooms.
 - Clarendon jobs must still pass through a deterministic post-polish stage, but that polish now runs per detected room instead of compressing output into a fixed 6-room layout.
 - Clarendon post-polish should prefer clean schedule-page text for benchtops, door colours, toe kicks, bulkheads, handles, sink/basin/tap fixtures, and soft-close states instead of falling back to OCR-noisy field fragments when the schedule pages already provide a cleaner source.
