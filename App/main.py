@@ -623,7 +623,11 @@ def _display_value(value: Any) -> str:
 def _split_room_door_groups(row: dict[str, Any]) -> dict[str, str]:
     room_key_normalized = parsing.normalize_room_key(_display_value(row.get("room_key", "")))
     has_explicit_overheads = bool(row.get("has_explicit_overheads", False))
-    derived = parsing._split_door_colour_groups(parsing._coerce_string_list(row.get("door_panel_colours", [])))
+    derived = (
+        parsing._blank_door_group_values()
+        if parsing._has_explicit_door_group_markers(row)
+        else parsing._split_door_colour_groups(parsing._coerce_string_list(row.get("door_panel_colours", [])))
+    )
     if room_key_normalized != "kitchen":
         derived["door_colours_island"] = ""
         derived["door_colours_bar_back"] = ""

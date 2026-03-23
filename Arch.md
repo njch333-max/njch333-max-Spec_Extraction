@@ -79,12 +79,15 @@
   - room identity is source-driven for every builder, so only the same detected room merges across pages/files
   - for multi-file spec jobs, automatically pick one room-master file by schedule density and only let that file define the room set
   - room material fields remain room-local, so supplement files can enrich fixtures/appliances but must not inject another room's material text into the current room
+  - grouped rooms such as `Vanities` still follow the same-room-only rule: grouped-room material fields come only from that grouped room's authoritative schedule section, while `vanity`/bathroom fixture pages may contribute fixture fields only
   - room-master detection first normalizes glued schedule headings such as `KITCHEN COLOUR SCHEDULEBENCHTOP...` or `VANITIES COLOUR SCHEDULENOTE...` so the clean heading is extracted before room matching
   - the room-master room set is precomputed before supplement files are parsed, so supplement-file ordering cannot accidentally create extra rooms
 11. Merge OpenAI output conservatively: keep the heuristic room set as the primary layout, merge room fields into that layout, and preserve heuristic appliance `model_no` values instead of replacing them with weaker guesses.
 12. For Clarendon-only spec runs, apply a deterministic post-polish stage after source-driven room detection:
   - rebuild stable room text from colour-schedule and fixture pages for each detected room
   - prefer clean schedule-page values over OCR-noisy field fragments
+  - use same-room-only overlay selection for material fields, while allowing grouped-room fixture fallback only for sink/basin/tap enrichment
+  - only let generic `DOORS/PANELS` text fall back to `Base` when the same room section has no explicit overhead/base/island/bar-back cabinetry markers
   - keep source-driven room ownership while replacing noisy field text with cleaner deterministic values
 13. Apply the fixed global cleaning rules after heuristic, merge, and Clarendon post-polish so brand casing, door-colour cleanup, kitchen-only bench-top splitting, and soft-close normalization stay consistent across all builders.
 14. Record analysis metadata in the snapshot: mode, parser strategy, attempted, succeeded, model, note, and runtime identifiers (`worker_pid`, `app_build_id`).

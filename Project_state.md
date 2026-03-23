@@ -30,6 +30,7 @@
   - Clarendon room-master scoring now prefers cabinetry colour-schedule files such as `COLOURS AFC` when they contain room-specific joinery labels, instead of defaulting to broader signed-drawings files
   - glued room-schedule headings such as `KITCHEN COLOUR SCHEDULEBENCHTOP...` are now normalized before room-master extraction so noisy heading text no longer becomes a room name
   - grouped room-master headings such as `Vanities` remain grouped while supplement bathroom/ensuite/powder fixture pages enrich that grouped room instead of creating extra room rows
+  - grouped-room material ownership is now same-room-only, so `Vanities` benchtops and door colours can only come from the authoritative `VANITIES COLOUR SCHEDULE` section while grouped fixture fallback remains limited to basin/tap/sink details
   - supplement-file upload order no longer matters because the room-master room set is precomputed before supplement files are parsed
   - snapshot and run metadata now record parser strategy, worker PID, and app build ID
   - single-worker lease guard to prevent stale local worker processes from racing newer code on queued jobs
@@ -39,6 +40,7 @@
   - room-card fixture rows for sink, basin, and tap
   - split door-colour rows for overheads, base, island, and bar back
   - non-kitchen room cards now suppress `Island` and `Bar Back`, and only show `Overheads` when that split is explicitly present in the authoritative room section
+  - generic `DOORS/PANELS` values now fall back to `Base` only when the same room section has no explicit cabinetry group markers, preventing grouped-room door colours from being copied into the wrong split
   - normalized drawer/hinge soft-close states
   - canonical brand casing cleanup for supported brands such as Polytec, AEG, Westinghouse, and Fisher & Paykel
   - Yellowwood joinery-page parsing that maps `Back Benchtops` to kitchen wall-run bench tops and keeps island waterfall notes together

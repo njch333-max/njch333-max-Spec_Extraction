@@ -806,7 +806,7 @@ def _select_clarendon_room_overlay(room: dict[str, Any], overlays: dict[str, dic
     if room_key in {"vanity", "vanities"}:
         for fallback_key in ("vanities", "vanity"):
             if fallback_key != room_key and fallback_key in overlays:
-                _merge_clarendon_overlay(overlay, overlays[fallback_key])
+                _merge_clarendon_fixture_overlay(overlay, overlays[fallback_key])
     return overlay if _clarendon_overlay_has_content(overlay) else {}
 
 
@@ -844,6 +844,10 @@ def _blank_clarendon_overlay() -> dict[str, Any]:
         "door_colours_base": "",
         "door_colours_island": "",
         "door_colours_bar_back": "",
+        "has_explicit_overheads": False,
+        "has_explicit_base": False,
+        "has_explicit_island": False,
+        "has_explicit_bar_back": False,
         "toe_kick": "",
         "bulkheads": "",
         "handles": [],
@@ -879,6 +883,8 @@ def _merge_clarendon_overlay(target: dict[str, Any], candidate: dict[str, Any]) 
         "tap_info",
     ):
         target[key] = parsing._merge_text(target.get(key, ""), candidate.get(key, ""))
+    for key in ("has_explicit_overheads", "has_explicit_base", "has_explicit_island", "has_explicit_bar_back"):
+        target[key] = bool(target.get(key, False) or candidate.get(key, False))
     target["splashback"] = _merge_clarendon_splashback(target.get("splashback", ""), candidate.get("splashback", ""))
     target["drawers_soft_close"] = _merge_soft_close_field(
         target.get("drawers_soft_close", ""),
@@ -890,6 +896,11 @@ def _merge_clarendon_overlay(target: dict[str, Any], candidate: dict[str, Any]) 
         candidate.get("hinges_soft_close", ""),
         keyword="hinge",
     )
+
+
+def _merge_clarendon_fixture_overlay(target: dict[str, Any], candidate: dict[str, Any]) -> None:
+    for key in ("sink_info", "basin_info", "tap_info"):
+        target[key] = parsing._merge_text(target.get(key, ""), candidate.get(key, ""))
 
 
 def _clarendon_schedule_room_key(text: str) -> str:
@@ -909,6 +920,7 @@ def _clarendon_schedule_room_key(text: str) -> str:
 def _extract_clarendon_schedule_overlay(room_key: str, text: str) -> dict[str, Any]:
     overlay = _blank_clarendon_overlay()
     template_family = _clarendon_detect_template_family(text)
+    lines = parsing._preprocess_chunk(_clarendon_spacing_normalize(text))
     benchtop_segments = _extract_clarendon_labeled_segments(
         text,
         r"BENCHTOP(?: COLOUR \d+)?(?:S)?",
@@ -917,16 +929,31 @@ def _extract_clarendon_schedule_overlay(room_key: str, text: str) -> dict[str, A
     for segment in benchtop_segments:
         _merge_clarendon_benchtop_segment(overlay, room_key, segment, template_family)
 
-    door_segments = _extract_clarendon_labeled_segments(
-        text,
-        r"DOOR(?:/PANEL)? COLOUR(?: \d+)?",
-        CLARENDON_FIELD_STOP_MARKERS,
-    )
-    if door_segments:
-        groups = parsing._split_door_colour_groups(door_segments)
-        overlay["door_panel_colours"] = list(parsing._rebuild_door_panel_colours(groups))
-        for key in ("door_colours_overheads", "door_colours_base", "door_colours_island", "door_colours_bar_back"):
-            overlay[key] = parsing._merge_text(overlay[key], groups.get(key, ""))
+    overhead_value = parsing._first_value(parsing._collect_field(lines, ["Overhead Cupboards"]))
+    base_value = parsing._first_value(parsing._collect_field(lines, ["Base Cupboards & Drawers", "Floor Mounted Vanity"]))
+    island_value = parsing._first_value(parsing._collect_field(lines, ["Island Bench Base Cupboards & Drawers"]))
+    bar_back_value = parsing._first_value(parsing._collect_field(lines, ["Island Bar Back"]))
+    if overhead_value:
+        overlay["has_explicit_overheads"] = True
+    if base_value:
+        overlay["has_explicit_base"] = True
+    if island_value:
+        overlay["has_explicit_island"] = True
+    if bar_back_value:
+        overlay["has_explicit_bar_back"] = True
+    overlay["door_colours_overheads"] = parsing._merge_clean_group_text(overlay["door_colours_overheads"], overhead_value, cleaner=parsing._clean_door_colour_value)
+    overlay["door_colours_base"] = parsing._merge_clean_group_text(overlay["door_colours_base"], base_value, cleaner=parsing._clean_door_colour_value)
+    overlay["door_colours_island"] = parsing._merge_clean_group_text(overlay["door_colours_island"], island_value, cleaner=parsing._clean_door_colour_value)
+    overlay["door_colours_bar_back"] = parsing._merge_clean_group_text(overlay["door_colours_bar_back"], bar_back_value, cleaner=parsing._clean_door_colour_value)
+    if not parsing._has_explicit_door_group_markers(overlay):
+        door_segments = parsing._collect_field(lines, parsing.DOOR_COLOUR_FIELD_PREFIXES)
+        if door_segments:
+            groups = parsing._split_door_colour_groups(door_segments)
+            overlay["door_panel_colours"] = list(parsing._rebuild_door_panel_colours(groups))
+            for key in ("door_colours_overheads", "door_colours_base", "door_colours_island", "door_colours_bar_back"):
+                overlay[key] = parsing._merge_text(overlay[key], groups.get(key, ""))
+    else:
+        overlay["door_panel_colours"] = list(parsing._rebuild_door_panel_colours(overlay))
 
     notes_block = _extract_clarendon_notes_block(text)
     if notes_block:
@@ -1137,6 +1164,8 @@ def _polish_clarendon_room(row: dict[str, Any], overlay: dict[str, Any]) -> dict
     polished = dict(row)
     overlay_present = _clarendon_overlay_has_content(overlay)
     is_vanity_room = _clarendon_is_vanity_room(room_key, str(row.get("original_room_label", "")))
+    for key in ("has_explicit_overheads", "has_explicit_base", "has_explicit_island", "has_explicit_bar_back"):
+        polished[key] = bool(row.get(key, False) or overlay.get(key, False))
 
     current_benchtops = " | ".join(_clarendon_clean_benchtop_text(value) for value in parsing._coerce_string_list(row.get("bench_tops", [])) if _clarendon_clean_benchtop_text(value))
     wall_run = _clarendon_clean_benchtop_text(overlay.get("bench_tops_wall_run", ""))
@@ -1163,13 +1192,21 @@ def _polish_clarendon_room(row: dict[str, Any], overlay: dict[str, Any]) -> dict
         "door_colours_bar_back": _clarendon_clean_door_group_text(overlay.get("door_colours_bar_back", "")) if overlay_has_door_groups else _clarendon_clean_door_group_text(row.get("door_colours_bar_back", "")),
     }
     grouped_doors = parsing._prune_door_group_overlap(grouped_doors)
+    if room_key != "kitchen":
+        if grouped_doors["door_colours_overheads"] and not polished.get("has_explicit_overheads", False):
+            grouped_doors["door_colours_base"] = parsing._merge_clean_group_text(
+                grouped_doors.get("door_colours_base", ""),
+                grouped_doors["door_colours_overheads"],
+                cleaner=parsing._clean_door_colour_value,
+            )
+            grouped_doors["door_colours_overheads"] = ""
+        grouped_doors["door_colours_island"] = ""
+        grouped_doors["door_colours_bar_back"] = ""
+        polished["has_explicit_island"] = False
+        polished["has_explicit_bar_back"] = False
     for key, value in grouped_doors.items():
         polished[key] = value
-    overlay_door_entries = overlay.get("door_panel_colours", [])
-    if overlay_door_entries:
-        polished["door_panel_colours"] = [_clarendon_clean_door_group_text(entry) for entry in overlay_door_entries if _clarendon_clean_door_group_text(entry)]
-    else:
-        polished["door_panel_colours"] = parsing._rebuild_door_panel_colours(polished)
+    polished["door_panel_colours"] = parsing._rebuild_door_panel_colours(polished)
 
     toe_kick = _clarendon_clean_toe_kick_text(overlay.get("toe_kick", "")) if overlay_present else _clarendon_clean_toe_kick_text(row.get("toe_kick", ""))
     bulkheads = _clarendon_clean_bulkhead_text(overlay.get("bulkheads", "")) if overlay_present else _clarendon_clean_bulkhead_text(row.get("bulkheads", ""))

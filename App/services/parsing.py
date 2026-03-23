@@ -174,10 +174,15 @@ FIELD_LABELS = [
     "Doors/Panels",
     "Doors/Panel",
     "Island Bench Kickboard",
+    "Kickboards",
     "Toe Kick",
     "Kickboard",
+    "Benchtop Shadowline",
     "Bulkheads",
     "Bulkhead",
+    "Bulkhead Shadowline",
+    "Carcass & Shelf Edges",
+    "Thermolaminate Notes",
     "Base Cabinet Handles",
     "Overhead Handles",
     "Handles",
@@ -194,6 +199,8 @@ FIELD_LABELS = [
     "Mixer",
     "Sink",
     "Basin",
+    "Door Hinges",
+    "Drawer Runners",
     "Drawers",
     "Hinges",
     "Splashback",
@@ -806,7 +813,8 @@ def _merge_room_section_into_row(
         row.door_colours_base = _merge_clean_group_text(row.door_colours_base, base_value, cleaner=_clean_door_colour_value)
         row.door_colours_island = _merge_clean_group_text(row.door_colours_island, island_value, cleaner=_clean_door_colour_value)
         row.door_colours_bar_back = _merge_clean_group_text(row.door_colours_bar_back, bar_back_value, cleaner=_clean_door_colour_value)
-        _apply_door_colour_groups(row, row.door_panel_colours)
+        if not _has_explicit_door_group_markers(row):
+            _apply_door_colour_groups(row, row.door_panel_colours)
         row.toe_kick = _merge_lists(row.toe_kick, _collect_field(lines, ["Toe Kick", "Kickboard", "Island Bench Kickboard"]))
         row.bulkheads = _merge_lists(row.bulkheads, _collect_field(lines, ["Bulkheads", "Bulkhead"]))
         row.handles = _merge_lists(row.handles, _clean_handle_entries(_collect_field(lines, ["Handles", "Handle", "Base Cabinet Handles", "Overhead Handles"])))
@@ -860,6 +868,7 @@ def _find_room_sections(text: str) -> list[tuple[str, str]]:
 def _preprocess_chunk(chunk: str) -> list[str]:
     chunk = _inject_schedule_heading_breaks(chunk)
     for label in sorted(FIELD_LABELS, key=len, reverse=True):
+        chunk = re.sub(rf"(?i)(?<=\w){re.escape(label)}\b", f" {label}", chunk)
         chunk = re.sub(rf"(?i)\b{re.escape(label)}\b", f"\n{label}", chunk)
     lines = [normalize_space(line) for line in chunk.split("\n") if normalize_space(line)]
     return _merge_broken_schedule_lines(lines)
@@ -1292,7 +1301,11 @@ def enrich_snapshot_rooms(snapshot: dict[str, Any], documents: list[dict[str, ob
         row["bench_tops_island"] = overlay.get("bench_tops_island", "") or _merge_text(_string_value(row.get("bench_tops_island", "")), benchtop_groups["bench_tops_island"])
         row["bench_tops_other"] = overlay.get("bench_tops_other", "") or _merge_text(_string_value(row.get("bench_tops_other", "")), benchtop_groups["bench_tops_other"])
         row["bench_tops"] = _rebuild_benchtop_entries(row)
-        door_groups = _split_door_colour_groups(_coerce_string_list(row.get("door_panel_colours", [])))
+        door_groups = (
+            _blank_door_group_values()
+            if _has_explicit_door_group_markers(row)
+            else _split_door_colour_groups(_coerce_string_list(row.get("door_panel_colours", [])))
+        )
         row["door_colours_overheads"] = overlay.get("door_colours_overheads", "") or _merge_clean_group_text(row.get("door_colours_overheads", ""), door_groups["door_colours_overheads"], cleaner=_clean_door_colour_value)
         row["door_colours_base"] = overlay.get("door_colours_base", "") or _merge_clean_group_text(row.get("door_colours_base", ""), door_groups["door_colours_base"], cleaner=_clean_door_colour_value)
         row["door_colours_island"] = overlay.get("door_colours_island", "") or _merge_clean_group_text(row.get("door_colours_island", ""), door_groups["door_colours_island"], cleaner=_clean_door_colour_value)
@@ -1357,7 +1370,11 @@ def _apply_room_cleaning_rules(row: dict[str, Any], rule_flags: dict[str, bool])
     row["hinges_soft_close"] = normalize_soft_close_value(row.get("hinges_soft_close", ""), keyword="hinge") or normalize_soft_close_value(row.get("hinges_soft_close", ""))
 
     row["door_panel_colours"] = _normalize_door_colour_entries(row.get("door_panel_colours", []), rule_flags)
-    grouped_doors = _split_door_colour_groups(row["door_panel_colours"])
+    grouped_doors = (
+        _blank_door_group_values()
+        if _has_explicit_door_group_markers(row)
+        else _split_door_colour_groups(row["door_panel_colours"])
+    )
     for key in ("door_colours_overheads", "door_colours_base", "door_colours_island", "door_colours_bar_back"):
         existing = _display_rule_text(row.get(key, ""), rule_flags)
         merged = _merge_clean_group_text(existing, grouped_doors.get(key, ""), cleaner=_clean_door_colour_value)
@@ -1482,7 +1499,7 @@ def _collect_room_overlays(documents: list[dict[str, object]], room_master_file:
                 overlay["door_colours_base"] = _merge_clean_group_text(overlay["door_colours_base"], base_value, cleaner=_clean_door_colour_value)
                 overlay["door_colours_island"] = _merge_clean_group_text(overlay["door_colours_island"], island_value, cleaner=_clean_door_colour_value)
                 overlay["door_colours_bar_back"] = _merge_clean_group_text(overlay["door_colours_bar_back"], bar_back_value, cleaner=_clean_door_colour_value)
-                if not any(overlay[key] for key in ("door_colours_overheads", "door_colours_base", "door_colours_island", "door_colours_bar_back")):
+                if not _has_explicit_door_group_markers(overlay):
                     door_groups = _split_door_colour_groups(_collect_field(lines, DOOR_COLOUR_FIELD_PREFIXES))
                     for key, value in door_groups.items():
                         overlay[key] = _merge_clean_group_text(overlay[key], value, cleaner=_clean_door_colour_value)
@@ -1616,7 +1633,7 @@ def _clean_door_colour_value(value: Any) -> str:
     text = re.sub(r"\s*\([^)]*$", "", text)
     text = re.sub(r"\s{2,}", " ", text)
     text = text.strip(" -;,")
-    if re.search(r"(?i)(kickboards?|bench\s*top|benchtop|thermolaminate notes?)", text):
+    if re.search(r"(?i)(kickboards?|bench\s*top|benchtop|thermolaminate notes?|carcass|shelf edges?)", text):
         return ""
     if re.search(r"(?i)\b([a-z])\1{4,}\b", text):
         return ""
@@ -1722,6 +1739,26 @@ def _split_door_colour_groups(values: list[str]) -> dict[str, str]:
             if not matched:
                 grouped["door_colours_base"].append(cleaned)
     return {key: " | ".join(_dedupe_prefer_specific(entries, cleaner=_clean_door_colour_value)) for key, entries in grouped.items()}
+
+
+def _blank_door_group_values() -> dict[str, str]:
+    return {
+        "door_colours_overheads": "",
+        "door_colours_base": "",
+        "door_colours_island": "",
+        "door_colours_bar_back": "",
+    }
+
+
+def _has_explicit_door_group_markers(row: Any) -> bool:
+    if isinstance(row, dict):
+        getter = lambda key: row.get(key, False)
+    else:
+        getter = lambda key: getattr(row, key, False)
+    return any(
+        bool(getter(key))
+        for key in ("has_explicit_overheads", "has_explicit_base", "has_explicit_island", "has_explicit_bar_back")
+    )
 
 
 BENCHTOP_WALL_HINTS = ("wall run", "cooktop run", "wall bench", "wall side", "back benchtops", "back benchtop")

@@ -1392,6 +1392,130 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("Polytec Blossom White Matt Finish Thermolaminate - Hamptons EM9 Profile", vanities["door_colours_base"])
         self.assertIn("Polytec Habitit Smooth Finish Thermolaminate - Hamptons EM9 Profile", vanities["door_colours_base"])
 
+    def test_clarendon_schedule_overlay_defaults_doors_panels_to_base_only_without_explicit_overheads(self) -> None:
+        overlay = extraction_service._extract_clarendon_schedule_overlay(
+            "vanities",
+            (
+                "VANITIES COLOUR SCHEDULE "
+                "BENCHTOP - QUANTUM ZERO LUNA WHITE - 20MM PENCIL ROUND EDGE / 140MM MITRED APRON EDGE - TO POWDER ROOM 2 "
+                "DOORS/PANELS - POL YTEC JAMAICAN OAK MATT FINISH MELAMINE WITH MATCHING 1MM ABS EDGES (VERTICAL GRAIN DIRECTION) "
+                "KICKBOARDS - N/A FLOATING"
+            ),
+        )
+        self.assertFalse(overlay["has_explicit_overheads"])
+        self.assertEqual(overlay["door_colours_overheads"], "")
+        self.assertEqual(
+            overlay["door_colours_base"].lower(),
+            "polytec jamaican oak matt finish melamine with matching 1mm abs edges (vertical grain direction)",
+        )
+
+    def test_clarendon_vanities_fixture_fallback_does_not_merge_material_fields(self) -> None:
+        overlay = extraction_service._select_clarendon_room_overlay(
+            {"room_key": "vanities", "original_room_label": "Vanities"},
+            {
+                "vanities": {
+                    "door_colours_base": "Polytec Jamaican Oak Matt Finish Melamine with Matching 1MM ABS Edges (Vertical Grain Direction)",
+                    "basin_info": "",
+                    "tap_info": "",
+                },
+                "vanity": {
+                    "door_colours_base": "Polytec Habitit Smooth Finish Thermolaminate - Hamptons EM9 Profile",
+                    "basin_info": "Johnson Suisse Emilia Rectangular Undercounter Basin (JBSE250.PW6) White",
+                    "tap_info": "Phoenix Nostalgia Basin Mixer NS748-62",
+                },
+            },
+        )
+        self.assertEqual(
+            overlay["door_colours_base"],
+            "Polytec Jamaican Oak Matt Finish Melamine with Matching 1MM ABS Edges (Vertical Grain Direction)",
+        )
+        self.assertEqual(overlay["basin_info"], "Johnson Suisse Emilia Rectangular Undercounter Basin (JBSE250.PW6) White")
+        self.assertEqual(overlay["tap_info"], "Phoenix Nostalgia Basin Mixer NS748-62")
+
+    def test_clarendon_polish_prefers_same_room_vanities_materials_over_contaminated_row_values(self) -> None:
+        row = {
+            "room_key": "vanities",
+            "original_room_label": "VANITIES",
+            "bench_tops": ["Quantum Zero Luna White - 20MM Pencil Round Edge / 140MM Mitred Apron Edge - to Powder Room 2"],
+            "bench_tops_wall_run": "",
+            "bench_tops_island": "",
+            "bench_tops_other": "Quantum Zero Luna White - 20MM Pencil Round Edge / 140MM Mitred Apron Edge - to Powder Room 2",
+            "door_panel_colours": [
+                "Polytec Habitit Smooth Finish Thermolaminate - Hamptons EM9 Profile",
+                "Polytec Blossom White Matt Finish Thermolaminate - Hamptons EM9 Profile",
+            ],
+            "door_colours_overheads": "",
+            "door_colours_base": "Polytec Habitit Smooth Finish Thermolaminate - Hamptons EM9 Profile | Polytec Blossom White Matt Finish Thermolaminate - Hamptons EM9 Profile",
+            "door_colours_island": "",
+            "door_colours_bar_back": "",
+            "has_explicit_overheads": False,
+            "has_explicit_base": False,
+            "has_explicit_island": False,
+            "has_explicit_bar_back": False,
+            "toe_kick": ["N/A floating"],
+            "bulkheads": [],
+            "handles": [],
+            "sink_info": "",
+            "basin_info": "",
+            "tap_info": "",
+            "drawers_soft_close": "",
+            "hinges_soft_close": "",
+            "splashback": "",
+            "flooring": "",
+            "source_file": "49906613 Amended Signed Drawings REV C 04-09-25.pdf",
+            "page_refs": "12",
+            "evidence_snippet": "",
+            "confidence": 0.6,
+        }
+        overlay = extraction_service._select_clarendon_room_overlay(
+            {"room_key": "vanities", "original_room_label": "VANITIES"},
+            {
+                "vanities": extraction_service._extract_clarendon_schedule_overlay(
+                    "vanities",
+                    (
+                        "VANITIES COLOUR SCHEDULE "
+                        "BENCHTOP - QUANTUM ZERO LUNA WHITE - 20MM PENCIL ROUND EDGE / 140MM MITRED APRON EDGE - TO POWDER ROOM 2 "
+                        "DOORS/PANELS - POL YTEC JAMAICAN OAK MATT FINISH MELAMINE WITH MATCHING 1MM ABS EDGES (VERTICAL GRAIN DIRECTION) "
+                        "KICKBOARDS - N/A FLOATING"
+                    ),
+                ),
+                "vanity": {
+                    "basin_info": "Johnson Suisse Emilia Rectangular Undercounter Basin (JBSE250.PW6) White",
+                    "tap_info": "Phoenix Nostalgia Basin Mixer NS748-62",
+                },
+            },
+        )
+        polished = extraction_service._polish_clarendon_room(row, overlay)
+        self.assertEqual(
+            polished["door_colours_base"],
+            "Polytec Jamaican Oak Matt Finish Melamine with Matching 1MM ABS Edges (Vertical Grain Direction)",
+        )
+        self.assertEqual(polished["door_colours_overheads"], "")
+        self.assertEqual(polished["basin_info"], "Johnson Suisse Emilia Rectangular Undercounter Basin (JBSE250.PW6) White")
+        self.assertEqual(polished["tap_info"], "Phoenix Nostalgia Basin Mixer NS748-62")
+
+    def test_clarendon_schedule_overlay_recovers_glued_vanities_doors_panels_from_realistic_ocr_text(self) -> None:
+        text = (
+            "NOTE: ALL PLUMBING SETOUT DIMENSIONS ARE FROM THE TIMBER FRAME\n"
+            "REV C 29/07/25\n"
+            "BENCHTOP - QUANTUM ZERO LUNA WHITE - 20MM PENCIL ROUND EDGE / 140MM MITRED APRON EDGE - TO POWDER ROOM 2"
+            "DOORS/PANELS - POL YTEC JAMAICAN OAK MATT FINISH MELAMINE WITH MATCHING 1MM ABS EDGES (VERTICAL GRAIN DIRECTION) "
+            "KICKBOARDS - N/A FLOATING BENCHTOP SHADOWLINE - AS DOOR COLOUR (HORIZONTAL GRAIN DIRECTION)"
+            "CARCASS & SHELF EDGES - STANDARD WHITEHANDLES - HETTICH NARNI 9995574 BRUSHED STAINLESS STEEL 37MM LONG - PROUD MOUNTED DOORS "
+            "WITH MIN' REVEALS TO DRAWERSDOOR HINGES - HETTICH STANDARD HINGES - NOT SOFT CLOSEDRAWER RUNNERS - HETTICH INNOTECH ATIRA SOFT CLOSE RUNNERS "
+            "VANITIES COLOUR SCHEDULE"
+        )
+        overlay = extraction_service._extract_clarendon_schedule_overlay("vanities", text)
+        self.assertEqual(overlay["door_colours_overheads"], "")
+        self.assertEqual(
+            overlay["door_colours_base"].lower(),
+            "polytec jamaican oak matt finish melamine with matching 1mm abs edges (vertical grain direction)",
+        )
+        self.assertEqual(
+            overlay["bench_tops_other"],
+            "Quantum Zero Luna White - 20MM Pencil Round Edge / 140MM Mitred Apron Edge - to Powder Room 2",
+        )
+
     def test_material_summary_keeps_distinct_benchtop_thickness_and_edge_variants(self) -> None:
         summary = _build_material_summary(
             {
