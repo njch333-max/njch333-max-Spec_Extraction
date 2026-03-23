@@ -105,11 +105,12 @@
 3. Render the `Rooms` section as a vertical stack of wide horizontal room cards on desktop, with one display row per field and a separate metadata column.
 4. Show room fixtures (`Sink`, `Basin`, `Tap`) directly on the room card and split door colours into `Overheads`, `Base`, `Island`, and `Bar Back`, while trimming location-only suffixes and filtering obvious OCR noise.
 5. Only the kitchen card expands bench tops into `Wall Run` and `Island`; all other rooms collapse to a single `Benchtop` display row.
-6. Filter plumbing fixtures out of the `Appliances` table and export.
-7. Render a `Material Summary` section that smart-deduplicates room-level door colours, handle models, and bench tops, using the split wall-run/island bench-top values when available.
-8. Render appliance official links as a clickable wrapped `Product` column.
-9. Export that raw snapshot through a dedicated Excel route.
-10. Never fall back to `reviews` when rendering the raw Spec List page.
+6. Non-kitchen cards only render door-colour groups that are both allowed for that room and actually present; `Island` and `Bar Back` are kitchen-only UI rows.
+7. Filter plumbing fixtures out of the `Appliances` table and export.
+8. Render a `Material Summary` section that smart-deduplicates room-level door colours, handle models, and bench tops, using the split wall-run/island bench-top values when available and preserving distinct thickness/edge variants.
+9. Render appliance official links as a clickable wrapped `Product` column.
+10. Export that raw snapshot through a dedicated Excel route.
+11. Never fall back to `reviews` when rendering the raw Spec List page.
 
 ### 3.7 Upload Interaction
 1. Job detail uses the existing upload POST route.
@@ -138,6 +139,7 @@
   - fixed Clarendon room compaction buckets such as `vanities` and preallocated rooms such as `theatre`/`rumpus` are no longer injected by layout stabilization
   - in multi-file spec jobs, supplement files cannot create new rooms; unmatched room-like sections are ignored and surfaced through warnings/diagnostics
   - when the room-master file already groups a room family such as `Vanities`, supplement bathroom/ensuite/powder vanity pages can enrich that grouped room without splitting it apart
+  - room-master scoring now prefers cabinetry colour-schedule files, especially `COLOURS AFC`-style Clarendon files that contain room-specific joinery labels such as `Overhead Cupboards`, `Base Cupboards & Drawers`, or `Floor Mounted Vanity`
 
 ## 4. Canonical Schema
 

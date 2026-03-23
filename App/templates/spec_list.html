@@ -103,10 +103,18 @@
         {% else %}
         <div class="room-field-row"><strong>Bench Tops</strong><span>{{ row.bench_tops_other or row.bench_tops or "-" }}</span></div>
         {% endif %}
-        <div class="room-field-row"><strong>Overheads</strong><span>{{ row.door_colours_overheads or "-" }}</span></div>
-        <div class="room-field-row"><strong>Base</strong><span>{{ row.door_colours_base or "-" }}</span></div>
-        <div class="room-field-row"><strong>Island</strong><span>{{ row.door_colours_island or "-" }}</span></div>
-        <div class="room-field-row"><strong>Bar Back</strong><span>{{ row.door_colours_bar_back or "-" }}</span></div>
+        {% if row.show_door_colours_overheads %}
+        <div class="room-field-row"><strong>Overheads</strong><span>{{ row.door_colours_overheads }}</span></div>
+        {% endif %}
+        {% if row.show_door_colours_base %}
+        <div class="room-field-row"><strong>Base</strong><span>{{ row.door_colours_base }}</span></div>
+        {% endif %}
+        {% if row.show_door_colours_island %}
+        <div class="room-field-row"><strong>Island</strong><span>{{ row.door_colours_island }}</span></div>
+        {% endif %}
+        {% if row.show_door_colours_bar_back %}
+        <div class="room-field-row"><strong>Bar Back</strong><span>{{ row.door_colours_bar_back }}</span></div>
+        {% endif %}
         <div class="room-field-row"><strong>Toe Kick</strong><span>{{ row.toe_kick or "-" }}</span></div>
         <div class="room-field-row"><strong>Bulkheads</strong><span>{{ row.bulkheads or "-" }}</span></div>
         <div class="room-field-row"><strong>Handles</strong><span>{{ row.handles or "-" }}</span></div>

@@ -27,6 +27,7 @@
   - global `37016`-style conservative parsing profile for all builders
   - source-driven room detection for all builders, with same-room-only merge behavior across pages/files
   - automatic `room master` selection for multi-file spec jobs, with supplement files limited to enriching rooms defined by the room-master document
+  - Clarendon room-master scoring now prefers cabinetry colour-schedule files such as `COLOURS AFC` when they contain room-specific joinery labels, instead of defaulting to broader signed-drawings files
   - glued room-schedule headings such as `KITCHEN COLOUR SCHEDULEBENCHTOP...` are now normalized before room-master extraction so noisy heading text no longer becomes a room name
   - grouped room-master headings such as `Vanities` remain grouped while supplement bathroom/ensuite/powder fixture pages enrich that grouped room instead of creating extra room rows
   - supplement-file upload order no longer matters because the room-master room set is precomputed before supplement files are parsed
@@ -37,11 +38,13 @@
   - vertically stacked wide horizontal room-card layout on the raw Spec List page
   - room-card fixture rows for sink, basin, and tap
   - split door-colour rows for overheads, base, island, and bar back
+  - non-kitchen room cards now suppress `Island` and `Bar Back`, and only show `Overheads` when that split is explicitly present in the authoritative room section
   - normalized drawer/hinge soft-close states
   - canonical brand casing cleanup for supported brands such as Polytec, AEG, Westinghouse, and Fisher & Paykel
   - Yellowwood joinery-page parsing that maps `Back Benchtops` to kitchen wall-run bench tops and keeps island waterfall notes together
   - cabinet-only colour filtering that excludes external paint / Colorbond / garage / door / window finish colours from room joinery output
   - kitchen-only split benchtop display on the raw Spec List page, with non-kitchen rooms collapsed back to one benchtop row
+  - Material Summary bench-top normalization now keeps distinct thickness and edge/apron variants instead of collapsing `20mm` and `40mm` entries together
   - heuristic-first room-layout merging so OpenAI can enrich fields without collapsing Yellowwood room sections
   - cleaned door-colour display that removes duplicated location suffixes and common OCR noise
   - plumbing fixtures filtered out of appliance presentation/export
@@ -96,6 +99,7 @@
 - Continue tightening noisy field cleanup inside the fixed global conservative profile without reintroducing per-builder configuration
 - Continue tightening Clarendon field wording so kitchen/bathroom/laundry text stays close to the accepted `37016` readability standard without relying on manual snapshot restores or fixed room buckets
 - Continue refining room-master scoring for builders that use multiple spec files so the joinery schedule file consistently wins over appliance/fixture miscellany files
+- Continue tightening grouped-room door-colour logic so `Vanities` only shows `Overheads` when the authoritative room section explicitly labels overhead cabinetry
 - Continue tightening supplement-file room mapping so only clearly related fixture pages enrich grouped rooms while unrelated finish/glazing notes stay ignored
 - Extend deterministic model-page probing beyond the currently supported appliance brand patterns
 - Expand model-number coverage for more appliance naming patterns beyond the current explicit rules

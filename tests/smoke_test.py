@@ -15,7 +15,7 @@ os.environ["SPEC_EXTRACTION_DATA_DIR"] = str(TEST_DATA_DIR)
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 
-from App.main import _flatten_rooms, app
+from App.main import _build_material_summary, _flatten_rooms, app
 from App.services import extraction_service, parsing as parsing_module, store
 from App.services.appliance_official import _build_direct_product_candidates, _extract_size_from_text, _primary_model_token
 from App.services.parsing import enrich_snapshot_rooms, parse_documents
@@ -1315,6 +1315,102 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("Ignored room-like section", warning_text)
         self.assertNotIn("Laundry Door", " ".join(rooms.keys()))
 
+    def test_parse_documents_prefers_colour_schedule_file_as_room_master_for_multifile_clarendon(self) -> None:
+        snapshot = parse_documents(
+            job_no="49906613",
+            builder_name="Clarendon",
+            source_kind="spec",
+            documents=[
+                {
+                    "file_name": "49906613 Amended Signed Drawings REV C 04-09-25.pdf",
+                    "role": "spec",
+                    "pages": [
+                        {
+                            "page_no": 1,
+                            "text": (
+                                "KITCHEN COLOUR SCHEDULE\n"
+                                "VANITIES COLOUR SCHEDULE\n"
+                                "LAUNDRY COLOUR SCHEDULE\n"
+                                "BUTLERS PANTRY COLOUR SCHEDULE\n"
+                            ),
+                            "needs_ocr": False,
+                        }
+                    ],
+                },
+                {
+                    "file_name": "49906613 COLOURS AFC AMENDED .pdf",
+                    "role": "spec",
+                    "pages": [
+                        {
+                            "page_no": 6,
+                            "text": (
+                                "VANITIES COLOUR SCHEDULE\n"
+                                "Door/Panel Colour - Polytec Blossom White Matt Finish Thermolaminate - Hamptons EM9 Profile\n"
+                                "Door/Panel Colour 2 - Polytec Habitit Smooth Finish Thermolaminate - Hamptons EM9 Profile\n"
+                                "Floor Mounted Vanity - Polytec Habitit Smooth Finish Thermolaminate - Hamptons EM9 Profile\n"
+                                "Back Benchtops Quantum Zero Luna White - 20MM Pencil Round Edge\n"
+                            ),
+                            "needs_ocr": False,
+                        }
+                    ],
+                },
+            ],
+        )
+        analysis = snapshot["analysis"]
+        vanities = next(room for room in snapshot["rooms"] if room["room_key"] == "vanities")
+        self.assertEqual(analysis["room_master_file"], "49906613 COLOURS AFC AMENDED .pdf")
+        self.assertEqual(vanities["source_file"], "49906613 COLOURS AFC AMENDED .pdf")
+        self.assertEqual(vanities["page_refs"], "6")
+
+    def test_parse_documents_defaults_grouped_vanities_door_colours_to_base_without_explicit_overheads(self) -> None:
+        snapshot = parse_documents(
+            job_no="37061",
+            builder_name="Clarendon",
+            source_kind="spec",
+            documents=[
+                {
+                    "file_name": "vanities-schedule.pdf",
+                    "role": "spec",
+                    "pages": [
+                        {
+                            "page_no": 1,
+                            "text": (
+                                "VANITIES COLOUR SCHEDULE\n"
+                                "Door/Panel Colour - Polytec Blossom White Matt Finish Thermolaminate - Hamptons EM9 Profile\n"
+                                "Door/Panel Colour 2 - Polytec Habitit Smooth Finish Thermolaminate - Hamptons EM9 Profile\n"
+                                "Benchtop - Quantum Zero Luna White - 20MM Pencil Round Edge / 140MM Mitred Apron Edge - to Powder Room 2\n"
+                            ),
+                            "needs_ocr": False,
+                        }
+                    ],
+                }
+            ],
+        )
+        vanities = snapshot["rooms"][0]
+        self.assertEqual(vanities["room_key"], "vanities")
+        self.assertEqual(vanities["door_colours_overheads"], "")
+        self.assertIn("Polytec Blossom White Matt Finish Thermolaminate - Hamptons EM9 Profile", vanities["door_colours_base"])
+        self.assertIn("Polytec Habitit Smooth Finish Thermolaminate - Hamptons EM9 Profile", vanities["door_colours_base"])
+
+    def test_material_summary_keeps_distinct_benchtop_thickness_and_edge_variants(self) -> None:
+        summary = _build_material_summary(
+            {
+                "rooms": [
+                    {
+                        "room_key": "kitchen",
+                        "original_room_label": "Kitchen",
+                        "bench_tops_wall_run": "Quantum Zero White Swirl - 20MM Pencil Round Edge",
+                        "bench_tops_island": "Quantum Zero White Swirl - 40MM Mitred Apron Edge - to Island Bench",
+                        "bench_tops_other": "",
+                        "door_panel_colours": [],
+                    }
+                ]
+            }
+        )
+        self.assertEqual(summary["bench_tops"]["count"], 2)
+        self.assertIn("Quantum Zero White Swirl - 20MM Pencil Round Edge", summary["bench_tops"]["entries"])
+        self.assertIn("Quantum Zero White Swirl - 40MM Mitred Apron Edge", summary["bench_tops"]["entries"])
+
     def test_parse_documents_recovers_glued_schedule_headings_from_room_master(self) -> None:
         snapshot = parse_documents(
             job_no="37869",
@@ -1776,6 +1872,63 @@ class SmokeTest(unittest.TestCase):
         meta_rows = [row[0] for row in meta_sheet.iter_rows(min_row=2, values_only=True)]
         self.assertIn("analysis_mode", meta_rows)
         self.assertIn("analysis_rule_flags", meta_rows)
+
+    def test_spec_list_page_hides_non_kitchen_island_bar_back_and_implicit_overheads(self) -> None:
+        builder_id = store.create_builder("Clarendon", "clarendon", "")
+        job_id = store.create_job("37588", builder_id, "Non Kitchen Door Groups", "")
+        store.upsert_snapshot(
+            job_id,
+            "raw_spec",
+            {
+                "job_no": "37588",
+                "builder_name": "Clarendon",
+                "source_kind": "spec",
+                "generated_at": "2026-03-23T10:00:00+00:00",
+                "analysis": {"mode": "heuristic_only", "openai_attempted": False, "openai_succeeded": False, "openai_model": "gpt-4.1-mini"},
+                "rooms": [
+                    {
+                        "room_key": "vanities",
+                        "original_room_label": "VANITIES",
+                        "bench_tops": ["Quantum Zero Luna White - 20MM Pencil Round Edge"],
+                        "door_panel_colours": [
+                            "Polytec Blossom White Matt Finish Thermolaminate - Hamptons EM9 Profile",
+                            "Polytec Habitit Smooth Finish Thermolaminate - Hamptons EM9 Profile",
+                        ],
+                        "door_colours_overheads": "Polytec Blossom White Matt Finish Thermolaminate - Hamptons EM9 Profile",
+                        "door_colours_base": "Polytec Habitit Smooth Finish Thermolaminate - Hamptons EM9 Profile",
+                        "door_colours_island": "",
+                        "door_colours_bar_back": "",
+                        "has_explicit_overheads": False,
+                        "has_explicit_base": False,
+                        "has_explicit_island": False,
+                        "has_explicit_bar_back": False,
+                        "toe_kick": [],
+                        "bulkheads": [],
+                        "handles": [],
+                        "drawers_soft_close": "",
+                        "hinges_soft_close": "",
+                        "splashback": "",
+                        "flooring": "",
+                        "source_file": "schedule.pdf",
+                        "page_refs": "3",
+                        "evidence_snippet": "",
+                        "confidence": 0.6,
+                    }
+                ],
+                "appliances": [],
+                "others": {},
+                "warnings": [],
+                "source_documents": [],
+            },
+        )
+        client = TestClient(app)
+        self._login(client)
+        response = client.get(f"/jobs/{job_id}/spec-list")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("<strong>Island</strong>", response.text)
+        self.assertNotIn("<strong>Bar Back</strong>", response.text)
+        self.assertNotIn("<strong>Overheads</strong>", response.text)
+        self.assertIn("<strong>Base</strong>", response.text)
 
     def test_spec_list_page_shows_empty_message_without_raw_snapshot(self) -> None:
         builder_id = store.create_builder("Yellowwood", "yellowwood", "")

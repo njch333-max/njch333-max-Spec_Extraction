@@ -32,6 +32,10 @@ class RoomRow(BaseModel):
     door_colours_base: str = ""
     door_colours_island: str = ""
     door_colours_bar_back: str = ""
+    has_explicit_overheads: bool = False
+    has_explicit_base: bool = False
+    has_explicit_island: bool = False
+    has_explicit_bar_back: bool = False
     toe_kick: list[str] = Field(default_factory=list)
     bulkheads: list[str] = Field(default_factory=list)
     handles: list[str] = Field(default_factory=list)

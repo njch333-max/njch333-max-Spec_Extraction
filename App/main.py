@@ -528,7 +528,9 @@ def _flatten_rooms(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
         door_groups = _split_room_door_groups(row)
         benchtop_groups = _split_room_benchtops(row)
         room_key = _display_value(row.get("room_key", ""))
-        show_split_benchtops = room_key.lower() == "kitchen" and bool(benchtop_groups["bench_tops_wall_run"] or benchtop_groups["bench_tops_island"])
+        room_key_normalized = parsing.normalize_room_key(room_key)
+        has_explicit_overheads = bool(row.get("has_explicit_overheads", False))
+        show_split_benchtops = room_key_normalized == "kitchen" and bool(benchtop_groups["bench_tops_wall_run"] or benchtop_groups["bench_tops_island"])
         rows.append(
             {
                 "room_key": room_key,
@@ -543,6 +545,10 @@ def _flatten_rooms(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
                 "door_colours_base": door_groups["door_colours_base"],
                 "door_colours_island": door_groups["door_colours_island"],
                 "door_colours_bar_back": door_groups["door_colours_bar_back"],
+                "show_door_colours_overheads": bool(door_groups["door_colours_overheads"]) and (room_key_normalized == "kitchen" or has_explicit_overheads),
+                "show_door_colours_base": bool(door_groups["door_colours_base"]),
+                "show_door_colours_island": room_key_normalized == "kitchen" and bool(door_groups["door_colours_island"]),
+                "show_door_colours_bar_back": room_key_normalized == "kitchen" and bool(door_groups["door_colours_bar_back"]),
                 "toe_kick": _display_value(row.get("toe_kick", [])),
                 "bulkheads": _display_value(row.get("bulkheads", [])),
                 "handles": _display_value(row.get("handles", [])),
@@ -615,12 +621,26 @@ def _display_value(value: Any) -> str:
 
 
 def _split_room_door_groups(row: dict[str, Any]) -> dict[str, str]:
+    room_key_normalized = parsing.normalize_room_key(_display_value(row.get("room_key", "")))
+    has_explicit_overheads = bool(row.get("has_explicit_overheads", False))
     derived = parsing._split_door_colour_groups(parsing._coerce_string_list(row.get("door_panel_colours", [])))
+    if room_key_normalized != "kitchen":
+        derived["door_colours_island"] = ""
+        derived["door_colours_bar_back"] = ""
+        if not has_explicit_overheads:
+            derived["door_colours_overheads"] = ""
+    overheads = parsing._merge_clean_group_text(row.get("door_colours_overheads", ""), derived["door_colours_overheads"], cleaner=parsing._clean_door_colour_value)
+    base = parsing._merge_clean_group_text(row.get("door_colours_base", ""), derived["door_colours_base"], cleaner=parsing._clean_door_colour_value)
+    if room_key_normalized != "kitchen" and not has_explicit_overheads and overheads:
+        base = parsing._merge_clean_group_text(base, overheads, cleaner=parsing._clean_door_colour_value)
+        overheads = ""
+    island = parsing._merge_clean_group_text(row.get("door_colours_island", ""), derived["door_colours_island"], cleaner=parsing._clean_door_colour_value) if room_key_normalized == "kitchen" else ""
+    bar_back = parsing._merge_clean_group_text(row.get("door_colours_bar_back", ""), derived["door_colours_bar_back"], cleaner=parsing._clean_door_colour_value) if room_key_normalized == "kitchen" else ""
     return {
-        "door_colours_overheads": parsing._merge_clean_group_text(row.get("door_colours_overheads", ""), derived["door_colours_overheads"], cleaner=parsing._clean_door_colour_value),
-        "door_colours_base": parsing._merge_clean_group_text(row.get("door_colours_base", ""), derived["door_colours_base"], cleaner=parsing._clean_door_colour_value),
-        "door_colours_island": parsing._merge_clean_group_text(row.get("door_colours_island", ""), derived["door_colours_island"], cleaner=parsing._clean_door_colour_value),
-        "door_colours_bar_back": parsing._merge_clean_group_text(row.get("door_colours_bar_back", ""), derived["door_colours_bar_back"], cleaner=parsing._clean_door_colour_value),
+        "door_colours_overheads": overheads,
+        "door_colours_base": base,
+        "door_colours_island": island,
+        "door_colours_bar_back": bar_back,
     }
 
 
@@ -953,14 +973,22 @@ def _normalize_handle_summary_value(value: str) -> str:
 
 def _normalize_benchtop_summary_value(value: str) -> str:
     text = parsing.normalize_space(value)
-    text = re.sub(r"\([^)]*(cooktop|island|bench|pantry|run|apron)[^)]*\)", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?i)^back benchtops?\s*", "", text)
+    text = re.sub(r"(?i)^wall run bench top\s*", "", text)
+    text = re.sub(r"(?i)^island bench top\s*", "", text)
+    text = re.sub(r"(?i)^island benchtop\s*", "", text)
     text = re.sub(
-        r"\b(cooktop run|island bench|pantry run|peninsula|breakfast bar)\b.*$",
+        r"(?i)\s*-\s*to\s+(?:the\s+)?(?:cooktop run|wall run|wall bench|wall side|island bench|island|powder room\s*\d*|powder\s+room|ensuite\s*\d*|ensuite|main bathroom|bathroom|laundry|vanities?|butler'?s pantry|pantry)\b.*$",
         "",
         text,
-        flags=re.IGNORECASE,
     )
-    return _clean_summary_segments(text, {"cooktop", "island", "bench", "pantry", "run", "apron"})
+    text = re.sub(
+        r"(?i)\s+\bto\s+(?:the\s+)?(?:cooktop run|wall run|wall bench|wall side|island bench|island|powder room\s*\d*|powder\s+room|ensuite\s*\d*|ensuite|main bathroom|bathroom|laundry|vanities?|butler'?s pantry|pantry)\b.*$",
+        "",
+        text,
+    )
+    text = re.sub(r"\s{2,}", " ", text)
+    return text.strip(" -;,/")
 
 
 def _clean_summary_segments(text: str, location_tokens: set[str]) -> str:

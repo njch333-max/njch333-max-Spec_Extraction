@@ -64,6 +64,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
   - source references.
 - Merge information across multiple spec files in the same job.
 - For multi-file spec jobs, select one authoritative room-master file automatically and use it to define the room list; other spec files may only enrich existing rooms and appliances.
+- For multi-file Clarendon jobs, the room-master selector must strongly prefer cabinetry colour-schedule files such as `COLOURS AFC` over broad `Signed Drawings` miscellany when the colour-schedule file contains room-specific joinery fields.
 - Room-master detection must normalize glued headings such as `KITCHEN COLOUR SCHEDULEBENCHTOP...` so only the clean room heading becomes the room label.
 - The room-master room set must be established before supplement files are processed, so supplement-file upload order cannot create extra rooms.
 - If OpenAI is configured, use it to improve structured extraction.
@@ -80,6 +81,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Appliance parsing must prefer explicit `model_no` values from labeled rows or table columns and must not use brand-only words or generic notes as model numbers.
 - Sink, basin, and tap selections must be captured as room-level fixture fields instead of appliance rows.
 - Door colour information should expose room-level splits for `Overheads`, `Base`, `Island`, and `Bar Back` whenever the source text makes those categories explicit.
+- Grouped rooms such as `Vanities` must treat door-colour splits as explicit-marker-driven: `Overheads` may only appear when the authoritative room section explicitly labels overhead cabinetry; otherwise grouped door colours default to `Base`.
 - Door-colour display should trim obvious installation-context suffixes and suppress OCR noise so room cards show material names instead of repeated positional phrases or unrelated kickboard/benchtop text.
 - Kitchen and similar room bench-top data should split into `Wall Run Bench Top` and `Island Bench Top` when the source text clearly describes separate wall-run and island materials.
 - Yellowwood-style joinery schedules must map `Back Benchtops` to `Wall Run Bench Top` and preserve `Waterfall Ends` as part of `Island Bench Top`.
@@ -131,10 +133,12 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - The `Rooms` section should use one wide horizontal block per room on desktop, stacked vertically one below the next, so each field can be read without cramped narrow cards.
 - Each room card must show room fixture rows for `Sink`, `Basin`, and `Tap`.
 - Each room card must show `Door Colours` as separate `Overheads`, `Base`, `Island`, and `Bar Back` rows.
+- Non-kitchen room cards must never render `Island` or `Bar Back`, and non-kitchen `Overheads` should only render when the authoritative room section explicitly provides that split.
 - Each room card should prefer separate `Wall Run Bench Top` and `Island Bench Top` rows when the source text supports that split.
 - Only the `Kitchen` room card should render split `Wall Run Bench Top` and `Island Bench Top` rows; other rooms should render a single `Benchtop` row even when internal split fields exist.
 - Plumbing fixtures shown on room cards must not also appear in the `Appliances` table.
 - The `Material Summary` block must deduplicate and count room-level `Door Colours`, `Handles`, and `Bench Tops` using smart normalization.
+- `Material Summary -> Bench Tops` must preserve full material, thickness, and edge/apron/waterfall details while stripping only location suffixes such as `to cooktop run`, `to island bench`, or `to powder room 2`.
 - Appliance rows on the page must expose a clickable official `Product` link and allow long URLs to wrap across multiple lines.
 
 ### 4.8 Upload UX

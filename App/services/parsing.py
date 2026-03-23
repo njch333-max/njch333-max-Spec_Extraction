@@ -564,9 +564,16 @@ def _document_full_text(document: dict[str, object]) -> str:
 def _document_room_master_score(document: dict[str, object]) -> dict[str, Any]:
     pages = list(document.get("pages", []))
     full_text = _document_full_text(document)
+    file_name = normalize_space(str(document.get("file_name", ""))).lower()
     schedule_sections = _collect_schedule_room_sections([document])
     schedule_pages = sum(1 for page in pages if _looks_like_joinery_schedule_page(str(page.get("text") or "")))
     colour_schedule_hits = len(re.findall(r"(?i)\bcolour schedule\b", full_text))
+    cabinetry_field_hits = len(
+        re.findall(
+            r"(?i)\b(?:overhead cupboards|base cupboards\s*&\s*drawers|floor mounted vanity|back benchtops|island benchtop|island bench base cupboards\s*&\s*drawers|island bar back)\b",
+            full_text,
+        )
+    )
     room_heading_hits = sum(
         1
         for page in pages
@@ -574,17 +581,32 @@ def _document_room_master_score(document: dict[str, object]) -> dict[str, Any]:
         if _is_schedule_room_heading(line)
     )
     generic_sections = len(_find_room_sections(full_text))
+    looks_like_cabinetry_schedule = bool(schedule_sections) or cabinetry_field_hits >= 2 or (colour_schedule_hits > 0 and cabinetry_field_hits > 0)
+    filename_boost = 0
+    if looks_like_cabinetry_schedule:
+        if re.search(r"(?i)\bcolou?rs?\s*afc\b", file_name):
+            filename_boost += 220
+        elif re.search(r"(?i)\bcolou?rs?\b", file_name):
+            filename_boost += 120
+        elif re.search(r"(?i)\bcolour\s+schedule\b", file_name):
+            filename_boost += 120
+    if re.search(r"(?i)\bdrawings?\b", file_name):
+        filename_boost -= 35
     score = (
-        len(schedule_sections) * 40
+        filename_boost
+        + len(schedule_sections) * 40
         + schedule_pages * 25
         + colour_schedule_hits * 10
+        + cabinetry_field_hits * 18
         + room_heading_hits * 6
         + generic_sections
     )
     reason = (
+        f"filename boost {filename_boost}, "
         f"{len(schedule_sections)} schedule sections, "
         f"{schedule_pages} schedule page(s), "
-        f"{colour_schedule_hits} colour-schedule hit(s)"
+        f"{colour_schedule_hits} colour-schedule hit(s), "
+        f"{cabinetry_field_hits} cabinetry-field hit(s)"
     )
     return {
         "score": score,
@@ -704,7 +726,15 @@ def parse_documents(
             if is_room_master:
                 row.original_room_label = original_room_label
                 row.source_file = file_name
-            _merge_room_section_into_row(row, lines, chunk, file_name, pages, allow_material_fields=is_room_master)
+            _merge_room_section_into_row(
+                row,
+                lines,
+                chunk,
+                file_name,
+                pages,
+                allow_material_fields=is_room_master,
+                authoritative_room_section=is_room_master,
+            )
             rooms[target_room_key] = row
         appliances.extend(_extract_appliances(full_text, file_name, pages))
         flooring_text = _extract_global_value(full_text, "flooring")
@@ -745,6 +775,7 @@ def _merge_room_section_into_row(
     file_name: str,
     pages: list[dict[str, object]],
     allow_material_fields: bool = True,
+    authoritative_room_section: bool = False,
 ) -> None:
     if allow_material_fields:
         generic_bench_tops = _collect_field(lines, ["Bench Tops", "Benchtop"])
@@ -759,22 +790,22 @@ def _merge_room_section_into_row(
             generic_bench_tops.append(f"Island Benchtop {island_bench_top}")
         row.bench_tops = _merge_lists(row.bench_tops, _unique(generic_bench_tops))
         row.door_panel_colours = _merge_lists(row.door_panel_colours, _collect_field(lines, DOOR_COLOUR_FIELD_PREFIXES))
-        row.door_colours_overheads = _merge_clean_group_text(row.door_colours_overheads, _first_value(_collect_field(lines, ["Overhead Cupboards"])), cleaner=_clean_door_colour_value)
-        row.door_colours_base = _merge_clean_group_text(
-            row.door_colours_base,
-            _first_value(_collect_field(lines, ["Base Cupboards & Drawers", "Floor Mounted Vanity"])),
-            cleaner=_clean_door_colour_value,
-        )
-        row.door_colours_island = _merge_clean_group_text(
-            row.door_colours_island,
-            _first_value(_collect_field(lines, ["Island Bench Base Cupboards & Drawers"])),
-            cleaner=_clean_door_colour_value,
-        )
-        row.door_colours_bar_back = _merge_clean_group_text(
-            row.door_colours_bar_back,
-            _first_value(_collect_field(lines, ["Island Bar Back"])),
-            cleaner=_clean_door_colour_value,
-        )
+        overhead_value = _first_value(_collect_field(lines, ["Overhead Cupboards"]))
+        base_value = _first_value(_collect_field(lines, ["Base Cupboards & Drawers", "Floor Mounted Vanity"]))
+        island_value = _first_value(_collect_field(lines, ["Island Bench Base Cupboards & Drawers"]))
+        bar_back_value = _first_value(_collect_field(lines, ["Island Bar Back"]))
+        if overhead_value:
+            row.has_explicit_overheads = True
+        if base_value:
+            row.has_explicit_base = True
+        if island_value:
+            row.has_explicit_island = True
+        if bar_back_value:
+            row.has_explicit_bar_back = True
+        row.door_colours_overheads = _merge_clean_group_text(row.door_colours_overheads, overhead_value, cleaner=_clean_door_colour_value)
+        row.door_colours_base = _merge_clean_group_text(row.door_colours_base, base_value, cleaner=_clean_door_colour_value)
+        row.door_colours_island = _merge_clean_group_text(row.door_colours_island, island_value, cleaner=_clean_door_colour_value)
+        row.door_colours_bar_back = _merge_clean_group_text(row.door_colours_bar_back, bar_back_value, cleaner=_clean_door_colour_value)
         _apply_door_colour_groups(row, row.door_panel_colours)
         row.toe_kick = _merge_lists(row.toe_kick, _collect_field(lines, ["Toe Kick", "Kickboard", "Island Bench Kickboard"]))
         row.bulkheads = _merge_lists(row.bulkheads, _collect_field(lines, ["Bulkheads", "Bulkhead"]))
@@ -787,9 +818,12 @@ def _merge_room_section_into_row(
     basin_value = _first_value(_collect_field(lines, ["Vanity Inset Basin"])) or _first_value(_collect_field(lines, ["Basin"]))
     row.basin_info = _merge_text(row.basin_info, basin_value)
     row.tap_info = _merge_text(row.tap_info, _first_value(_collect_field(lines, ["Vanity Tap Style", "Tap Type", "Tap Style", "Sink Mixer", "Pull-Out Mixer", "Mixer"])))
-    row.source_file = row.source_file or file_name
-    row.page_refs = row.page_refs or _guess_page_refs(chunk, pages)
-    row.evidence_snippet = row.evidence_snippet or chunk[:300]
+    if authoritative_room_section or not row.source_file:
+        row.source_file = file_name
+    if authoritative_room_section or not row.page_refs:
+        row.page_refs = _guess_page_refs(chunk, pages)
+    if authoritative_room_section or not row.evidence_snippet:
+        row.evidence_snippet = chunk[:300]
     row.confidence = max(row.confidence, 0.55)
 
 
@@ -1251,6 +1285,8 @@ def enrich_snapshot_rooms(snapshot: dict[str, Any], documents: list[dict[str, ob
     overlays = _collect_room_overlays(documents, room_master_file=room_master_file)
     for row in rooms:
         overlay = _match_room_overlay(row, overlays)
+        for key in ("has_explicit_overheads", "has_explicit_base", "has_explicit_island", "has_explicit_bar_back"):
+            row[key] = bool(row.get(key, False) or overlay.get(key, False))
         benchtop_groups = _split_benchtop_groups(_coerce_string_list(row.get("bench_tops", [])))
         row["bench_tops_wall_run"] = overlay.get("bench_tops_wall_run", "") or _merge_text(_string_value(row.get("bench_tops_wall_run", "")), benchtop_groups["bench_tops_wall_run"])
         row["bench_tops_island"] = overlay.get("bench_tops_island", "") or _merge_text(_string_value(row.get("bench_tops_island", "")), benchtop_groups["bench_tops_island"])
@@ -1303,6 +1339,10 @@ def apply_snapshot_cleaning_rules(snapshot: dict[str, Any], rule_flags: Any = No
 
 def _apply_room_cleaning_rules(row: dict[str, Any], rule_flags: dict[str, bool]) -> dict[str, Any]:
     row["room_key"] = normalize_space(str(row.get("room_key", "")))
+    row["has_explicit_overheads"] = bool(row.get("has_explicit_overheads", False))
+    row["has_explicit_base"] = bool(row.get("has_explicit_base", False))
+    row["has_explicit_island"] = bool(row.get("has_explicit_island", False))
+    row["has_explicit_bar_back"] = bool(row.get("has_explicit_bar_back", False))
     row["original_room_label"] = _display_rule_text(row.get("original_room_label", ""), rule_flags)
     row["bench_tops"] = _normalize_text_list(row.get("bench_tops", []), rule_flags)
     row["toe_kick"] = _normalize_text_list(row.get("toe_kick", []), rule_flags)
@@ -1324,16 +1364,22 @@ def _apply_room_cleaning_rules(row: dict[str, Any], rule_flags: dict[str, bool])
         row[key] = _display_rule_text(merged, rule_flags)
     if cleaning_rules.rule_enabled(rule_flags, "door_colour_dedupe_cleanup"):
         row.update(_prune_door_group_overlap({key: row.get(key, "") for key in ("door_colours_overheads", "door_colours_base", "door_colours_island", "door_colours_bar_back")}))
-    if normalize_room_key(str(row.get("room_key", ""))) != "kitchen":
+    normalized_room_key = normalize_room_key(str(row.get("room_key", "")))
+    if normalized_room_key != "kitchen":
+        if row["door_colours_overheads"] and not row["has_explicit_overheads"]:
+            row["door_colours_base"] = _merge_clean_group_text(row.get("door_colours_base", ""), row["door_colours_overheads"], cleaner=_clean_door_colour_value)
+            row["door_colours_overheads"] = ""
         row["door_colours_island"] = ""
         row["door_colours_bar_back"] = ""
+        row["has_explicit_island"] = False
+        row["has_explicit_bar_back"] = False
     row["door_panel_colours"] = _rebuild_door_panel_colours(row)
 
     benchtop_groups = _split_benchtop_groups(row["bench_tops"])
     row["bench_tops_wall_run"] = _display_rule_text(_merge_text(row.get("bench_tops_wall_run", ""), benchtop_groups["bench_tops_wall_run"]), rule_flags)
     row["bench_tops_island"] = _display_rule_text(_merge_text(row.get("bench_tops_island", ""), benchtop_groups["bench_tops_island"]), rule_flags)
     row["bench_tops_other"] = _display_rule_text(_merge_text(row.get("bench_tops_other", ""), benchtop_groups["bench_tops_other"]), rule_flags)
-    if cleaning_rules.rule_enabled(rule_flags, "kitchen_only_split_benchtops") and normalize_room_key(str(row.get("room_key", ""))) != "kitchen":
+    if cleaning_rules.rule_enabled(rule_flags, "kitchen_only_split_benchtops") and normalized_room_key != "kitchen":
         folded = " | ".join(part for part in [row.get("bench_tops_other", ""), row.get("bench_tops_wall_run", ""), row.get("bench_tops_island", "")] if part)
         row["bench_tops_other"] = _merge_text(row.get("bench_tops_other", ""), folded)
         row["bench_tops_wall_run"] = ""
@@ -1400,6 +1446,10 @@ def _collect_room_overlays(documents: list[dict[str, object]], room_master_file:
                     "door_colours_base": "",
                     "door_colours_island": "",
                     "door_colours_bar_back": "",
+                    "has_explicit_overheads": False,
+                    "has_explicit_base": False,
+                    "has_explicit_island": False,
+                    "has_explicit_bar_back": False,
                     "sink_info": "",
                     "basin_info": "",
                     "tap_info": "",
@@ -1416,26 +1466,22 @@ def _collect_room_overlays(documents: list[dict[str, object]], room_master_file:
                 benchtop_groups = _split_benchtop_groups(generic_bench_tops + explicit_bench_values)
                 for key, value in benchtop_groups.items():
                     overlay[key] = value or overlay[key]
-                overlay["door_colours_overheads"] = _merge_clean_group_text(
-                    overlay["door_colours_overheads"],
-                    _first_value(_collect_field(lines, ["Overhead Cupboards"])),
-                    cleaner=_clean_door_colour_value,
-                )
-                overlay["door_colours_base"] = _merge_clean_group_text(
-                    overlay["door_colours_base"],
-                    _first_value(_collect_field(lines, ["Base Cupboards & Drawers", "Floor Mounted Vanity"])),
-                    cleaner=_clean_door_colour_value,
-                )
-                overlay["door_colours_island"] = _merge_clean_group_text(
-                    overlay["door_colours_island"],
-                    _first_value(_collect_field(lines, ["Island Bench Base Cupboards & Drawers"])),
-                    cleaner=_clean_door_colour_value,
-                )
-                overlay["door_colours_bar_back"] = _merge_clean_group_text(
-                    overlay["door_colours_bar_back"],
-                    _first_value(_collect_field(lines, ["Island Bar Back"])),
-                    cleaner=_clean_door_colour_value,
-                )
+                overhead_value = _first_value(_collect_field(lines, ["Overhead Cupboards"]))
+                base_value = _first_value(_collect_field(lines, ["Base Cupboards & Drawers", "Floor Mounted Vanity"]))
+                island_value = _first_value(_collect_field(lines, ["Island Bench Base Cupboards & Drawers"]))
+                bar_back_value = _first_value(_collect_field(lines, ["Island Bar Back"]))
+                if overhead_value:
+                    overlay["has_explicit_overheads"] = True
+                if base_value:
+                    overlay["has_explicit_base"] = True
+                if island_value:
+                    overlay["has_explicit_island"] = True
+                if bar_back_value:
+                    overlay["has_explicit_bar_back"] = True
+                overlay["door_colours_overheads"] = _merge_clean_group_text(overlay["door_colours_overheads"], overhead_value, cleaner=_clean_door_colour_value)
+                overlay["door_colours_base"] = _merge_clean_group_text(overlay["door_colours_base"], base_value, cleaner=_clean_door_colour_value)
+                overlay["door_colours_island"] = _merge_clean_group_text(overlay["door_colours_island"], island_value, cleaner=_clean_door_colour_value)
+                overlay["door_colours_bar_back"] = _merge_clean_group_text(overlay["door_colours_bar_back"], bar_back_value, cleaner=_clean_door_colour_value)
                 if not any(overlay[key] for key in ("door_colours_overheads", "door_colours_base", "door_colours_island", "door_colours_bar_back")):
                     door_groups = _split_door_colour_groups(_collect_field(lines, DOOR_COLOUR_FIELD_PREFIXES))
                     for key, value in door_groups.items():
@@ -1462,6 +1508,10 @@ def _match_room_overlay(row: dict[str, Any], overlays: dict[str, dict[str, str]]
         "door_colours_base": "",
         "door_colours_island": "",
         "door_colours_bar_back": "",
+        "has_explicit_overheads": False,
+        "has_explicit_base": False,
+        "has_explicit_island": False,
+        "has_explicit_bar_back": False,
         "sink_info": "",
         "basin_info": "",
         "tap_info": "",
