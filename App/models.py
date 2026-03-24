@@ -30,10 +30,12 @@ class RoomRow(BaseModel):
     door_panel_colours: list[str] = Field(default_factory=list)
     door_colours_overheads: str = ""
     door_colours_base: str = ""
+    door_colours_tall: str = ""
     door_colours_island: str = ""
     door_colours_bar_back: str = ""
     has_explicit_overheads: bool = False
     has_explicit_base: bool = False
+    has_explicit_tall: bool = False
     has_explicit_island: bool = False
     has_explicit_bar_back: bool = False
     toe_kick: list[str] = Field(default_factory=list)
@@ -67,6 +69,16 @@ class ApplianceRow(BaseModel):
     confidence: float = 0.0
 
 
+class SpecialSectionRow(BaseModel):
+    section_key: str = ""
+    original_section_label: str = ""
+    fields: dict[str, str] = Field(default_factory=dict)
+    source_file: str = ""
+    page_refs: str = ""
+    evidence_snippet: str = ""
+    confidence: float = 0.0
+
+
 class SnapshotPayload(BaseModel):
     job_no: str
     builder_name: str = ""
@@ -74,6 +86,7 @@ class SnapshotPayload(BaseModel):
     generated_at: str = ""
     analysis: AnalysisMeta = Field(default_factory=AnalysisMeta)
     rooms: list[RoomRow] = Field(default_factory=list)
+    special_sections: list[SpecialSectionRow] = Field(default_factory=list)
     appliances: list[ApplianceRow] = Field(default_factory=list)
     others: dict[str, str] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)

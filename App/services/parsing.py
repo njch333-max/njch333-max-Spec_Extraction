@@ -9,7 +9,7 @@ from xml.etree import ElementTree as ET
 
 from pypdf import PdfReader
 
-from App.models import AnalysisMeta, ApplianceRow, RoomRow, SnapshotPayload
+from App.models import AnalysisMeta, ApplianceRow, RoomRow, SnapshotPayload, SpecialSectionRow
 from App.services import cleaning_rules
 from App.services.runtime import utc_now_iso
 
@@ -165,6 +165,12 @@ FIELD_LABELS = [
     "Island Bar Back",
     "Island Bench Base Cupboards & Drawers",
     "Floor Mounted Vanity",
+    "Upper Cabinetry Colour + Tall Cabinets",
+    "Upper Cabinetry Colour",
+    "Tall Cabinets",
+    "Tall Cabinet",
+    "Tall Doors",
+    "Base Cabinetry Colour",
     "Door/Panel Colour",
     "Door/Panel Colour 1",
     "Door/Panel Colour 2",
@@ -186,6 +192,9 @@ FIELD_LABELS = [
     "Thermolaminate Notes",
     "Base Cabinet Handles",
     "Overhead Handles",
+    "Handles to Overheads",
+    "Handles Base Cabs",
+    "Custom Handles",
     "Handles",
     "Handle",
     "Sink Type/Model",
@@ -685,6 +694,418 @@ def _resolve_room_target(
     return "", "not in room master"
 
 
+def _is_imperial_builder(builder_name: str) -> bool:
+    return "imperial" in normalize_space(builder_name).lower()
+
+
+def _select_imperial_room_master_document(documents: list[dict[str, object]]) -> tuple[dict[str, object] | None, str]:
+    if not documents:
+        return None, ""
+    if len(documents) == 1:
+        document = documents[0]
+        return document, f"{document['file_name']} selected as room master for Imperial single-file parse."
+    best_document: dict[str, object] | None = None
+    best_score = -1
+    best_reason = ""
+    for document in documents:
+        section_count = len(_collect_imperial_sections_for_document(document))
+        score = section_count * 100
+        if score > best_score:
+            best_document = document
+            best_score = score
+            best_reason = f"{document['file_name']} selected as room master by Imperial title count ({section_count} section title(s))."
+    return best_document, best_reason
+
+
+def _collect_imperial_sections_for_document(document: dict[str, object]) -> list[dict[str, Any]]:
+    sections: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+
+    def flush() -> None:
+        nonlocal current
+        if not current:
+            return
+        text_parts = [part for part in current.get("text_parts", []) if normalize_space(part)]
+        section_text = normalize_space("\n".join(text_parts))
+        if section_text:
+            current["text"] = section_text
+            sections.append(current)
+        current = None
+
+    for page in document.get("pages", []):
+        raw_text = str(page.get("text") or "")
+        if not raw_text.strip():
+            continue
+        title = _extract_imperial_section_title(raw_text)
+        trimmed_text = _trim_imperial_page_text(raw_text, title)
+        if title:
+            flush()
+            section_label = _imperial_section_label(title)
+            section_kind = "special" if section_label in IMPERIAL_SPECIAL_SECTION_TITLES else "room"
+            section_key = _imperial_section_key(section_label, section_kind)
+            current = {
+                "section_key": section_key,
+                "original_section_label": section_label,
+                "section_kind": section_kind,
+                "file_name": str(document.get("file_name", "")),
+                "page_nos": [int(page.get("page_no", 0) or 0)],
+                "text_parts": [trimmed_text] if trimmed_text else [],
+            }
+            continue
+        if current and not _looks_like_imperial_continuation_page(trimmed_text):
+            flush()
+            continue
+        if current:
+            current["page_nos"].append(int(page.get("page_no", 0) or 0))
+            if trimmed_text:
+                current.setdefault("text_parts", []).append(trimmed_text)
+    flush()
+    return sections
+
+
+def _extract_imperial_section_title(text: str) -> str:
+    match = IMPERIAL_SECTION_TITLE_RE.search(text)
+    if not match:
+        return ""
+    return normalize_space(match.group("title"))
+
+
+def _imperial_section_label(title: str) -> str:
+    return normalize_space(re.sub(r"(?i)\s+joinery selection sheet\b", "", title)).strip(" -")
+
+
+def _imperial_section_key(label: str, section_kind: str) -> str:
+    if section_kind == "special":
+        return re.sub(r"[^a-z0-9]+", "_", normalize_space(label).lower()).strip("_") or "special_section"
+    lowered = normalize_space(label).lower()
+    if lowered == "bath + ensuite":
+        return "bath_ensuite"
+    return source_room_key(label)
+
+
+def _trim_imperial_page_text(text: str, title: str = "") -> str:
+    working = text.replace("\r", "\n")
+    if title:
+        match = IMPERIAL_SECTION_TITLE_RE.search(working)
+        if match:
+            working = working[match.end() :]
+    footer_positions = [working.find(marker) for marker in IMPERIAL_FOOTER_MARKERS if marker in working]
+    footer_positions = [pos for pos in footer_positions if pos >= 0]
+    if footer_positions:
+        working = working[: min(footer_positions)]
+    lines = [normalize_space(line) for line in working.split("\n") if normalize_space(line)]
+    while lines and not _is_useful_imperial_line(lines[0]):
+        lines.pop(0)
+    return "\n".join(lines)
+
+
+def _is_useful_imperial_line(line: str) -> bool:
+    text = normalize_space(line)
+    if not text:
+        return False
+    if any(text.startswith(marker) for marker in IMPERIAL_HEADER_START_MARKERS):
+        return True
+    return _imperial_match_field_label(text)[0] != ""
+
+
+def _looks_like_imperial_continuation_page(text: str) -> bool:
+    lines = [normalize_space(line) for line in text.split("\n") if normalize_space(line)]
+    if not lines:
+        return False
+    return any(_is_useful_imperial_line(line) for line in lines[:20])
+
+
+def _imperial_match_field_label(line: str) -> tuple[str, str]:
+    text = normalize_space(line)
+    for field_key, pattern in IMPERIAL_SECTION_FIELD_PATTERNS:
+        match = re.match(rf"(?i)^{pattern}(?:\s*[:\-]?\s*(?P<tail>.*))?$", text)
+        if match:
+            return field_key, normalize_space(match.group("tail") or "")
+    return "", ""
+
+
+def _imperial_is_supplier_only_line(line: str) -> bool:
+    normalized = normalize_brand_casing_text(line)
+    return normalized in IMPERIAL_SUPPLIER_ONLY_LINES
+
+
+def _imperial_collect_fields(lines: list[str]) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    index = 0
+    while index < len(lines):
+        field_key, tail = _imperial_match_field_label(lines[index])
+        if not field_key:
+            index += 1
+            continue
+        parts: list[str] = [tail] if tail else []
+        index += 1
+        while index < len(lines):
+            next_field_key, _ = _imperial_match_field_label(lines[index])
+            if next_field_key:
+                break
+            next_line = normalize_space(lines[index])
+            if next_line:
+                parts.append(next_line)
+            index += 1
+        cleaned = _imperial_clean_field_value(field_key, parts)
+        if cleaned:
+            fields[field_key] = _merge_text(fields.get(field_key, ""), cleaned)
+    return fields
+
+
+def _preprocess_imperial_lines(lines: list[str]) -> list[str]:
+    merged: list[str] = []
+    for raw_line in lines:
+        line = normalize_space(raw_line)
+        if not line:
+            continue
+        if merged:
+            combined = normalize_space(f"{merged[-1]} {line}")
+            previous_key, previous_tail = _imperial_match_field_label(merged[-1])
+            if line.startswith(("+ ", "- ")) or (previous_key and not previous_tail):
+                merged[-1] = combined
+                continue
+        merged.append(line)
+    return merged
+
+
+def _imperial_clean_field_value(field_key: str, parts: list[str]) -> str:
+    if field_key in {"bench_tops", "splashback"}:
+        return _imperial_clean_material_value(parts, drop_note_lines=True)
+    if field_key in {"upper_tall", "upper", "base", "tall_doors"}:
+        return _imperial_clean_material_value(parts, drop_note_lines=False)
+    if field_key == "toe_kick":
+        return _imperial_clean_toe_kick_value(parts)
+    if field_key in {"handles_overheads", "handles_base", "custom_handles", "handles"}:
+        return _imperial_clean_handles_value(parts)
+    return _imperial_clean_material_value(parts, drop_note_lines=False)
+
+
+def _imperial_clean_material_value(parts: list[str], drop_note_lines: bool) -> str:
+    supplier = ""
+    cleaned_parts: list[str] = []
+    for raw_part in parts:
+        part = normalize_space(raw_part)
+        if not part:
+            continue
+        if _imperial_is_supplier_only_line(part):
+            supplier = normalize_brand_casing_text(part)
+            continue
+        lowered = part.lower()
+        if drop_note_lines and (
+            lowered.startswith("note:")
+            or "undermount sink" in lowered
+            or "same height on all other walls" in lowered
+            or "as per plans" in lowered
+            or lowered.startswith("up to overheads")
+        ):
+            continue
+        if "handle" in lowered and "profile door" not in lowered:
+            continue
+        cleaned_parts.append(normalize_brand_casing_text(part))
+    text = normalize_space(" ".join(cleaned_parts)).strip(" -;,")
+    if supplier and text and not text.lower().startswith(supplier.lower()):
+        text = f"{supplier} {text}"
+    return text
+
+
+def _imperial_clean_toe_kick_value(parts: list[str]) -> str:
+    supplier = ""
+    entries: list[str] = []
+    for raw_part in parts:
+        part = normalize_space(raw_part)
+        if not part:
+            continue
+        if _imperial_is_supplier_only_line(part):
+            supplier = normalize_brand_casing_text(part)
+            continue
+        if part.upper().startswith("MATCH ABOVE"):
+            continue
+        normalized = normalize_brand_casing_text(part).strip(" -;,.")
+        if supplier and normalized and not normalized.lower().startswith(supplier.lower()):
+            normalized = f"{supplier} {normalized}"
+        if normalized and normalized not in entries:
+            entries.append(normalized)
+    return "; ".join(entries)
+
+
+def _imperial_clean_handles_value(parts: list[str]) -> str:
+    entries: list[str] = []
+    for raw_part in parts:
+        part = normalize_space(raw_part)
+        if not part or _imperial_is_supplier_only_line(part):
+            continue
+        part = re.sub(r"(?i)\bpolytec\b", "", part)
+        part = normalize_space(part).strip(" -;,")
+        if not part:
+            continue
+        entries.append(normalize_brand_casing_text(part))
+    return "; ".join(_unique(entries))
+
+
+def _imperial_extract_inline_value(text: str, start_label: str, stop_labels: tuple[str, ...]) -> str:
+    pattern = rf"(?is){re.escape(start_label)}\s*(?P<value>.*?)(?={'|'.join(re.escape(label) for label in stop_labels)}|$)"
+    match = re.search(pattern, text)
+    if not match:
+        return ""
+    return normalize_space(match.group("value"))
+
+
+def _imperial_page_refs(page_nos: list[int]) -> str:
+    ordered = [str(page_no) for page_no in page_nos if page_no]
+    return ", ".join(ordered)
+
+
+def _imperial_room_from_section(section: dict[str, Any]) -> RoomRow:
+    section_text = str(section.get("text", ""))
+    lines = _preprocess_imperial_lines([normalize_space(line) for line in section_text.split("\n") if normalize_space(line)])
+    fields = _imperial_collect_fields(lines)
+    bulkhead_text = _imperial_extract_inline_value(
+        section_text,
+        "Bulkhead:",
+        ("Shadowline:", "Hinges & Drawer Runners:", "AREA / ITEM", "SPLASHBACK", "BENCHTOP"),
+    )
+    soft_close_text = _imperial_extract_inline_value(
+        section_text,
+        "Hinges & Drawer Runners:",
+        ("Floor Type & Kick refacing required:", "AREA / ITEM", "SPLASHBACK", "BENCHTOP"),
+    )
+    row = RoomRow(
+        room_key=str(section.get("section_key", "")),
+        original_room_label=str(section.get("original_section_label", "")),
+        source_file=str(section.get("file_name", "")),
+        page_refs=_imperial_page_refs(list(section.get("page_nos", []))),
+        evidence_snippet=section_text[:300],
+        confidence=0.72,
+    )
+    bench_text = fields.get("bench_tops", "")
+    if bench_text:
+        row.bench_tops = [bench_text]
+        row.bench_tops_other = bench_text
+    row.splashback = fields.get("splashback", "")
+    row.door_colours_overheads = fields.get("upper_tall", "") or fields.get("upper", "")
+    row.door_colours_tall = fields.get("upper_tall", "")
+    row.door_colours_base = fields.get("base", "")
+    row.has_explicit_overheads = bool(row.door_colours_overheads)
+    row.has_explicit_tall = bool(row.door_colours_tall)
+    row.has_explicit_base = bool(row.door_colours_base)
+    row.door_panel_colours = _rebuild_door_panel_colours(row.model_dump())
+    toe_kick_text = fields.get("toe_kick", "")
+    if toe_kick_text:
+        row.toe_kick = [toe_kick_text]
+    if bulkhead_text:
+        row.bulkheads = [normalize_brand_casing_text(bulkhead_text)]
+    handles: list[str] = []
+    for key in ("handles_overheads", "handles_base", "handles"):
+        if fields.get(key):
+            handles.extend([part for part in fields[key].split("; ") if part])
+    row.handles = _clean_handle_entries(handles)
+    soft_close = normalize_soft_close_value(soft_close_text, keyword="drawer") or normalize_soft_close_value(soft_close_text)
+    if soft_close:
+        row.drawers_soft_close = soft_close
+        row.hinges_soft_close = soft_close
+    return row
+
+
+def _imperial_special_section_from_section(section: dict[str, Any]) -> SpecialSectionRow:
+    section_text = str(section.get("text", ""))
+    lines = _preprocess_imperial_lines([normalize_space(line) for line in section_text.split("\n") if normalize_space(line)])
+    fields = _imperial_collect_fields(lines)
+    normalized_fields: dict[str, str] = {}
+    if fields.get("tall_doors"):
+        normalized_fields["Tall"] = fields["tall_doors"]
+    if fields.get("toe_kick"):
+        normalized_fields["Toe Kick"] = fields["toe_kick"]
+    if fields.get("custom_handles"):
+        normalized_fields["Handles"] = fields["custom_handles"]
+    soft_close_text = _imperial_extract_inline_value(
+        section_text,
+        "Hinges & Drawer Runners:",
+        ("Floor Type & Kick refacing required:", "AREA / ITEM", "TALL DOORS"),
+    )
+    soft_close = normalize_soft_close_value(soft_close_text, keyword="drawer") or normalize_soft_close_value(soft_close_text)
+    if soft_close:
+        normalized_fields["Drawers"] = soft_close
+        normalized_fields["Hinges"] = soft_close
+    return SpecialSectionRow(
+        section_key=str(section.get("section_key", "")),
+        original_section_label=str(section.get("original_section_label", "")),
+        fields=normalized_fields,
+        source_file=str(section.get("file_name", "")),
+        page_refs=_imperial_page_refs(list(section.get("page_nos", []))),
+        evidence_snippet=section_text[:300],
+        confidence=0.72,
+    )
+
+
+def _parse_imperial_documents(
+    job_no: str,
+    builder_name: str,
+    source_kind: str,
+    documents: list[dict[str, object]],
+    rule_flags: Any = None,
+) -> dict[str, Any]:
+    rooms: dict[str, RoomRow] = {}
+    appliances: list[ApplianceRow] = []
+    special_sections: list[SpecialSectionRow] = []
+    warnings: list[str] = []
+    source_documents: list[dict[str, str]] = []
+    room_master_document, room_master_reason = _select_imperial_room_master_document(documents)
+    room_master_file = str(room_master_document["file_name"]) if room_master_document else ""
+    supplement_files: list[str] = []
+
+    for document in documents:
+        file_name = str(document["file_name"])
+        pages = list(document["pages"])
+        is_room_master = not room_master_document or document is room_master_document
+        if not is_room_master:
+            supplement_files.append(file_name)
+        source_documents.append(
+            {
+                "file_name": file_name,
+                "role": str(document["role"]),
+                "page_count": str(len(pages)),
+                "room_role": "room_master" if is_room_master else "supplement",
+            }
+        )
+        full_text = "\n\n".join(str(page["text"]) for page in pages if page.get("text"))
+        if not full_text.strip():
+            warnings.append(f"No extractable text found in {file_name}.")
+            continue
+        for page in pages:
+            if page.get("needs_ocr"):
+                warnings.append(f"Low-text page detected in {file_name} page {page['page_no']}.")
+        if is_room_master:
+            for section in _collect_imperial_sections_for_document(document):
+                if section["section_kind"] == "room":
+                    row = _imperial_room_from_section(section)
+                    rooms[row.room_key] = row
+                else:
+                    special_sections.append(_imperial_special_section_from_section(section))
+        appliances.extend(_extract_appliances(full_text, file_name, pages))
+
+    payload = SnapshotPayload(
+        job_no=job_no,
+        builder_name=builder_name,
+        source_kind=source_kind,
+        generated_at=utc_now_iso(),
+        analysis=AnalysisMeta(
+            parser_strategy=cleaning_rules.global_parser_strategy(),
+            room_master_file=room_master_file,
+            room_master_reason=room_master_reason,
+            supplement_files=supplement_files,
+            ignored_room_like_lines_count=0,
+        ),
+        rooms=list(rooms.values()),
+        special_sections=special_sections,
+        appliances=_dedupe_appliances(appliances),
+        others={},
+        warnings=_unique(warnings),
+        source_documents=source_documents,
+    )
+    return apply_snapshot_cleaning_rules(payload.model_dump(), rule_flags=rule_flags)
+
+
 def parse_documents(
     job_no: str,
     builder_name: str,
@@ -692,6 +1113,9 @@ def parse_documents(
     documents: list[dict[str, object]],
     rule_flags: Any = None,
 ) -> dict:
+    if source_kind == "spec" and _is_imperial_builder(builder_name):
+        return _parse_imperial_documents(job_no, builder_name, source_kind, documents, rule_flags=rule_flags)
+
     rooms: dict[str, RoomRow] = {}
     appliances: list[ApplianceRow] = []
     warnings: list[str] = []
@@ -818,20 +1242,24 @@ def _merge_room_section_into_row(
             generic_bench_tops.append(f"Island Benchtop {island_bench_top}")
         row.bench_tops = _merge_lists(row.bench_tops, _unique(generic_bench_tops))
         row.door_panel_colours = _merge_lists(row.door_panel_colours, _collect_field(lines, DOOR_COLOUR_FIELD_PREFIXES))
-        overhead_value = _first_value(_collect_field(lines, ["Overhead Cupboards"]))
-        base_value = _first_value(_collect_field(lines, ["Base Cupboards & Drawers", "Floor Mounted Vanity"]))
+        overhead_value = _first_value(_collect_field(lines, ["Overhead Cupboards", "Upper Cabinetry Colour + Tall Cabinets", "Upper Cabinetry Colour"]))
+        base_value = _first_value(_collect_field(lines, ["Base Cupboards & Drawers", "Floor Mounted Vanity", "Base Cabinetry Colour"]))
+        tall_value = _first_value(_collect_field(lines, ["Tall Cabinets", "Tall Cabinet", "Tall Doors", "Upper Cabinetry Colour + Tall Cabinets"]))
         island_value = _first_value(_collect_field(lines, ["Island Bench Base Cupboards & Drawers"]))
         bar_back_value = _first_value(_collect_field(lines, ["Island Bar Back"]))
         if overhead_value:
             row.has_explicit_overheads = True
         if base_value:
             row.has_explicit_base = True
+        if tall_value:
+            row.has_explicit_tall = True
         if island_value:
             row.has_explicit_island = True
         if bar_back_value:
             row.has_explicit_bar_back = True
         row.door_colours_overheads = _merge_clean_group_text(row.door_colours_overheads, overhead_value, cleaner=_clean_door_colour_value)
         row.door_colours_base = _merge_clean_group_text(row.door_colours_base, base_value, cleaner=_clean_door_colour_value)
+        row.door_colours_tall = _merge_clean_group_text(row.door_colours_tall, tall_value, cleaner=_clean_door_colour_value)
         row.door_colours_island = _merge_clean_group_text(row.door_colours_island, island_value, cleaner=_clean_door_colour_value)
         row.door_colours_bar_back = _merge_clean_group_text(row.door_colours_bar_back, bar_back_value, cleaner=_clean_door_colour_value)
         if not _has_explicit_door_group_markers(row):
@@ -1313,9 +1741,20 @@ def enrich_snapshot_rooms(snapshot: dict[str, Any], documents: list[dict[str, ob
     analysis = snapshot.get("analysis") or {}
     room_master_file = str(analysis.get("room_master_file", "") or "")
     overlays = _collect_room_overlays(documents, room_master_file=room_master_file)
+    imperial_builder = _is_imperial_builder(str(snapshot.get("builder_name", "")))
     for row in rooms:
         overlay = _match_room_overlay(row, overlays)
-        for key in ("has_explicit_overheads", "has_explicit_base", "has_explicit_island", "has_explicit_bar_back"):
+        if imperial_builder:
+            row["bench_tops"] = _rebuild_benchtop_entries(row)
+            row["door_panel_colours"] = _rebuild_door_panel_colours(row)
+            row["handles"] = _clean_handle_entries(_coerce_string_list(row.get("handles", [])))
+            row["sink_info"] = _merge_text(_string_value(row.get("sink_info", "")), overlay.get("sink_info", ""))
+            row["basin_info"] = _merge_text(_string_value(row.get("basin_info", "")), overlay.get("basin_info", ""))
+            row["tap_info"] = _merge_text(_string_value(row.get("tap_info", "")), overlay.get("tap_info", ""))
+            row["drawers_soft_close"] = merge_soft_close_values(row.get("drawers_soft_close", ""), "")
+            row["hinges_soft_close"] = merge_soft_close_values(row.get("hinges_soft_close", ""), "")
+            continue
+        for key in ("has_explicit_overheads", "has_explicit_base", "has_explicit_tall", "has_explicit_island", "has_explicit_bar_back"):
             row[key] = bool(row.get(key, False) or overlay.get(key, False))
         benchtop_groups = _split_benchtop_groups(_coerce_string_list(row.get("bench_tops", [])))
         row["bench_tops_wall_run"] = overlay.get("bench_tops_wall_run", "") or _merge_text(_string_value(row.get("bench_tops_wall_run", "")), benchtop_groups["bench_tops_wall_run"])
@@ -1329,6 +1768,7 @@ def enrich_snapshot_rooms(snapshot: dict[str, Any], documents: list[dict[str, ob
         )
         row["door_colours_overheads"] = overlay.get("door_colours_overheads", "") or _merge_clean_group_text(row.get("door_colours_overheads", ""), door_groups["door_colours_overheads"], cleaner=_clean_door_colour_value)
         row["door_colours_base"] = overlay.get("door_colours_base", "") or _merge_clean_group_text(row.get("door_colours_base", ""), door_groups["door_colours_base"], cleaner=_clean_door_colour_value)
+        row["door_colours_tall"] = overlay.get("door_colours_tall", "") or _merge_clean_group_text(row.get("door_colours_tall", ""), door_groups["door_colours_tall"], cleaner=_clean_door_colour_value)
         row["door_colours_island"] = overlay.get("door_colours_island", "") or _merge_clean_group_text(row.get("door_colours_island", ""), door_groups["door_colours_island"], cleaner=_clean_door_colour_value)
         row["door_colours_bar_back"] = overlay.get("door_colours_bar_back", "") or _merge_clean_group_text(row.get("door_colours_bar_back", ""), door_groups["door_colours_bar_back"], cleaner=_clean_door_colour_value)
         row.update(
@@ -1336,6 +1776,7 @@ def enrich_snapshot_rooms(snapshot: dict[str, Any], documents: list[dict[str, ob
                 {
                     "door_colours_overheads": row["door_colours_overheads"],
                     "door_colours_base": row["door_colours_base"],
+                    "door_colours_tall": row["door_colours_tall"],
                     "door_colours_island": row["door_colours_island"],
                     "door_colours_bar_back": row["door_colours_bar_back"],
                 }
@@ -1357,6 +1798,11 @@ def apply_snapshot_cleaning_rules(snapshot: dict[str, Any], rule_flags: Any = No
     flags = cleaning_rules.normalize_rule_flags(rule_flags)
     cleaned = dict(snapshot)
     cleaned["rooms"] = [_apply_room_cleaning_rules(dict(row), flags) for row in snapshot.get("rooms", []) if isinstance(row, dict)]
+    cleaned["special_sections"] = [
+        _apply_special_section_cleaning_rules(dict(row), flags)
+        for row in snapshot.get("special_sections", [])
+        if isinstance(row, dict)
+    ]
     cleaned["appliances"] = [
         _apply_appliance_cleaning_rules(dict(row), flags)
         for row in snapshot.get("appliances", [])
@@ -1375,6 +1821,7 @@ def _apply_room_cleaning_rules(row: dict[str, Any], rule_flags: dict[str, bool])
     row["room_key"] = normalize_space(str(row.get("room_key", "")))
     row["has_explicit_overheads"] = bool(row.get("has_explicit_overheads", False))
     row["has_explicit_base"] = bool(row.get("has_explicit_base", False))
+    row["has_explicit_tall"] = bool(row.get("has_explicit_tall", False))
     row["has_explicit_island"] = bool(row.get("has_explicit_island", False))
     row["has_explicit_bar_back"] = bool(row.get("has_explicit_bar_back", False))
     row["original_room_label"] = _display_rule_text(row.get("original_room_label", ""), rule_flags)
@@ -1396,12 +1843,12 @@ def _apply_room_cleaning_rules(row: dict[str, Any], rule_flags: dict[str, bool])
         if _has_explicit_door_group_markers(row)
         else _split_door_colour_groups(row["door_panel_colours"])
     )
-    for key in ("door_colours_overheads", "door_colours_base", "door_colours_island", "door_colours_bar_back"):
+    for key in ("door_colours_overheads", "door_colours_base", "door_colours_tall", "door_colours_island", "door_colours_bar_back"):
         existing = _display_rule_text(row.get(key, ""), rule_flags)
         merged = _merge_clean_group_text(existing, grouped_doors.get(key, ""), cleaner=_clean_door_colour_value)
         row[key] = _display_rule_text(merged, rule_flags)
     if cleaning_rules.rule_enabled(rule_flags, "door_colour_dedupe_cleanup"):
-        row.update(_prune_door_group_overlap({key: row.get(key, "") for key in ("door_colours_overheads", "door_colours_base", "door_colours_island", "door_colours_bar_back")}))
+        row.update(_prune_door_group_overlap({key: row.get(key, "") for key in ("door_colours_overheads", "door_colours_base", "door_colours_tall", "door_colours_island", "door_colours_bar_back")}))
     normalized_room_key = normalize_room_key(str(row.get("room_key", "")))
     if normalized_room_key != "kitchen":
         if row["door_colours_overheads"] and not row["has_explicit_overheads"]:
@@ -1425,6 +1872,28 @@ def _apply_room_cleaning_rules(row: dict[str, Any], rule_flags: dict[str, bool])
     row["bench_tops"] = _normalize_text_list(_rebuild_benchtop_entries(row), rule_flags)
 
     return row
+
+
+def _apply_special_section_cleaning_rules(row: dict[str, Any], rule_flags: dict[str, bool]) -> dict[str, Any]:
+    cleaned = dict(row)
+    cleaned["section_key"] = normalize_space(str(cleaned.get("section_key", "")))
+    cleaned["original_section_label"] = _display_rule_text(cleaned.get("original_section_label", ""), rule_flags)
+    fields = cleaned.get("fields") or {}
+    if isinstance(fields, dict):
+        cleaned["fields"] = {
+            _display_rule_text(key, rule_flags): _display_rule_text(value, rule_flags)
+            for key, value in fields.items()
+            if _display_rule_text(value, rule_flags)
+        }
+    else:
+        cleaned["fields"] = {}
+    for key in ("source_file", "page_refs", "evidence_snippet"):
+        cleaned[key] = _display_rule_text(cleaned.get(key, ""), rule_flags)
+    try:
+        cleaned["confidence"] = float(cleaned.get("confidence", 0) or 0)
+    except (TypeError, ValueError):
+        cleaned["confidence"] = 0.0
+    return cleaned
 
 
 def _apply_appliance_cleaning_rules(row: dict[str, Any], rule_flags: dict[str, bool]) -> dict[str, Any]:
@@ -1482,10 +1951,12 @@ def _collect_room_overlays(documents: list[dict[str, object]], room_master_file:
                     "bench_tops_other": "",
                     "door_colours_overheads": "",
                     "door_colours_base": "",
+                    "door_colours_tall": "",
                     "door_colours_island": "",
                     "door_colours_bar_back": "",
                     "has_explicit_overheads": False,
                     "has_explicit_base": False,
+                    "has_explicit_tall": False,
                     "has_explicit_island": False,
                     "has_explicit_bar_back": False,
                     "sink_info": "",
@@ -1504,20 +1975,24 @@ def _collect_room_overlays(documents: list[dict[str, object]], room_master_file:
                 benchtop_groups = _split_benchtop_groups(generic_bench_tops + explicit_bench_values)
                 for key, value in benchtop_groups.items():
                     overlay[key] = value or overlay[key]
-                overhead_value = _first_value(_collect_field(lines, ["Overhead Cupboards"]))
-                base_value = _first_value(_collect_field(lines, ["Base Cupboards & Drawers", "Floor Mounted Vanity"]))
+                overhead_value = _first_value(_collect_field(lines, ["Overhead Cupboards", "Upper Cabinetry Colour + Tall Cabinets", "Upper Cabinetry Colour"]))
+                base_value = _first_value(_collect_field(lines, ["Base Cupboards & Drawers", "Floor Mounted Vanity", "Base Cabinetry Colour"]))
+                tall_value = _first_value(_collect_field(lines, ["Tall Cabinets", "Tall Cabinet", "Tall Doors", "Upper Cabinetry Colour + Tall Cabinets"]))
                 island_value = _first_value(_collect_field(lines, ["Island Bench Base Cupboards & Drawers"]))
                 bar_back_value = _first_value(_collect_field(lines, ["Island Bar Back"]))
                 if overhead_value:
                     overlay["has_explicit_overheads"] = True
                 if base_value:
                     overlay["has_explicit_base"] = True
+                if tall_value:
+                    overlay["has_explicit_tall"] = True
                 if island_value:
                     overlay["has_explicit_island"] = True
                 if bar_back_value:
                     overlay["has_explicit_bar_back"] = True
                 overlay["door_colours_overheads"] = _merge_clean_group_text(overlay["door_colours_overheads"], overhead_value, cleaner=_clean_door_colour_value)
                 overlay["door_colours_base"] = _merge_clean_group_text(overlay["door_colours_base"], base_value, cleaner=_clean_door_colour_value)
+                overlay["door_colours_tall"] = _merge_clean_group_text(overlay["door_colours_tall"], tall_value, cleaner=_clean_door_colour_value)
                 overlay["door_colours_island"] = _merge_clean_group_text(overlay["door_colours_island"], island_value, cleaner=_clean_door_colour_value)
                 overlay["door_colours_bar_back"] = _merge_clean_group_text(overlay["door_colours_bar_back"], bar_back_value, cleaner=_clean_door_colour_value)
                 if not _has_explicit_door_group_markers(overlay):
@@ -1544,10 +2019,12 @@ def _match_room_overlay(row: dict[str, Any], overlays: dict[str, dict[str, str]]
         "bench_tops_other": "",
         "door_colours_overheads": "",
         "door_colours_base": "",
+        "door_colours_tall": "",
         "door_colours_island": "",
         "door_colours_bar_back": "",
         "has_explicit_overheads": False,
         "has_explicit_base": False,
+        "has_explicit_tall": False,
         "has_explicit_island": False,
         "has_explicit_bar_back": False,
         "sink_info": "",
@@ -1578,6 +2055,11 @@ DOOR_CONTEXT_TOKENS = (
     "overhead",
     "tall cabinetry",
     "tall cabinet",
+    "tall cabinets",
+    "tall door",
+    "tall doors",
+    "tall panel",
+    "tall panels",
     "base cabinetry",
     "base cabinet",
     "cooktop run",
@@ -1710,7 +2192,7 @@ def _prune_door_group_overlap(groups: dict[str, str]) -> dict[str, str]:
         key: _dedupe_prefer_specific(_split_group_entries(value), cleaner=_clean_door_colour_value)
         for key, value in groups.items()
     }
-    island_signatures = [_material_signature(entry) for entry in cleaned["door_colours_island"] + cleaned["door_colours_bar_back"] if entry]
+    island_signatures = [_material_signature(entry) for entry in cleaned.get("door_colours_island", []) + cleaned.get("door_colours_bar_back", []) if entry]
     if island_signatures and len(cleaned["door_colours_base"]) > 1:
         filtered: list[str] = []
         for entry in cleaned["door_colours_base"]:
@@ -1727,6 +2209,7 @@ def _split_door_colour_groups(values: list[str]) -> dict[str, str]:
     grouped = {
         "door_colours_overheads": [],
         "door_colours_base": [],
+        "door_colours_tall": [],
         "door_colours_island": [],
         "door_colours_bar_back": [],
     }
@@ -1745,8 +2228,11 @@ def _split_door_colour_groups(values: list[str]) -> dict[str, str]:
                 continue
             lowered = text.lower()
             matched = False
-            if any(token in lowered for token in ["upper", "overhead", "tall cabinetry", "tall cabinet"]):
+            if any(token in lowered for token in ["upper", "overhead"]):
                 grouped["door_colours_overheads"].append(cleaned)
+                matched = True
+            if any(token in lowered for token in ["tall cabinetry", "tall cabinet", "tall cabinets", "tall door", "tall doors", "tall panel", "tall panels"]):
+                grouped["door_colours_tall"].append(cleaned)
                 matched = True
             if "base" in lowered and "island" not in lowered:
                 grouped["door_colours_base"].append(cleaned)
@@ -1766,6 +2252,7 @@ def _blank_door_group_values() -> dict[str, str]:
     return {
         "door_colours_overheads": "",
         "door_colours_base": "",
+        "door_colours_tall": "",
         "door_colours_island": "",
         "door_colours_bar_back": "",
     }
@@ -1778,12 +2265,57 @@ def _has_explicit_door_group_markers(row: Any) -> bool:
         getter = lambda key: getattr(row, key, False)
     return any(
         bool(getter(key))
-        for key in ("has_explicit_overheads", "has_explicit_base", "has_explicit_island", "has_explicit_bar_back")
+        for key in ("has_explicit_overheads", "has_explicit_base", "has_explicit_tall", "has_explicit_island", "has_explicit_bar_back")
     )
 
 
 BENCHTOP_WALL_HINTS = ("wall run", "cooktop run", "wall bench", "wall side", "back benchtops", "back benchtop")
 BENCHTOP_ISLAND_HINTS = ("island bench", "island")
+
+IMPERIAL_SECTION_TITLE_RE = re.compile(r"(?im)\b(?P<title>[A-Z][A-Z +/&'\-]{2,}?)\s+JOINERY SELECTION SHEET\b")
+IMPERIAL_SPECIAL_SECTION_TITLES = {"FEATURE TALL DOORS"}
+IMPERIAL_HEADER_START_MARKERS = (
+    "Ceiling height:",
+    "Bulkhead:",
+    "Shadowline:",
+    "Hinges & Drawer Runners:",
+    "AREA / ITEM",
+    "NOTES",
+    "SPLASHBACK",
+    "BENCHTOP",
+    "UPPER CABINETRY",
+    "BASE CABINETRY",
+    "KICKBOARDS",
+    "HANDLES",
+    "TALL DOORS",
+)
+IMPERIAL_FOOTER_MARKERS = (
+    "CLIENT NAME:",
+    "SIGNATURE:",
+    "SIGNED DATE:",
+    "DESIGNER:",
+    "ALL COLOURS SHOWN ARE APPROXIMATE REPRESENTATIONS ONLY",
+)
+IMPERIAL_SUPPLIER_ONLY_LINES = {
+    "Polytec",
+    "Caesarstone",
+    "Smartstone",
+    "Laminex",
+    "WK Stone",
+}
+IMPERIAL_SECTION_FIELD_PATTERNS: list[tuple[str, str]] = [
+    ("upper_tall", r"UPPER CABINETRY COLOUR\s*\+\s*TALL CABINETS\b"),
+    ("upper", r"UPPER CABINETRY COLOUR(?:\s+DOORS)?\b"),
+    ("handles_overheads", r"HANDLES\s+to\s+OVERHEADS\b"),
+    ("handles_base", r"HANDLES\s+BASE\s+CABS\b"),
+    ("custom_handles", r"CUSTOM HANDLES\b"),
+    ("handles", r"HANDLES\b"),
+    ("base", r"BASE CABINETRY COLOUR\b"),
+    ("splashback", r"SPLASHBACK(?:\s+COLOUR)?\b"),
+    ("bench_tops", r"BENCHTOPS?(?:\s+COLOUR)?\b"),
+    ("toe_kick", r"KICKBOARDS\b"),
+    ("tall_doors", r"TALL DOORS\b"),
+]
 
 
 def _split_benchtop_groups(values: list[str]) -> dict[str, str]:
@@ -1912,6 +2444,7 @@ def _rebuild_door_panel_colours(row: dict[str, Any]) -> list[str]:
     for value in (
         row.get("door_colours_overheads", ""),
         row.get("door_colours_base", ""),
+        row.get("door_colours_tall", ""),
         row.get("door_colours_island", ""),
         row.get("door_colours_bar_back", ""),
     ):
@@ -1923,6 +2456,7 @@ def _apply_door_colour_groups(row: RoomRow, values: list[str]) -> None:
     groups = _split_door_colour_groups(values)
     row.door_colours_overheads = _merge_clean_group_text(row.door_colours_overheads, groups["door_colours_overheads"], cleaner=_clean_door_colour_value)
     row.door_colours_base = _merge_clean_group_text(row.door_colours_base, groups["door_colours_base"], cleaner=_clean_door_colour_value)
+    row.door_colours_tall = _merge_clean_group_text(row.door_colours_tall, groups["door_colours_tall"], cleaner=_clean_door_colour_value)
     row.door_colours_island = _merge_clean_group_text(row.door_colours_island, groups["door_colours_island"], cleaner=_clean_door_colour_value)
     row.door_colours_bar_back = _merge_clean_group_text(row.door_colours_bar_back, groups["door_colours_bar_back"], cleaner=_clean_door_colour_value)
 

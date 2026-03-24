@@ -18,6 +18,7 @@ from openpyxl import load_workbook
 from App.main import _build_material_summary, _flatten_rooms, app
 from App.services import extraction_service, parsing as parsing_module, store
 from App.services.appliance_official import _build_direct_product_candidates, _extract_size_from_text, _primary_model_token
+from App.services.export_service import build_spec_list_excel
 from App.services.parsing import enrich_snapshot_rooms, parse_documents
 
 
@@ -2059,10 +2060,10 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(rooms_sheet["D2"].value, "Quantum Zero Midnight Black 20mm pencil round edge")
         self.assertEqual(rooms_sheet["E2"].value, "Quantum Zero Venatino Statuario 40mm mitred apron edge")
         self.assertEqual(rooms_sheet["H2"].value, "Polytec Blossom White Matt Finish - overhead cabinetry")
-        self.assertEqual(rooms_sheet["O2"].value, "PARISI Quadro Double Bowl (PK8644)")
-        self.assertEqual(rooms_sheet["Q2"].value, "PHOENIX Nostalgia Sink Mixer NS714-62")
-        self.assertEqual(rooms_sheet["R2"].value, "Soft Close")
-        self.assertEqual(rooms_sheet["S2"].value, "Not Soft Close")
+        self.assertEqual(rooms_sheet["P2"].value, "PARISI Quadro Double Bowl (PK8644)")
+        self.assertEqual(rooms_sheet["R2"].value, "PHOENIX Nostalgia Sink Mixer NS714-62")
+        self.assertEqual(rooms_sheet["S2"].value, "Soft Close")
+        self.assertEqual(rooms_sheet["T2"].value, "Not Soft Close")
         self.assertEqual(appliances_sheet["A2"].value, "Cooktop")
         self.assertEqual(appliances_sheet["D2"].value, "https://official.example/product/WHC943BD")
         self.assertEqual(appliances_sheet["F2"].value, "900 x 510 x 60 mm")
@@ -2138,6 +2139,264 @@ class SmokeTest(unittest.TestCase):
         response = client.get(f"/jobs/{job_id}/spec-list")
         self.assertEqual(response.status_code, 200)
         self.assertIn("No raw spec snapshot yet", response.text)
+
+    def test_parse_documents_imperial_uses_title_boundaries_and_special_sections(self) -> None:
+        documents = [
+            {
+                "file_name": "imperial-colours.pdf",
+                "role": "spec",
+                "pages": [
+                    {
+                        "page_no": 1,
+                        "text": (
+                            "Address:82/1 Goodwin St KANGAROO POINT\n"
+                            "Client:Tracey Godfrey\n"
+                            "Date:29.8.25\n"
+                            "KITCHEN JOINERY SELECTION SHEET\n"
+                            "Ceiling height:2200mm builder's bulkhead Cabinetry Height:2170mm 55mm Cove Cornice (to be checked)\n"
+                            "Bulkhead:MDF Bulkhead 80mm high (to have cornice applied) Shadowline:Base under benchtop for Bronte Handle\n"
+                            "Hinges & Drawer Runners:Soft Close Floor Type & Kick refacing required:\n"
+                            "AREA / ITEM SPECS / DESCRIPTION IMAGE SUPPLIER NOTES\n"
+                            "SPLASHBACK COLOUR\n"
+                            "Caesarstone\n"
+                            "Organic White\n"
+                            "20mm Pencil Round Edge\n"
+                            "Caesarstone\n"
+                            "Up to overheads on cooktop run and\n"
+                            "same height on all other walls\n"
+                            "as per plans\n"
+                            "BENCHTOPS COLOUR\n"
+                            "Caesarstone\n"
+                            "Organic White\n"
+                            "20mm with 40mm Double Mitred\n"
+                            "Pencil Round Edge\n"
+                            "Caesarstone NOTE: Undermount Sink\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 2,
+                        "text": (
+                            "UPPER CABINETRY COLOUR + TALL CABINETS\n"
+                            "Polytec\n"
+                            "Valla Profile Door in\n"
+                            "Boston Oak Woodmatt\n"
+                            "EM0\n"
+                            "Polytec\n"
+                            "BASE CABINETRY COLOUR\n"
+                            "Polytec\n"
+                            "Ascot Profile Door\n"
+                            "in Gossamer White Smooth\n"
+                            "EM0\n"
+                            "Polytec\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 3,
+                        "text": (
+                            "KICKBOARDS\n"
+                            "MATCH ABOVE:\n"
+                            "Polytec\n"
+                            "Gossamer White Smooth\n"
+                            "Polytec\n"
+                            "Boston Oak Woodmatt under talls.\n"
+                            "Polytec\n"
+                            "HANDLES to OVERHEADS\n"
+                            "NO HANDLE for OVERHEADS - RECESSED FINGER SPACE\n"
+                            "Touch catch above ovens\n"
+                            "Polytec\n"
+                            "HANDLES BASE CABS NO HANDLES - BRONTE HANDLE Polytec\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 4,
+                        "text": (
+                            "CUSTOM HANDLES\n"
+                            "Polytec\n"
+                            "Boston Oak Woodmatt Melamine - Custom Made Handles - 1200mm high x 50mm wide outset 41mm\n"
+                            "Polytec VERTICAL\n"
+                            "DESIGNER: MELISSA COAKES CLIENT NAME: SIGNATURE: SIGNED DATE:\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 5,
+                        "text": (
+                            "FEATURE TALL DOORS JOINERY SELECTION SHEET\n"
+                            "Bulkhead:NA Shadowline:NA\n"
+                            "Hinges & Drawer Runners:Soft Close Floor Type & Kick refacing required:NA\n"
+                            "TALL DOORS\n"
+                            "Polytec\n"
+                            "Valla Profile Door in\n"
+                            "Thermolaminated Vinyl Wrap\n"
+                            "Boston Oak Woodmatt\n"
+                            "EM0 Edge\n"
+                            "KICKBOARDS Polytec\n"
+                            "BOSTON OAK WOODMATT Polytec\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                ],
+            }
+        ]
+        snapshot = parse_documents(
+            job_no="37647",
+            builder_name="Imperial",
+            source_kind="spec",
+            documents=documents,
+        )
+        rooms = {row["room_key"]: row for row in snapshot["rooms"]}
+        self.assertIn("kitchen", rooms)
+        kitchen = rooms["kitchen"]
+        self.assertEqual(kitchen["bench_tops_other"], "Caesarstone Organic White 20mm with 40mm Double Mitred Pencil Round Edge")
+        self.assertEqual(kitchen["splashback"], "Caesarstone Organic White 20mm Pencil Round Edge")
+        self.assertEqual(kitchen["door_colours_overheads"], "Polytec Valla Profile Door in Boston Oak Woodmatt EM0")
+        self.assertEqual(kitchen["door_colours_tall"], "Polytec Valla Profile Door in Boston Oak Woodmatt EM0")
+        self.assertEqual(kitchen["door_colours_base"], "Polytec Ascot Profile Door in Gossamer White Smooth EM0")
+        self.assertEqual(kitchen["drawers_soft_close"], "Soft Close")
+        self.assertEqual(kitchen["hinges_soft_close"], "Soft Close")
+        self.assertEqual(kitchen["toe_kick"], ["Polytec Gossamer White Smooth", "Polytec Boston Oak Woodmatt under talls"])
+        self.assertTrue(any("FEATURE TALL DOORS" == row["original_section_label"] for row in snapshot["special_sections"]))
+
+        enriched = enrich_snapshot_rooms(snapshot, documents)
+        kitchen_after_enrichment = {row["room_key"]: row for row in enriched["rooms"]}["kitchen"]
+        self.assertEqual(
+            kitchen_after_enrichment["bench_tops_other"],
+            "Caesarstone Organic White 20mm with 40mm Double Mitred Pencil Round Edge",
+        )
+        self.assertEqual(
+            kitchen_after_enrichment["bench_tops"],
+            ["Caesarstone Organic White 20mm with 40mm Double Mitred Pencil Round Edge"],
+        )
+        self.assertEqual(
+            kitchen_after_enrichment["door_colours_base"],
+            "Polytec Ascot Profile Door in Gossamer White Smooth EM0",
+        )
+        self.assertEqual(
+            kitchen_after_enrichment["door_colours_overheads"],
+            "Polytec Valla Profile Door in Boston Oak Woodmatt EM0",
+        )
+
+    def test_spec_list_page_renders_tall_and_special_sections(self) -> None:
+        builder_id = store.create_builder("Imperial", "imperial", "")
+        job_id = store.create_job("37647", builder_id, "Imperial Test", "")
+        store.upsert_snapshot(
+            job_id,
+            "raw_spec",
+            {
+                "job_no": "37647",
+                "builder_name": "Imperial",
+                "source_kind": "spec",
+                "generated_at": "2026-03-24T10:00:00+00:00",
+                "analysis": {"mode": "heuristic_only", "parser_strategy": "global_conservative"},
+                "rooms": [
+                    {
+                        "room_key": "kitchen",
+                        "original_room_label": "KITCHEN",
+                        "bench_tops": ["Caesarstone Organic White 20mm with 40mm Double Mitred Pencil Round Edge"],
+                        "bench_tops_other": "Caesarstone Organic White 20mm with 40mm Double Mitred Pencil Round Edge",
+                        "door_panel_colours": [],
+                        "door_colours_overheads": "Polytec Valla Profile Door in Boston Oak Woodmatt EM0",
+                        "door_colours_base": "Polytec Ascot Profile Door in Gossamer White Smooth EM0",
+                        "door_colours_tall": "Polytec Valla Profile Door in Boston Oak Woodmatt EM0",
+                        "door_colours_island": "",
+                        "door_colours_bar_back": "",
+                        "has_explicit_overheads": True,
+                        "has_explicit_base": True,
+                        "has_explicit_tall": True,
+                        "toe_kick": [],
+                        "bulkheads": [],
+                        "handles": [],
+                        "drawers_soft_close": "",
+                        "hinges_soft_close": "",
+                        "splashback": "",
+                        "flooring": "",
+                        "source_file": "imperial-colours.pdf",
+                        "page_refs": "1, 2",
+                        "evidence_snippet": "",
+                        "confidence": 0.7,
+                    }
+                ],
+                "special_sections": [
+                    {
+                        "section_key": "feature_tall_doors",
+                        "original_section_label": "FEATURE TALL DOORS",
+                        "fields": {"Tall": "Polytec Valla Profile Door in Thermolaminated Vinyl Wrap Boston Oak Woodmatt EM0 Edge"},
+                        "source_file": "imperial-colours.pdf",
+                        "page_refs": "5, 6",
+                        "evidence_snippet": "TALL DOORS Polytec ...",
+                        "confidence": 0.7,
+                    }
+                ],
+                "appliances": [],
+                "others": {},
+                "warnings": [],
+                "source_documents": [],
+            },
+        )
+        client = TestClient(app)
+        self._login(client)
+        response = client.get(f"/jobs/{job_id}/spec-list")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("<strong>Tall</strong>", response.text)
+        self.assertIn("FEATURE TALL DOORS", response.text)
+
+    def test_spec_list_excel_includes_tall_and_special_sections_sheet(self) -> None:
+        snapshot = {
+            "job_no": "37647",
+            "builder_name": "Imperial",
+            "source_kind": "spec",
+            "generated_at": "2026-03-24T10:00:00+00:00",
+            "analysis": {"mode": "heuristic_only", "parser_strategy": "global_conservative"},
+            "rooms": [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "bench_tops": ["Caesarstone Organic White 20mm with 40mm Double Mitred Pencil Round Edge"],
+                    "door_panel_colours": [],
+                    "door_colours_overheads": "Polytec Valla Profile Door in Boston Oak Woodmatt EM0",
+                    "door_colours_base": "Polytec Ascot Profile Door in Gossamer White Smooth EM0",
+                    "door_colours_tall": "Polytec Valla Profile Door in Boston Oak Woodmatt EM0",
+                    "toe_kick": [],
+                    "bulkheads": [],
+                    "handles": [],
+                    "drawers_soft_close": "",
+                    "hinges_soft_close": "",
+                    "splashback": "",
+                    "flooring": "",
+                    "source_file": "imperial-colours.pdf",
+                    "page_refs": "1, 2",
+                    "evidence_snippet": "",
+                    "confidence": 0.7,
+                }
+            ],
+            "special_sections": [
+                {
+                    "section_key": "feature_tall_doors",
+                    "original_section_label": "FEATURE TALL DOORS",
+                    "fields": {"Tall": "Polytec Valla Profile Door in Thermolaminated Vinyl Wrap Boston Oak Woodmatt EM0 Edge"},
+                    "source_file": "imperial-colours.pdf",
+                    "page_refs": "5, 6",
+                    "evidence_snippet": "TALL DOORS Polytec ...",
+                    "confidence": 0.7,
+                }
+            ],
+            "appliances": [],
+            "others": {},
+            "warnings": [],
+            "source_documents": [],
+        }
+        excel_path = Path(build_spec_list_excel("37647", snapshot))
+        workbook = load_workbook(excel_path)
+        self.assertIn("Special Sections", workbook.sheetnames)
+        rooms_sheet = workbook["Rooms"]
+        headers = [cell.value for cell in next(rooms_sheet.iter_rows(min_row=1, max_row=1))]
+        self.assertIn("door_colours_tall", headers)
+        special_sheet = workbook["Special Sections"]
+        self.assertEqual(special_sheet["A2"].value, "feature_tall_doors")
+        self.assertEqual(special_sheet["C2"].value, "Tall")
 
     def _login(self, client: TestClient) -> str:
         login_page = client.get("/login")

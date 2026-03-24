@@ -199,10 +199,11 @@ def _try_openai(
         "source_kind": source_kind,
         "instructions": (
             "Extract cabinet and appliance information into JSON. "
-            "Return JSON only with keys: rooms, appliances, others, warnings. "
+            "Return JSON only with keys: rooms, special_sections, appliances, others, warnings. "
             "Room rows must include room_key, original_room_label, bench_tops, door_panel_colours, toe_kick, bulkheads, handles, "
-            "drawers_soft_close, hinges_soft_close, splashback, flooring, door_colours_overheads, door_colours_base, door_colours_island, door_colours_bar_back, "
+            "drawers_soft_close, hinges_soft_close, splashback, flooring, door_colours_overheads, door_colours_base, door_colours_tall, door_colours_island, door_colours_bar_back, "
             "sink_info, basin_info, tap_info, source_file, page_refs, evidence_snippet, confidence. "
+            "Special sections, when present, must include section_key, original_section_label, fields, source_file, page_refs, evidence_snippet, confidence. "
             "Appliance rows must include appliance_type, make, model_no, product_url, spec_url, manual_url, website_url, overall_size, source_file, page_refs, evidence_snippet, confidence, "
             "but do not return sinks, basins, taps, or tubs as appliances because those belong on the related room row. "
             "When an appliance table has separate make and model columns, capture the model column into model_no. "
@@ -367,6 +368,7 @@ def _merge_ai_result(base: dict[str, Any], ai_result: dict[str, Any], parser_str
     ai_others = _as_dict(ai_result.get("others"))
     ai_warnings = _as_string_list(ai_result.get("warnings"))
     merged["rooms"] = _merge_rooms(list(base.get("rooms", [])), ai_rooms, parser_strategy=parser_strategy, rule_flags=rule_flags)
+    merged["special_sections"] = list(base.get("special_sections", []))
     merged["appliances"] = _merge_appliances(list(base.get("appliances", [])), ai_appliances)
     merged["others"] = _merge_other_fields(dict(base.get("others") or {}), ai_others)
     merged["warnings"] = _merge_warning_lists(list(base.get("warnings", [])), ai_warnings)
@@ -377,6 +379,7 @@ def _merge_ai_result(base: dict[str, Any], ai_result: dict[str, Any], parser_str
 def _normalize_ai_result(parsed: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(parsed)
     normalized["rooms"] = _as_list_of_dicts(parsed.get("rooms"))
+    normalized["special_sections"] = _as_list_of_dicts(parsed.get("special_sections"))
     normalized["appliances"] = _as_list_of_dicts(parsed.get("appliances"))
     normalized["others"] = _as_dict(parsed.get("others"))
     normalized["warnings"] = _as_string_list(parsed.get("warnings"))
@@ -484,12 +487,13 @@ def _merge_single_room(base_row: dict[str, Any], ai_row: dict[str, Any], stable_
         "bench_tops_other",
         "door_colours_overheads",
         "door_colours_base",
+        "door_colours_tall",
         "door_colours_island",
         "door_colours_bar_back",
     ):
         if not merged.get(field_name) and ai_row.get(field_name):
             merged[field_name] = ai_row[field_name]
-    for field_name in ("has_explicit_overheads", "has_explicit_base", "has_explicit_island", "has_explicit_bar_back"):
+    for field_name in ("has_explicit_overheads", "has_explicit_base", "has_explicit_tall", "has_explicit_island", "has_explicit_bar_back"):
         merged[field_name] = bool(base_row.get(field_name, False) or ai_row.get(field_name, False))
     merged["drawers_soft_close"] = _merge_soft_close_field(base_row.get("drawers_soft_close", ""), ai_row.get("drawers_soft_close", ""), keyword="drawer")
     merged["hinges_soft_close"] = _merge_soft_close_field(base_row.get("hinges_soft_close", ""), ai_row.get("hinges_soft_close", ""), keyword="hinge")

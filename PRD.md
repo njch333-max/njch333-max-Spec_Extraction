@@ -86,10 +86,13 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Appliance parsing must prefer explicit `model_no` values from labeled rows or table columns and must not use brand-only words or generic notes as model numbers.
 - Sink, basin, and tap selections must be captured as room-level fixture fields instead of appliance rows.
 - Door colour information should expose room-level splits for `Overheads`, `Base`, `Island`, and `Bar Back` whenever the source text makes those categories explicit.
+- Door colour information should also expose a room-level `Tall` split when the source explicitly labels tall cabinets, tall doors, tall panels, or combined `Upper Cabinetry Colour + Tall Cabinets` rows.
 - Grouped rooms such as `Vanities` must treat door-colour splits as explicit-marker-driven: `Overheads` may only appear when the authoritative room section explicitly labels overhead cabinetry; otherwise grouped door colours default to `Base`.
 - Door-colour display should trim obvious installation-context suffixes and suppress OCR noise so room cards show material names instead of repeated positional phrases or unrelated kickboard/benchtop text.
 - Kitchen and similar room bench-top data should split into `Wall Run Bench Top` and `Island Bench Top` when the source text clearly describes separate wall-run and island materials.
 - Yellowwood-style joinery schedules must map `Back Benchtops` to `Wall Run Bench Top` and preserve `Waterfall Ends` as part of `Island Bench Top`.
+- Imperial-style joinery selection sheets must use page-top section titles as authoritative section boundaries, keep continuation pages with the current section until the next section title, and stop extraction at `CLIENT NAME / SIGNATURE / SIGNED DATE` footer blocks.
+- Imperial-style non-room sections such as `FEATURE TALL DOORS` must be preserved separately from rooms and must never be merged into the surrounding kitchen or pantry room output.
 - Joinery schedule parsing must ignore non-cabinet finish pages and exclude colours that only appear in paint, Colorbond, garage-door, entry-door, window-frame, or other non-joinery contexts.
 - Drawer and hinge states must normalize to `Soft Close`, `Not Soft Close`, or blank.
 - OpenAI extraction should tolerate markdown code fences or short explanatory prefixes around JSON instead of failing the whole AI pass immediately.
@@ -138,6 +141,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - The `Rooms` section should use one wide horizontal block per room on desktop, stacked vertically one below the next, so each field can be read without cramped narrow cards.
 - Each room card must show room fixture rows for `Sink`, `Basin`, and `Tap`.
 - Each room card must show `Door Colours` as separate `Overheads`, `Base`, `Island`, and `Bar Back` rows.
+- Each room card must also show a `Tall` row so tall-cabinet material can be captured when the source provides it.
 - Non-kitchen room cards must never render `Island` or `Bar Back`, and non-kitchen `Overheads` should only render when the authoritative room section explicitly provides that split.
 - Each room card should prefer separate `Wall Run Bench Top` and `Island Bench Top` rows when the source text supports that split.
 - Only the `Kitchen` room card should render split `Wall Run Bench Top` and `Island Bench Top` rows; other rooms should render a single `Benchtop` row even when internal split fields exist.
@@ -145,6 +149,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - The `Material Summary` block must deduplicate and count room-level `Door Colours`, `Handles`, and `Bench Tops` using smart normalization.
 - `Material Summary -> Bench Tops` must preserve full material, thickness, and edge/apron/waterfall details while stripping only location suffixes such as `to cooktop run`, `to island bench`, or `to powder room 2`.
 - Appliance rows on the page must expose a clickable official `Product` link and allow long URLs to wrap across multiple lines.
+- The page must also render a `Special Sections` area for non-room joinery sections such as `FEATURE TALL DOORS`.
 
 ### 4.8 Upload UX
 - Job detail uploads should start automatically as soon as files are selected.
@@ -207,6 +212,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - `original_room_label`
 - `bench_tops`
 - `door_panel_colours[]`
+- `door_colours_tall`
 - `toe_kick`
 - `bulkheads`
 - `handles[]`
@@ -247,6 +253,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - User can tell from the Job page which global extraction profile, worker PID, and build ID generated the latest snapshot.
 - Clarendon jobs use an additional deterministic post-polish step so repeated parses keep the stable 6-room structure while stripping handle-location noise, fixture line breaks, and noisy field spillover.
 - Clarendon jobs support both the original `37016` schedule family and the denser single-line `handleless / mirror splashback / laminate` family, with the same compact-summary output style.
+- Imperial jobs use title-driven section parsing so kitchen, pantry, laundry, bar, bath/ensuite, and other selection-sheet sections stay isolated, footer/signature blocks are ignored, and `FEATURE TALL DOORS` is shown separately from room cards.
 - The completion workflow for confirmed changes includes deployment to `spec.lxtransport.online`, successful service restarts, and live verification on the affected page or job.
 - SQLite persists Builders, Jobs, files, run history, raw results, and reviewed results.
 - Worker can process queued spec and drawing runs separately from the web process.

@@ -35,6 +35,9 @@
   - authoritative schedule labels such as `WALK-IN-PANTRY` and `MEALS ROOM` are now preserved as display labels instead of being shortened to generic pantry names
   - multi-file Clarendon parsing now keeps `BUTLERS PANTRY` and `WALK-IN-PANTRY` separate when the room-master schedule defines both
   - composite supplement headings such as `Kitchen/Pantry/Family/Meals` no longer create synthetic rooms; only explicit room-master schedule pages can add rooms like `MEALS ROOM`
+  - Imperial builder parsing now uses page-top `... JOINERY SELECTION SHEET` titles as authoritative section boundaries, keeps continuation pages with the current section, and ignores signature/footer blocks during field extraction
+  - Imperial non-room sections such as `FEATURE TALL DOORS` are preserved as `special_sections` instead of being merged into nearby room cards
+  - all room cards and exports now support a global `Tall` material field for tall cabinets / tall doors / tall panels when the source provides that split
   - snapshot and run metadata now record parser strategy, worker PID, and app build ID
   - single-worker lease guard to prevent stale local worker processes from racing newer code on queued jobs
   - online-first deployment helper scripts that push the current repo state to `/opt/spec-extraction`, restart production services, and verify live health
@@ -42,6 +45,8 @@
   - vertically stacked wide horizontal room-card layout on the raw Spec List page
   - room-card fixture rows for sink, basin, and tap
   - split door-colour rows for overheads, base, island, and bar back
+  - global `Tall` material support in room cards, review tables, and exports
+  - dedicated `Special Sections` rendering and export for non-room joinery sections such as `FEATURE TALL DOORS`
   - non-kitchen room cards now suppress `Island` and `Bar Back`, and only show `Overheads` when that split is explicitly present in the authoritative room section
   - generic `DOORS/PANELS` values now fall back to `Base` only when the same room section has no explicit cabinetry group markers, preventing grouped-room door colours from being copied into the wrong split
   - normalized drawer/hinge soft-close states
@@ -106,6 +111,7 @@
 - Continue refining room-master scoring for builders that use multiple spec files so the joinery schedule file consistently wins over appliance/fixture miscellany files
 - Continue tightening grouped-room door-colour logic so `Vanities` only shows `Overheads` when the authoritative room section explicitly labels overhead cabinetry
 - Continue tightening supplement-file room mapping so only clearly related fixture pages enrich grouped rooms while unrelated finish/glazing notes stay ignored
+- Continue refining Imperial field cleanup for non-kitchen sections so `BAR`, `LAUNDRY`, and `BATH + ENSUITE` match the same high-confidence row-boundary quality as `KITCHEN`
 - Extend deterministic model-page probing beyond the currently supported appliance brand patterns
 - Expand model-number coverage for more appliance naming patterns beyond the current explicit rules
 - Build the future comparison UI and diff logic
@@ -119,6 +125,7 @@
 - The OpenAI Responses integration is optional and depends on valid API credentials and model access
 - The default configured extraction model is `gpt-4.1-mini`; local and production deployments should be kept in sync.
 - Room material fields should remain room-local so supplement files cannot leak another room's benchtop or door-colour text into the current room.
+- Imperial PDFs rely on page-top titles and row boundaries; if those titles or labels shift significantly in future templates, the Imperial-specific parser may need another template-family expansion.
 
 ## Verification Completed
 - Local `.venv` created inside the project
@@ -204,6 +211,12 @@
   - dense single-line schedule pages with `Mirror Splashback`
   - `Square Edge Handleless` extraction into `handles`
   - single-line kitchen benchtop splitting into wall-run and island values without pulling door/kickboard text into the benchtop field
+- Imperial parsing coverage added for:
+  - page-top section-title detection and continuation-page handling
+  - footer/signature exclusion
+  - row-boundary extraction of kitchen benchtops, splashback, base, overheads, tall, toe kick, handles, and bulkhead values
+  - `FEATURE TALL DOORS` export into `special_sections[]` instead of room cards
+  - `Tall` rendering on room cards and dedicated Excel export for `special_sections`
 - Smoke tests now use an isolated temporary data directory instead of `App/data/`
 - Worker smoke test passed for:
   - upload DOCX spec

@@ -314,6 +314,7 @@ def spec_list_page(request: Request, job_id: int):
             raw_snapshot=raw_snapshot,
             raw_analysis=_analysis_from_snapshot(raw_snapshot),
             raw_spec_rooms=_flatten_rooms(raw_snapshot or {}),
+            raw_special_sections=_flatten_special_sections(raw_snapshot or {}),
             raw_spec_appliances=_flatten_appliances(raw_snapshot or {}),
             raw_spec_others=_flatten_others(raw_snapshot or {}),
             raw_spec_warnings=_string_list((raw_snapshot or {}).get("warnings", [])),
@@ -543,10 +544,12 @@ def _flatten_rooms(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
                 "door_panel_colours": _display_value(row.get("door_panel_colours", [])),
                 "door_colours_overheads": door_groups["door_colours_overheads"],
                 "door_colours_base": door_groups["door_colours_base"],
+                "door_colours_tall": door_groups["door_colours_tall"],
                 "door_colours_island": door_groups["door_colours_island"],
                 "door_colours_bar_back": door_groups["door_colours_bar_back"],
                 "show_door_colours_overheads": bool(door_groups["door_colours_overheads"]) and (room_key_normalized == "kitchen" or has_explicit_overheads),
                 "show_door_colours_base": bool(door_groups["door_colours_base"]),
+                "show_door_colours_tall": True,
                 "show_door_colours_island": room_key_normalized == "kitchen" and bool(door_groups["door_colours_island"]),
                 "show_door_colours_bar_back": room_key_normalized == "kitchen" and bool(door_groups["door_colours_bar_back"]),
                 "toe_kick": _display_value(row.get("toe_kick", [])),
@@ -559,6 +562,32 @@ def _flatten_rooms(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
                 "hinges_soft_close": _normalize_soft_close_display(row.get("hinges_soft_close", ""), "hinge"),
                 "splashback": _display_value(row.get("splashback", "")),
                 "flooring": _display_value(row.get("flooring", "")),
+                "source_file": _display_value(row.get("source_file", "")),
+                "page_refs": _display_value(row.get("page_refs", "")),
+                "evidence_snippet": _display_value(row.get("evidence_snippet", "")),
+                "confidence": _display_value(row.get("confidence", "")),
+            }
+        )
+    return rows
+
+
+def _flatten_special_sections(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for row in snapshot.get("special_sections", []):
+        if not isinstance(row, dict):
+            continue
+        fields = row.get("fields") or {}
+        field_rows = []
+        if isinstance(fields, dict):
+            for key, value in fields.items():
+                text = _display_value(value)
+                if text:
+                    field_rows.append({"key": _display_value(key), "value": text})
+        rows.append(
+            {
+                "section_key": _display_value(row.get("section_key", "")),
+                "original_section_label": _display_value(row.get("original_section_label", "")),
+                "fields": field_rows,
                 "source_file": _display_value(row.get("source_file", "")),
                 "page_refs": _display_value(row.get("page_refs", "")),
                 "evidence_snippet": _display_value(row.get("evidence_snippet", "")),
@@ -635,6 +664,7 @@ def _split_room_door_groups(row: dict[str, Any]) -> dict[str, str]:
             derived["door_colours_overheads"] = ""
     overheads = parsing._merge_clean_group_text(row.get("door_colours_overheads", ""), derived["door_colours_overheads"], cleaner=parsing._clean_door_colour_value)
     base = parsing._merge_clean_group_text(row.get("door_colours_base", ""), derived["door_colours_base"], cleaner=parsing._clean_door_colour_value)
+    tall = parsing._merge_clean_group_text(row.get("door_colours_tall", ""), derived["door_colours_tall"], cleaner=parsing._clean_door_colour_value)
     if room_key_normalized != "kitchen" and not has_explicit_overheads and overheads:
         base = parsing._merge_clean_group_text(base, overheads, cleaner=parsing._clean_door_colour_value)
         overheads = ""
@@ -643,6 +673,7 @@ def _split_room_door_groups(row: dict[str, Any]) -> dict[str, str]:
     return {
         "door_colours_overheads": overheads,
         "door_colours_base": base,
+        "door_colours_tall": tall,
         "door_colours_island": island,
         "door_colours_bar_back": bar_back,
     }
@@ -709,6 +740,7 @@ def _review_payload_from_form(base: dict[str, Any], form: Any) -> dict[str, Any]
                 "original_room_label": str(form.get(f"original_room_label_{index}", "")),
                 "bench_tops": _split_pipe(str(form.get(f"bench_tops_{index}", ""))),
                 "door_panel_colours": _split_pipe(str(form.get(f"door_panel_colours_{index}", ""))),
+                "door_colours_tall": str(form.get(f"door_colours_tall_{index}", "")),
                 "toe_kick": _split_pipe(str(form.get(f"toe_kick_{index}", ""))),
                 "bulkheads": _split_pipe(str(form.get(f"bulkheads_{index}", ""))),
                 "handles": _split_pipe(str(form.get(f"handles_{index}", ""))),
@@ -753,6 +785,7 @@ def _review_payload_from_form(base: dict[str, Any], form: Any) -> dict[str, Any]
         "source_kind": base.get("source_kind", "spec"),
         "generated_at": utc_now_iso(),
         "rooms": rooms,
+        "special_sections": list(base.get("special_sections", [])),
         "appliances": appliances,
         "others": {
             "flooring_notes": str(form.get("others_flooring_notes", "")),
@@ -784,6 +817,7 @@ def _blank_snapshot(job: dict[str, Any]) -> dict[str, Any]:
         "generated_at": utc_now_iso(),
         "analysis": _analysis_from_snapshot(None),
         "rooms": [],
+        "special_sections": [],
         "appliances": [],
         "others": {"flooring_notes": "", "splashback_notes": "", "manual_notes": ""},
         "warnings": [],
@@ -908,6 +942,7 @@ def _build_material_summary(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
         door_sources = [
             row.get("door_colours_overheads", ""),
             row.get("door_colours_base", ""),
+            row.get("door_colours_tall", ""),
             row.get("door_colours_island", ""),
             row.get("door_colours_bar_back", ""),
         ]

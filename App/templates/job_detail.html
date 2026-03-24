@@ -186,6 +186,7 @@
             <th>Original Label</th>
             <th>Bench Tops</th>
             <th>Door Colours</th>
+            <th>Tall</th>
             <th>Toe Kick</th>
             <th>Bulkheads</th>
             <th>Handles</th>
@@ -206,6 +207,7 @@
             <td><input name="original_room_label_{{ loop.index0 }}" value="{{ row.original_room_label }}"></td>
             <td><input name="bench_tops_{{ loop.index0 }}" value="{{ row.bench_tops }}"></td>
             <td><input name="door_panel_colours_{{ loop.index0 }}" value="{{ row.door_panel_colours }}"></td>
+            <td><input name="door_colours_tall_{{ loop.index0 }}" value="{{ row.door_colours_tall }}"></td>
             <td><input name="toe_kick_{{ loop.index0 }}" value="{{ row.toe_kick }}"></td>
             <td><input name="bulkheads_{{ loop.index0 }}" value="{{ row.bulkheads }}"></td>
             <td><input name="handles_{{ loop.index0 }}" value="{{ row.handles }}"></td>
@@ -219,7 +221,7 @@
             <td><input name="confidence_{{ loop.index0 }}" value="{{ row.confidence }}"></td>
           </tr>
           {% else %}
-          <tr><td colspan="15" class="empty-cell">No room rows yet. Run a spec extraction first.</td></tr>
+          <tr><td colspan="16" class="empty-cell">No room rows yet. Run a spec extraction first.</td></tr>
           {% endfor %}
         </tbody>
       </table>

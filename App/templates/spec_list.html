@@ -109,6 +109,7 @@
         {% if row.show_door_colours_base %}
         <div class="room-field-row"><strong>Base</strong><span>{{ row.door_colours_base }}</span></div>
         {% endif %}
+        <div class="room-field-row"><strong>Tall</strong><span>{{ row.door_colours_tall }}</span></div>
         {% if row.show_door_colours_island %}
         <div class="room-field-row"><strong>Island</strong><span>{{ row.door_colours_island }}</span></div>
         {% endif %}
@@ -138,6 +139,39 @@
     {% endfor %}
   </div>
 </section>
+
+{% if raw_special_sections %}
+<section class="card">
+  <span class="eyebrow">Raw Snapshot</span>
+  <h3>Special Sections</h3>
+  <div class="room-card-grid room-card-grid-horizontal room-card-stack">
+    {% for row in raw_special_sections %}
+    <article class="room-card">
+      <div class="room-card-head">
+        <div>
+          <h4>{{ row.original_section_label or row.section_key }}</h4>
+          <p class="muted">{{ row.section_key }}</p>
+        </div>
+        <span class="status-chip status-ready">Special</span>
+      </div>
+      <div class="room-field-list">
+        {% for field in row.fields %}
+        <div class="room-field-row"><strong>{{ field.key }}</strong><span>{{ field.value }}</span></div>
+        {% else %}
+        <div class="room-field-row"><strong>Details</strong><span></span></div>
+        {% endfor %}
+      </div>
+      <div class="room-meta-list">
+        <div class="room-field-row"><strong>Source</strong><span>{{ row.source_file or "-" }}</span></div>
+        <div class="room-field-row"><strong>Pages</strong><span>{{ row.page_refs or "-" }}</span></div>
+        <div class="room-field-row"><strong>Confidence</strong><span>{{ row.confidence or "-" }}</span></div>
+        <div class="room-field-row room-field-stack"><strong>Evidence</strong><span>{{ row.evidence_snippet or "-" }}</span></div>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
 
 <section class="card">
   <span class="eyebrow">Raw Snapshot</span>

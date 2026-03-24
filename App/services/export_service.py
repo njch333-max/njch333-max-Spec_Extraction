@@ -45,6 +45,7 @@ def _write_excel(path: Path, snapshot: dict[str, Any]) -> None:
             "door_panel_colours",
             "door_colours_overheads",
             "door_colours_base",
+            "door_colours_tall",
             "door_colours_island",
             "door_colours_bar_back",
             "toe_kick",
@@ -76,6 +77,7 @@ def _write_excel(path: Path, snapshot: dict[str, Any]) -> None:
                 _display_value(row.get("door_panel_colours", [])),
                 _display_value(row.get("door_colours_overheads", "")),
                 _display_value(row.get("door_colours_base", "")),
+                _display_value(row.get("door_colours_tall", "")),
                 _display_value(row.get("door_colours_island", "")),
                 _display_value(row.get("door_colours_bar_back", "")),
                 _display_value(row.get("toe_kick", [])),
@@ -146,6 +148,51 @@ def _write_excel(path: Path, snapshot: dict[str, Any]) -> None:
     elif others:
         ws_others.append(["notes", _display_value(others)])
 
+    ws_special = wb.create_sheet("Special Sections")
+    ws_special.append(
+        [
+            "section_key",
+            "original_section_label",
+            "field_key",
+            "field_value",
+            "source_file",
+            "page_refs",
+            "evidence_snippet",
+            "confidence",
+        ]
+    )
+    for row in _mapping_rows(snapshot.get("special_sections", [])):
+        fields = row.get("fields") or {}
+        if not isinstance(fields, dict):
+            fields = {}
+        if fields:
+            for field_key, field_value in fields.items():
+                ws_special.append(
+                    [
+                        _display_value(row.get("section_key", "")),
+                        _display_value(row.get("original_section_label", "")),
+                        _display_value(field_key),
+                        _display_value(field_value),
+                        _display_value(row.get("source_file", "")),
+                        _display_value(row.get("page_refs", "")),
+                        _display_value(row.get("evidence_snippet", "")),
+                        _display_value(row.get("confidence", "")),
+                    ]
+                )
+        else:
+            ws_special.append(
+                [
+                    _display_value(row.get("section_key", "")),
+                    _display_value(row.get("original_section_label", "")),
+                    "",
+                    "",
+                    _display_value(row.get("source_file", "")),
+                    _display_value(row.get("page_refs", "")),
+                    _display_value(row.get("evidence_snippet", "")),
+                    _display_value(row.get("confidence", "")),
+                ]
+            )
+
     ws_warnings = wb.create_sheet("Warnings")
     ws_warnings.append(["warning"])
     for warning in _string_list(snapshot.get("warnings", [])):
@@ -180,6 +227,7 @@ def _write_csv(path: Path, snapshot: dict[str, Any]) -> None:
                 "bench_tops_other",
                 "door_colours_overheads",
                 "door_colours_base",
+                "door_colours_tall",
                 "door_colours_island",
                 "door_colours_bar_back",
                 "sink_info",
@@ -221,6 +269,17 @@ def _write_csv(path: Path, snapshot: dict[str, Any]) -> None:
                 writer.writerow(["others", "others", _display_value(key), _display_value(value)])
         elif others:
             writer.writerow(["others", "others", "notes", _display_value(others)])
+        for row in _mapping_rows(snapshot.get("special_sections", [])):
+            fields = row.get("fields") or {}
+            row_key = _display_value(row.get("section_key", "")) or _display_value(row.get("original_section_label", ""))
+            writer.writerow(["special_sections", row_key, "original_section_label", _display_value(row.get("original_section_label", ""))])
+            writer.writerow(["special_sections", row_key, "source_file", _display_value(row.get("source_file", ""))])
+            writer.writerow(["special_sections", row_key, "page_refs", _display_value(row.get("page_refs", ""))])
+            writer.writerow(["special_sections", row_key, "evidence_snippet", _display_value(row.get("evidence_snippet", ""))])
+            writer.writerow(["special_sections", row_key, "confidence", _display_value(row.get("confidence", ""))])
+            if isinstance(fields, dict):
+                for field_name, field_value in fields.items():
+                    writer.writerow(["special_sections", row_key, _display_value(field_name), _display_value(field_value)])
 
 
 def _mapping_rows(value: Any) -> list[dict[str, Any]]:

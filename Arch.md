@@ -66,7 +66,7 @@
 2. Extract text from PDF or DOCX.
 3. Flag low-text PDF pages for OCR/vision fallback.
 4. Run heuristic extraction into canonical schema, including explicit appliance model parsing from labeled rows.
-5. Enrich room rows with fixture fields (`sink_info`, `basin_info`, `tap_info`), split door-colour fields (`door_colours_overheads`, `door_colours_base`, `door_colours_island`, `door_colours_bar_back`), and derived bench-top fields (`bench_tops_wall_run`, `bench_tops_island`, `bench_tops_other`).
+5. Enrich room rows with fixture fields (`sink_info`, `basin_info`, `tap_info`), split door-colour fields (`door_colours_overheads`, `door_colours_base`, `door_colours_tall`, `door_colours_island`, `door_colours_bar_back`), and derived bench-top fields (`bench_tops_wall_run`, `bench_tops_island`, `bench_tops_other`).
 6. For Yellowwood-style schedule PDFs, parse room sections page-by-page from joinery schedule pages instead of scanning the whole document blindly, so `Back Benchtops`, island bench fields, vanity colours, and cabinet-only materials are mapped from the correct pages.
 7. Remove plumbing fixtures from appliance rows so they only appear on room rows.
 8. If OpenAI is enabled, send consolidated text and template context for higher-quality structured output.
@@ -91,11 +91,17 @@
   - use same-room-only overlay selection for material fields, while allowing grouped-room fixture fallback only for sink/basin/tap enrichment
   - only let generic `DOORS/PANELS` text fall back to `Base` when the same room section has no explicit overhead/base/island/bar-back cabinetry markers
   - keep source-driven room ownership while replacing noisy field text with cleaner deterministic values
-13. Apply the fixed global cleaning rules after heuristic, merge, and Clarendon post-polish so brand casing, door-colour cleanup, kitchen-only bench-top splitting, and soft-close normalization stay consistent across all builders.
-14. Record analysis metadata in the snapshot: mode, parser strategy, attempted, succeeded, model, note, and runtime identifiers (`worker_pid`, `app_build_id`).
-15. Normalize drawer and hinge states to `Soft Close`, `Not Soft Close`, or blank.
-16. Look up official appliance resources by `make + model_no`, first probing deterministic brand-site model URLs where supported and then falling back to search-based discovery; AEG, Westinghouse, and Fisher & Paykel now extract official dimensions from product pages when available, including JSON-like structured metadata.
-17. Save the raw snapshot.
+13. For Imperial-only spec runs, apply a title-driven section parser before the generic cleanup stages:
+  - use the page-top `... JOINERY SELECTION SHEET` title as the authoritative section start
+  - keep untitled continuation pages attached to the current section until the next top title appears
+  - stop section text collection at footer markers such as `CLIENT NAME`, `SIGNATURE`, and `SIGNED DATE`
+  - parse table-style rows so `BENCHTOPS`, `SPLASHBACK`, `UPPER CABINETRY COLOUR + TALL CABINETS`, `BASE CABINETRY COLOUR`, `KICKBOARDS`, and `HANDLES` stay on their own row boundaries
+  - emit non-room sections such as `FEATURE TALL DOORS` into `special_sections[]` instead of merging them into nearby room cards
+14. Apply the fixed global cleaning rules after heuristic, merge, Clarendon post-polish, and Imperial section parsing so brand casing, door-colour cleanup, kitchen-only bench-top splitting, tall-cabinet capture, and soft-close normalization stay consistent across all builders.
+15. Record analysis metadata in the snapshot: mode, parser strategy, attempted, succeeded, model, note, and runtime identifiers (`worker_pid`, `app_build_id`).
+16. Normalize drawer and hinge states to `Soft Close`, `Not Soft Close`, or blank.
+17. Look up official appliance resources by `make + model_no`, first probing deterministic brand-site model URLs where supported and then falling back to search-based discovery; AEG, Westinghouse, and Fisher & Paykel now extract official dimensions from product pages when available, including JSON-like structured metadata.
+18. Save the raw snapshot.
 
 ### 3.5 Review Pipeline
 1. Load latest raw snapshot.
@@ -108,14 +114,15 @@
 1. Load `snapshots.snapshot_kind = raw_spec` for the requested job.
 2. Flatten room, appliance, and other fields into read-only page rows.
 3. Render the `Rooms` section as a vertical stack of wide horizontal room cards on desktop, with one display row per field and a separate metadata column.
-4. Show room fixtures (`Sink`, `Basin`, `Tap`) directly on the room card and split door colours into `Overheads`, `Base`, `Island`, and `Bar Back`, while trimming location-only suffixes and filtering obvious OCR noise.
+4. Show room fixtures (`Sink`, `Basin`, `Tap`) directly on the room card and split door colours into `Overheads`, `Base`, `Tall`, `Island`, and `Bar Back`, while trimming location-only suffixes and filtering obvious OCR noise.
 5. Only the kitchen card expands bench tops into `Wall Run` and `Island`; all other rooms collapse to a single `Benchtop` display row.
 6. Non-kitchen cards only render door-colour groups that are both allowed for that room and actually present; `Island` and `Bar Back` are kitchen-only UI rows.
 7. Filter plumbing fixtures out of the `Appliances` table and export.
 8. Render a `Material Summary` section that smart-deduplicates room-level door colours, handle models, and bench tops, using the split wall-run/island bench-top values when available and preserving distinct thickness/edge variants.
 9. Render appliance official links as a clickable wrapped `Product` column.
-10. Export that raw snapshot through a dedicated Excel route.
-11. Never fall back to `reviews` when rendering the raw Spec List page.
+10. Render non-room joinery sections such as `FEATURE TALL DOORS` in a dedicated `Special Sections` block instead of folding them into nearby rooms.
+11. Export that raw snapshot through a dedicated Excel route, including a `Special Sections` worksheet.
+12. Never fall back to `reviews` when rendering the raw Spec List page.
 
 ### 3.7 Upload Interaction
 1. Job detail uses the existing upload POST route.
@@ -152,9 +159,21 @@
 - One row per source-driven room
 - Array-like fields are stored as lists in JSON and flattened with ` | ` in the review UI
 - `room_key` is a source-driven normalized identity, `original_room_label` preserves the detected source label
-- Room rows also carry fixture fields for sinks, basins, and taps plus split door-colour and bench-top display fields.
+- Room rows also carry fixture fields for sinks, basins, and taps plus split door-colour and bench-top display fields, including the global `door_colours_tall` split for tall-cabinet material.
 - Clarendon rows pass through a deterministic post-polish layer after layout stabilization so handle strings, fixture text, splashback notes, and soft-close fallbacks stay readable without changing source-driven room ownership.
 - That Clarendon post-polish now detects at least two schedule families: the `37016` reference family and the denser single-line `LUXE / handleless / mirror splashback` family, then applies family-specific field splitting before the shared compact-summary cleanup.
+
+### Special Sections
+- Non-room sections such as `FEATURE TALL DOORS` are stored in `special_sections[]`.
+- Each special section carries:
+  - `section_key`
+  - `original_section_label`
+  - `fields`
+  - `source_file`
+  - `page_refs`
+  - `evidence_snippet`
+  - `confidence`
+- The raw Spec List page renders them separately from rooms, and exports keep them in a dedicated worksheet.
 
 ### Appliances
 - One row per appliance
