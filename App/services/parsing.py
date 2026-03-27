@@ -761,6 +761,9 @@ def _collect_imperial_sections_for_document(document: dict[str, object]) -> list
                 "text_parts": [trimmed_text] if trimmed_text else [],
             }
             continue
+        if current and _is_imperial_non_joinery_page(raw_text):
+            flush()
+            continue
         if current and not _looks_like_imperial_continuation_page(trimmed_text):
             flush()
             continue
@@ -820,6 +823,16 @@ def _looks_like_imperial_title_prefix(line: str) -> bool:
         return False
     letters = re.sub(r"[^A-Za-z&/+ '\-]", "", text)
     return bool(letters and letters == letters.upper())
+
+
+def _is_imperial_non_joinery_page(text: str) -> bool:
+    if IMPERIAL_SECTION_TITLE_RE.search(text):
+        return False
+    lines = [normalize_space(line) for line in text.replace("\r", "\n").split("\n") if normalize_space(line)]
+    for line in lines[:30]:
+        if line.upper() in IMPERIAL_NON_JOINERY_HEADINGS:
+            return True
+    return False
 
 
 def _is_imperial_page_noise_line(line: str) -> bool:
@@ -2406,6 +2419,12 @@ BENCHTOP_ISLAND_HINTS = ("island bench", "island")
 
 IMPERIAL_SECTION_TITLE_RE = re.compile(r"(?im)\b(?P<title>[A-Z][A-Z +/&'\-]{2,}?)\s+JOINERY SELECTION SHEET\b")
 IMPERIAL_SPECIAL_SECTION_TITLES = {"FEATURE TALL DOORS"}
+IMPERIAL_NON_JOINERY_HEADINGS = {
+    "APPLIANCES",
+    "SINKWARE & TAPWARE",
+    "SINKWARE",
+    "TAPWARE",
+}
 IMPERIAL_HEADER_START_MARKERS = (
     "Ceiling height:",
     "Bulkhead:",

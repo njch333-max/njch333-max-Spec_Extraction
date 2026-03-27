@@ -96,6 +96,7 @@
   - recover the full visible title body when the extracted text splits the prefix from `... JOINERY SELECTION SHEET`, so grouped labels such as `LIVING & OFFICE` survive intact
   - use the title to identify the section, but do not discard same-page body text that appears before the title in extracted reading order
   - keep untitled continuation pages attached to the current section until the next top title appears
+  - break the current joinery section when the next page switches into non-joinery full-page headings such as `APPLIANCES` or `SINKWARE & TAPWARE`
   - stop section text collection at footer markers such as `CLIENT NAME`, `SIGNATURE`, and `SIGNED DATE`
   - parse table-style rows so `BENCHTOPS`, `SPLASHBACK`, `UPPER CABINETRY COLOUR + TALL CABINETS`, `BASE CABINETRY COLOUR`, `KICKBOARDS`, and `HANDLES` stay on their own row boundaries
   - emit non-room sections such as `FEATURE TALL DOORS` into `special_sections[]` instead of merging them into nearby room cards

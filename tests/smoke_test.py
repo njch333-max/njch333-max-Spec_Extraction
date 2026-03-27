@@ -2336,6 +2336,18 @@ class SmokeTest(unittest.TestCase):
                         ),
                         "needs_ocr": False,
                     },
+                    {
+                        "page_no": 3,
+                        "text": (
+                            "APPLIANCES\n"
+                            "OVEN (KITCHEN) N / A - By others\n"
+                            "RANGEHOOD (KITCHEN) N / A - By others\n"
+                            "SINKWARE & TAPWARE\n"
+                            "SINKWARE (KITCHEN)\n"
+                            "2 x Abey Schock Soho Large Single Bowl\n"
+                        ),
+                        "needs_ocr": False,
+                    },
                 ],
             }
         ]
@@ -2363,6 +2375,8 @@ class SmokeTest(unittest.TestCase):
             office["other_items"],
             [{"label": "RAIL", "value": "Square Edge recessed rail in black"}],
         )
+        self.assertNotIn("OVEN (KITCHEN)", office["handles"])
+        self.assertNotIn("SINKWARE", office["evidence_snippet"])
 
     def test_format_brisbane_time_and_run_duration(self) -> None:
         self.assertEqual(_format_brisbane_time("2026-03-24T10:00:00+00:00"), "2026-03-24 20:00 AEST")

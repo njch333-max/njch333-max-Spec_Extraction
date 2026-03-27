@@ -92,6 +92,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Kitchen and similar room bench-top data should split into `Wall Run Bench Top` and `Island Bench Top` when the source text clearly describes separate wall-run and island materials.
 - Yellowwood-style joinery schedules must map `Back Benchtops` to `Wall Run Bench Top` and preserve `Waterfall Ends` as part of `Island Bench Top`.
 - Imperial-style joinery selection sheets must use page-top section titles as authoritative section boundaries, keep continuation pages with the current section until the next section title, and stop extraction at `CLIENT NAME / SIGNATURE / SIGNED DATE` footer blocks.
+- Imperial continuation must also stop when a later page switches into non-joinery full-page headings such as `APPLIANCES` or `SINKWARE & TAPWARE`.
 - Imperial-style non-room sections such as `FEATURE TALL DOORS` must be preserved separately from rooms and must never be merged into the surrounding kitchen or pantry room output.
 - Joinery schedule parsing must ignore non-cabinet finish pages and exclude colours that only appear in paint, Colorbond, garage-door, entry-door, window-frame, or other non-joinery contexts.
 - Drawer and hinge states must normalize to `Soft Close`, `Not Soft Close`, or blank.

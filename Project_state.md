@@ -36,6 +36,7 @@
   - multi-file Clarendon parsing now keeps `BUTLERS PANTRY` and `WALK-IN-PANTRY` separate when the room-master schedule defines both
   - composite supplement headings such as `Kitchen/Pantry/Family/Meals` no longer create synthetic rooms; only explicit room-master schedule pages can add rooms like `MEALS ROOM`
   - Imperial builder parsing now uses page-top `... JOINERY SELECTION SHEET` titles as authoritative section boundaries, keeps continuation pages with the current section, and ignores signature/footer blocks during field extraction
+  - Imperial room sections now also stop cleanly when later pages switch into non-joinery headings such as `APPLIANCES` or `SINKWARE & TAPWARE`, so office/joinery cards do not swallow appliance and tapware pages
   - Imperial title recovery now preserves the full visible section name, so grouped labels such as `LIVING & OFFICE`, `WALK-IN-PANTRY`, and `BENCH SEAT` survive instead of collapsing to shortened room names
   - Imperial non-room sections such as `FEATURE TALL DOORS` are preserved as `special_sections` instead of being merged into nearby room cards
   - all room cards and exports now support a global `Tall` material field for tall cabinets / tall doors / tall panels when the source provides that split
