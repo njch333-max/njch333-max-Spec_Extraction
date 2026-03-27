@@ -201,7 +201,7 @@ def _try_openai(
             "Extract cabinet and appliance information into JSON. "
             "Return JSON only with keys: rooms, special_sections, appliances, others, warnings. "
             "Room rows must include room_key, original_room_label, bench_tops, door_panel_colours, toe_kick, bulkheads, handles, "
-            "drawers_soft_close, hinges_soft_close, splashback, flooring, door_colours_overheads, door_colours_base, door_colours_tall, door_colours_island, door_colours_bar_back, "
+            "drawers_soft_close, hinges_soft_close, splashback, flooring, floating_shelf, led, accessories, other_items, door_colours_overheads, door_colours_base, door_colours_tall, door_colours_island, door_colours_bar_back, "
             "sink_info, basin_info, tap_info, source_file, page_refs, evidence_snippet, confidence. "
             "Special sections, when present, must include section_key, original_section_label, fields, source_file, page_refs, evidence_snippet, confidence. "
             "Appliance rows must include appliance_type, make, model_no, product_url, spec_url, manual_url, website_url, overall_size, source_file, page_refs, evidence_snippet, confidence, "
@@ -473,14 +473,15 @@ def _find_best_room_match(base_row: dict[str, Any], ai_rows: list[dict[str, Any]
 
 def _merge_single_room(base_row: dict[str, Any], ai_row: dict[str, Any], stable_hybrid: bool = False) -> dict[str, Any]:
     merged = dict(base_row)
-    for field_name in ("room_key", "original_room_label", "splashback", "flooring", "sink_info", "basin_info", "tap_info", "source_file", "page_refs", "evidence_snippet"):
+    for field_name in ("room_key", "original_room_label", "splashback", "flooring", "floating_shelf", "led", "sink_info", "basin_info", "tap_info", "source_file", "page_refs", "evidence_snippet"):
         if not merged.get(field_name) and ai_row.get(field_name):
             merged[field_name] = ai_row[field_name]
-    for field_name in ("bench_tops", "door_panel_colours", "toe_kick", "bulkheads", "handles"):
+    for field_name in ("bench_tops", "door_panel_colours", "toe_kick", "bulkheads", "handles", "accessories"):
         if stable_hybrid:
             merged[field_name] = parsing._coerce_string_list(base_row.get(field_name)) or parsing._coerce_string_list(ai_row.get(field_name))
         else:
             merged[field_name] = _merge_list_field(base_row.get(field_name), ai_row.get(field_name))
+    merged["other_items"] = parsing._merge_other_items(base_row.get("other_items", []), ai_row.get("other_items", []))
     for field_name in (
         "bench_tops_wall_run",
         "bench_tops_island",
@@ -843,6 +844,7 @@ def _blank_clarendon_overlay() -> dict[str, Any]:
         "bench_tops_island": "",
         "bench_tops_other": "",
         "bench_tops": [],
+        "floating_shelf": "",
         "door_panel_colours": [],
         "door_colours_overheads": "",
         "door_colours_base": "",
@@ -855,6 +857,9 @@ def _blank_clarendon_overlay() -> dict[str, Any]:
         "toe_kick": "",
         "bulkheads": "",
         "handles": [],
+        "led": "",
+        "accessories": [],
+        "other_items": [],
         "sink_info": "",
         "basin_info": "",
         "tap_info": "",
@@ -865,7 +870,7 @@ def _blank_clarendon_overlay() -> dict[str, Any]:
 
 
 def _merge_clarendon_overlay(target: dict[str, Any], candidate: dict[str, Any]) -> None:
-    for key in ("bench_tops", "door_panel_colours", "handles"):
+    for key in ("bench_tops", "door_panel_colours", "handles", "accessories"):
         values = list(target.get(key, []))
         for value in candidate.get(key, []):
             text = parsing.normalize_space(str(value or ""))
@@ -876,17 +881,20 @@ def _merge_clarendon_overlay(target: dict[str, Any], candidate: dict[str, Any]) 
         "bench_tops_wall_run",
         "bench_tops_island",
         "bench_tops_other",
+        "floating_shelf",
         "door_colours_overheads",
         "door_colours_base",
         "door_colours_island",
         "door_colours_bar_back",
         "toe_kick",
         "bulkheads",
+        "led",
         "sink_info",
         "basin_info",
         "tap_info",
     ):
         target[key] = parsing._merge_text(target.get(key, ""), candidate.get(key, ""))
+    target["other_items"] = parsing._merge_other_items(target.get("other_items", []), candidate.get("other_items", []))
     for key in ("has_explicit_overheads", "has_explicit_base", "has_explicit_island", "has_explicit_bar_back"):
         target[key] = bool(target.get(key, False) or candidate.get(key, False))
     target["splashback"] = _merge_clarendon_splashback(target.get("splashback", ""), candidate.get("splashback", ""))
@@ -1594,6 +1602,7 @@ def _room_has_meaningful_content(row: dict[str, Any]) -> bool:
         "bench_tops_wall_run",
         "bench_tops_island",
         "bench_tops_other",
+        "floating_shelf",
         "door_panel_colours",
         "door_colours_overheads",
         "door_colours_base",
@@ -1602,6 +1611,9 @@ def _room_has_meaningful_content(row: dict[str, Any]) -> bool:
         "toe_kick",
         "bulkheads",
         "handles",
+        "led",
+        "accessories",
+        "other_items",
         "sink_info",
         "basin_info",
         "tap_info",

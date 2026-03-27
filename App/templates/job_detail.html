@@ -95,16 +95,17 @@
     <h3>Available Exports</h3>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>File</th><th>Size</th><th>Download</th></tr></thead>
+        <thead><tr><th>File</th><th>Modified</th><th>Size</th><th>Download</th></tr></thead>
         <tbody>
           {% for file in exports %}
           <tr>
             <td>{{ file.name }}</td>
+            <td>{{ file.modified }}</td>
             <td>{{ file.size_bytes }}</td>
             <td><a href="/jobs/{{ job.id }}/exports/{{ file.name }}" class="text-link">Download</a></td>
           </tr>
           {% else %}
-          <tr><td colspan="3" class="empty-cell">No exports generated yet.</td></tr>
+          <tr><td colspan="4" class="empty-cell">No exports generated yet.</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -167,129 +168,4 @@
   </article>
 </section>
 
-<form method="post" action="/jobs/{{ job.id }}/review/save" class="stack">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <section class="card">
-    <div class="split-head">
-      <div>
-        <span class="eyebrow">Review</span>
-        <h3>Rooms</h3>
-      </div>
-      <button type="submit" class="primary-button">Save Reviewed Data</button>
-    </div>
-    <input type="hidden" name="room_count" value="{{ room_rows|length }}">
-    <div class="table-wrap wide-table">
-      <table>
-        <thead>
-          <tr>
-            <th>Room Key</th>
-            <th>Original Label</th>
-            <th>Bench Tops</th>
-            <th>Door Colours</th>
-            <th>Tall</th>
-            <th>Toe Kick</th>
-            <th>Bulkheads</th>
-            <th>Handles</th>
-            <th>Drawers</th>
-            <th>Hinges</th>
-            <th>Splashback</th>
-            <th>Flooring</th>
-            <th>Source</th>
-            <th>Pages</th>
-            <th>Evidence</th>
-            <th>Confidence</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in room_rows %}
-          <tr>
-            <td><input name="room_key_{{ loop.index0 }}" value="{{ row.room_key }}"></td>
-            <td><input name="original_room_label_{{ loop.index0 }}" value="{{ row.original_room_label }}"></td>
-            <td><input name="bench_tops_{{ loop.index0 }}" value="{{ row.bench_tops }}"></td>
-            <td><input name="door_panel_colours_{{ loop.index0 }}" value="{{ row.door_panel_colours }}"></td>
-            <td><input name="door_colours_tall_{{ loop.index0 }}" value="{{ row.door_colours_tall }}"></td>
-            <td><input name="toe_kick_{{ loop.index0 }}" value="{{ row.toe_kick }}"></td>
-            <td><input name="bulkheads_{{ loop.index0 }}" value="{{ row.bulkheads }}"></td>
-            <td><input name="handles_{{ loop.index0 }}" value="{{ row.handles }}"></td>
-            <td><input name="drawers_soft_close_{{ loop.index0 }}" value="{{ row.drawers_soft_close }}"></td>
-            <td><input name="hinges_soft_close_{{ loop.index0 }}" value="{{ row.hinges_soft_close }}"></td>
-            <td><input name="splashback_{{ loop.index0 }}" value="{{ row.splashback }}"></td>
-            <td><input name="flooring_{{ loop.index0 }}" value="{{ row.flooring }}"></td>
-            <td><input name="source_file_{{ loop.index0 }}" value="{{ row.source_file }}"></td>
-            <td><input name="page_refs_{{ loop.index0 }}" value="{{ row.page_refs }}"></td>
-            <td><textarea name="evidence_snippet_{{ loop.index0 }}" rows="2">{{ row.evidence_snippet }}</textarea></td>
-            <td><input name="confidence_{{ loop.index0 }}" value="{{ row.confidence }}"></td>
-          </tr>
-          {% else %}
-          <tr><td colspan="16" class="empty-cell">No room rows yet. Run a spec extraction first.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </section>
-
-  <section class="card">
-    <div class="split-head">
-      <div>
-        <span class="eyebrow">Review</span>
-        <h3>Appliances</h3>
-      </div>
-    </div>
-    <input type="hidden" name="appliance_count" value="{{ appliance_rows|length }}">
-    <div class="table-wrap wide-table">
-      <table>
-        <thead>
-          <tr>
-            <th>Type</th>
-            <th>Make</th>
-            <th>Model</th>
-            <th>Product URL</th>
-            <th>Overall Size</th>
-            <th>Source</th>
-            <th>Pages</th>
-            <th>Evidence</th>
-            <th>Confidence</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in appliance_rows %}
-          <tr>
-            <td><input name="appliance_type_{{ loop.index0 }}" value="{{ row.appliance_type }}"></td>
-            <td><input name="make_{{ loop.index0 }}" value="{{ row.make }}"></td>
-            <td><input name="model_no_{{ loop.index0 }}" value="{{ row.model_no }}"></td>
-            <td><input name="product_url_{{ loop.index0 }}" value="{{ row.product_url }}"></td>
-            <td><input name="overall_size_{{ loop.index0 }}" value="{{ row.overall_size }}"></td>
-            <td><input name="appliance_source_file_{{ loop.index0 }}" value="{{ row.source_file }}"></td>
-            <td><input name="appliance_page_refs_{{ loop.index0 }}" value="{{ row.page_refs }}"></td>
-            <td><textarea name="appliance_evidence_snippet_{{ loop.index0 }}" rows="2">{{ row.evidence_snippet }}</textarea></td>
-            <td><input name="appliance_confidence_{{ loop.index0 }}" value="{{ row.confidence }}"></td>
-          </tr>
-          {% else %}
-          <tr><td colspan="9" class="empty-cell">No appliance rows yet.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </section>
-
-  <section class="card">
-    <span class="eyebrow">Review</span>
-    <h3>Others</h3>
-    <div class="grid-form">
-      <label class="wide">
-        <span>Flooring Notes</span>
-        <textarea name="others_flooring_notes" rows="3">{{ review_snapshot.others.flooring_notes if review_snapshot.others else '' }}</textarea>
-      </label>
-      <label class="wide">
-        <span>Splashback Notes</span>
-        <textarea name="others_splashback_notes" rows="3">{{ review_snapshot.others.splashback_notes if review_snapshot.others else '' }}</textarea>
-      </label>
-      <label class="wide">
-        <span>Manual Notes</span>
-        <textarea name="others_manual_notes" rows="4">{{ review_snapshot.others.manual_notes if review_snapshot.others else '' }}</textarea>
-      </label>
-    </div>
-    <button type="submit" class="primary-button">Save Reviewed Data</button>
-  </section>
-</form>
 {% endblock %}

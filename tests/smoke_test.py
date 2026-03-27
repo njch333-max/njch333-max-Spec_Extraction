@@ -15,7 +15,7 @@ os.environ["SPEC_EXTRACTION_DATA_DIR"] = str(TEST_DATA_DIR)
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 
-from App.main import _build_material_summary, _flatten_rooms, app
+from App.main import _build_material_summary, _flatten_rooms, _format_brisbane_time, _format_run_duration, app
 from App.services import extraction_service, parsing as parsing_module, store
 from App.services.appliance_official import _build_direct_product_candidates, _extract_size_from_text, _primary_model_token
 from App.services.export_service import build_spec_list_excel
@@ -1536,6 +1536,21 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("Quantum Zero White Swirl - 20MM Pencil Round Edge", summary["bench_tops"]["entries"])
         self.assertIn("Quantum Zero White Swirl - 40MM Mitred Apron Edge", summary["bench_tops"]["entries"])
 
+    def test_material_summary_includes_floating_shelf_material(self) -> None:
+        summary = _build_material_summary(
+            {
+                "rooms": [
+                    {
+                        "room_key": "office",
+                        "original_room_label": "OFFICE",
+                        "bench_tops_other": "",
+                        "floating_shelf": "Polytec Boston Oak Woodmatt 33mm pencil round edge",
+                    }
+                ]
+            }
+        )
+        self.assertIn("Polytec Boston Oak Woodmatt 33mm pencil round edge", summary["bench_tops"]["entries"])
+
     def test_parse_documents_recovers_glued_schedule_headings_from_room_master(self) -> None:
         snapshot = parse_documents(
             job_no="37869",
@@ -1823,10 +1838,10 @@ class SmokeTest(unittest.TestCase):
         self._login(client)
         response = client.get(f"/jobs/{job_id}")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("20mm stone bench", response.text)
-        self.assertIn("PAGE 2 | PAGE 3", response.text)
-        self.assertIn("Soft Close", response.text)
-        self.assertIn("Not Soft Close", response.text)
+        self.assertNotIn("<span class=\"eyebrow\">Review</span>", response.text)
+        self.assertIn("Legacy scalar room fields should still render.", response.text)
+        self.assertIn("OpenAI merged", response.text)
+        self.assertIn("Open Spec List", response.text)
 
     def test_run_history_partial_shows_live_stage_and_message(self) -> None:
         builder_id = store.create_builder("Clarendon", "clarendon", "")
@@ -2056,14 +2071,15 @@ class SmokeTest(unittest.TestCase):
         appliances_sheet = workbook["Appliances"]
         warnings_sheet = workbook["Warnings"]
         meta_sheet = workbook["Meta"]
+        room_headers = {cell.value: index + 1 for index, cell in enumerate(next(rooms_sheet.iter_rows(min_row=1, max_row=1))[0:])}
         self.assertEqual(rooms_sheet["B2"].value, "Kitchen \u4e2d\u6587")
-        self.assertEqual(rooms_sheet["D2"].value, "Quantum Zero Midnight Black 20mm pencil round edge")
-        self.assertEqual(rooms_sheet["E2"].value, "Quantum Zero Venatino Statuario 40mm mitred apron edge")
-        self.assertEqual(rooms_sheet["H2"].value, "Polytec Blossom White Matt Finish - overhead cabinetry")
-        self.assertEqual(rooms_sheet["P2"].value, "PARISI Quadro Double Bowl (PK8644)")
-        self.assertEqual(rooms_sheet["R2"].value, "PHOENIX Nostalgia Sink Mixer NS714-62")
-        self.assertEqual(rooms_sheet["S2"].value, "Soft Close")
-        self.assertEqual(rooms_sheet["T2"].value, "Not Soft Close")
+        self.assertEqual(rooms_sheet.cell(row=2, column=room_headers["bench_tops_wall_run"]).value, "Quantum Zero Midnight Black 20mm pencil round edge")
+        self.assertEqual(rooms_sheet.cell(row=2, column=room_headers["bench_tops_island"]).value, "Quantum Zero Venatino Statuario 40mm mitred apron edge")
+        self.assertEqual(rooms_sheet.cell(row=2, column=room_headers["door_colours_overheads"]).value, "Polytec Blossom White Matt Finish - overhead cabinetry")
+        self.assertEqual(rooms_sheet.cell(row=2, column=room_headers["sink_info"]).value, "PARISI Quadro Double Bowl (PK8644)")
+        self.assertEqual(rooms_sheet.cell(row=2, column=room_headers["tap_info"]).value, "PHOENIX Nostalgia Sink Mixer NS714-62")
+        self.assertEqual(rooms_sheet.cell(row=2, column=room_headers["drawers_soft_close"]).value, "Soft Close")
+        self.assertEqual(rooms_sheet.cell(row=2, column=room_headers["hinges_soft_close"]).value, "Not Soft Close")
         self.assertEqual(appliances_sheet["A2"].value, "Cooktop")
         self.assertEqual(appliances_sheet["D2"].value, "https://official.example/product/WHC943BD")
         self.assertEqual(appliances_sheet["F2"].value, "900 x 510 x 60 mm")
@@ -2279,9 +2295,100 @@ class SmokeTest(unittest.TestCase):
             "Polytec Valla Profile Door in Boston Oak Woodmatt EM0",
         )
 
+    def test_parse_documents_imperial_keeps_body_before_title_and_continuation_accessories(self) -> None:
+        documents = [
+            {
+                "file_name": "imperial-office.pdf",
+                "role": "spec",
+                "pages": [
+                    {
+                        "page_no": 1,
+                        "text": (
+                            "BENCHTOP\n"
+                            "Tasmanian Oak Matt Laminate Benchtop 33mm square edge\n"
+                            "BASE CABINETRY COLOUR Polytec Classic White Matt\n"
+                            "KICKBOARDS Polytec Classic White Matt\n"
+                            "Hinges & Drawer Runners: NAFloor Type & Kick refacing required:SOFT CLOSE\n"
+                            "NOTESSUPPLIERAREA / ITEM SPECS / DESCRIPTION IMAGE\n"
+                            "Shadowline:NABulkhead:NA\n"
+                            "Ceiling height:NA Cabinetry Height:760mm TO TOP OF BENCHTOP\n"
+                            "LIVING & OFFICE JOINERY SELECTION SHEET\n"
+                            "Address:16 Dovedale Cres ASHGROVE\n"
+                            "Client:Phill Deacon\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 2,
+                        "text": (
+                            "ALL COLOURS SHOWN ARE APPROXIMATE REPRESENTATIONS ONLY AND CANNOT BE RELIED ON COME INSTALLATION.\n"
+                            "DESIGNER: MELISSA COAKES CLIENT NAME: SIGNATURE: SIGNED DATE:\n"
+                            "ACCESSORIES\n"
+                            "Safe Desk Prodigy Cable Basket 950mm Black\n"
+                            "Product Code: 7112195\n"
+                            "ACCESSORIES\n"
+                            "2 x Black Cable Grommet in black 80mm diameter\n"
+                            "LED STRIP LIGHTING\n"
+                            "Warm white strip light\n"
+                            "HANDLES Square Edge recessed rail on drawers and door.\n"
+                            "RAIL\n"
+                            "Square Edge recessed rail in black\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                ],
+            }
+        ]
+        snapshot = parse_documents(
+            job_no="37642",
+            builder_name="Imperial",
+            source_kind="spec",
+            documents=documents,
+        )
+        rooms = {row["room_key"]: row for row in snapshot["rooms"]}
+        self.assertIn("living_office", rooms)
+        office = rooms["living_office"]
+        self.assertEqual(office["original_room_label"], "LIVING & OFFICE")
+        self.assertEqual(office["bench_tops_other"], "Tasmanian Oak Matt Laminate Benchtop 33mm square edge")
+        self.assertEqual(office["door_colours_base"], "Polytec Classic White Matt")
+        self.assertEqual(office["led"], "Yes")
+        self.assertEqual(
+            office["accessories"],
+            [
+                "Safe Desk Prodigy Cable Basket 950mm Black",
+                "2 x Black Cable Grommet in black 80mm diameter",
+            ],
+        )
+        self.assertEqual(
+            office["other_items"],
+            [{"label": "RAIL", "value": "Square Edge recessed rail in black"}],
+        )
+
+    def test_format_brisbane_time_and_run_duration(self) -> None:
+        self.assertEqual(_format_brisbane_time("2026-03-24T10:00:00+00:00"), "2026-03-24 20:00 AEST")
+        self.assertEqual(
+            _format_run_duration(
+                {
+                    "started_at": "2026-03-24T10:00:00+00:00",
+                    "finished_at": "2026-03-24T10:02:05+00:00",
+                }
+            ),
+            "2m 5s",
+        )
+
     def test_spec_list_page_renders_tall_and_special_sections(self) -> None:
         builder_id = store.create_builder("Imperial", "imperial", "")
         job_id = store.create_job("37647", builder_id, "Imperial Test", "")
+        run_id = store.create_run(job_id, "spec")
+        with store.connect() as conn:
+            conn.execute(
+                """
+                UPDATE runs
+                SET status = 'succeeded', stage = 'done', started_at = ?, finished_at = ?, parser_strategy = ?, app_build_id = ?, message = 'Completed'
+                WHERE id = ?
+                """,
+                ("2026-03-24T10:00:00+00:00", "2026-03-24T10:02:05+00:00", "global_conservative", "test-build-001", run_id),
+            )
         store.upsert_snapshot(
             job_id,
             "raw_spec",
@@ -2297,6 +2404,7 @@ class SmokeTest(unittest.TestCase):
                         "original_room_label": "KITCHEN",
                         "bench_tops": ["Caesarstone Organic White 20mm with 40mm Double Mitred Pencil Round Edge"],
                         "bench_tops_other": "Caesarstone Organic White 20mm with 40mm Double Mitred Pencil Round Edge",
+                        "floating_shelf": "Polytec Boston Oak Woodmatt 33mm pencil round edge",
                         "door_panel_colours": [],
                         "door_colours_overheads": "Polytec Valla Profile Door in Boston Oak Woodmatt EM0",
                         "door_colours_base": "Polytec Ascot Profile Door in Gossamer White Smooth EM0",
@@ -2309,6 +2417,9 @@ class SmokeTest(unittest.TestCase):
                         "toe_kick": [],
                         "bulkheads": [],
                         "handles": [],
+                        "led": "Yes",
+                        "accessories": ["Safe Desk Prodigy Cable Basket 950mm Black", "2 x Black Cable Grommet"],
+                        "other_items": [{"label": "RAIL", "value": "Square Edge recessed rail in black"}],
                         "drawers_soft_close": "",
                         "hinges_soft_close": "",
                         "splashback": "",
@@ -2342,6 +2453,12 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("<strong>Tall</strong>", response.text)
         self.assertIn("FEATURE TALL DOORS", response.text)
+        self.assertIn("2026-03-24 20:00 AEST", response.text)
+        self.assertIn("Extraction duration:</strong> 2m 5s", response.text)
+        self.assertIn("<strong>Floating Shelf</strong>", response.text)
+        self.assertIn("<strong>LED</strong>", response.text)
+        self.assertIn("Accessories 1", response.text)
+        self.assertIn("RAIL", response.text)
 
     def test_spec_list_excel_includes_tall_and_special_sections_sheet(self) -> None:
         snapshot = {
@@ -2355,6 +2472,7 @@ class SmokeTest(unittest.TestCase):
                     "room_key": "kitchen",
                     "original_room_label": "KITCHEN",
                     "bench_tops": ["Caesarstone Organic White 20mm with 40mm Double Mitred Pencil Round Edge"],
+                    "floating_shelf": "Polytec Boston Oak Woodmatt 33mm pencil round edge",
                     "door_panel_colours": [],
                     "door_colours_overheads": "Polytec Valla Profile Door in Boston Oak Woodmatt EM0",
                     "door_colours_base": "Polytec Ascot Profile Door in Gossamer White Smooth EM0",
@@ -2362,6 +2480,9 @@ class SmokeTest(unittest.TestCase):
                     "toe_kick": [],
                     "bulkheads": [],
                     "handles": [],
+                    "led": "Yes",
+                    "accessories": ["Safe Desk Prodigy Cable Basket 950mm Black"],
+                    "other_items": [{"label": "RAIL", "value": "Square Edge recessed rail in black"}],
                     "drawers_soft_close": "",
                     "hinges_soft_close": "",
                     "splashback": "",
@@ -2394,9 +2515,21 @@ class SmokeTest(unittest.TestCase):
         rooms_sheet = workbook["Rooms"]
         headers = [cell.value for cell in next(rooms_sheet.iter_rows(min_row=1, max_row=1))]
         self.assertIn("door_colours_tall", headers)
+        self.assertIn("floating_shelf", headers)
+        self.assertIn("accessories", headers)
+        self.assertIn("other_items", headers)
         special_sheet = workbook["Special Sections"]
         self.assertEqual(special_sheet["A2"].value, "feature_tall_doors")
         self.assertEqual(special_sheet["C2"].value, "Tall")
+
+    def test_job_detail_page_hides_review_cards(self) -> None:
+        builder_id = store.create_builder("Imperial", "imperial", "")
+        job_id = store.create_job("37647", builder_id, "Imperial Test", "")
+        client = TestClient(app)
+        self._login(client)
+        response = client.get(f"/jobs/{job_id}")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("<span class=\"eyebrow\">Review</span>", response.text)
 
     def _login(self, client: TestClient) -> str:
         login_page = client.get("/login")

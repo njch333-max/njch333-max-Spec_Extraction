@@ -93,6 +93,8 @@
   - keep source-driven room ownership while replacing noisy field text with cleaner deterministic values
 13. For Imperial-only spec runs, apply a title-driven section parser before the generic cleanup stages:
   - use the page-top `... JOINERY SELECTION SHEET` title as the authoritative section start
+  - recover the full visible title body when the extracted text splits the prefix from `... JOINERY SELECTION SHEET`, so grouped labels such as `LIVING & OFFICE` survive intact
+  - use the title to identify the section, but do not discard same-page body text that appears before the title in extracted reading order
   - keep untitled continuation pages attached to the current section until the next top title appears
   - stop section text collection at footer markers such as `CLIENT NAME`, `SIGNATURE`, and `SIGNED DATE`
   - parse table-style rows so `BENCHTOPS`, `SPLASHBACK`, `UPPER CABINETRY COLOUR + TALL CABINETS`, `BASE CABINETRY COLOUR`, `KICKBOARDS`, and `HANDLES` stay on their own row boundaries
@@ -118,11 +120,12 @@
 5. Only the kitchen card expands bench tops into `Wall Run` and `Island`; all other rooms collapse to a single `Benchtop` display row.
 6. Non-kitchen cards only render door-colour groups that are both allowed for that room and actually present; `Island` and `Bar Back` are kitchen-only UI rows.
 7. Filter plumbing fixtures out of the `Appliances` table and export.
-8. Render a `Material Summary` section that smart-deduplicates room-level door colours, handle models, and bench tops, using the split wall-run/island bench-top values when available and preserving distinct thickness/edge variants.
+8. Render a `Material Summary` section that smart-deduplicates room-level door colours, handle models, and bench tops, using the split wall-run/island bench-top values when available, preserving distinct thickness/edge variants, and including floating-shelf materials in the bench-top summary bucket.
 9. Render appliance official links as a clickable wrapped `Product` column.
 10. Render non-room joinery sections such as `FEATURE TALL DOORS` in a dedicated `Special Sections` block instead of folding them into nearby rooms.
-11. Export that raw snapshot through a dedicated Excel route, including a `Special Sections` worksheet.
-12. Never fall back to `reviews` when rendering the raw Spec List page.
+11. Show `Generated at` and `Extraction duration` in Brisbane time / human-readable duration format on the raw Spec List page.
+12. Export that raw snapshot through a dedicated Excel route, including a `Special Sections` worksheet and the expanded room fields for `Floating Shelf`, `LED`, `Accessories`, and curated accessory `Others`.
+13. Never fall back to `reviews` when rendering the raw Spec List page.
 
 ### 3.7 Upload Interaction
 1. Job detail uses the existing upload POST route.
@@ -160,6 +163,7 @@
 - Array-like fields are stored as lists in JSON and flattened with ` | ` in the review UI
 - `room_key` is a source-driven normalized identity, `original_room_label` preserves the detected source label
 - Room rows also carry fixture fields for sinks, basins, and taps plus split door-colour and bench-top display fields, including the global `door_colours_tall` split for tall-cabinet material.
+- Room rows now also support `floating_shelf`, `led`, ordered `accessories`, and curated `other_items` accessory labels such as `RAIL` and `JEWELLERY INSERT`.
 - Clarendon rows pass through a deterministic post-polish layer after layout stabilization so handle strings, fixture text, splashback notes, and soft-close fallbacks stay readable without changing source-driven room ownership.
 - That Clarendon post-polish now detects at least two schedule families: the `37016` reference family and the denser single-line `LUXE / handleless / mirror splashback` family, then applies family-specific field splitting before the shared compact-summary cleanup.
 
@@ -209,6 +213,16 @@
 - Production Nginx and FastAPI upload limits should stay aligned at `100 MB`
 - Routine updates are online-first: after local verification, deploy the current repo state to `/opt/spec-extraction`, restart both production services, verify `/api/health`, and then re-run any job whose parsing output should change.
 - The repo now includes `tools/deploy_online.py` and `tools/deploy_online.ps1` to stage selected repo files to the LXtransport host, install them into `/opt/spec-extraction`, restart `spec-extraction-web.service` and `spec-extraction-worker.service`, and validate the live health endpoint.
+
+## 6.1 Presentation Timezone
+- SQLite and snapshot timestamps remain stored in UTC.
+- The FastAPI presentation layer converts user-facing timestamps to a fixed Brisbane timezone object (`AEST`, UTC+10) before rendering:
+  - jobs list
+  - builder template upload tables
+  - job file tables
+  - export file tables
+  - run history
+  - raw spec snapshot summary
 
 ## 7. Implemented Route Map
 - `GET /`: redirect to login or jobs

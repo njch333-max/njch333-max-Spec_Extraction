@@ -42,6 +42,7 @@ def _write_excel(path: Path, snapshot: dict[str, Any]) -> None:
             "bench_tops_wall_run",
             "bench_tops_island",
             "bench_tops_other",
+            "floating_shelf",
             "door_panel_colours",
             "door_colours_overheads",
             "door_colours_base",
@@ -51,6 +52,9 @@ def _write_excel(path: Path, snapshot: dict[str, Any]) -> None:
             "toe_kick",
             "bulkheads",
             "handles",
+            "led",
+            "accessories",
+            "other_items",
             "sink_info",
             "basin_info",
             "tap_info",
@@ -74,6 +78,7 @@ def _write_excel(path: Path, snapshot: dict[str, Any]) -> None:
                 benchtop_groups["bench_tops_wall_run"],
                 benchtop_groups["bench_tops_island"],
                 benchtop_groups["bench_tops_other"],
+                _display_value(row.get("floating_shelf", "")),
                 _display_value(row.get("door_panel_colours", [])),
                 _display_value(row.get("door_colours_overheads", "")),
                 _display_value(row.get("door_colours_base", "")),
@@ -83,6 +88,9 @@ def _write_excel(path: Path, snapshot: dict[str, Any]) -> None:
                 _display_value(row.get("toe_kick", [])),
                 _display_value(row.get("bulkheads", [])),
                 _display_value(row.get("handles", [])),
+                _display_value(row.get("led", "")),
+                _display_value(row.get("accessories", [])),
+                _display_other_items(row.get("other_items", [])),
                 _display_value(row.get("sink_info", "")),
                 _display_value(row.get("basin_info", "")),
                 _display_value(row.get("tap_info", "")),
@@ -225,11 +233,13 @@ def _write_csv(path: Path, snapshot: dict[str, Any]) -> None:
                 "bench_tops_wall_run",
                 "bench_tops_island",
                 "bench_tops_other",
+                "floating_shelf",
                 "door_colours_overheads",
                 "door_colours_base",
                 "door_colours_tall",
                 "door_colours_island",
                 "door_colours_bar_back",
+                "led",
                 "sink_info",
                 "basin_info",
                 "tap_info",
@@ -244,8 +254,9 @@ def _write_csv(path: Path, snapshot: dict[str, Any]) -> None:
                 writer.writerow(["rooms", room_key, field_name, field_value])
             writer.writerow(["rooms", room_key, "drawers_soft_close", _normalize_soft_close(row.get("drawers_soft_close", ""), "drawer")])
             writer.writerow(["rooms", room_key, "hinges_soft_close", _normalize_soft_close(row.get("hinges_soft_close", ""), "hinge")])
-            for field_name in ("bench_tops", "door_panel_colours", "toe_kick", "bulkheads", "handles"):
+            for field_name in ("bench_tops", "door_panel_colours", "toe_kick", "bulkheads", "handles", "accessories"):
                 writer.writerow(["rooms", room_key, field_name, _display_value(row.get(field_name, []))])
+            writer.writerow(["rooms", room_key, "other_items", _display_other_items(row.get("other_items", []))])
         for row in _mapping_rows(snapshot.get("appliances", [])):
             if not _include_appliance_row(row):
                 continue
@@ -316,6 +327,20 @@ def _display_value(value: Any) -> str:
         except TypeError:
             return str(value)
     return str(value)
+
+
+def _display_other_items(value: Any) -> str:
+    if not isinstance(value, list):
+        return ""
+    parts: list[str] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        label = _display_value(item.get("label", ""))
+        entry_value = _display_value(item.get("value", ""))
+        if label and entry_value:
+            parts.append(f"{label}: {entry_value}")
+    return " | ".join(parts)
 
 
 def _normalize_soft_close(value: Any, keyword: str) -> str:

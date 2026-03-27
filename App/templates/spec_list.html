@@ -29,7 +29,8 @@
       <li><strong>OpenAI attempted:</strong> {{ "Yes" if raw_analysis.openai_attempted else "No" }}</li>
       <li><strong>OpenAI succeeded:</strong> {{ "Yes" if raw_analysis.openai_succeeded else "No" }}</li>
       <li><strong>Model:</strong> {{ raw_analysis.openai_model or "Not used" }}</li>
-      <li><strong>Generated at:</strong> {{ raw_snapshot.generated_at }}</li>
+      <li><strong>Generated at:</strong> {{ raw_generated_at or raw_snapshot.generated_at }}</li>
+      <li><strong>Extraction duration:</strong> {{ raw_extraction_duration or "Not recorded" }}</li>
       <li><strong>Rooms:</strong> {{ raw_spec_rooms|length }}</li>
       <li><strong>Appliances:</strong> {{ raw_spec_appliances|length }}</li>
       <li><strong>Warnings:</strong> {{ raw_spec_warnings|length }}</li>
@@ -119,6 +120,18 @@
         <div class="room-field-row"><strong>Toe Kick</strong><span>{{ row.toe_kick or "-" }}</span></div>
         <div class="room-field-row"><strong>Bulkheads</strong><span>{{ row.bulkheads or "-" }}</span></div>
         <div class="room-field-row"><strong>Handles</strong><span>{{ row.handles or "-" }}</span></div>
+        {% if row.floating_shelf %}
+        <div class="room-field-row"><strong>Floating Shelf</strong><span>{{ row.floating_shelf }}</span></div>
+        {% endif %}
+        {% if row.led %}
+        <div class="room-field-row"><strong>LED</strong><span>{{ row.led }}</span></div>
+        {% endif %}
+        {% for accessory in row.accessories %}
+        <div class="room-field-row"><strong>Accessories {{ loop.index }}</strong><span>{{ accessory }}</span></div>
+        {% endfor %}
+        {% for item in row.other_items %}
+        <div class="room-field-row"><strong>{{ item.label }}</strong><span>{{ item.value }}</span></div>
+        {% endfor %}
         <div class="room-field-row"><strong>Sink</strong><span>{{ row.sink_info or "-" }}</span></div>
         <div class="room-field-row"><strong>Basin</strong><span>{{ row.basin_info or "-" }}</span></div>
         <div class="room-field-row"><strong>Tap</strong><span>{{ row.tap_info or "-" }}</span></div>

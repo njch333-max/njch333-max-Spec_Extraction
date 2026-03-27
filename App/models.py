@@ -27,6 +27,7 @@ class RoomRow(BaseModel):
     bench_tops_wall_run: str = ""
     bench_tops_island: str = ""
     bench_tops_other: str = ""
+    floating_shelf: str = ""
     door_panel_colours: list[str] = Field(default_factory=list)
     door_colours_overheads: str = ""
     door_colours_base: str = ""
@@ -41,6 +42,9 @@ class RoomRow(BaseModel):
     toe_kick: list[str] = Field(default_factory=list)
     bulkheads: list[str] = Field(default_factory=list)
     handles: list[str] = Field(default_factory=list)
+    led: str = ""
+    accessories: list[str] = Field(default_factory=list)
+    other_items: list[dict[str, str]] = Field(default_factory=list)
     sink_info: str = ""
     basin_info: str = ""
     tap_info: str = ""

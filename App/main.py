@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +43,7 @@ app.add_middleware(
 )
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+BRISBANE_TZ = timezone(timedelta(hours=10), name="AEST")
 
 
 @app.get("/")
@@ -88,7 +90,7 @@ def builders_page(request: Request):
     if user:
         builders = store.list_builders()
         for builder in builders:
-            builder["templates"] = store.list_builder_templates(int(builder["id"]))
+            builder["templates"] = _present_files(store.list_builder_templates(int(builder["id"])))
         return templates.TemplateResponse(request, "builders.html", _context(request, "Builders", builders=builders))
     return RedirectResponse("/login", status_code=303)
 
@@ -202,7 +204,7 @@ def jobs_page(request: Request):
     if not _require_page_user(request):
         return RedirectResponse("/login", status_code=303)
     query = request.query_params.get("q", "").strip()
-    jobs = store.list_jobs(query)
+    jobs = _present_jobs(store.list_jobs(query))
     builders = store.list_builders()
     return templates.TemplateResponse(request, "jobs.html", _context(request, "Jobs", jobs=jobs, builders=builders, job_query=query))
 
@@ -245,8 +247,8 @@ def job_detail_page(request: Request, job_id: int):
         return RedirectResponse("/jobs", status_code=303)
     builder = store.get_builder(int(job["builder_id"]))
     dirs = ensure_job_dirs(job["job_no"])
-    spec_files = store.list_job_files(job_id, "spec")
-    drawing_files = store.list_job_files(job_id, "drawing")
+    spec_files = _present_files(store.list_job_files(job_id, "spec"))
+    drawing_files = _present_files(store.list_job_files(job_id, "drawing"))
     runs = _present_runs(store.list_runs(job_id))
     raw_snapshot_row = store.get_snapshot(job_id, "raw_spec")
     drawing_snapshot_row = store.get_snapshot(job_id, "drawing")
@@ -304,6 +306,7 @@ def spec_list_page(request: Request, job_id: int):
         return RedirectResponse("/jobs", status_code=303)
     raw_snapshot_row = store.get_snapshot(job_id, "raw_spec")
     raw_snapshot = raw_snapshot_row["data"] if raw_snapshot_row else None
+    latest_spec_run = _latest_completed_run(store.list_runs(job_id), "spec")
     return templates.TemplateResponse(
         request,
         "spec_list.html",
@@ -312,7 +315,9 @@ def spec_list_page(request: Request, job_id: int):
             f"Spec List {job['job_no']}",
             job=job,
             raw_snapshot=raw_snapshot,
+            raw_generated_at=_format_brisbane_time((raw_snapshot or {}).get("generated_at", "")),
             raw_analysis=_analysis_from_snapshot(raw_snapshot),
+            raw_extraction_duration=_format_run_duration(latest_spec_run),
             raw_spec_rooms=_flatten_rooms(raw_snapshot or {}),
             raw_special_sections=_flatten_special_sections(raw_snapshot or {}),
             raw_spec_appliances=_flatten_appliances(raw_snapshot or {}),
@@ -521,6 +526,76 @@ def _guard_upload_size(size_bytes: int) -> None:
         raise ValueError(f"Upload exceeds {MAX_UPLOAD_MB} MB.")
 
 
+def _parse_datetime(value: Any) -> datetime | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(float(value), tz=BRISBANE_TZ)
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=BRISBANE_TZ)
+    return parsed.astimezone(BRISBANE_TZ)
+
+
+def _format_brisbane_time(value: Any) -> str:
+    parsed = _parse_datetime(value)
+    if not parsed:
+        return _display_value(value)
+    return parsed.strftime("%Y-%m-%d %H:%M AEST")
+
+
+def _format_duration_seconds(total_seconds: float | int) -> str:
+    seconds = max(int(round(float(total_seconds))), 0)
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes}m {secs}s"
+    if minutes:
+        return f"{minutes}m {secs}s"
+    return f"{secs}s"
+
+
+def _format_run_duration(run: dict[str, Any] | None) -> str:
+    if not run:
+        return ""
+    started_at = _parse_datetime(run.get("started_at", ""))
+    finished_at = _parse_datetime(run.get("finished_at", ""))
+    if not started_at or not finished_at:
+        return ""
+    return _format_duration_seconds((finished_at - started_at).total_seconds())
+
+
+def _latest_completed_run(runs: list[dict[str, Any]], run_kind: str) -> dict[str, Any] | None:
+    for run in runs:
+        if str(run.get("run_kind", "")) == run_kind and str(run.get("status", "")) == "succeeded":
+            return run
+    return None
+
+
+def _present_jobs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    presented: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        item["created_at"] = _format_brisbane_time(item.get("created_at", ""))
+        presented.append(item)
+    return presented
+
+
+def _present_files(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    presented: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        item["uploaded_at"] = _format_brisbane_time(item.get("uploaded_at", ""))
+        presented.append(item)
+    return presented
+
+
 def _flatten_rooms(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for row in snapshot.get("rooms", []):
@@ -555,6 +630,17 @@ def _flatten_rooms(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
                 "toe_kick": _display_value(row.get("toe_kick", [])),
                 "bulkheads": _display_value(row.get("bulkheads", [])),
                 "handles": _display_value(row.get("handles", [])),
+                "floating_shelf": _display_value(row.get("floating_shelf", "")),
+                "led": "Yes" if _display_value(row.get("led", "")) else "",
+                "accessories": _string_list(row.get("accessories", [])),
+                "other_items": [
+                    {
+                        "label": _display_value(item.get("label", "")),
+                        "value": _display_value(item.get("value", "")),
+                    }
+                    for item in row.get("other_items", [])
+                    if isinstance(item, dict) and _display_value(item.get("label", "")) and _display_value(item.get("value", ""))
+                ],
                 "sink_info": _display_value(row.get("sink_info", "")),
                 "basin_info": _display_value(row.get("basin_info", "")),
                 "tap_info": _display_value(row.get("tap_info", "")),
@@ -832,7 +918,13 @@ def _list_export_files(export_dir: Path) -> list[dict[str, Any]]:
     for path in sorted(export_dir.glob("*"), key=lambda item: item.stat().st_mtime, reverse=True):
         if path.is_file():
             stat = path.stat()
-            rows.append({"name": path.name, "size_bytes": stat.st_size, "modified": stat.st_mtime})
+            rows.append(
+                {
+                    "name": path.name,
+                    "size_bytes": stat.st_size,
+                    "modified": _format_brisbane_time(stat.st_mtime),
+                }
+            )
     return rows
 
 
@@ -878,6 +970,8 @@ def _present_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         row["message_display"] = str(run.get("message") or run.get("error_text") or "")
         if str(run.get("status", "")) == "queued" and not row["message_display"]:
             row["message_display"] = "Waiting for worker to start parsing."
+        row["requested_at"] = _format_brisbane_time(run.get("requested_at", ""))
+        row["finished_at"] = _format_brisbane_time(run.get("finished_at", ""))
         row["parser_strategy_label"] = (
             cleaning_rules.parser_strategy_label(row.get("parser_strategy", ""))
             if str(run.get("parser_strategy", "")).strip()
@@ -955,6 +1049,7 @@ def _build_material_summary(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
             benchtop_groups["bench_tops_wall_run"],
             benchtop_groups["bench_tops_island"],
             benchtop_groups["bench_tops_other"],
+            row.get("floating_shelf", ""),
         ):
             benchtop_values.extend(_split_material_values(value))
 

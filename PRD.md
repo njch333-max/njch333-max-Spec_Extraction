@@ -118,6 +118,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
   - `Others`
 - Allow direct editing in the browser.
 - Preserve reviewed data separately from raw machine extraction.
+- The Job page should temporarily hide the Review cards until a later redesign is ready; the underlying review data model and save/export behavior may remain in the backend.
 
 ### 4.6 Export
 - Export reviewed data to:
@@ -142,14 +143,17 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Each room card must show room fixture rows for `Sink`, `Basin`, and `Tap`.
 - Each room card must show `Door Colours` as separate `Overheads`, `Base`, `Island`, and `Bar Back` rows.
 - Each room card must also show a `Tall` row so tall-cabinet material can be captured when the source provides it.
+- Each room card must support optional `Floating Shelf`, `LED`, `Accessories 1..n`, and curated `Others` accessory rows, and only render those rows when values exist.
 - Non-kitchen room cards must never render `Island` or `Bar Back`, and non-kitchen `Overheads` should only render when the authoritative room section explicitly provides that split.
 - Each room card should prefer separate `Wall Run Bench Top` and `Island Bench Top` rows when the source text supports that split.
 - Only the `Kitchen` room card should render split `Wall Run Bench Top` and `Island Bench Top` rows; other rooms should render a single `Benchtop` row even when internal split fields exist.
 - Plumbing fixtures shown on room cards must not also appear in the `Appliances` table.
 - The `Material Summary` block must deduplicate and count room-level `Door Colours`, `Handles`, and `Bench Tops` using smart normalization.
 - `Material Summary -> Bench Tops` must preserve full material, thickness, and edge/apron/waterfall details while stripping only location suffixes such as `to cooktop run`, `to island bench`, or `to powder room 2`.
+- `Material Summary -> Bench Tops` must also include floating-shelf materials when the room card captures a `Floating Shelf` material.
 - Appliance rows on the page must expose a clickable official `Product` link and allow long URLs to wrap across multiple lines.
 - The page must also render a `Special Sections` area for non-room joinery sections such as `FEATURE TALL DOORS`.
+- The page must show `Extraction duration` in `Snapshot Summary`.
 
 ### 4.8 Upload UX
 - Job detail uploads should start automatically as soon as files are selected.
@@ -180,6 +184,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 
 ### 4.12 Frontend Delivery
 - Static CSS assets should include cache-busting so layout changes become visible immediately after restart or deploy.
+- All frontend timestamps must display in Brisbane time using the fixed format `YYYY-MM-DD HH:mm AEST`.
 
 ### 4.13 Git Rollback Tooling
 - Provide local Git helper scripts to initialize, checkpoint, inspect history, and restore from previous commits.
@@ -213,6 +218,10 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - `bench_tops`
 - `door_panel_colours[]`
 - `door_colours_tall`
+- `floating_shelf`
+- `led`
+- `accessories`
+- `other_items`
 - `toe_kick`
 - `bulkheads`
 - `handles[]`

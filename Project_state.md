@@ -36,8 +36,13 @@
   - multi-file Clarendon parsing now keeps `BUTLERS PANTRY` and `WALK-IN-PANTRY` separate when the room-master schedule defines both
   - composite supplement headings such as `Kitchen/Pantry/Family/Meals` no longer create synthetic rooms; only explicit room-master schedule pages can add rooms like `MEALS ROOM`
   - Imperial builder parsing now uses page-top `... JOINERY SELECTION SHEET` titles as authoritative section boundaries, keeps continuation pages with the current section, and ignores signature/footer blocks during field extraction
+  - Imperial title recovery now preserves the full visible section name, so grouped labels such as `LIVING & OFFICE`, `WALK-IN-PANTRY`, and `BENCH SEAT` survive instead of collapsing to shortened room names
   - Imperial non-room sections such as `FEATURE TALL DOORS` are preserved as `special_sections` instead of being merged into nearby room cards
   - all room cards and exports now support a global `Tall` material field for tall cabinets / tall doors / tall panels when the source provides that split
+  - room cards and exports now also support optional `Floating Shelf`, `LED`, ordered `Accessories`, and curated accessory `Others` rows
+  - the raw Spec List summary now shows `Extraction duration`, and `Floating Shelf` materials also contribute to the `Material Summary -> Bench Tops` bucket
+  - the Job page temporarily hides the Review cards while the review UX is being redesigned, without removing the backend review model
+  - all user-facing timestamps are now rendered in fixed Brisbane time (`YYYY-MM-DD HH:mm AEST`) across job lists, uploads, run history, export tables, and spec-list summary
   - snapshot and run metadata now record parser strategy, worker PID, and app build ID
   - single-worker lease guard to prevent stale local worker processes from racing newer code on queued jobs
   - online-first deployment helper scripts that push the current repo state to `/opt/spec-extraction`, restart production services, and verify live health
@@ -112,6 +117,7 @@
 - Continue tightening grouped-room door-colour logic so `Vanities` only shows `Overheads` when the authoritative room section explicitly labels overhead cabinetry
 - Continue tightening supplement-file room mapping so only clearly related fixture pages enrich grouped rooms while unrelated finish/glazing notes stay ignored
 - Continue refining Imperial field cleanup for non-kitchen sections so `BAR`, `LAUNDRY`, and `BATH + ENSUITE` match the same high-confidence row-boundary quality as `KITCHEN`
+- Continue validating Imperial grouped-room title recovery on more templates where the extracted title appears after the body text in PDF reading order
 - Extend deterministic model-page probing beyond the currently supported appliance brand patterns
 - Expand model-number coverage for more appliance naming patterns beyond the current explicit rules
 - Build the future comparison UI and diff logic
@@ -126,6 +132,7 @@
 - The default configured extraction model is `gpt-4.1-mini`; local and production deployments should be kept in sync.
 - Room material fields should remain room-local so supplement files cannot leak another room's benchtop or door-colour text into the current room.
 - Imperial PDFs rely on page-top titles and row boundaries; if those titles or labels shift significantly in future templates, the Imperial-specific parser may need another template-family expansion.
+- Brisbane time is rendered with a fixed UTC+10 `AEST` presentation helper; if future daylight-saving-sensitive locations are required, the display helper will need revisiting.
 
 ## Verification Completed
 - Local `.venv` created inside the project
@@ -217,6 +224,8 @@
   - row-boundary extraction of kitchen benchtops, splashback, base, overheads, tall, toe kick, handles, and bulkhead values
   - `FEATURE TALL DOORS` export into `special_sections[]` instead of room cards
   - `Tall` rendering on room cards and dedicated Excel export for `special_sections`
+  - grouped-title recovery when the `... JOINERY SELECTION SHEET` text appears after body rows in extracted PDF order
+  - `Floating Shelf`, `LED`, `Accessories`, and curated accessory `Others` rendering/export safety
 - Smoke tests now use an isolated temporary data directory instead of `App/data/`
 - Worker smoke test passed for:
   - upload DOCX spec
