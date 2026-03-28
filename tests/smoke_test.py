@@ -2898,6 +2898,28 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(cleaned["door_colours_island"], "")
         self.assertEqual(cleaned["tap_info"], "Mixer Tap Clients own | Water Filter Tap Clients own")
 
+    def test_stable_hybrid_room_merge_keeps_base_accessories_and_rejects_orientation_only_ai_groups(self) -> None:
+        merged = extraction_service._merge_single_room(
+            {
+                "room_key": "kitchen",
+                "original_room_label": "KITCHEN",
+                "accessories": [],
+                "door_colours_tall": "",
+                "door_colours_island": "",
+            },
+            {
+                "room_key": "kitchen",
+                "original_room_label": "KITCHEN",
+                "accessories": ["OE ELSAFE DESK PRODIGY CABLE BASKET 950MM BLACK"],
+                "door_colours_tall": "Polytec Vertical",
+                "door_colours_island": "Polytec Horizontal on all",
+            },
+            stable_hybrid=True,
+        )
+        self.assertEqual(merged["accessories"], [])
+        self.assertEqual(merged["door_colours_tall"], "")
+        self.assertEqual(merged["door_colours_island"], "")
+
     def test_job_detail_page_hides_review_cards(self) -> None:
         builder_id = store.create_builder("Imperial", "imperial", "")
         job_id = store.create_job("37647", builder_id, "Imperial Test", "")

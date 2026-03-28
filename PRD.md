@@ -101,6 +101,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Imperial accessory lists must be deduplicated within the same room so repeated `Accessories` rows do not render multiple times with the same value.
 - Orientation-only notes such as `Vertical on Tall doors only` or `Horizontal on all` must not be treated as room-material values.
 - Imperial fixture overlay pages should be preferred over AI guesses for sink, basin, and tap text whenever the builder-specific overlay parser can read a cleaner local value.
+- Under the conservative merge profile, accessory lists and door-colour subgroup values should prefer clean heuristic output over noisier AI-only guesses when the AI result appears to come from another row or section.
 - Joinery schedule parsing must ignore non-cabinet finish pages and exclude colours that only appear in paint, Colorbond, garage-door, entry-door, window-frame, or other non-joinery contexts.
 - Drawer and hinge states must normalize to `Soft Close`, `Not Soft Close`, or blank.
 - OpenAI extraction should tolerate markdown code fences or short explanatory prefixes around JSON instead of failing the whole AI pass immediately.

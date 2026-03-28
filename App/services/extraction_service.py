@@ -478,7 +478,10 @@ def _merge_single_room(base_row: dict[str, Any], ai_row: dict[str, Any], stable_
             merged[field_name] = ai_row[field_name]
     for field_name in ("bench_tops", "door_panel_colours", "toe_kick", "bulkheads", "handles", "accessories"):
         if stable_hybrid:
-            merged[field_name] = parsing._coerce_string_list(base_row.get(field_name)) or parsing._coerce_string_list(ai_row.get(field_name))
+            if field_name == "accessories":
+                merged[field_name] = parsing._coerce_string_list(base_row.get(field_name))
+            else:
+                merged[field_name] = parsing._coerce_string_list(base_row.get(field_name)) or parsing._coerce_string_list(ai_row.get(field_name))
         else:
             merged[field_name] = _merge_list_field(base_row.get(field_name), ai_row.get(field_name))
     merged["other_items"] = parsing._merge_other_items(base_row.get("other_items", []), ai_row.get("other_items", []))
@@ -493,7 +496,11 @@ def _merge_single_room(base_row: dict[str, Any], ai_row: dict[str, Any], stable_
         "door_colours_bar_back",
     ):
         if not merged.get(field_name) and ai_row.get(field_name):
-            merged[field_name] = ai_row[field_name]
+            ai_value = ai_row[field_name]
+            if stable_hybrid and field_name.startswith("door_colours_"):
+                ai_value = parsing._clean_door_colour_value(ai_value)
+            if ai_value:
+                merged[field_name] = ai_value
     for field_name in ("has_explicit_overheads", "has_explicit_base", "has_explicit_tall", "has_explicit_island", "has_explicit_bar_back"):
         merged[field_name] = bool(base_row.get(field_name, False) or ai_row.get(field_name, False))
     merged["drawers_soft_close"] = _merge_soft_close_field(base_row.get("drawers_soft_close", ""), ai_row.get("drawers_soft_close", ""), keyword="drawer")

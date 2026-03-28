@@ -86,13 +86,14 @@
   - the room-master room set is precomputed before supplement files are parsed, so supplement-file ordering cannot accidentally create extra rooms
   - composite supplement headings such as `Kitchen/Pantry/Family/Meals` are treated as room-like noise unless the room-master file also contains explicit room-specific schedule pages for those rooms
 11. Merge OpenAI output conservatively: keep the heuristic room set as the primary layout, merge room fields into that layout, and preserve heuristic appliance `model_no` values instead of replacing them with weaker guesses.
-12. For Clarendon-only spec runs, apply a deterministic post-polish stage after source-driven room detection:
+12. For stable-hybrid room merges, prefer heuristic accessories and reject AI-only door-colour subgroup values that collapse to orientation notes instead of real material text.
+13. For Clarendon-only spec runs, apply a deterministic post-polish stage after source-driven room detection:
   - rebuild stable room text from colour-schedule and fixture pages for each detected room
   - prefer clean schedule-page values over OCR-noisy field fragments
   - use same-room-only overlay selection for material fields, while allowing grouped-room fixture fallback only for sink/basin/tap enrichment
   - only let generic `DOORS/PANELS` text fall back to `Base` when the same room section has no explicit overhead/base/island/bar-back cabinetry markers
   - keep source-driven room ownership while replacing noisy field text with cleaner deterministic values
-13. For Imperial-only spec runs, apply a title-driven section parser before the generic cleanup stages:
+14. For Imperial-only spec runs, apply a title-driven section parser before the generic cleanup stages:
   - use the page-top `... JOINERY SELECTION SHEET` title as the authoritative section start
   - use the currently extractable title body as the authoritative room label, preserving values such as `WALK-BEHIND PANTRY`, `BENCH SEAT`, or `OFFICE` without shorthand aliases
   - use the title to identify the section, but do not discard same-page body text that appears before the title in extracted reading order
@@ -107,11 +108,11 @@
   - reject orientation-only notes such as `Vertical on Tall doors only` or `Horizontal on all` as door-colour material values
   - prefer builder-specific Imperial sink/tap overlay text over noisier AI fixture guesses when both are present
   - emit non-room sections such as `FEATURE TALL DOORS` into `special_sections[]` instead of merging them into nearby room cards
-14. Apply the fixed global cleaning rules after heuristic, merge, Clarendon post-polish, and Imperial section parsing so brand casing, door-colour cleanup, kitchen-only bench-top splitting, tall-cabinet capture, and soft-close normalization stay consistent across all builders.
-15. Record analysis metadata in the snapshot: mode, parser strategy, attempted, succeeded, model, note, and runtime identifiers (`worker_pid`, `app_build_id`).
-16. Normalize drawer and hinge states to `Soft Close`, `Not Soft Close`, or blank.
-17. Look up official appliance resources by `make + model_no`, first probing deterministic brand-site model URLs where supported and then falling back to search-based discovery; AEG, Westinghouse, and Fisher & Paykel now extract official dimensions from product pages when available, including JSON-like structured metadata.
-18. Save the raw snapshot.
+15. Apply the fixed global cleaning rules after heuristic, merge, Clarendon post-polish, and Imperial section parsing so brand casing, door-colour cleanup, kitchen-only bench-top splitting, tall-cabinet capture, and soft-close normalization stay consistent across all builders.
+16. Record analysis metadata in the snapshot: mode, parser strategy, attempted, succeeded, model, note, and runtime identifiers (`worker_pid`, `app_build_id`).
+17. Normalize drawer and hinge states to `Soft Close`, `Not Soft Close`, or blank.
+18. Look up official appliance resources by `make + model_no`, first probing deterministic brand-site model URLs where supported and then falling back to search-based discovery; AEG, Westinghouse, and Fisher & Paykel now extract official dimensions from product pages when available, including JSON-like structured metadata.
+19. Save the raw snapshot.
 
 ### 3.5 Review Pipeline
 1. Load latest raw snapshot.

@@ -2892,7 +2892,8 @@ def _clean_door_colour_value(value: Any) -> str:
     text = re.sub(r"\s*\([^)]*$", "", text)
     text = re.sub(r"\s{2,}", " ", text)
     text = text.strip(" -;,")
-    if re.fullmatch(r"(?i)(?:vertical|horizontal)\s+on.*", text):
+    orientation_text = normalize_space(re.sub(r"(?i)\b(?:polytec|laminex|caesarstone|smartstone|wk stone)\b", "", text)).strip(" -;,")
+    if re.fullmatch(r"(?i)(?:vertical|horizontal)(?:\s+on.*)?", orientation_text):
         return ""
     if re.fullmatch(r"(?i)incl\.?\s+spring\s+free.*", text):
         return ""
