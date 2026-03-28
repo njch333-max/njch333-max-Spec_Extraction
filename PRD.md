@@ -118,6 +118,8 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - If no exact official model match is found, appliance links and overall size should stay blank instead of falling back to guessed spec-text values.
 - The visible appliance link in the UI and exports only needs the official product page URL; spec and manual files may still be used internally for size extraction when needed.
 - Official overall size extraction must support both single-line `W x D x H` style text and labeled `51 mm (H) / 900 mm (W) / 520 mm (D)` style product-page dimensions.
+- Snapshot payloads should carry a parsed `site_address` when the source documents expose a clear address line, so job-workspace and raw-spec headers can show `job no - address` without a separate manual job-address field.
+- For Imperial jobs, delayed handle model lines that appear after joinery tables or near footer metadata should still be recoverable as long as they remain within the same room section, while adjacent cabinet-colour rows must never be mistaken for handle values.
 
 ### 4.5 Review
 - Show reviewable data in English-only sections:
@@ -148,6 +150,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
   - source documents
   - `Material Summary`
 - The page must use `raw_spec` only and must not switch to reviewed data.
+- The page title must show `Spec List for job no - site address` when the latest parsed snapshot provides a `site_address`; if no address exists, omit the separator and address text.
 - The page must provide a left-side navigation hide/show control and should load with the navigation rail hidden by default on every visit.
 - The `Rooms` section should use one wide horizontal block per room on desktop, stacked vertically one below the next, so each field can be read without cramped narrow cards.
 - Each room card must show room fixture rows for `Sink`, `Basin`, and `Tap`.
@@ -196,6 +199,9 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Static CSS assets should include cache-busting so layout changes become visible immediately after restart or deploy.
 - All frontend timestamps must display in Brisbane time using the fixed format `YYYY-MM-DD HH:mm AEST`.
 - The Jobs homepage keeps its navigation rail visible, while the Job Workspace and Raw Spec List pages default that rail to hidden and allow the user to toggle it open when needed.
+- The Jobs page `Open` action must continue to open in a new browser tab.
+- The Job Workspace title must show `job no - site address` when the latest parsed raw or drawing snapshot exposes a `site_address`.
+- At roughly `1280px` width and below, main pages should switch from wide tables to stacked card-style layouts so a 1080p half-screen browser can be read without horizontal scrolling.
 
 ### 4.13 Git Rollback Tooling
 - Provide local Git helper scripts to initialize, checkpoint, inspect history, and restore from previous commits.
@@ -222,6 +228,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - `analysis.note`
 - `analysis.worker_pid`
 - `analysis.app_build_id`
+- `site_address`
 
 ### 5.1 Room Fields
 - `room_key`

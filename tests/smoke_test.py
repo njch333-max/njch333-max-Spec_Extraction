@@ -2411,6 +2411,7 @@ class SmokeTest(unittest.TestCase):
                 "builder_name": "Imperial",
                 "source_kind": "spec",
                 "generated_at": "2026-03-24T10:00:00+00:00",
+                "site_address": "92 Haldham Crescent, Regents Park",
                 "analysis": {"mode": "heuristic_only", "parser_strategy": "global_conservative"},
                 "rooms": [
                     {
@@ -2473,6 +2474,7 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("<strong>LED</strong>", response.text)
         self.assertIn("Accessories 1", response.text)
         self.assertIn("RAIL", response.text)
+        self.assertIn("Spec List for 37647 - 92 Haldham Crescent, Regents Park", response.text)
 
     def test_spec_list_excel_includes_tall_and_special_sections_sheet(self) -> None:
         snapshot = {
@@ -2545,6 +2547,8 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn('target="_blank"', response.text)
         self.assertIn('rel="noopener"', response.text)
+        self.assertIn('class="table-cardify"', response.text)
+        self.assertIn('data-label="Job No."', response.text)
 
     def test_workspace_and_spec_list_sidebar_start_hidden(self) -> None:
         builder_id = store.create_builder("Imperial", "imperial", "")
@@ -2775,11 +2779,20 @@ class SmokeTest(unittest.TestCase):
                             "Hinges & Drawer Runners: Tiles ( Use same footprint as existing kicks)Floor Type & Kick refacing required:Softclose \n"
                             "Caesarstone\n"
                             "KITCHEN JOINERY SELECTION SHEET\n"
+                            "92 Haldham Crescent, Regents Park\n"
+                            "PRIVATE - Leah Mitchell\n"
+                            "29/10/2025\n"
+                            "Address:\n"
+                            "Client:\n"
+                            "Date:\n"
                             "20mm Stone \n"
                             "5131 Calacattra Nuvo - PR\n"
                             "Waterfall End\n"
                             "Polytec\n"
                             "Polytec\n"
+                            "Titus Tekform\n"
+                            "2163 Voda Profile Handle Matt Black\n"
+                            "200mm - SO-2163-200-MB\n"
                         ),
                         "needs_ocr": False,
                     },
@@ -2804,13 +2817,52 @@ class SmokeTest(unittest.TestCase):
         ]
         snapshot = enrich_snapshot_rooms(parse_documents("37813", "Imperial", "spec", documents), documents)
         kitchen = snapshot["rooms"][0]
+        self.assertEqual(snapshot["site_address"], "92 Haldham Crescent, Regents Park")
         self.assertIn("20mm Caesarstone", kitchen["bench_tops_other"])
         self.assertIn("5131 Calacattra Nuvo - PR", kitchen["bench_tops_other"])
         self.assertEqual(kitchen["door_colours_tall"], "")
         self.assertEqual(kitchen["bulkheads"], ["None"])
         self.assertEqual(kitchen["tap_info"], "Mixer Tap Clients own | Water Filter Tap Clients own")
         self.assertEqual(kitchen["accessories"], [])
+        self.assertEqual(
+            kitchen["handles"],
+            [
+                "7206 Danes Bow Handle Matt Black 320mm - SO-7206-320-MB",
+                "No handles on Uppers - PTO Where req",
+                "2163 Voda Profile Handle Matt Black 200mm - SO-2163-200-MB",
+            ],
+        )
         self.assertNotIn("IMAGE N/A", " ".join(kitchen["bulkheads"]))
+
+    def test_job_detail_and_spec_list_titles_show_snapshot_site_address(self) -> None:
+        builder_id = store.create_builder("Imperial", "imperial", "")
+        job_id = store.create_job("37813.2", builder_id, "", "")
+        store.upsert_snapshot(
+            job_id,
+            "raw_spec",
+            {
+                "job_no": "37813.2",
+                "builder_name": "Imperial",
+                "source_kind": "spec",
+                "generated_at": "2026-03-28T07:06:09+00:00",
+                "site_address": "92 Haldham Crescent, Regents Park",
+                "analysis": {"mode": "heuristic_only", "parser_strategy": "global_conservative"},
+                "rooms": [],
+                "special_sections": [],
+                "appliances": [],
+                "others": {},
+                "warnings": [],
+                "source_documents": [],
+            },
+        )
+        client = TestClient(app)
+        self._login(client)
+        detail_response = client.get(f"/jobs/{job_id}")
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertIn("37813.2 - 92 Haldham Crescent, Regents Park", detail_response.text)
+        spec_response = client.get(f"/jobs/{job_id}/spec-list")
+        self.assertEqual(spec_response.status_code, 200)
+        self.assertIn("Spec List for 37813.2 - 92 Haldham Crescent, Regents Park", spec_response.text)
 
     def test_imperial_office_benchtop_ignores_joinery_title_and_address_noise(self) -> None:
         documents = [

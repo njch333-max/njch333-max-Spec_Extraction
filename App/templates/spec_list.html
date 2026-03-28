@@ -3,7 +3,7 @@
 <section class="page-head">
   <div>
     <span class="eyebrow">Raw Snapshot</span>
-    <h2>Spec List for {{ job.job_no }}</h2>
+    <h2>Spec List for {{ job.job_no }}{% if job_site_address %} - {{ job_site_address }}{% endif %}</h2>
     <p>{{ job.builder_name }}{% if job.title %} | {{ job.title }}{% endif %}</p>
   </div>
   <div class="head-actions">
@@ -55,7 +55,7 @@
   <article class="card">
     <h3>Source Documents</h3>
     <div class="table-wrap">
-      <table>
+      <table class="table-cardify">
         <thead>
           <tr>
             <th>Role</th>
@@ -67,10 +67,10 @@
         <tbody>
           {% for row in raw_source_documents %}
           <tr>
-            <td>{{ row.role }}</td>
-            <td>{{ row.room_role or "-" }}</td>
-            <td>{{ row.file_name }}</td>
-            <td>{{ row.page_count }}</td>
+            <td data-label="Role">{{ row.role }}</td>
+            <td data-label="Room Role">{{ row.room_role or "-" }}</td>
+            <td data-label="File Name">{{ row.file_name }}</td>
+            <td data-label="Pages">{{ row.page_count }}</td>
           </tr>
           {% else %}
           <tr><td colspan="4" class="empty-cell">No source document entries.</td></tr>
@@ -190,7 +190,7 @@
   <span class="eyebrow">Raw Snapshot</span>
   <h3>Appliances</h3>
   <div class="table-wrap wide-table">
-    <table>
+    <table class="table-cardify">
       <thead>
         <tr>
           <th>Type</th>
@@ -207,15 +207,15 @@
       <tbody>
         {% for row in raw_spec_appliances %}
         <tr>
-          <td>{{ row.appliance_type }}</td>
-          <td>{{ row.make }}</td>
-          <td>{{ row.model_no }}</td>
-          <td>{% if row.product_url %}<a href="{{ row.product_url }}" class="wrap-link" target="_blank" rel="noopener">{{ row.product_url }}</a>{% endif %}</td>
-          <td>{{ row.overall_size }}</td>
-          <td>{{ row.source_file }}</td>
-          <td>{{ row.page_refs }}</td>
-          <td>{{ row.evidence_snippet }}</td>
-          <td>{{ row.confidence }}</td>
+          <td data-label="Type">{{ row.appliance_type }}</td>
+          <td data-label="Make">{{ row.make }}</td>
+          <td data-label="Model">{{ row.model_no }}</td>
+          <td data-label="Product">{% if row.product_url %}<a href="{{ row.product_url }}" class="wrap-link" target="_blank" rel="noopener">{{ row.product_url }}</a>{% endif %}</td>
+          <td data-label="Overall Size">{{ row.overall_size }}</td>
+          <td data-label="Source">{{ row.source_file }}</td>
+          <td data-label="Pages">{{ row.page_refs }}</td>
+          <td data-label="Evidence">{{ row.evidence_snippet }}</td>
+          <td data-label="Confidence">{{ row.confidence }}</td>
         </tr>
         {% else %}
         <tr><td colspan="9" class="empty-cell">No appliance rows available.</td></tr>
@@ -230,7 +230,7 @@
     <span class="eyebrow">Raw Snapshot</span>
     <h3>Others</h3>
     <div class="table-wrap">
-      <table>
+      <table class="table-cardify">
         <thead>
           <tr>
             <th>Key</th>
@@ -240,8 +240,8 @@
         <tbody>
           {% for row in raw_spec_others %}
           <tr>
-            <td>{{ row.key }}</td>
-            <td>{{ row.value }}</td>
+            <td data-label="Key">{{ row.key }}</td>
+            <td data-label="Value">{{ row.value }}</td>
           </tr>
           {% else %}
           <tr><td colspan="2" class="empty-cell">No extra notes available.</td></tr>

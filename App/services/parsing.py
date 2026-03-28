@@ -905,6 +905,54 @@ def _imperial_is_supplier_only_line(line: str) -> bool:
     return normalized in IMPERIAL_SUPPLIER_ONLY_LINES
 
 
+ADDRESS_STREET_TYPE_PATTERN = (
+    r"(?:street|st|road|rd|crescent|cres|avenue|ave|drive|dr|court|ct|place|pl|boulevard|blvd|lane|ln|terrace|tce|close|cl|way|parade|pde)"
+)
+
+
+def _extract_site_address_from_documents(documents: list[dict[str, object]]) -> str:
+    ordered_documents = list(documents)
+    for document in ordered_documents:
+        pages = list(document.get("pages", []))
+        for page in pages:
+            address = _extract_site_address_from_text(str(page.get("text", "")))
+            if address:
+                return address
+    return ""
+
+
+def _extract_site_address_from_text(text: str) -> str:
+    lines = [normalize_space(line) for line in str(text or "").splitlines() if normalize_space(line)]
+    for index, line in enumerate(lines):
+        candidate = line
+        if re.match(r"(?i)^address\s*:", line):
+            tail = normalize_space(re.sub(r"(?i)^address\s*:\s*", "", line))
+            if tail:
+                candidate = tail
+            elif index + 1 < len(lines):
+                candidate = lines[index + 1]
+        cleaned = _clean_site_address_candidate(candidate)
+        if cleaned:
+            return cleaned
+    return ""
+
+
+def _clean_site_address_candidate(value: str) -> str:
+    text = normalize_space(str(value or ""))
+    if not text:
+        return ""
+    text = re.sub(r"(?i)^address\s*:\s*", "", text)
+    if not text:
+        return ""
+    if re.search(r"(?i)\b(?:client|date|document ref|designer|signature|signed date|private\b|all colours shown|subject to supplier)\b", text):
+        return ""
+    if not re.search(r"\b\d+[A-Za-z]?(?:/\d+[A-Za-z]?)?\b", text):
+        return ""
+    if not re.search(rf"(?i)\b{ADDRESS_STREET_TYPE_PATTERN}\b", text):
+        return ""
+    return text.strip(" -;,")
+
+
 def _imperial_collect_fields(lines: list[str]) -> dict[str, str]:
     fields: dict[str, str] = {}
     index = 0
@@ -1148,6 +1196,56 @@ def _imperial_compose_material_text(supplier: str, parts: list[str]) -> str:
     return " - ".join(part for part in ordered if part).strip(" -;,")
 
 
+def _imperial_handle_value_looks_noisy(value: str) -> bool:
+    text = normalize_space(value)
+    if not text:
+        return False
+    return bool(
+        re.search(r"(?i)\b(?:thermolaminated|polytec|vinyl style|vienna|classic white|woodmatt|smooth|matt finish)\b", text)
+        and not re.search(r"(?i)\bhandle|touch catch|finger pull|recessed rail\b", text)
+    )
+
+
+def _imperial_extract_delayed_handles(lines: list[str]) -> list[str]:
+    entries: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = normalize_space(lines[index])
+        if not line or _is_imperial_page_noise_line(line):
+            index += 1
+            continue
+        candidate = ""
+        tail_match = re.match(r"(?i)^HANDLES?\s*[:\-]?\s*(.*)$", line)
+        if tail_match:
+            tail = normalize_space(tail_match.group(1))
+            if tail and not _imperial_handle_value_looks_noisy(tail):
+                candidate = tail
+        elif re.search(r"(?i)\bno handles?\b", line):
+            candidate = line
+        elif re.search(r"(?i)\b(?:touch catch|recessed rail|finger pull)\b", line):
+            candidate = line
+        elif re.search(r"(?i)\bhandle\b", line) and not _imperial_handle_value_looks_noisy(line):
+            candidate = line
+
+        if not candidate:
+            index += 1
+            continue
+
+        next_line = normalize_space(lines[index + 1]) if index + 1 < len(lines) else ""
+        if next_line and not _imperial_match_field_label(next_line)[0] and not _is_imperial_field_stop_line(next_line):
+            if re.search(r"(?i)\b(?:\d+\s*mm|so-[a-z0-9-]+|matt black|black|chrome|brass|nickel)\b", next_line):
+                candidate = f"{candidate} {next_line}"
+                index += 1
+
+        candidate = re.sub(r"(?i)^Tall Pantry Doors\s*-\s*", "", candidate)
+        candidate = re.sub(r"(?i)^HANDLES?\s*[:\-]?\s*", "", candidate)
+        candidate = normalize_space(candidate).strip(" -;,")
+        if candidate:
+            entries.append(candidate)
+        index += 1
+    return _clean_handle_entries(entries)
+
+
 def _imperial_collect_page_fields(page_text: str) -> dict[str, Any]:
     lines = _preprocess_imperial_lines([normalize_space(line) for line in page_text.split("\n") if normalize_space(line)])
     fields = _imperial_collect_fields(lines)
@@ -1158,6 +1256,7 @@ def _imperial_collect_page_fields(page_text: str) -> dict[str, Any]:
         "splashback": "",
         "feature_cabinetry": "",
         "accessories_list": [],
+        "delayed_handles": [],
         "bulkhead": "",
         "base": "",
         "upper": "",
@@ -1183,6 +1282,9 @@ def _imperial_collect_page_fields(page_text: str) -> dict[str, Any]:
     accessory_entries = _imperial_extract_accessory_entries(lines)
     if accessory_entries:
         overrides["accessories_list"] = accessory_entries
+    delayed_handles = _imperial_extract_delayed_handles(lines)
+    if delayed_handles:
+        overrides["delayed_handles"] = delayed_handles
     bulkhead = _imperial_clean_bulkhead_value(
         _imperial_extract_inline_value(
             page_text,
@@ -1478,6 +1580,7 @@ def _imperial_room_from_section(section: dict[str, Any]) -> RoomRow:
     page_entries = list(section.get("page_texts", []))
     fields: dict[str, str] = {}
     accessories: list[str] = []
+    delayed_handles: list[str] = []
     other_items: list[dict[str, str]] = []
     bulkhead_text = ""
     soft_close_text = ""
@@ -1509,6 +1612,7 @@ def _imperial_room_from_section(section: dict[str, Any]) -> RoomRow:
         if overrides.get("feature_cabinetry"):
             feature_cabinetry = _merge_text(feature_cabinetry, overrides["feature_cabinetry"])
         accessories = _merge_lists(accessories, overrides.get("accessories_list", []))
+        delayed_handles = _merge_lists(delayed_handles, overrides.get("delayed_handles", []))
         other_items = _merge_other_items(
             other_items,
             [
@@ -1573,7 +1677,10 @@ def _imperial_room_from_section(section: dict[str, Any]) -> RoomRow:
     for key in ("handles_overheads", "handles_base", "handles"):
         if fields.get(key):
             handles.extend([part for part in fields[key].split("; ") if part])
-    row.handles = _clean_handle_entries(handles)
+    cleaned_handles = [item for item in _clean_handle_entries(handles) if not _imperial_handle_value_looks_noisy(item)]
+    if delayed_handles:
+        cleaned_handles = _merge_lists(cleaned_handles, delayed_handles)
+    row.handles = _clean_handle_entries(cleaned_handles)
     soft_close = normalize_soft_close_value(soft_close_text, keyword="drawer") or normalize_soft_close_value(soft_close_text)
     if soft_close:
         row.drawers_soft_close = soft_close
@@ -1627,6 +1734,7 @@ def _parse_imperial_documents(
     room_master_document, room_master_reason = _select_imperial_room_master_document(documents)
     room_master_file = str(room_master_document["file_name"]) if room_master_document else ""
     supplement_files: list[str] = []
+    site_address = _extract_site_address_from_documents([room_master_document] if room_master_document else documents) or _extract_site_address_from_documents(documents)
 
     for document in documents:
         file_name = str(document["file_name"])
@@ -1663,6 +1771,7 @@ def _parse_imperial_documents(
         builder_name=builder_name,
         source_kind=source_kind,
         generated_at=utc_now_iso(),
+        site_address=site_address,
         analysis=AnalysisMeta(
             parser_strategy=cleaning_rules.global_parser_strategy(),
             room_master_file=room_master_file,
@@ -1698,6 +1807,7 @@ def parse_documents(
     splashback_notes: list[str] = []
     room_master_document, room_master_reason = select_room_master_document(documents, source_kind)
     room_master_file = str(room_master_document["file_name"]) if room_master_document else ""
+    site_address = _extract_site_address_from_documents([room_master_document] if room_master_document else documents) or _extract_site_address_from_documents(documents)
     room_master_keys: set[str] = set()
     supplement_files: list[str] = []
     ignored_room_like_lines_count = 0
@@ -1775,6 +1885,7 @@ def parse_documents(
         builder_name=builder_name,
         source_kind=source_kind,
         generated_at=utc_now_iso(),
+        site_address=site_address,
         analysis=AnalysisMeta(
             parser_strategy=cleaning_rules.global_parser_strategy(),
             room_master_file=room_master_file,

@@ -36,6 +36,7 @@
 - Static asset links include a file-version query string so browser caches do not hold stale layouts after CSS updates
 - Form-based actions with CSRF token checks
 - The Jobs list keeps the left navigation visible, but the Job Workspace and Raw Spec List pages render the same shell with a client-side collapsible navigation rail that starts hidden on each visit.
+- The Jobs list `Open` action uses a new browser tab, and dense tables switch to a stacked card-style presentation below roughly `1280px` so 1080p half-screen layouts stay readable without horizontal scrolling.
 
 ### 3.2 Persistence
 - SQLite tables:
@@ -108,11 +109,13 @@
   - reject orientation-only notes such as `Vertical on Tall doors only` or `Horizontal on all` as door-colour material values
   - prefer builder-specific Imperial sink/tap overlay text over noisier AI fixture guesses when both are present
   - emit non-room sections such as `FEATURE TALL DOORS` into `special_sections[]` instead of merging them into nearby room cards
+  - recover delayed Imperial handle lines that appear later in the same section while rejecting adjacent cabinet-colour rows as handle noise
 15. Apply the fixed global cleaning rules after heuristic, merge, Clarendon post-polish, and Imperial section parsing so brand casing, door-colour cleanup, kitchen-only bench-top splitting, tall-cabinet capture, and soft-close normalization stay consistent across all builders.
 16. Record analysis metadata in the snapshot: mode, parser strategy, attempted, succeeded, model, note, and runtime identifiers (`worker_pid`, `app_build_id`).
 17. Normalize drawer and hinge states to `Soft Close`, `Not Soft Close`, or blank.
 18. Look up official appliance resources by `make + model_no`, first probing deterministic brand-site model URLs where supported and then falling back to search-based discovery; AEG, Westinghouse, and Fisher & Paykel now extract official dimensions from product pages when available, including JSON-like structured metadata.
-19. Save the raw snapshot.
+19. Extract an optional `site_address` from the authoritative source text and carry it in the snapshot for header display on the Job Workspace and Raw Spec List pages.
+20. Save the raw snapshot.
 
 ### 3.5 Review Pipeline
 1. Load latest raw snapshot.
@@ -136,6 +139,7 @@
 12. Export that raw snapshot through a dedicated Excel route, including a `Special Sections` worksheet and the expanded room fields for `Floating Shelf`, `LED`, `Accessories`, and curated accessory `Others`.
 13. Never fall back to `reviews` when rendering the raw Spec List page.
 14. Start the page shell with the left navigation rail collapsed by default and let the user toggle it open client-side when needed.
+15. When a parsed `site_address` exists, append it to the page heading as `job no - site address`; otherwise omit the separator.
 
 ### 3.7 Upload Interaction
 1. Job detail uses the existing upload POST route.
@@ -174,6 +178,7 @@
 - `room_key` is a source-driven normalized identity, `original_room_label` preserves the detected source label
 - Room rows also carry fixture fields for sinks, basins, and taps plus split door-colour and bench-top display fields, including the global `door_colours_tall` split for tall-cabinet material.
 - Room rows now also support `floating_shelf`, `led`, ordered `accessories`, and curated `other_items` accessory labels such as `RAIL` and `JEWELLERY INSERT`.
+- Snapshot payloads now also carry an optional `site_address` string extracted from source documents.
 - Clarendon rows pass through a deterministic post-polish layer after layout stabilization so handle strings, fixture text, splashback notes, and soft-close fallbacks stay readable without changing source-driven room ownership.
 - That Clarendon post-polish now detects at least two schedule families: the `37016` reference family and the denser single-line `LUXE / handleless / mirror splashback` family, then applies family-specific field splitting before the shared compact-summary cleanup.
 

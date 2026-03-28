@@ -88,6 +88,7 @@ class SnapshotPayload(BaseModel):
     builder_name: str = ""
     source_kind: str = "spec"
     generated_at: str = ""
+    site_address: str = ""
     analysis: AnalysisMeta = Field(default_factory=AnalysisMeta)
     rooms: list[RoomRow] = Field(default_factory=list)
     special_sections: list[SpecialSectionRow] = Field(default_factory=list)

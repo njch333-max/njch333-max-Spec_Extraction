@@ -43,6 +43,7 @@
   - Imperial bench-top parsing now defaults a plain `Bench Top` or `Cooktop Run` row to `Wall Run Bench Top` when no explicit wall-run row exists, while keeping island-only notes inside `Kitchen`
   - Imperial office pages now ignore `... TO TOP OF BENCHTOP` layout text and later address/title noise when resolving the actual office benchtop value
   - Imperial room accessories are now deduplicated within the same room before display and export
+  - Imperial handle parsing now includes a delayed same-section recovery pass so footer-adjacent handle model lines can still populate `handles` without letting nearby cabinet-colour rows pollute the value
   - orientation-only notes such as `Vertical on Tall doors only` and `Horizontal on all` are now rejected as door-colour material values, so they do not populate `Tall` or `Island`
   - Imperial sink and tap room fields now prefer the builder-specific non-joinery overlay parser over noisier AI fixture guesses when both are present
   - stable-hybrid room merges now ignore AI-only accessory leakage and reject AI-only orientation notes from populating `Tall` or `Island` door-colour splits
@@ -51,8 +52,10 @@
   - the raw Spec List summary now shows `Extraction duration`, and `Floating Shelf` materials also contribute to the `Material Summary -> Bench Tops` bucket
   - the Job page temporarily hides the Review cards while the review UX is being redesigned, without removing the backend review model
   - all user-facing timestamps are now rendered in fixed Brisbane time (`YYYY-MM-DD HH:mm AEST`) across job lists, uploads, run history, export tables, and spec-list summary
+  - parsed snapshots now carry a `site_address` when the source documents expose one, and the Job Workspace / Raw Spec List headers append that address as `job no - address`
   - the Jobs list `Open` action now opens the target job in a new browser tab
   - the Job Workspace and Raw Spec List pages now start with the left navigation rail hidden and expose a client-side show/hide toggle, while the Jobs homepage keeps the rail visible
+  - dense tables on the Jobs page, Job Workspace, Raw Spec List, Builders page, and Run History now collapse into stacked card-style rows below roughly `1280px` so 1080p half-screen windows remain readable without horizontal scrolling
   - snapshot and run metadata now record parser strategy, worker PID, and app build ID
   - single-worker lease guard to prevent stale local worker processes from racing newer code on queued jobs
   - online-first deployment helper scripts that push the current repo state to `/opt/spec-extraction`, restart production services, and verify live health

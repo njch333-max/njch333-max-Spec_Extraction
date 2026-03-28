@@ -264,6 +264,7 @@ def job_detail_page(request: Request, job_id: int):
             sidebar_collapsible=True,
             sidebar_default_hidden=True,
             job=job,
+            job_site_address=_job_site_address(raw_snapshot_row["data"] if raw_snapshot_row else None, drawing_snapshot_row["data"] if drawing_snapshot_row else None),
             builder=builder,
             spec_files=spec_files,
             drawing_files=drawing_files,
@@ -318,6 +319,7 @@ def spec_list_page(request: Request, job_id: int):
             sidebar_collapsible=True,
             sidebar_default_hidden=True,
             job=job,
+            job_site_address=_job_site_address(raw_snapshot, None),
             raw_snapshot=raw_snapshot,
             raw_generated_at=_format_brisbane_time((raw_snapshot or {}).get("generated_at", "")),
             raw_analysis=_analysis_from_snapshot(raw_snapshot),
@@ -911,6 +913,7 @@ def _blank_snapshot(job: dict[str, Any]) -> dict[str, Any]:
         "builder_name": job["builder_name"],
         "source_kind": "spec",
         "generated_at": utc_now_iso(),
+        "site_address": "",
         "analysis": _analysis_from_snapshot(None),
         "rooms": [],
         "special_sections": [],
@@ -919,6 +922,15 @@ def _blank_snapshot(job: dict[str, Any]) -> dict[str, Any]:
         "warnings": [],
         "source_documents": [],
     }
+
+
+def _job_site_address(raw_snapshot: dict[str, Any] | None, drawing_snapshot: dict[str, Any] | None) -> str:
+    for snapshot in (raw_snapshot, drawing_snapshot):
+        if isinstance(snapshot, dict):
+            value = parsing.normalize_space(str(snapshot.get("site_address", "") or ""))
+            if value:
+                return value
+    return ""
 
 
 def _list_export_files(export_dir: Path) -> list[dict[str, Any]]:

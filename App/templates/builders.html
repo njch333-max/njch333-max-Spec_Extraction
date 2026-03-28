@@ -46,7 +46,7 @@
     <p class="notes">{{ builder.notes }}</p>
     {% endif %}
     <div class="table-wrap">
-      <table>
+      <table class="table-cardify">
         <thead>
           <tr>
             <th>Original Name</th>
@@ -58,10 +58,10 @@
         <tbody>
           {% for file in builder.templates %}
           <tr>
-            <td>{{ file.original_name }}</td>
-            <td>{{ file.uploaded_at }}</td>
-            <td>{{ file.size_bytes }}</td>
-            <td class="actions">
+            <td data-label="Original Name">{{ file.original_name }}</td>
+            <td data-label="Uploaded">{{ file.uploaded_at }}</td>
+            <td data-label="Size">{{ file.size_bytes }}</td>
+            <td data-label="Actions" class="actions">
               <a href="/builders/templates/{{ file.id }}/download" class="text-link">Download</a>
               <form method="post" action="/templates/{{ file.id }}/delete">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

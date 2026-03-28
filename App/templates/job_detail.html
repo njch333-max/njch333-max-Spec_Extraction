@@ -3,7 +3,7 @@
 <section class="page-head">
   <div>
     <span class="eyebrow">Job Workspace</span>
-    <h2>{{ job.job_no }}</h2>
+    <h2>{{ job.job_no }}{% if job_site_address %} - {{ job_site_address }}{% endif %}</h2>
     <p>{{ job.builder_name }}{% if job.title %} | {{ job.title }}{% endif %}</p>
   </div>
   <div class="head-actions">
@@ -22,14 +22,14 @@
     </form>
     <p class="muted">Choose one or more spec files to upload immediately, then click Parse Spec Files to start a worker run.</p>
     <div class="table-wrap">
-      <table>
+      <table class="table-cardify">
         <thead><tr><th>Name</th><th>Uploaded</th><th>Actions</th></tr></thead>
         <tbody>
           {% for file in spec_files %}
           <tr>
-            <td>{{ file.original_name }}</td>
-            <td>{{ file.uploaded_at }}</td>
-            <td class="actions">
+            <td data-label="Name">{{ file.original_name }}</td>
+            <td data-label="Uploaded">{{ file.uploaded_at }}</td>
+            <td data-label="Actions" class="actions">
               <a href="/jobs/files/{{ file.id }}/download" class="text-link">Download</a>
               <form method="post" action="/jobs/files/{{ file.id }}/delete">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -59,14 +59,14 @@
     </form>
     <p class="muted">Choose drawing PDFs to upload immediately, then click Parse Drawing Files to prepare compare-ready data.</p>
     <div class="table-wrap">
-      <table>
+      <table class="table-cardify">
         <thead><tr><th>Name</th><th>Uploaded</th><th>Actions</th></tr></thead>
         <tbody>
           {% for file in drawing_files %}
           <tr>
-            <td>{{ file.original_name }}</td>
-            <td>{{ file.uploaded_at }}</td>
-            <td class="actions">
+            <td data-label="Name">{{ file.original_name }}</td>
+            <td data-label="Uploaded">{{ file.uploaded_at }}</td>
+            <td data-label="Actions" class="actions">
               <a href="/jobs/files/{{ file.id }}/download" class="text-link">Download</a>
               <form method="post" action="/jobs/files/{{ file.id }}/delete">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -94,15 +94,15 @@
   <article class="card">
     <h3>Available Exports</h3>
     <div class="table-wrap">
-      <table>
+      <table class="table-cardify">
         <thead><tr><th>File</th><th>Modified</th><th>Size</th><th>Download</th></tr></thead>
         <tbody>
           {% for file in exports %}
           <tr>
-            <td>{{ file.name }}</td>
-            <td>{{ file.modified }}</td>
-            <td>{{ file.size_bytes }}</td>
-            <td><a href="/jobs/{{ job.id }}/exports/{{ file.name }}" class="text-link">Download</a></td>
+            <td data-label="File">{{ file.name }}</td>
+            <td data-label="Modified">{{ file.modified }}</td>
+            <td data-label="Size">{{ file.size_bytes }}</td>
+            <td data-label="Download"><a href="/jobs/{{ job.id }}/exports/{{ file.name }}" class="text-link">Download</a></td>
           </tr>
           {% else %}
           <tr><td colspan="4" class="empty-cell">No exports generated yet.</td></tr>

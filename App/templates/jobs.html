@@ -50,7 +50,7 @@
     {% endif %}
   </form>
   <div class="table-wrap">
-    <table>
+    <table class="table-cardify">
       <thead>
         <tr>
           <th>Job No.</th>
@@ -65,13 +65,13 @@
       <tbody>
         {% for job in jobs %}
         <tr>
-          <td>{{ job.job_no }}</td>
-          <td>{{ job.builder_name }}</td>
-          <td><span class="status-chip status-{{ job.status }}">{{ job.status }}</span></td>
-          <td>{{ job.spec_file_count }}</td>
-          <td>{{ job.drawing_file_count }}</td>
-          <td>{{ job.created_at }}</td>
-          <td><a href="/jobs/{{ job.id }}" class="text-link" target="_blank" rel="noopener">Open</a></td>
+          <td data-label="Job No.">{{ job.job_no }}</td>
+          <td data-label="Builder">{{ job.builder_name }}</td>
+          <td data-label="Status"><span class="status-chip status-{{ job.status }}">{{ job.status }}</span></td>
+          <td data-label="Spec Files">{{ job.spec_file_count }}</td>
+          <td data-label="Drawings">{{ job.drawing_file_count }}</td>
+          <td data-label="Created">{{ job.created_at }}</td>
+          <td data-label="Open"><a href="/jobs/{{ job.id }}" class="text-link" target="_blank" rel="noopener">Open</a></td>
         </tr>
         {% else %}
         <tr><td colspan="7" class="empty-cell">{{ "No jobs matched the current search." if job_query else "No jobs created yet." }}</td></tr>
