@@ -2809,6 +2809,7 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(kitchen["door_colours_tall"], "")
         self.assertEqual(kitchen["bulkheads"], ["None"])
         self.assertEqual(kitchen["tap_info"], "Mixer Tap Clients own | Water Filter Tap Clients own")
+        self.assertEqual(kitchen["accessories"], [])
         self.assertNotIn("IMAGE N/A", " ".join(kitchen["bulkheads"]))
 
     def test_imperial_office_benchtop_ignores_joinery_title_and_address_noise(self) -> None:

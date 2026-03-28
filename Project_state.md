@@ -44,6 +44,7 @@
   - Imperial office pages now ignore `... TO TOP OF BENCHTOP` layout text and later address/title noise when resolving the actual office benchtop value
   - Imperial room accessories are now deduplicated within the same room before display and export
   - orientation-only notes such as `Vertical on Tall doors only` and `Horizontal on all` are now rejected as door-colour material values, so they do not populate `Tall` or `Island`
+  - Imperial sink and tap room fields now prefer the builder-specific non-joinery overlay parser over noisier AI fixture guesses when both are present
   - all room cards and exports now support a global `Tall` material field for tall cabinets / tall doors / tall panels when the source provides that split
   - room cards and exports now also support optional `Floating Shelf`, `LED`, ordered `Accessories`, and curated accessory `Others` rows
   - the raw Spec List summary now shows `Extraction duration`, and `Floating Shelf` materials also contribute to the `Material Summary -> Bench Tops` bucket

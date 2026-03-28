@@ -2339,11 +2339,11 @@ def enrich_snapshot_rooms(snapshot: dict[str, Any], documents: list[dict[str, ob
             row["handles"] = _clean_handle_entries(_coerce_string_list(row.get("handles", [])))
             row["floating_shelf"] = _string_value(row.get("floating_shelf", ""))
             row["led"] = "Yes" if row.get("led") else ""
-            row["accessories"] = _unique(_coerce_string_list(row.get("accessories", [])))
+            row["accessories"] = _clean_accessory_entries(_coerce_string_list(row.get("accessories", [])))
             row["other_items"] = _merge_other_items([], row.get("other_items", []))
-            row["sink_info"] = _merge_text(_string_value(row.get("sink_info", "")), overlay.get("sink_info", ""))
-            row["basin_info"] = _merge_text(_string_value(row.get("basin_info", "")), overlay.get("basin_info", ""))
-            row["tap_info"] = _merge_text(_string_value(row.get("tap_info", "")), overlay.get("tap_info", ""))
+            row["sink_info"] = _clean_fixture_text(overlay.get("sink_info", "") or _string_value(row.get("sink_info", "")))
+            row["basin_info"] = _clean_fixture_text(overlay.get("basin_info", "") or _string_value(row.get("basin_info", "")))
+            row["tap_info"] = _clean_fixture_text(overlay.get("tap_info", "") or _string_value(row.get("tap_info", "")))
             row["drawers_soft_close"] = merge_soft_close_values(row.get("drawers_soft_close", ""), "")
             row["hinges_soft_close"] = merge_soft_close_values(row.get("hinges_soft_close", ""), "")
             continue
@@ -2848,6 +2848,20 @@ def _clean_handle_entries(values: list[str]) -> list[str]:
     cleaned_entries: list[str] = []
     for value in values:
         cleaned_entries.extend(_extract_handle_parts(value))
+    return _unique(cleaned_entries)
+
+
+def _clean_accessory_entries(values: list[str]) -> list[str]:
+    cleaned_entries: list[str] = []
+    for value in values:
+        text = normalize_brand_casing_text(normalize_space(value))
+        if not text:
+            continue
+        if re.search(r"(?i)\b(?:spring free|upgrade promotion|document ref|address:|client:|date:)\b", text):
+            continue
+        if _imperial_is_supplier_only_line(text):
+            continue
+        cleaned_entries.append(text)
     return _unique(cleaned_entries)
 
 
