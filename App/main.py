@@ -261,6 +261,8 @@ def job_detail_page(request: Request, job_id: int):
         _context(
             request,
             f"Job {job['job_no']}",
+            sidebar_collapsible=True,
+            sidebar_default_hidden=True,
             job=job,
             builder=builder,
             spec_files=spec_files,
@@ -313,6 +315,8 @@ def spec_list_page(request: Request, job_id: int):
         _context(
             request,
             f"Spec List {job['job_no']}",
+            sidebar_collapsible=True,
+            sidebar_default_hidden=True,
             job=job,
             raw_snapshot=raw_snapshot,
             raw_generated_at=_format_brisbane_time((raw_snapshot or {}).get("generated_at", "")),
@@ -768,10 +772,16 @@ def _split_room_door_groups(row: dict[str, Any]) -> dict[str, str]:
 def _split_room_benchtops(row: dict[str, Any]) -> dict[str, str]:
     entries = parsing._coerce_string_list(row.get("bench_tops", []))
     grouped = parsing._split_benchtop_groups(entries)
+    room_key_normalized = parsing.normalize_room_key(_display_value(row.get("room_key", "")))
+    wall_run = _merge_display_text(_display_value(row.get("bench_tops_wall_run", "")), grouped["bench_tops_wall_run"])
+    island = _merge_display_text(_display_value(row.get("bench_tops_island", "")), grouped["bench_tops_island"])
+    other_candidates = _split_material_values(_merge_display_text(_display_value(row.get("bench_tops_other", "")), grouped["bench_tops_other"]))
+    suppressed = {value.lower() for value in (wall_run, island) if value} if room_key_normalized == "kitchen" else set()
+    other = " | ".join(value for value in other_candidates if value.lower() not in suppressed)
     return {
-        "bench_tops_wall_run": _merge_display_text(_display_value(row.get("bench_tops_wall_run", "")), grouped["bench_tops_wall_run"]),
-        "bench_tops_island": _merge_display_text(_display_value(row.get("bench_tops_island", "")), grouped["bench_tops_island"]),
-        "bench_tops_other": _merge_display_text(_display_value(row.get("bench_tops_other", "")), grouped["bench_tops_other"]),
+        "bench_tops_wall_run": wall_run,
+        "bench_tops_island": island,
+        "bench_tops_other": other,
     }
 
 

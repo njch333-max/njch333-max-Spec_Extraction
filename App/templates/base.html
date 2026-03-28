@@ -8,8 +8,11 @@
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
 </head>
 <body>
-  <div class="shell">
-    <aside class="rail">
+  <div
+    id="app-shell"
+    class="shell{% if sidebar_collapsible %} shell-rail-collapsible{% endif %}{% if sidebar_collapsible and sidebar_default_hidden %} shell-rail-collapsed{% endif %}"
+  >
+    <aside class="rail" id="app-rail">
       <div class="brand">
         <div class="brand-kicker">Builder Spec Extractor</div>
         <h1>Spec Extraction</h1>
@@ -31,11 +34,42 @@
       </div>
     </aside>
     <main class="content">
+      {% if sidebar_collapsible %}
+      <button
+        type="button"
+        class="ghost-button rail-toggle"
+        data-rail-toggle
+        aria-controls="app-rail"
+        aria-expanded="{{ 'false' if sidebar_default_hidden else 'true' }}"
+      >
+        {{ "Show Sidebar" if sidebar_default_hidden else "Hide Sidebar" }}
+      </button>
+      {% endif %}
       {% if flash %}
       <div class="flash flash-{{ flash.level }}">{{ flash.message }}</div>
       {% endif %}
       {% block content %}{% endblock %}
     </main>
   </div>
+  {% if sidebar_collapsible %}
+  <script>
+    (function () {
+      const shell = document.getElementById("app-shell");
+      const button = document.querySelector("[data-rail-toggle]");
+      if (!shell || !button) return;
+      const collapsedClass = "shell-rail-collapsed";
+      const sync = () => {
+        const collapsed = shell.classList.contains(collapsedClass);
+        button.textContent = collapsed ? "Show Sidebar" : "Hide Sidebar";
+        button.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      };
+      sync();
+      button.addEventListener("click", () => {
+        shell.classList.toggle(collapsedClass);
+        sync();
+      });
+    }());
+  </script>
+  {% endif %}
 </body>
 </html>

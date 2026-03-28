@@ -35,6 +35,7 @@
 - Static CSS served by FastAPI
 - Static asset links include a file-version query string so browser caches do not hold stale layouts after CSS updates
 - Form-based actions with CSRF token checks
+- The Jobs list keeps the left navigation visible, but the Job Workspace and Raw Spec List pages render the same shell with a client-side collapsible navigation rail that starts hidden on each visit.
 
 ### 3.2 Persistence
 - SQLite tables:
@@ -93,12 +94,15 @@
   - keep source-driven room ownership while replacing noisy field text with cleaner deterministic values
 13. For Imperial-only spec runs, apply a title-driven section parser before the generic cleanup stages:
   - use the page-top `... JOINERY SELECTION SHEET` title as the authoritative section start
-  - recover the full visible title body when the extracted text splits the prefix from `... JOINERY SELECTION SHEET`, so grouped labels such as `LIVING & OFFICE` survive intact
+  - use the currently extractable title body as the authoritative room label, preserving values such as `WALK-BEHIND PANTRY`, `BENCH SEAT`, or `OFFICE` without shorthand aliases
   - use the title to identify the section, but do not discard same-page body text that appears before the title in extracted reading order
   - keep untitled continuation pages attached to the current section until the next top title appears
   - break the current joinery section when the next page switches into non-joinery full-page headings such as `APPLIANCES` or `SINKWARE & TAPWARE`
   - stop section text collection at footer markers such as `CLIENT NAME`, `SIGNATURE`, and `SIGNED DATE`
   - parse table-style rows so `BENCHTOPS`, `SPLASHBACK`, `UPPER CABINETRY COLOUR + TALL CABINETS`, `BASE CABINETRY COLOUR`, `KICKBOARDS`, and `HANDLES` stay on their own row boundaries
+  - keep material ownership same-room-only, same-section-only, and same-row-or-adjacent-only so kitchen rows cannot absorb pantry, office, appliance, or tapware values
+  - default a plain `BENCHTOP` or `COOKTOP RUN` row to `Wall Run Bench Top` when no explicit wall-run row exists
+  - deduplicate repeated `Accessories` values inside the same room card
   - emit non-room sections such as `FEATURE TALL DOORS` into `special_sections[]` instead of merging them into nearby room cards
 14. Apply the fixed global cleaning rules after heuristic, merge, Clarendon post-polish, and Imperial section parsing so brand casing, door-colour cleanup, kitchen-only bench-top splitting, tall-cabinet capture, and soft-close normalization stay consistent across all builders.
 15. Record analysis metadata in the snapshot: mode, parser strategy, attempted, succeeded, model, note, and runtime identifiers (`worker_pid`, `app_build_id`).
@@ -127,6 +131,7 @@
 11. Show `Generated at` and `Extraction duration` in Brisbane time / human-readable duration format on the raw Spec List page.
 12. Export that raw snapshot through a dedicated Excel route, including a `Special Sections` worksheet and the expanded room fields for `Floating Shelf`, `LED`, `Accessories`, and curated accessory `Others`.
 13. Never fall back to `reviews` when rendering the raw Spec List page.
+14. Start the page shell with the left navigation rail collapsed by default and let the user toggle it open client-side when needed.
 
 ### 3.7 Upload Interaction
 1. Job detail uses the existing upload POST route.

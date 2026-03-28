@@ -44,6 +44,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - List jobs with status summary.
 - Allow `job_no` search from the main job list using partial-match input and explicit submit.
 - View a job detail page with files, runs, results, and exports.
+- The Jobs list `Open` link must open each job in a new browser tab so the list page remains available.
 
 ### 4.3 File Support
 - Spec files: `PDF`, `DOCX`
@@ -74,9 +75,11 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - When OpenAI and heuristic room sets disagree, keep the heuristic room layout as the primary room skeleton and merge AI fields conservatively into that layout so repeated parses of the same spec stay visually stable.
 - Room rows must come from actual source headings or labels, and only the same room should merge across pages/files. Bathroom, ensuite, powder, vanity, pantry, WIP, theatre, rumpus, study, office, and similar rooms must stay separate unless the source clearly uses the same room label.
 - Full source room names from authoritative colour-schedule pages must be preserved in `original_room_label`, including labels such as `WALK-IN-PANTRY` and `MEALS ROOM`.
+- For Imperial jobs, room names must use the currently extractable `... JOINERY SELECTION SHEET` title body as-is, such as `WALK-BEHIND PANTRY`, `BENCH SEAT`, or `OFFICE`, without shorthand aliases or manual remapping.
 - Distinct pantry spaces must stay separate when the source distinguishes them; `BUTLERS PANTRY` and `WALK-IN-PANTRY` must not be auto-merged.
 - When a room-master file uses grouped room headings such as `Vanities`, grouped output should be preserved and supplement files must enrich that grouped room instead of splitting it into extra bathroom/ensuite/powder rows.
 - Room material fields must remain room-local. Benchtops, door colours, handles, toe kicks, bulkheads, and splashbacks should come only from the matched room section, and supplement files must not leak another room's material text into the current room.
+- Material ownership must be same-room-only, same-section-only, and same-row-or-adjacent-only: the parser may not borrow benchtop, splashback, accessory, tap, or other material text from another room, another section, or a later unrelated row.
 - Room-local material ownership must also hold inside grouped rooms. If the authoritative room is `Vanities`, only the `VANITIES COLOUR SCHEDULE` section may define its benchtops and door colours; fixture supplements may add basin/tap/sink details only.
 - Composite supplement headings such as `Kitchen/Pantry/Family/Meals` must not generate a single synthetic room; independent rooms should only be created when the authoritative room-master file contains explicit room-specific colour-schedule pages such as `MEALS ROOM COLOUR SCHEDULE`.
 - Generic `DOORS/PANELS` or `Door/Panel Colour` values may fall back to `Base` only when the same room section has no explicit `Overhead Cupboards`, `Base Cupboards & Drawers`, `Island Bench Base Cupboards & Drawers`, or `Island Bar Back` group markers.
@@ -90,10 +93,12 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Grouped rooms such as `Vanities` must treat door-colour splits as explicit-marker-driven: `Overheads` may only appear when the authoritative room section explicitly labels overhead cabinetry; otherwise grouped door colours default to `Base`.
 - Door-colour display should trim obvious installation-context suffixes and suppress OCR noise so room cards show material names instead of repeated positional phrases or unrelated kickboard/benchtop text.
 - Kitchen and similar room bench-top data should split into `Wall Run Bench Top` and `Island Bench Top` when the source text clearly describes separate wall-run and island materials.
+- If no explicit `Wall Run Bench Top` is present, a plain `Bench Top` or `Cooktop Run` description defaults to `Wall Run Bench Top`.
 - Yellowwood-style joinery schedules must map `Back Benchtops` to `Wall Run Bench Top` and preserve `Waterfall Ends` as part of `Island Bench Top`.
 - Imperial-style joinery selection sheets must use page-top section titles as authoritative section boundaries, keep continuation pages with the current section until the next section title, and stop extraction at `CLIENT NAME / SIGNATURE / SIGNED DATE` footer blocks.
 - Imperial continuation must also stop when a later page switches into non-joinery full-page headings such as `APPLIANCES` or `SINKWARE & TAPWARE`.
 - Imperial-style non-room sections such as `FEATURE TALL DOORS` must be preserved separately from rooms and must never be merged into the surrounding kitchen or pantry room output.
+- Imperial accessory lists must be deduplicated within the same room so repeated `Accessories` rows do not render multiple times with the same value.
 - Joinery schedule parsing must ignore non-cabinet finish pages and exclude colours that only appear in paint, Colorbond, garage-door, entry-door, window-frame, or other non-joinery contexts.
 - Drawer and hinge states must normalize to `Soft Close`, `Not Soft Close`, or blank.
 - OpenAI extraction should tolerate markdown code fences or short explanatory prefixes around JSON instead of failing the whole AI pass immediately.
@@ -140,6 +145,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
   - source documents
   - `Material Summary`
 - The page must use `raw_spec` only and must not switch to reviewed data.
+- The page must provide a left-side navigation hide/show control and should load with the navigation rail hidden by default on every visit.
 - The `Rooms` section should use one wide horizontal block per room on desktop, stacked vertically one below the next, so each field can be read without cramped narrow cards.
 - Each room card must show room fixture rows for `Sink`, `Basin`, and `Tap`.
 - Each room card must show `Door Colours` as separate `Overheads`, `Base`, `Island`, and `Bar Back` rows.
@@ -186,6 +192,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 ### 4.12 Frontend Delivery
 - Static CSS assets should include cache-busting so layout changes become visible immediately after restart or deploy.
 - All frontend timestamps must display in Brisbane time using the fixed format `YYYY-MM-DD HH:mm AEST`.
+- The Jobs homepage keeps its navigation rail visible, while the Job Workspace and Raw Spec List pages default that rail to hidden and allow the user to toggle it open when needed.
 
 ### 4.13 Git Rollback Tooling
 - Provide local Git helper scripts to initialize, checkpoint, inspect history, and restore from previous commits.

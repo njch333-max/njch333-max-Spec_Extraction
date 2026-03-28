@@ -71,7 +71,7 @@
           <td>{{ job.spec_file_count }}</td>
           <td>{{ job.drawing_file_count }}</td>
           <td>{{ job.created_at }}</td>
-          <td><a href="/jobs/{{ job.id }}" class="text-link">Open</a></td>
+          <td><a href="/jobs/{{ job.id }}" class="text-link" target="_blank" rel="noopener">Open</a></td>
         </tr>
         {% else %}
         <tr><td colspan="7" class="empty-cell">{{ "No jobs matched the current search." if job_query else "No jobs created yet." }}</td></tr>

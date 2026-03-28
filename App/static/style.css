@@ -32,6 +32,34 @@ body {
   min-height: 100vh;
 }
 
+.shell-rail-collapsible {
+  transition: grid-template-columns 0.22s ease;
+}
+
+.shell-rail-collapsible .rail {
+  overflow: hidden;
+  transition:
+    opacity 0.22s ease,
+    transform 0.22s ease,
+    padding 0.22s ease,
+    width 0.22s ease,
+    border-right-color 0.22s ease;
+}
+
+.shell-rail-collapsed {
+  grid-template-columns: 0 minmax(0, 1fr);
+}
+
+.shell-rail-collapsed .rail {
+  width: 0;
+  padding-left: 0;
+  padding-right: 0;
+  border-right-color: transparent;
+  opacity: 0;
+  transform: translateX(-18px);
+  pointer-events: none;
+}
+
 .rail {
   padding: 28px 22px;
   border-right: 1px solid rgba(255, 255, 255, 0.25);
@@ -67,6 +95,11 @@ body {
   padding: 28px;
   display: grid;
   gap: 18px;
+}
+
+.rail-toggle {
+  justify-self: start;
+  margin-bottom: 6px;
 }
 
 .page-head, .split-head {

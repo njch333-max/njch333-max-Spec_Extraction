@@ -37,13 +37,18 @@
   - composite supplement headings such as `Kitchen/Pantry/Family/Meals` no longer create synthetic rooms; only explicit room-master schedule pages can add rooms like `MEALS ROOM`
   - Imperial builder parsing now uses page-top `... JOINERY SELECTION SHEET` titles as authoritative section boundaries, keeps continuation pages with the current section, and ignores signature/footer blocks during field extraction
   - Imperial room sections now also stop cleanly when later pages switch into non-joinery headings such as `APPLIANCES` or `SINKWARE & TAPWARE`, so office/joinery cards do not swallow appliance and tapware pages
-  - Imperial title recovery now preserves the full visible section name, so grouped labels such as `LIVING & OFFICE`, `WALK-IN-PANTRY`, and `BENCH SEAT` survive instead of collapsing to shortened room names
+  - Imperial room labels now preserve the currently extractable title body exactly, so names such as `WALK-BEHIND PANTRY`, `BENCH SEAT`, and `OFFICE` survive instead of collapsing to shortened room names
   - Imperial non-room sections such as `FEATURE TALL DOORS` are preserved as `special_sections` instead of being merged into nearby room cards
+  - Imperial joinery parsing now enforces same-room-only, same-section-only, and same-row-or-adjacent-only material boundaries so kitchen, pantry, office, appliance, and tapware rows do not bleed into one another
+  - Imperial bench-top parsing now defaults a plain `Bench Top` or `Cooktop Run` row to `Wall Run Bench Top` when no explicit wall-run row exists, while keeping island-only notes inside `Kitchen`
+  - Imperial room accessories are now deduplicated within the same room before display and export
   - all room cards and exports now support a global `Tall` material field for tall cabinets / tall doors / tall panels when the source provides that split
   - room cards and exports now also support optional `Floating Shelf`, `LED`, ordered `Accessories`, and curated accessory `Others` rows
   - the raw Spec List summary now shows `Extraction duration`, and `Floating Shelf` materials also contribute to the `Material Summary -> Bench Tops` bucket
   - the Job page temporarily hides the Review cards while the review UX is being redesigned, without removing the backend review model
   - all user-facing timestamps are now rendered in fixed Brisbane time (`YYYY-MM-DD HH:mm AEST`) across job lists, uploads, run history, export tables, and spec-list summary
+  - the Jobs list `Open` action now opens the target job in a new browser tab
+  - the Job Workspace and Raw Spec List pages now start with the left navigation rail hidden and expose a client-side show/hide toggle, while the Jobs homepage keeps the rail visible
   - snapshot and run metadata now record parser strategy, worker PID, and app build ID
   - single-worker lease guard to prevent stale local worker processes from racing newer code on queued jobs
   - online-first deployment helper scripts that push the current repo state to `/opt/spec-extraction`, restart production services, and verify live health
@@ -118,7 +123,7 @@
 - Continue tightening grouped-room door-colour logic so `Vanities` only shows `Overheads` when the authoritative room section explicitly labels overhead cabinetry
 - Continue tightening supplement-file room mapping so only clearly related fixture pages enrich grouped rooms while unrelated finish/glazing notes stay ignored
 - Continue refining Imperial field cleanup for non-kitchen sections so `BAR`, `LAUNDRY`, and `BATH + ENSUITE` match the same high-confidence row-boundary quality as `KITCHEN`
-- Continue validating Imperial grouped-room title recovery on more templates where the extracted title appears after the body text in PDF reading order
+- Continue validating Imperial title/body preservation on more templates where the extracted title appears after the body text in PDF reading order
 - Extend deterministic model-page probing beyond the currently supported appliance brand patterns
 - Expand model-number coverage for more appliance naming patterns beyond the current explicit rules
 - Build the future comparison UI and diff logic

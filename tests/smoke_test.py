@@ -2266,11 +2266,11 @@ class SmokeTest(unittest.TestCase):
         rooms = {row["room_key"]: row for row in snapshot["rooms"]}
         self.assertIn("kitchen", rooms)
         kitchen = rooms["kitchen"]
-        self.assertEqual(kitchen["bench_tops_other"], "Caesarstone Organic White 20mm with 40mm Double Mitred Pencil Round Edge")
-        self.assertEqual(kitchen["splashback"], "Caesarstone Organic White 20mm Pencil Round Edge")
-        self.assertEqual(kitchen["door_colours_overheads"], "Polytec Valla Profile Door in Boston Oak Woodmatt EM0")
-        self.assertEqual(kitchen["door_colours_tall"], "Polytec Valla Profile Door in Boston Oak Woodmatt EM0")
-        self.assertEqual(kitchen["door_colours_base"], "Polytec Ascot Profile Door in Gossamer White Smooth EM0")
+        self.assertEqual(kitchen["bench_tops_other"], "20mm Caesarstone - Organic White with 40mm Double Mitred - Pencil Round Edge")
+        self.assertEqual(kitchen["splashback"], "20mm Caesarstone - Organic White - Pencil Round Edge")
+        self.assertEqual(kitchen["door_colours_overheads"], "Polytec - EM0 - Valla Profile Door in - Boston Oak Woodmatt")
+        self.assertEqual(kitchen["door_colours_tall"], "Polytec - EM0 - Valla Profile Door in - Boston Oak Woodmatt")
+        self.assertEqual(kitchen["door_colours_base"], "Polytec - EM0 - Ascot Profile Door - in Gossamer White Smooth")
         self.assertEqual(kitchen["drawers_soft_close"], "Soft Close")
         self.assertEqual(kitchen["hinges_soft_close"], "Soft Close")
         self.assertEqual(kitchen["toe_kick"], ["Polytec Gossamer White Smooth", "Polytec Boston Oak Woodmatt under talls"])
@@ -2280,19 +2280,19 @@ class SmokeTest(unittest.TestCase):
         kitchen_after_enrichment = {row["room_key"]: row for row in enriched["rooms"]}["kitchen"]
         self.assertEqual(
             kitchen_after_enrichment["bench_tops_other"],
-            "Caesarstone Organic White 20mm with 40mm Double Mitred Pencil Round Edge",
+            "20mm Caesarstone - Organic White with 40mm Double Mitred - Pencil Round Edge",
         )
         self.assertEqual(
             kitchen_after_enrichment["bench_tops"],
-            ["Caesarstone Organic White 20mm with 40mm Double Mitred Pencil Round Edge"],
+            ["20mm Caesarstone - Organic White with 40mm Double Mitred - Pencil Round Edge"],
         )
         self.assertEqual(
             kitchen_after_enrichment["door_colours_base"],
-            "Polytec Ascot Profile Door in Gossamer White Smooth EM0",
+            "Polytec - EM0 - Ascot Profile Door - in Gossamer White Smooth",
         )
         self.assertEqual(
             kitchen_after_enrichment["door_colours_overheads"],
-            "Polytec Valla Profile Door in Boston Oak Woodmatt EM0",
+            "Polytec - EM0 - Valla Profile Door in - Boston Oak Woodmatt",
         )
 
     def test_parse_documents_imperial_keeps_body_before_title_and_continuation_accessories(self) -> None:
@@ -2535,6 +2535,281 @@ class SmokeTest(unittest.TestCase):
         special_sheet = workbook["Special Sections"]
         self.assertEqual(special_sheet["A2"].value, "feature_tall_doors")
         self.assertEqual(special_sheet["C2"].value, "Tall")
+
+    def test_jobs_open_links_use_new_tab(self) -> None:
+        builder_id = store.create_builder("Imperial", "imperial", "")
+        store.create_job("37642", builder_id, "Imperial Live", "")
+        client = TestClient(app)
+        self._login(client)
+        response = client.get("/jobs")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('target="_blank"', response.text)
+        self.assertIn('rel="noopener"', response.text)
+
+    def test_workspace_and_spec_list_sidebar_start_hidden(self) -> None:
+        builder_id = store.create_builder("Imperial", "imperial", "")
+        job_id = store.create_job("37642", builder_id, "Imperial Sidebar", "")
+        client = TestClient(app)
+        self._login(client)
+
+        jobs_response = client.get("/jobs")
+        self.assertEqual(jobs_response.status_code, 200)
+        self.assertNotIn("shell-rail-collapsed", jobs_response.text)
+
+        detail_response = client.get(f"/jobs/{job_id}")
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertIn("shell-rail-collapsed", detail_response.text)
+        self.assertIn("Show Sidebar", detail_response.text)
+
+        spec_list_response = client.get(f"/jobs/{job_id}/spec-list")
+        self.assertEqual(spec_list_response.status_code, 200)
+        self.assertIn("shell-rail-collapsed", spec_list_response.text)
+        self.assertIn("Show Sidebar", spec_list_response.text)
+
+    def test_parse_documents_imperial_job31_keeps_room_names_and_same_section_values(self) -> None:
+        documents = [
+            {
+                "file_name": "37642 Signed Variation COLOURS_Deacon 20 10 25.pdf",
+                "role": "spec",
+                "pages": [
+                    {
+                        "page_no": 1,
+                        "text": (
+                            "BENCHTOP+ SPLASHBACK\n"
+                            "Frosty Carrina (5141)\n"
+                            "20mm \n"
+                            "Pencil Round Edge\n"
+                            "Benchtop + Waterfall ends to island plus Splashback \n"
+                            "up to overheads.\n"
+                            "Caesarstone\n"
+                            "BENCHTOP ON ISLAND TO HAVE 2 X \n"
+                            "WATERFALL ENDS MITRED JOINS\n"
+                            "BASE CABINETRY COLOUR Polytec\n"
+                            "Classic White Matt Polytec\n"
+                            "AREA / ITEM SPECS / DESCRIPTION IMAGE SUPPLIER NOTES\n"
+                            "Bulkhead:MDF Bulkhead flush with carcass Shadowline:Yes shadowline under benchtops - recessed square edge finger pulls\n"
+                            "Hinges & Drawer Runners:Soft Close Floor Type & Kick refacing required:\n"
+                            "KITCHEN JOINERY SELECTION SHEET\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 2,
+                        "text": (
+                            "TOUCH CATCH HANDLES TO TALL PANTRY DOORS ONLY Polytec\n"
+                            "HANDLES Square Edge recessed rail \n"
+                            "finger pull doors and drawers Polytec\n"
+                            "NO HANDLES to OVERHEADS Recessed finger space overheads. Polytec\n"
+                            "FEATURE CABINETRY COLOUR\n"
+                            "Polytec \n"
+                            "COVE PROFILE 25\n"
+                            "Classic White Matt Finish\n"
+                            "Polytec Overheads and \n"
+                            "Bar Back only\n"
+                            "KICKBOARDS Polytec\n"
+                            "Classic White Matt Polytec\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 3,
+                        "text": (
+                            "KICKBOARDS Polytec\n"
+                            "Classic White Matt Polytec\n"
+                            "BENCHTOP+ SPLASHBACK\n"
+                            "Frosty Carrina (5141)\n"
+                            "20mm \n"
+                            "Pencil Round Edge\n"
+                            "SPLASHBACK - 200MM HIGH AT REAR AND ON \n"
+                            "RIGHT HAND WALL ONLY.\n"
+                            "Caesarstone\n"
+                            "BENCHTOP AREA WITH COOKTOP TO \n"
+                            "BE REPLACED WITH FROSTY CARIN \n"
+                            "BUT SPLASHBACK TO REMAIN AS \n"
+                            "CURRENT TILES IF POSSIBLE.\n"
+                            "BASE CABINETRY COLOUR Polytec\n"
+                            "Classic White Matt Polytec\n"
+                            "AREA / ITEM SPECS / DESCRIPTION IMAGE SUPPLIER NOTES\n"
+                            "Bulkhead:MDF Bulkhead flush with carcass Shadowline:Yes shadowline under benchtops - recessed square edge finger pulls\n"
+                            "Hinges & Drawer Runners:Soft Close Floor Type & Kick refacing required:\n"
+                            "WALK-BEHIND PANTRY JOINERY SELECTION SHEET\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 4,
+                        "text": "HANDLES Square Edge recessed rail \nfinger pull doors and drawers Polytec\n",
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 5,
+                        "text": (
+                            "KICKBOARDS Polytec\n"
+                            "Classic White Matt Polytec 100mm high kicks only\n"
+                            "BENCHTOP STANDARD 16mm Panel \n"
+                            "Classic White Matt - Flush with doors Polytec\n"
+                            "BASE CABINETRY COLOUR\n"
+                            "Polytec\n"
+                            "COVE PROFILE 25\n"
+                            "THERMOLANINATED DOORS \n"
+                            "AND END PANELS\n"
+                            "Classic White Matt\n"
+                            "Polytec\n"
+                            "AREA / ITEM SPECS / DESCRIPTION IMAGE SUPPLIER NOTES\n"
+                            "Bulkhead:NA Shadowline:NA\n"
+                            "Hinges & Drawer Runners:STD Floor Type & Kick refacing required:NA\n"
+                            "BENCH SEAT JOINERY SELECTION SHEET\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 7,
+                        "text": (
+                            "BENCHTOP\n"
+                            "KICKBOARDS Polytec\n"
+                            "Classic White Matt\n"
+                            "Tasmanian Oak Matt \n"
+                            "Laminate Benchtop \n"
+                            "33mm square edge\n"
+                            "BASE CABINETRY COLOUR Polytec\n"
+                            "Classic White Matt\n"
+                            "Hinges & Drawer Runners: NAFloor Type & Kick refacing required:SOFT CLOSE\n"
+                            "OFFICE JOINERY SELECTION SHEET\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 8,
+                        "text": (
+                            "ACCESSORIES\n"
+                            "OE ELSAFE DESK PRODIGY \n"
+                            "CABLE BASKET 950MM BLACK\n"
+                            "Product Code: 7112195\n"
+                            "ACCESSORIES\n"
+                            " 2 x Black Cable Grommet\n"
+                            "in black 80mm diameter\n"
+                            "Installed rear underside of desk on \n"
+                            "right next to cupboardLincoln Sentry\n"
+                            "Furnware\n"
+                            "HANDLES Square Edge recessed rail on drawers and door. Furnware\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 10,
+                        "text": (
+                            "SINKWARE & TAPWARE\n"
+                            "AREA / ITEM SPECS / DESCRIPTION IMAGE SUPPLIER NOTES\n"
+                            "Taphole location: Centred to back\n"
+                            "SINKS TO BE INSTAL\n"
+                            "LED UNDERMOUTNED\n"
+                            "SINKWARE (KITCHEN)\n"
+                            "2 x ABEY Schock SOHO\n"
+                            "Large Single Bowl Puro\n"
+                            "N120P\n"
+                            "Puro Black Cristadur\n"
+                            "ABEY BY IMPERIAL\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 11,
+                        "text": (
+                            "2 x 304 Gooseneck Pull Out with Dual Spray \n"
+                            "Function Kitchen Mixer \n"
+                            "in Eureka Gold finish\n"
+                            "KTA014-G\n"
+                            "TAPWARE (KITCHEN) ABEY BY IMPERIAL\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                ],
+            }
+        ]
+        snapshot = enrich_snapshot_rooms(parse_documents("37642", "Imperial", "spec", documents), documents)
+        rooms = {row["room_key"]: row for row in snapshot["rooms"]}
+        self.assertIn("walk_behind_pantry", rooms)
+        self.assertEqual(rooms["walk_behind_pantry"]["original_room_label"], "WALK-BEHIND PANTRY")
+        kitchen = rooms["kitchen"]
+        self.assertEqual(kitchen["bench_tops_wall_run"], "20mm Caesarstone - Frosty Carrina (5141) - Pencil Round Edge")
+        self.assertIn("BENCHTOP ON ISLAND TO HAVE 2 X WATERFALL ENDS MITRED JOINS", kitchen["bench_tops_island"])
+        self.assertEqual(kitchen["splashback"], "20mm Caesarstone - Frosty Carrina (5141) - Pencil Round Edge - up to overheads.")
+        self.assertIn("Taphole location: Centred to back", kitchen["sink_info"])
+        self.assertIn("Undermounted", kitchen["sink_info"])
+        self.assertEqual(kitchen["tap_info"], "2 x 304 Gooseneck Pull Out with Dual Spray Function Kitchen Mixer in Eureka Gold finish KTA014-G")
+        office = rooms["office"]
+        self.assertEqual(office["bench_tops_other"], "Tasmanian Oak Matt - Laminate Benchtop - 33mm square edge")
+        self.assertEqual(
+            office["accessories"],
+            [
+                "OE ELSAFE DESK PRODIGY CABLE BASKET 950MM BLACK",
+                "2 x Black Cable Grommet in black 80mm diameter",
+            ],
+        )
+
+    def test_parse_documents_imperial_job32_keeps_tall_blank_and_tap_clean(self) -> None:
+        documents = [
+            {
+                "file_name": "37813 Imperial.pdf",
+                "role": "spec",
+                "pages": [
+                    {
+                        "page_no": 1,
+                        "text": (
+                            "Tall Pantry Doors - 7206 Danes Bow Handle Matt \n"
+                            "Black 320mm - SO-7206-320-MB\n"
+                            "No handles on Uppers - PTO Where reqHANDLES\n"
+                            " Thermolaminated Vinyl Style 1 - Vienna - \n"
+                            "Classic White Matt\n"
+                            "Thermolaminated Vinyl Style 1 - Vienna - \n"
+                            "Classic White Matt\n"
+                            "Ceiling height:2430mm Cabinetry Height:2150mm\n"
+                            "Shadowline:\n"
+                            "KICKBOARDS As Doors\n"
+                            "BASE CABINETRY COLOUR\n"
+                            "UPPER CABINETRY COLOUR\n"
+                            "BENCHTOP\n"
+                            "Bulkhead:None\n"
+                            "IMAGE\n"
+                            "N/A\n"
+                            "Hinges & Drawer Runners: Tiles ( Use same footprint as existing kicks)Floor Type & Kick refacing required:Softclose \n"
+                            "Caesarstone\n"
+                            "KITCHEN JOINERY SELECTION SHEET\n"
+                            "20mm Stone \n"
+                            "5131 Calacattra Nuvo - PR\n"
+                            "Waterfall End\n"
+                            "Polytec\n"
+                            "Polytec\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 3,
+                        "text": (
+                            "Taphole location: In Sink\n"
+                            "SINKWARE (KITCHEN)\n"
+                            "Veronar, matrix sink,double bowl, double drain, \n"
+                            "stainless steel, Part Number:S220.SS.FG, Sink \n"
+                            "Mounting -Topmount \n"
+                            "Out of stock, available to back order \n"
+                            "Furnware\n"
+                            "TAPWARE (KITCHEN) Mixer Tap Clients own Taphole location: In Sink\n"
+                            "TAPWARE (KITCHEN) Water Filter Tap Clients own\n"
+                            "SINKWARE & TAPWARE\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                ],
+            }
+        ]
+        snapshot = enrich_snapshot_rooms(parse_documents("37813", "Imperial", "spec", documents), documents)
+        kitchen = snapshot["rooms"][0]
+        self.assertIn("20mm Caesarstone", kitchen["bench_tops_other"])
+        self.assertIn("5131 Calacattra Nuvo - PR", kitchen["bench_tops_other"])
+        self.assertEqual(kitchen["door_colours_tall"], "")
+        self.assertEqual(kitchen["bulkheads"], ["None"])
+        self.assertEqual(kitchen["tap_info"], "Mixer Tap Clients own | Water Filter Tap Clients own")
+        self.assertNotIn("IMAGE N/A", " ".join(kitchen["bulkheads"]))
 
     def test_job_detail_page_hides_review_cards(self) -> None:
         builder_id = store.create_builder("Imperial", "imperial", "")

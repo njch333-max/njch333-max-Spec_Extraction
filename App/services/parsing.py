@@ -383,6 +383,7 @@ def source_room_label(label: str, fallback_key: str = "") -> str:
     if not text:
         return "Room"
     text = re.sub(r"(?i)(colour schedule)(?=[A-Z])", r"\1 ", text)
+    text = re.sub(r"(?i)\b(WALK[- ]IN[- ]PANTRY)\b\s+PANTRY$", r"\1", text)
     for pattern in ROOM_HEADING_CLEANUP_PATTERNS:
         text = re.sub(pattern, "", text)
     for pattern in ROOM_HEADING_TRIM_MARKERS:
@@ -392,6 +393,7 @@ def source_room_label(label: str, fallback_key: str = "") -> str:
     text = re.sub(r"(?i)\broom specifications?\b", "", text)
     text = re.sub(r"\s*[:\-]+\s*$", "", text)
     text = normalize_space(text)
+    text = re.sub(r"(?i)\b(WALK[- ]IN[- ]PANTRY)\b(?:\s+PANTRY)?$", r"\1", text)
     specific_match = _extract_specific_room_heading(text)
     if specific_match:
         return specific_match
@@ -406,6 +408,10 @@ def _extract_specific_room_heading(text: str) -> str:
         if not match:
             continue
         value = normalize_space(match.group(0))
+        normalized_text = re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+        normalized_value = re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+        if normalized_text != normalized_value:
+            continue
         if value.lower() == "wip":
             return "WIP"
         return value
@@ -758,6 +764,7 @@ def _collect_imperial_sections_for_document(document: dict[str, object]) -> list
                 "section_kind": section_kind,
                 "file_name": str(document.get("file_name", "")),
                 "page_nos": [int(page.get("page_no", 0) or 0)],
+                "page_texts": [{"page_no": int(page.get("page_no", 0) or 0), "text": trimmed_text}],
                 "text_parts": [trimmed_text] if trimmed_text else [],
             }
             continue
@@ -770,6 +777,7 @@ def _collect_imperial_sections_for_document(document: dict[str, object]) -> list
         if current:
             current["page_nos"].append(int(page.get("page_no", 0) or 0))
             if trimmed_text:
+                current.setdefault("page_texts", []).append({"page_no": int(page.get("page_no", 0) or 0), "text": trimmed_text})
                 current.setdefault("text_parts", []).append(trimmed_text)
     flush()
     return sections
@@ -809,7 +817,13 @@ def _trim_imperial_page_text(text: str, title: str = "") -> str:
     if title:
         working = re.sub(r"(?im)^.*JOINERY SELECTION SHEET.*$", "", working, count=1)
     lines = [normalize_space(line) for line in working.split("\n") if normalize_space(line)]
-    cleaned_lines = [line for line in lines if not _is_imperial_page_noise_line(line)]
+    cleaned_lines: list[str] = []
+    for line in lines:
+        if _is_imperial_page_noise_line(line):
+            continue
+        if cleaned_lines and _is_imperial_full_page_break(line):
+            break
+        cleaned_lines.append(line)
     return "\n".join(cleaned_lines)
 
 
@@ -839,9 +853,13 @@ def _is_imperial_page_noise_line(line: str) -> bool:
     text = normalize_space(line)
     if not text:
         return True
+    if text.upper() == "IMAGE":
+        return True
     if any(text.startswith(marker) for marker in IMPERIAL_FOOTER_MARKERS):
         return True
     if re.match(r"(?i)^(address|client|date|document ref)\s*:", text):
+        return True
+    if re.match(r"(?i)^document ref\b.*$", text):
         return True
     if re.match(r"(?i)^page\s+\d+\s+of\s+\d+$", text):
         return True
@@ -850,6 +868,11 @@ def _is_imperial_page_noise_line(line: str) -> bool:
     if re.match(r"(?i)^\d{1,2}-\d{1,2}-\d{2,4}$", text):
         return True
     return False
+
+
+def _is_imperial_full_page_break(line: str) -> bool:
+    text = normalize_space(line).upper()
+    return text in IMPERIAL_NON_JOINERY_HEADINGS
 
 
 def _is_useful_imperial_line(line: str) -> bool:
@@ -925,23 +948,60 @@ def _is_imperial_field_stop_line(line: str) -> bool:
 def _preprocess_imperial_lines(lines: list[str]) -> list[str]:
     merged: list[str] = []
     for raw_line in lines:
-        line = normalize_space(raw_line)
-        if not line:
-            continue
-        if merged:
-            combined = normalize_space(f"{merged[-1]} {line}")
-            previous_key, previous_tail = _imperial_match_field_label(merged[-1])
-            if line.startswith(("+ ", "- ")) or (previous_key and not previous_tail):
-                merged[-1] = combined
+        for segment in _imperial_split_combined_line(raw_line):
+            line = normalize_space(segment)
+            if not line:
                 continue
-        merged.append(line)
+            next_key, _ = _imperial_match_field_label(line)
+            if merged:
+                combined = normalize_space(f"{merged[-1]} {line}")
+                previous_key, previous_tail = _imperial_match_field_label(merged[-1])
+                if line.startswith(("+ ", "- ")) or (
+                    previous_key and not previous_tail and not next_key and not _is_imperial_field_stop_line(line)
+                ):
+                    merged[-1] = combined
+                    continue
+            merged.append(line)
     return merged
+
+
+def _imperial_split_combined_line(raw_line: str) -> list[str]:
+    text = normalize_space(raw_line)
+    if not text:
+        return []
+    split_points: set[int] = {0}
+    for marker in IMPERIAL_INLINE_SPLIT_MARKERS:
+        search_from = 0
+        while True:
+            index = text.find(marker, search_from)
+            if index == -1:
+                break
+            prefix = text[max(0, index - 20) : index].upper()
+            if marker == "SPLASHBACK" and prefix.endswith("BENCHTOP+ "):
+                search_from = index + len(marker)
+                continue
+            if marker.startswith("HANDLES") and (prefix.endswith("NO ") or prefix.endswith("TOUCH CATCH ")):
+                search_from = index + len(marker)
+                continue
+            if index > 0:
+                split_points.add(index)
+            search_from = index + len(marker)
+    ordered = sorted(split_points)
+    if len(ordered) == 1:
+        return [text]
+    parts: list[str] = []
+    for idx, start in enumerate(ordered):
+        end = ordered[idx + 1] if idx + 1 < len(ordered) else len(text)
+        segment = normalize_space(text[start:end])
+        if segment:
+            parts.append(segment)
+    return parts
 
 
 def _imperial_clean_field_value(field_key: str, parts: list[str]) -> str:
     if field_key in {"bench_tops", "splashback"}:
         return _imperial_clean_material_value(parts, drop_note_lines=True)
-    if field_key in {"upper_tall", "upper", "base", "tall_doors", "floating_shelf", "rail", "jewellery_insert"}:
+    if field_key in {"upper_tall", "upper", "base", "feature_cabinetry", "tall_doors", "floating_shelf", "rail", "jewellery_insert"}:
         return _imperial_clean_material_value(parts, drop_note_lines=False)
     if field_key == "led":
         return "Yes" if any(normalize_space(part) for part in parts) else ""
@@ -973,13 +1033,21 @@ def _imperial_clean_material_value(parts: list[str], drop_note_lines: bool) -> s
             or lowered.startswith("up to overheads")
         ):
             continue
+        if lowered in {"n/a", "image"}:
+            continue
         if "handle" in lowered and "profile door" not in lowered:
             continue
+        thickness_match = re.match(r"(?i)^(?P<thickness>\d+\s*mm)\b(?P<rest>.*)$", part)
+        if thickness_match and re.search(r"(?i)\b(edge|mitred|profile|style)\b", part):
+            thickness = normalize_brand_casing_text(thickness_match.group("thickness"))
+            rest = normalize_brand_casing_text(thickness_match.group("rest")).strip(" -;,")
+            if thickness:
+                cleaned_parts.append(thickness)
+            if rest:
+                cleaned_parts.append(rest)
+            continue
         cleaned_parts.append(normalize_brand_casing_text(part))
-    text = normalize_space(" ".join(cleaned_parts)).strip(" -;,")
-    if supplier and text and not text.lower().startswith(supplier.lower()):
-        text = f"{supplier} {text}"
-    return text
+    return _imperial_compose_material_text(supplier, cleaned_parts)
 
 
 def _imperial_clean_toe_kick_value(parts: list[str]) -> str:
@@ -995,6 +1063,8 @@ def _imperial_clean_toe_kick_value(parts: list[str]) -> str:
         if part.upper().startswith("MATCH ABOVE"):
             continue
         normalized = normalize_brand_casing_text(part).strip(" -;,.")
+        if supplier:
+            normalized = re.sub(rf"(?i)\b{re.escape(supplier)}\b\s*$", "", normalized).strip(" -;,.")
         if supplier and normalized and not normalized.lower().startswith(supplier.lower()):
             normalized = f"{supplier} {normalized}"
         if normalized and normalized not in entries:
@@ -1024,8 +1094,335 @@ def _imperial_clean_accessories_value(parts: list[str]) -> str:
             continue
         if re.match(r"(?i)^product code\s*:", part):
             continue
+        if re.match(r"(?i)^installed\b", part):
+            break
         cleaned_parts.append(normalize_brand_casing_text(part).strip(" -;,"))
     return normalize_space(" ".join(cleaned_parts)).strip(" -;,")
+
+
+def _imperial_compose_material_text(supplier: str, parts: list[str]) -> str:
+    cleaned_parts = [normalize_brand_casing_text(normalize_space(part)).strip(" -;,") for part in parts if normalize_space(part)]
+    if supplier:
+        supplier_pattern = re.compile(rf"(?i)\b{re.escape(supplier)}\b")
+        normalized_parts: list[str] = []
+        for part in cleaned_parts:
+            if part.lower() == supplier.lower():
+                continue
+            trimmed = normalize_space(supplier_pattern.sub("", part)).strip(" -;,")
+            normalized_parts.append(trimmed or part)
+        cleaned_parts = [part for part in normalized_parts if part]
+    if not cleaned_parts and not supplier:
+        return ""
+    thickness = next((part for part in cleaned_parts if re.search(r"\b\d+\s*mm\b", part, re.IGNORECASE)), "")
+    profile_parts = [part for part in cleaned_parts if re.search(r"(?i)\b(profile|style|edge|woodmatt|smooth|matt finish|thermolaminate|melamine|vinyl)\b", part)]
+    material_parts = [
+        part
+        for part in cleaned_parts
+        if part not in profile_parts and part != thickness and not _imperial_is_supplier_only_line(part) and part.lower() not in {"n/a", "image"}
+    ]
+    ordered: list[str] = []
+    lead = " ".join(part for part in (thickness, supplier) if part)
+    if lead:
+        ordered.append(lead)
+    elif supplier:
+        ordered.append(supplier)
+    if material_parts:
+        ordered.append(" ".join(_unique(material_parts)))
+    remaining_profiles = [part for part in _unique(profile_parts) if part not in ordered]
+    ordered.extend(remaining_profiles)
+    return " - ".join(part for part in ordered if part).strip(" -;,")
+
+
+def _imperial_collect_page_fields(page_text: str) -> dict[str, Any]:
+    lines = _preprocess_imperial_lines([normalize_space(line) for line in page_text.split("\n") if normalize_space(line)])
+    fields = _imperial_collect_fields(lines)
+    overrides: dict[str, Any] = {
+        "bench_tops_other": "",
+        "bench_tops_wall_run": "",
+        "bench_tops_island": "",
+        "splashback": "",
+        "feature_cabinetry": "",
+        "accessories_list": [],
+        "bulkhead": "",
+        "base": "",
+        "upper": "",
+        "upper_tall": "",
+    }
+    if any(line.upper().startswith("BENCHTOP+ SPLASHBACK") for line in lines):
+        overrides.update(_imperial_extract_combined_bench_splash_fields(lines))
+        fields.pop("bench_tops", None)
+        fields.pop("splashback", None)
+    delayed_benchtop = _imperial_extract_delayed_benchtop(lines)
+    if delayed_benchtop and not (fields.get("bench_tops") or overrides["bench_tops_other"] or overrides["bench_tops_wall_run"]):
+        overrides["bench_tops_other"] = delayed_benchtop
+    benchtop_fallback = _imperial_extract_freeform_benchtop(lines)
+    if benchtop_fallback and not (fields.get("bench_tops") or overrides["bench_tops_other"] or overrides["bench_tops_wall_run"]):
+        overrides["bench_tops_other"] = benchtop_fallback
+    feature_cabinetry = _imperial_extract_feature_cabinetry_material(lines)
+    if feature_cabinetry:
+        overrides["feature_cabinetry"] = feature_cabinetry
+    accessory_entries = _imperial_extract_accessory_entries(lines)
+    if accessory_entries:
+        overrides["accessories_list"] = accessory_entries
+    bulkhead = _imperial_clean_bulkhead_value(
+        _imperial_extract_inline_value(
+            page_text,
+            "Bulkhead:",
+            ("Shadowline:", "Hinges & Drawer Runners:", "AREA / ITEM", "SPLASHBACK", "BENCHTOP", "Ceiling height:", "Cabinetry Height:"),
+        )
+    )
+    if bulkhead:
+        overrides["bulkhead"] = bulkhead
+    if not fields.get("base") and not fields.get("upper") and not fields.get("upper_tall"):
+        prelabel_material = _imperial_extract_prelabel_cabinetry_material(lines)
+        if prelabel_material:
+            overrides["base"] = prelabel_material
+            overrides["upper"] = prelabel_material
+    return {"lines": lines, "fields": fields, "overrides": overrides}
+
+
+def _imperial_extract_combined_bench_splash_fields(lines: list[str]) -> dict[str, str]:
+    block: list[str] = []
+    capturing = False
+    for line in lines:
+        if line.upper().startswith("BENCHTOP+ SPLASHBACK"):
+            capturing = True
+            continue
+        if capturing:
+            field_key, _ = _imperial_match_field_label(line)
+            if field_key and field_key not in {"bench_tops", "splashback"} and not re.match(r"(?i)^BENCHTOP\s+(?:ON\s+ISLAND|AREA\s+WITH\s+COOKTOP)\b", line):
+                break
+            if _is_imperial_field_stop_line(line) and not field_key:
+                break
+        if capturing:
+            block.append(line)
+    block_text = normalize_space(" ".join(block))
+    supplier = next((normalize_brand_casing_text(line) for line in block if _imperial_is_supplier_only_line(line)), "")
+    thickness_match = re.search(r"\b(\d+\s*mm)\b", block_text, re.IGNORECASE)
+    thickness = thickness_match.group(1) if thickness_match else ""
+    material = next(
+        (
+            normalize_brand_casing_text(line)
+            for line in block
+            if "(" in line and not _imperial_is_supplier_only_line(line) and "SPLASHBACK" not in line.upper()
+        ),
+        "",
+    )
+    edge_parts = [
+        normalize_brand_casing_text(line)
+        for line in block
+        if re.search(r"(?i)\b(edge|pencil round|mitred apron)\b", line)
+        and "SPLASHBACK" not in line.upper()
+        and "BENCHTOP ON ISLAND" not in line.upper()
+        and "BENCHTOP AREA WITH COOKTOP" not in line.upper()
+    ]
+    base_value = _imperial_compose_material_text(supplier, [thickness, material, *edge_parts])
+    island_match = re.search(r"(?i)(BENCHTOP ON ISLAND.*?)(?=$)", block_text)
+    island_note = normalize_space(island_match.group(1)) if island_match else ""
+    wall_match = re.search(r"(?i)(BENCHTOP AREA WITH COOKTOP.*?)(?=$)", block_text)
+    wall_note = normalize_space(wall_match.group(1)) if wall_match else ""
+    splash_note = ""
+    splash_match = re.search(r"(?i)SPLASHBACK\s*-\s*(.*?)(?=Caesarstone\b|BENCHTOP AREA WITH COOKTOP|BASE CABINETRY COLOUR|$)", block_text)
+    if splash_match:
+        splash_note = normalize_space(splash_match.group(1))
+    elif re.search(r"(?i)plus Splashback", block_text):
+        plus_match = re.search(r"(?i)plus Splashback\s+(.*?)(?=Caesarstone\b|BENCHTOP ON ISLAND|$)", block_text)
+        splash_note = normalize_space(plus_match.group(1)) if plus_match else ""
+    if "BENCHTOP AREA WITH COOKTOP" in wall_note.upper() and "SPLASHBACK TO REMAIN" in wall_note.upper():
+        wall_note = wall_note.replace(" BUT ", " ").strip()
+    return {
+        "bench_tops_wall_run": f"{base_value} - {wall_note}".strip(" -") if wall_note else base_value,
+        "bench_tops_island": f"{base_value} - {island_note}".strip(" -") if island_note else "",
+        "bench_tops_other": "",
+        "splashback": f"{base_value} - {splash_note}".strip(" -") if splash_note else "",
+    }
+
+
+def _imperial_extract_delayed_benchtop(lines: list[str]) -> str:
+    if any(line.upper().startswith("BENCHTOP+ SPLASHBACK") for line in lines):
+        return ""
+    bench_indexes = [index for index, line in enumerate(lines) if line.upper().startswith("BENCHTOP")]
+    if not bench_indexes:
+        return ""
+    if any("Laminate Benchtop" in line for line in lines):
+        for index, line in enumerate(lines):
+            if "Laminate Benchtop" not in line:
+                continue
+            material = normalize_brand_casing_text(lines[index - 1]) if index > 0 and not _imperial_match_field_label(lines[index - 1])[0] else ""
+            profile = normalize_brand_casing_text(lines[index + 1]) if index + 1 < len(lines) and not _imperial_match_field_label(lines[index + 1])[0] else ""
+            parts = [part for part in (material, normalize_brand_casing_text(line), profile) if part]
+            return " - ".join(parts)
+    search_start = bench_indexes[0] + 1
+    ceiling_indexes = [index for index, line in enumerate(lines) if line.startswith("Ceiling height:")]
+    if ceiling_indexes:
+        search_start = max(search_start, ceiling_indexes[-1] + 1)
+    search_lines = lines[search_start:]
+    supplier = next(
+        (
+            normalize_brand_casing_text(line)
+            for line in search_lines
+            if _imperial_is_supplier_only_line(line) and normalize_brand_casing_text(line) in {"Caesarstone", "Smartstone", "WK Stone", "Laminex", "Polytec"}
+        ),
+        "",
+    )
+    thickness = ""
+    thickness_index = -1
+    for index, line in enumerate(search_lines):
+        match = re.search(r"\b\d+\s*mm\b", line, re.IGNORECASE)
+        if not match:
+            continue
+        thickness = match.group(0)
+        thickness_index = index
+        break
+    material = ""
+    candidate_lines = search_lines[thickness_index + 1 :] if thickness_index >= 0 else search_lines
+    for line in candidate_lines:
+        normalized = normalize_brand_casing_text(line)
+        upper = normalized.upper()
+        if _imperial_is_supplier_only_line(normalized):
+            continue
+        if "HANDLES" in upper or "VERTICAL ON" in upper or "HORIZONTAL ON" in upper or "SPRING FREE" in upper:
+            continue
+        if re.fullmatch(r"(?i)\d+\s*mm(?:\s+stone)?", normalized):
+            continue
+        if re.search(r"(?i)\b(?:calacattra|calacatta|organic white|frosty carrina|carrina|stone)\b", normalized) or re.search(r"\(\d{3,}\)", normalized) or re.search(r"^\d{3,4}\b", normalized):
+            material = normalized
+            break
+    extra = next(
+        (
+            normalize_brand_casing_text(line)
+            for line in search_lines
+            if re.search(r"(?i)\b(waterfall end|waterfall ends|pencil round edge|mitred apron edge|square edge)\b", line)
+            and "HANDLES" not in line.upper()
+        ),
+        "",
+    )
+    if not any((supplier, thickness, material, extra)):
+        return ""
+    return _imperial_compose_material_text(supplier, [thickness, material, extra])
+
+
+def _imperial_extract_feature_cabinetry_material(lines: list[str]) -> str:
+    if "FEATURE CABINETRY COLOUR" not in " ".join(lines):
+        return ""
+    block: list[str] = []
+    capture = False
+    for line in lines:
+        if line.upper().startswith("FEATURE CABINETRY COLOUR"):
+            tail = normalize_space(re.sub(r"(?i)^FEATURE CABINETRY COLOUR\b", "", line)).strip(" :-")
+            if tail:
+                block.append(tail)
+            capture = True
+            continue
+        if capture and (_imperial_match_field_label(line)[0] or _is_imperial_field_stop_line(line)):
+            break
+        if capture:
+            block.append(line)
+    supplier = ""
+    material_parts: list[str] = []
+    profile_parts: list[str] = []
+    for line in block:
+        normalized = normalize_brand_casing_text(line)
+        if _imperial_is_supplier_only_line(normalized):
+            supplier = normalized
+            continue
+        if re.search(r"(?i)\boverheads?\b|\bbar back\b", normalized):
+            continue
+        if re.search(r"(?i)\bprofile\b", normalized):
+            profile_parts.append(normalized)
+            continue
+        material_parts.append(normalized)
+    return _imperial_compose_material_text(supplier, [*material_parts, *profile_parts])
+
+
+def _imperial_extract_accessory_entries(lines: list[str]) -> list[str]:
+    entries: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if not line.upper().startswith("ACCESSORIES"):
+            index += 1
+            continue
+        entry_parts: list[str] = []
+        tail = normalize_space(re.sub(r"(?i)^ACCESSORIES?\b", "", line)).strip(" :-")
+        if tail:
+            entry_parts.append(tail)
+        index += 1
+        while index < len(lines):
+            next_line = normalize_space(lines[index])
+            if not next_line or _imperial_match_field_label(next_line)[0] or next_line.upper().startswith("ACCESSORIES"):
+                break
+            if re.match(r"(?i)^product code\s*:", next_line):
+                index += 1
+                continue
+            if re.match(r"(?i)^installed\b", next_line):
+                break
+            if _imperial_is_supplier_only_line(next_line):
+                break
+            entry_parts.append(next_line)
+            index += 1
+        entry = normalize_space(" ".join(entry_parts)).strip(" -;,")
+        if entry:
+            entries.append(normalize_brand_casing_text(entry))
+        continue
+    return _unique(entries)
+
+
+def _imperial_extract_freeform_benchtop(lines: list[str]) -> str:
+    for index, line in enumerate(lines):
+        if "Benchtop" not in line and "BENCHTOP" not in line:
+            continue
+        if line.upper().startswith("BENCHTOP") and _imperial_match_field_label(line)[0]:
+            continue
+        candidate_parts = [line]
+        cursor = index + 1
+        while cursor < len(lines):
+            next_line = lines[cursor]
+            if _imperial_match_field_label(next_line)[0] or _is_imperial_field_stop_line(next_line):
+                break
+            if _imperial_is_supplier_only_line(next_line):
+                break
+            candidate_parts.append(next_line)
+            cursor += 1
+        candidate = normalize_space(" ".join(candidate_parts)).strip(" -;,")
+        candidate = re.sub(r"(?i)^BENCHTOPS?\b", "", candidate).strip(" -;,")
+        if candidate:
+            return normalize_brand_casing_text(candidate)
+    return ""
+
+
+def _imperial_extract_prelabel_cabinetry_material(lines: list[str]) -> str:
+    header_index = next((index for index, line in enumerate(lines) if line.startswith("Ceiling height:")), -1)
+    if header_index <= 0:
+        return ""
+    prefix_lines = lines[:header_index]
+    merged_prefix: list[str] = []
+    index = 0
+    while index < len(prefix_lines):
+        line = prefix_lines[index]
+        if line.endswith("-") and index + 1 < len(prefix_lines):
+            merged_prefix.append(normalize_space(f"{line} {prefix_lines[index + 1]}"))
+            index += 2
+            continue
+        merged_prefix.append(line)
+        index += 1
+    candidates = [
+        normalize_brand_casing_text(line)
+        for line in merged_prefix
+        if re.search(r"(?i)\b(?:thermolaminated|melamine|woodmatt|smooth|matt|vinyl style)\b", line)
+        and "handle" not in line.lower()
+    ]
+    if not candidates:
+        return ""
+    value = candidates[0]
+    supplier = "Polytec" if any("Polytec" in line for line in lines) else ""
+    return _imperial_compose_material_text(supplier, [value])
+
+
+def _imperial_clean_bulkhead_value(value: str) -> str:
+    lines = [normalize_brand_casing_text(normalize_space(line)) for line in value.split("\n") if normalize_space(line)]
+    cleaned = [line for line in lines if line.upper() not in {"IMAGE", "N/A"}]
+    return normalize_space(" ".join(cleaned)).strip(" -;,")
 
 
 def _imperial_extract_inline_value(text: str, start_label: str, stop_labels: tuple[str, ...]) -> str:
@@ -1043,18 +1440,58 @@ def _imperial_page_refs(page_nos: list[int]) -> str:
 
 def _imperial_room_from_section(section: dict[str, Any]) -> RoomRow:
     section_text = str(section.get("text", ""))
-    lines = _preprocess_imperial_lines([normalize_space(line) for line in section_text.split("\n") if normalize_space(line)])
-    fields = _imperial_collect_fields(lines)
-    bulkhead_text = _imperial_extract_inline_value(
-        section_text,
-        "Bulkhead:",
-        ("Shadowline:", "Hinges & Drawer Runners:", "AREA / ITEM", "SPLASHBACK", "BENCHTOP", "Ceiling height:", "Cabinetry Height:"),
-    )
-    soft_close_text = _imperial_extract_inline_value(
-        section_text,
-        "Hinges & Drawer Runners:",
-        ("Floor Type & Kick refacing required:", "AREA / ITEM", "SPLASHBACK", "BENCHTOP"),
-    )
+    page_entries = list(section.get("page_texts", []))
+    fields: dict[str, str] = {}
+    accessories: list[str] = []
+    other_items: list[dict[str, str]] = []
+    bulkhead_text = ""
+    soft_close_text = ""
+    bench_wall = ""
+    bench_island = ""
+    bench_other = ""
+    splashback_text = ""
+    feature_cabinetry = ""
+    for page_entry in page_entries:
+        page_text = str(page_entry.get("text", ""))
+        page_result = _imperial_collect_page_fields(page_text)
+        page_lines = page_result["lines"]
+        page_fields = page_result["fields"]
+        overrides = page_result["overrides"]
+        for key, value in page_fields.items():
+            if value:
+                fields[key] = _merge_text(fields.get(key, ""), value)
+        for key in ("base", "upper", "upper_tall"):
+            if overrides.get(key) and not fields.get(key):
+                fields[key] = overrides[key]
+        if overrides.get("bench_tops_wall_run"):
+            bench_wall = _merge_text(bench_wall, overrides["bench_tops_wall_run"])
+        if overrides.get("bench_tops_island"):
+            bench_island = _merge_text(bench_island, overrides["bench_tops_island"])
+        if overrides.get("bench_tops_other"):
+            bench_other = _merge_text(bench_other, overrides["bench_tops_other"])
+        if overrides.get("splashback"):
+            splashback_text = _merge_text(splashback_text, overrides["splashback"])
+        if overrides.get("feature_cabinetry"):
+            feature_cabinetry = _merge_text(feature_cabinetry, overrides["feature_cabinetry"])
+        accessories = _merge_lists(accessories, overrides.get("accessories_list", []))
+        other_items = _merge_other_items(
+            other_items,
+            [
+                {"label": label, "value": page_fields.get(key, "")}
+                for key, label in IMPERIAL_CURATED_OTHER_FIELD_KEYS.items()
+                if page_fields.get(key, "")
+            ],
+        )
+        if overrides.get("bulkhead") and not bulkhead_text:
+            bulkhead_text = overrides["bulkhead"]
+        soft_close_candidate = _imperial_extract_inline_value(
+            page_text,
+            "Hinges & Drawer Runners:",
+            ("Floor Type & Kick refacing required:", "AREA / ITEM", "SPLASHBACK", "BENCHTOP"),
+        )
+        if soft_close_candidate and not soft_close_text:
+            soft_close_text = soft_close_candidate
+
     row = RoomRow(
         room_key=str(section.get("section_key", "")),
         original_room_label=str(section.get("original_section_label", "")),
@@ -1063,34 +1500,40 @@ def _imperial_room_from_section(section: dict[str, Any]) -> RoomRow:
         evidence_snippet=section_text[:300],
         confidence=0.72,
     )
-    bench_text = fields.get("bench_tops", "")
-    if bench_text:
-        row.bench_tops = [bench_text]
+    bench_text = bench_other or fields.get("bench_tops", "")
+    row.bench_tops_wall_run = bench_wall
+    row.bench_tops_island = bench_island
+    if row.room_key != "kitchen" and bench_text and not row.bench_tops_wall_run:
+        row.bench_tops_wall_run = bench_text
+        bench_text = ""
+    if bench_text and bench_text != row.bench_tops_wall_run:
         row.bench_tops_other = bench_text
+    row.bench_tops = _unique([value for value in (bench_wall, bench_island, bench_text) if value])
     row.floating_shelf = fields.get("floating_shelf", "")
-    row.splashback = fields.get("splashback", "")
+    row.splashback = splashback_text or fields.get("splashback", "")
     row.door_colours_overheads = fields.get("upper_tall", "") or fields.get("upper", "")
     row.door_colours_tall = fields.get("upper_tall", "")
     row.door_colours_base = fields.get("base", "")
+    if feature_cabinetry:
+        row.door_colours_overheads = _merge_clean_group_text(row.door_colours_overheads, feature_cabinetry, cleaner=_clean_door_colour_value)
+        row.door_colours_bar_back = _merge_clean_group_text(row.door_colours_bar_back, feature_cabinetry, cleaner=_clean_door_colour_value)
     row.has_explicit_overheads = bool(row.door_colours_overheads)
     row.has_explicit_tall = bool(row.door_colours_tall)
     row.has_explicit_base = bool(row.door_colours_base)
+    row.has_explicit_bar_back = bool(row.door_colours_bar_back)
     row.door_panel_colours = _rebuild_door_panel_colours(row.model_dump())
     toe_kick_text = fields.get("toe_kick", "")
     if toe_kick_text:
-        row.toe_kick = [toe_kick_text]
+        row.toe_kick = [
+            item
+            for item in [part.strip() for part in toe_kick_text.split(";") if part.strip()]
+            if "benchtop" not in item.lower() and "square edge" not in item.lower() and "waterfall" not in item.lower()
+        ]
     if bulkhead_text:
-        row.bulkheads = [normalize_brand_casing_text(bulkhead_text)]
+        row.bulkheads = [_imperial_clean_bulkhead_value(bulkhead_text)]
     row.led = fields.get("led", "")
-    row.accessories = _coerce_string_list(fields.get("accessories", ""))
-    row.other_items = _merge_other_items(
-        [],
-        [
-            {"label": label, "value": fields.get(key, "")}
-            for key, label in IMPERIAL_CURATED_OTHER_FIELD_KEYS.items()
-            if fields.get(key, "")
-        ],
-    )
+    row.accessories = accessories or _coerce_string_list(fields.get("accessories", ""))
+    row.other_items = other_items
     handles: list[str] = []
     for key in ("handles_overheads", "handles_base", "handles"):
         if fields.get(key):
@@ -1847,18 +2290,22 @@ def enrich_snapshot_rooms(snapshot: dict[str, Any], documents: list[dict[str, ob
     rooms = [row for row in snapshot.get("rooms", []) if isinstance(row, dict)]
     analysis = snapshot.get("analysis") or {}
     room_master_file = str(analysis.get("room_master_file", "") or "")
-    overlays = _collect_room_overlays(documents, room_master_file=room_master_file)
     imperial_builder = _is_imperial_builder(str(snapshot.get("builder_name", "")))
+    overlays = (
+        _collect_imperial_room_overlays(documents)
+        if imperial_builder
+        else _collect_room_overlays(documents, room_master_file=room_master_file)
+    )
     for row in rooms:
         overlay = _match_room_overlay(row, overlays)
         if imperial_builder:
             row["bench_tops"] = _rebuild_benchtop_entries(row)
             row["door_panel_colours"] = _rebuild_door_panel_colours(row)
             row["handles"] = _clean_handle_entries(_coerce_string_list(row.get("handles", [])))
-            row["floating_shelf"] = _merge_text(_string_value(row.get("floating_shelf", "")), overlay.get("floating_shelf", ""))
-            row["led"] = "Yes" if (overlay.get("led") or row.get("led")) else ""
-            row["accessories"] = _merge_lists(_coerce_string_list(row.get("accessories", [])), _coerce_string_list(overlay.get("accessories", [])))
-            row["other_items"] = _merge_other_items(row.get("other_items", []), overlay.get("other_items", []))
+            row["floating_shelf"] = _string_value(row.get("floating_shelf", ""))
+            row["led"] = "Yes" if row.get("led") else ""
+            row["accessories"] = _unique(_coerce_string_list(row.get("accessories", [])))
+            row["other_items"] = _merge_other_items([], row.get("other_items", []))
             row["sink_info"] = _merge_text(_string_value(row.get("sink_info", "")), overlay.get("sink_info", ""))
             row["basin_info"] = _merge_text(_string_value(row.get("basin_info", "")), overlay.get("basin_info", ""))
             row["tap_info"] = _merge_text(_string_value(row.get("tap_info", "")), overlay.get("tap_info", ""))
@@ -2056,6 +2503,97 @@ def _display_rule_text(value: Any, rule_flags: dict[str, bool]) -> str:
     return normalize_brand_casing_text(value, rule_flags)
 
 
+def _imperial_extract_non_joinery_blocks(text: str, kind: str) -> list[tuple[str, str]]:
+    lines = [normalize_space(line) for line in text.replace("\r", "\n").split("\n") if normalize_space(line)]
+    blocks: list[tuple[str, str]] = []
+    pending: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if _is_imperial_page_noise_line(line) or line.upper() in {"SINKWARE & TAPWARE", "AREA / ITEM SPECS / DESCRIPTION IMAGE SUPPLIER NOTES", "AREA / ITEM SPECS / DESCRIPTION IMAGE SUPPLIER"}:
+            index += 1
+            continue
+        any_heading_match = re.match(r"(?i)^(?P<label>SINKWARE|TAPWARE)\s*\((?P<room>[^)]+)\)\s*(?P<tail>.*)$", line)
+        if any_heading_match and any_heading_match.group("label").upper() != ("SINKWARE" if kind == "sinkware" else "TAPWARE"):
+            pending = []
+            index += 1
+            while index < len(lines):
+                next_line = lines[index]
+                if re.match(r"(?i)^(?:SINKWARE|TAPWARE)\s*\(", next_line):
+                    break
+                if next_line.upper().startswith("SINK ACCESSORIES") or next_line.upper().startswith("NOTES"):
+                    break
+                index += 1
+            continue
+        heading_match = re.match(rf"(?i)^{'SINKWARE' if kind == 'sinkware' else 'TAPWARE'}\s*\((?P<room>[^)]+)\)\s*(?P<tail>.*)$", line)
+        if heading_match:
+            room_label = normalize_space(heading_match.group("room"))
+            body_parts = pending[:]
+            pending = []
+            tail = normalize_space(heading_match.group("tail"))
+            if tail:
+                body_parts.append(tail)
+            index += 1
+            while index < len(lines):
+                next_line = lines[index]
+                if _is_imperial_page_noise_line(next_line):
+                    index += 1
+                    continue
+                if re.match(r"(?i)^(?:SINKWARE|TAPWARE)\s*\(", next_line):
+                    break
+                if next_line.upper().startswith("SINK ACCESSORIES") or next_line.upper().startswith("NOTES"):
+                    break
+                body_parts.append(next_line)
+                index += 1
+            cleaned = _imperial_clean_non_joinery_body("\n".join(body_parts), kind)
+            if room_label and cleaned:
+                blocks.append((room_label, cleaned))
+            continue
+        pending.append(line)
+        index += 1
+    return blocks
+
+
+def _imperial_clean_non_joinery_body(body: str, kind: str) -> str:
+    raw_lines = [normalize_space(line) for line in body.replace("\r", "\n").split("\n") if normalize_space(line)]
+    lines: list[str] = []
+    for line in raw_lines:
+        if lines and not _is_imperial_page_noise_line(line) and not re.match(r"(?i)^(?:SINKWARE|TAPWARE|SINK ACCESSORIES|NOTES)\b", line):
+            previous = lines[-1]
+            if previous.endswith(("TO", "OF", "IN", "WITH", "UNDERMOUTNED", "UNDERMOUT", "INSTAL", "INSTALLED")) or line[:1].islower():
+                lines[-1] = normalize_space(f"{previous} {line}")
+                continue
+        lines.append(line)
+    notes: list[str] = []
+    values: list[str] = []
+    for line in lines:
+        upper = line.upper()
+        if _is_imperial_page_noise_line(line):
+            continue
+        if upper.startswith("SINKWARE") or upper.startswith("TAPWARE") or upper.startswith("SINK ACCESSORIES") or upper.startswith("NOTES"):
+            continue
+        if _imperial_is_supplier_only_line(line):
+            continue
+        if re.match(r"(?i)^taphole location\s*:", line):
+            notes.append(normalize_brand_casing_text(line))
+            continue
+        if "UNDERMOUT" in upper:
+            notes.append("Undermounted")
+            continue
+        if re.match(r"(?i)^.*\bBY IMPERIAL\b$", line):
+            continue
+        if re.match(r"(?i)^\d{1,2}/\d{1,2}/\d{2,4}", line):
+            continue
+        if re.match(r"(?i)^(available to back order|by imperial|by client)\b", line):
+            continue
+        values.append(normalize_brand_casing_text(line))
+    value_text = normalize_space(" ".join(values)).strip(" -;,")
+    if kind == "tapware":
+        value_text = re.sub(r"(?i)\s*Taphole location\b.*$", "", value_text).strip(" -;,")
+        return value_text
+    return " - ".join(part for part in [value_text, *notes] if part)
+
+
 def _collect_room_overlays(documents: list[dict[str, object]], room_master_file: str = "") -> dict[str, dict[str, str]]:
     overlays: dict[str, dict[str, str]] = {}
     for document in documents:
@@ -2150,10 +2688,34 @@ def _collect_room_overlays(documents: list[dict[str, object]], room_master_file:
     return overlays
 
 
+def _collect_imperial_room_overlays(documents: list[dict[str, object]]) -> dict[str, dict[str, str]]:
+    overlays: dict[str, dict[str, str]] = {}
+    for document in documents:
+        for page in document.get("pages", []):
+            text = str(page.get("text") or "")
+            if not text.strip():
+                continue
+            if not _is_imperial_non_joinery_page(text) and "SINKWARE" not in text.upper() and "TAPWARE" not in text.upper():
+                continue
+            for room_label, sink_text in _imperial_extract_non_joinery_blocks(text, "sinkware"):
+                room_key = source_room_key(room_label, fallback_key=room_label)
+                overlay = overlays.setdefault(room_key, _blank_overlay())
+                overlay["sink_info"] = _merge_text(overlay["sink_info"], sink_text)
+            for room_label, tap_text in _imperial_extract_non_joinery_blocks(text, "tapware"):
+                room_key = source_room_key(room_label, fallback_key=room_label)
+                overlay = overlays.setdefault(room_key, _blank_overlay())
+                overlay["tap_info"] = _merge_text(overlay["tap_info"], tap_text)
+    return overlays
+
+
 def _match_room_overlay(row: dict[str, Any], overlays: dict[str, dict[str, str]]) -> dict[str, str]:
     for key in _room_lookup_candidates(row):
         if key in overlays:
             return overlays[key]
+    return _blank_overlay()
+
+
+def _blank_overlay() -> dict[str, Any]:
     return {
         "bench_tops_wall_run": "",
         "bench_tops_island": "",
@@ -2432,6 +2994,7 @@ IMPERIAL_HEADER_START_MARKERS = (
     "Hinges & Drawer Runners:",
     "AREA / ITEM",
     "NOTES",
+    "FEATURE CABINETRY COLOUR",
     "SPLASHBACK",
     "BENCHTOP",
     "UPPER CABINETRY",
@@ -2446,6 +3009,7 @@ IMPERIAL_FOOTER_MARKERS = (
     "SIGNED DATE:",
     "DESIGNER:",
     "ALL COLOURS SHOWN ARE APPROXIMATE REPRESENTATIONS ONLY",
+    "Document Ref:",
 )
 IMPERIAL_SUPPLIER_ONLY_LINES = {
     "Polytec",
@@ -2453,10 +3017,16 @@ IMPERIAL_SUPPLIER_ONLY_LINES = {
     "Smartstone",
     "Laminex",
     "WK Stone",
+    "Furnware",
+    "MOMO",
+    "Lincoln Sentry",
+    "Titus Tekform",
+    "ABEY",
 }
 IMPERIAL_SECTION_FIELD_PATTERNS: list[tuple[str, str]] = [
     ("upper_tall", r"UPPER CABINETRY COLOUR\s*\+\s*TALL CABINETS\b"),
     ("upper", r"UPPER CABINETRY COLOUR(?:\s+DOORS)?\b"),
+    ("feature_cabinetry", r"FEATURE CABINETRY COLOUR\b"),
     ("handles_overheads", r"HANDLES\s+to\s+OVERHEADS\b"),
     ("handles_base", r"HANDLES\s+BASE\s+CABS\b"),
     ("custom_handles", r"CUSTOM HANDLES\b"),
@@ -2477,6 +3047,32 @@ IMPERIAL_CURATED_OTHER_FIELD_KEYS = {
     "rail": "RAIL",
     "jewellery_insert": "JEWELLERY INSERT",
 }
+
+IMPERIAL_INLINE_SPLIT_MARKERS = (
+    "FEATURE CABINETRY COLOUR",
+    "UPPER CABINETRY COLOUR + TALL CABINETS",
+    "UPPER CABINETRY COLOUR",
+    "BASE CABINETRY COLOUR",
+    "BENCHTOP+ SPLASHBACK",
+    "SPLASHBACK",
+    "BENCHTOPS",
+    "BENCHTOP",
+    "FLOATING SHELF",
+    "FLOATING SHELVES",
+    "LED STRIP LIGHTING",
+    "LED LIGHTING",
+    "LED",
+    "ACCESSORIES",
+    "CUSTOM HANDLES",
+    "HANDLES to OVERHEADS",
+    "HANDLES BASE CABS",
+    "HANDLES",
+    "KICKBOARDS",
+    "TALL DOORS",
+    "Bulkhead:",
+    "Shadowline:",
+    "Hinges & Drawer Runners:",
+)
 
 
 def _split_benchtop_groups(values: list[str]) -> dict[str, str]:
@@ -2684,13 +3280,20 @@ def _is_room_fixture_appliance(row: dict[str, Any]) -> bool:
 
 
 def _clean_fixture_text(value: Any) -> str:
+    if isinstance(value, list):
+        flattened = [_clean_fixture_text(item) for item in value]
+        return " | ".join(part for part in _unique(flattened) if part)
     if isinstance(value, dict):
-        for key in ("sink_type", "basin_type", "tap_type", "sink", "basin", "tap", "description", "value"):
-            text = normalize_space(str(value.get(key, "")))
-            if text:
-                return normalize_brand_casing_text(text)
-        return normalize_brand_casing_text(str(value))
+        return _format_fixture_mapping(value)
     text = normalize_space(str(value))
+    if text.startswith("[") and text.endswith("]"):
+        parsed_list: Any = None
+        try:
+            parsed_list = literal_eval(text)
+        except (ValueError, SyntaxError):
+            parsed_list = None
+        if isinstance(parsed_list, list):
+            return _clean_fixture_text(parsed_list)
     if not text.startswith("{") or not text.endswith("}"):
         return normalize_brand_casing_text(text)
     parsed: Any
@@ -2701,6 +3304,25 @@ def _clean_fixture_text(value: Any) -> str:
     if isinstance(parsed, dict):
         return _clean_fixture_text(parsed)
     return normalize_brand_casing_text(text)
+
+
+def _format_fixture_mapping(entry: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for key in ("sink_type", "basin_type", "tap_type", "type", "sink", "basin", "tap", "description", "value"):
+        text = normalize_space(str(entry.get(key, "")))
+        if text:
+            parts.append(normalize_brand_casing_text(text))
+            break
+    ownership = normalize_space(str(entry.get("ownership", "")))
+    if ownership:
+        parts.append(normalize_brand_casing_text(ownership))
+    taphole = normalize_space(str(entry.get("taphole_location", "")))
+    if taphole:
+        parts.append(f"Taphole location: {normalize_brand_casing_text(taphole)}")
+    notes = normalize_space(str(entry.get("notes", "")))
+    if notes:
+        parts.append(normalize_brand_casing_text(notes))
+    return " - ".join(part for part in parts if part)
 
 
 def _dedupe_appliances(rows: list[ApplianceRow]) -> list[ApplianceRow]:
