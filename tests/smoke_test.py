@@ -2811,6 +2811,92 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(kitchen["tap_info"], "Mixer Tap Clients own | Water Filter Tap Clients own")
         self.assertNotIn("IMAGE N/A", " ".join(kitchen["bulkheads"]))
 
+    def test_imperial_office_benchtop_ignores_joinery_title_and_address_noise(self) -> None:
+        documents = [
+            {
+                "file_name": "imperial-office-live.pdf",
+                "role": "spec",
+                "pages": [
+                    {
+                        "page_no": 7,
+                        "text": (
+                            "BENCHTOP\n"
+                            "KICKBOARDS Polytec\n"
+                            "Classic White Matt\n"
+                            "Tasmanian Oak Matt \n"
+                            "Laminate Benchtop \n"
+                            "33mm square edge\n"
+                            "BASE CABINETRY COLOUR Polytec\n"
+                            "Classic White Matt\n"
+                            "Hinges & Drawer Runners: NAFloor Type & Kick refacing required:SOFT CLOSE\n"
+                            "NOTESSUPPLIERAREA / ITEM SPECS / DESCRIPTION IMAGE\n"
+                            "Polytec\n"
+                            "Polytec\n"
+                            "Shadowline:NABulkhead:NA\n"
+                            "Ceiling height:NA Cabinetry Height:760mm TO TOP OF BENCHTOP\n"
+                            "OFFICE JOINERY SELECTION SHEET\n"
+                            "16 Dovedale Cres ASHGROVE\n"
+                            "Phill Deacon\n"
+                            "12.9.25\n"
+                            "Address:\n"
+                            "Client:\n"
+                            "Date:\n"
+                            "Polytec\n"
+                        ),
+                        "needs_ocr": False,
+                    }
+                ],
+            }
+        ]
+        snapshot = enrich_snapshot_rooms(parse_documents("37642", "Imperial", "spec", documents), documents)
+        office = snapshot["rooms"][0]
+        self.assertEqual(office["original_room_label"], "OFFICE")
+        self.assertEqual(office["bench_tops_other"], "Tasmanian Oak Matt - Laminate Benchtop - 33mm square edge")
+        self.assertNotIn("Dovedale Cres", office["bench_tops_other"])
+        self.assertNotIn("JOINERY SELECTION SHEET", office["bench_tops_other"])
+
+    def test_imperial_orientation_notes_do_not_become_tall_or_island_material(self) -> None:
+        row = {
+            "room_key": "kitchen",
+            "original_room_label": "KITCHEN",
+            "bench_tops": ["20mm Caesarstone - 5131 Calacattra Nuvo - PR Waterfall End"],
+            "door_panel_colours": [],
+            "door_colours_overheads": "Polytec - Thermolaminated Vinyl Style 1 - Vienna - Classic White Matt",
+            "door_colours_base": "Polytec - Thermolaminated Vinyl Style 1 - Vienna - Classic White Matt",
+            "door_colours_tall": "Vertical on Tall doors only",
+            "door_colours_island": "Horizontal on all",
+            "door_colours_bar_back": "",
+            "has_explicit_overheads": True,
+            "has_explicit_base": True,
+            "has_explicit_tall": False,
+            "has_explicit_island": False,
+            "has_explicit_bar_back": False,
+            "toe_kick": ["As Doors"],
+            "bulkheads": ["None"],
+            "handles": [],
+            "floating_shelf": "",
+            "led": "",
+            "accessories": [],
+            "other_items": [],
+            "sink_info": "",
+            "basin_info": "",
+            "tap_info": "Mixer Tap Clients own | Water Filter Tap Clients own | Mixer Tap Clients own",
+            "drawers_soft_close": "",
+            "hinges_soft_close": "",
+            "splashback": "",
+            "flooring": "",
+            "source_file": "imperial.pdf",
+            "page_refs": "1",
+            "evidence_snippet": "",
+            "confidence": 0.7,
+        }
+        cleaned = parsing_module.apply_snapshot_cleaning_rules(
+            {"rooms": [row], "appliances": [], "special_sections": [], "others": {}, "warnings": []}
+        )["rooms"][0]
+        self.assertEqual(cleaned["door_colours_tall"], "")
+        self.assertEqual(cleaned["door_colours_island"], "")
+        self.assertEqual(cleaned["tap_info"], "Mixer Tap Clients own | Water Filter Tap Clients own")
+
     def test_job_detail_page_hides_review_cards(self) -> None:
         builder_id = store.create_builder("Imperial", "imperial", "")
         job_id = store.create_job("37647", builder_id, "Imperial Test", "")

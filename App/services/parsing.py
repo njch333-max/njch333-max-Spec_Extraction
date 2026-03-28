@@ -956,6 +956,9 @@ def _preprocess_imperial_lines(lines: list[str]) -> list[str]:
             if merged:
                 combined = normalize_space(f"{merged[-1]} {line}")
                 previous_key, previous_tail = _imperial_match_field_label(merged[-1])
+                if _looks_like_imperial_section_title_line(line):
+                    merged.append(line)
+                    continue
                 if line.startswith(("+ ", "- ")) or (
                     previous_key and not previous_tail and not next_key and not _is_imperial_field_stop_line(line)
                 ):
@@ -977,6 +980,9 @@ def _imperial_split_combined_line(raw_line: str) -> list[str]:
             if index == -1:
                 break
             prefix = text[max(0, index - 20) : index].upper()
+            if marker in {"BENCHTOP", "BENCHTOPS"} and "TO TOP OF " in prefix:
+                search_from = index + len(marker)
+                continue
             if marker == "SPLASHBACK" and prefix.endswith("BENCHTOP+ "):
                 search_from = index + len(marker)
                 continue
@@ -996,6 +1002,15 @@ def _imperial_split_combined_line(raw_line: str) -> list[str]:
         if segment:
             parts.append(segment)
     return parts
+
+
+def _looks_like_imperial_section_title_line(line: str) -> bool:
+    text = normalize_space(line)
+    if not text:
+        return False
+    if re.search(r"(?i)\bJOINERY SELECTION SHEET\b", text):
+        return True
+    return text.upper() in {"FEATURE TALL DOORS"}
 
 
 def _imperial_clean_field_value(field_key: str, parts: list[str]) -> str:
@@ -1153,8 +1168,12 @@ def _imperial_collect_page_fields(page_text: str) -> dict[str, Any]:
         fields.pop("bench_tops", None)
         fields.pop("splashback", None)
     delayed_benchtop = _imperial_extract_delayed_benchtop(lines)
-    if delayed_benchtop and not (fields.get("bench_tops") or overrides["bench_tops_other"] or overrides["bench_tops_wall_run"]):
+    if delayed_benchtop and (
+        not (fields.get("bench_tops") or overrides["bench_tops_other"] or overrides["bench_tops_wall_run"])
+        or _imperial_benchtop_value_looks_noisy(fields.get("bench_tops", ""))
+    ):
         overrides["bench_tops_other"] = delayed_benchtop
+        fields.pop("bench_tops", None)
     benchtop_fallback = _imperial_extract_freeform_benchtop(lines)
     if benchtop_fallback and not (fields.get("bench_tops") or overrides["bench_tops_other"] or overrides["bench_tops_wall_run"]):
         overrides["bench_tops_other"] = benchtop_fallback
@@ -1300,6 +1319,22 @@ def _imperial_extract_delayed_benchtop(lines: list[str]) -> str:
     if not any((supplier, thickness, material, extra)):
         return ""
     return _imperial_compose_material_text(supplier, [thickness, material, extra])
+
+
+def _imperial_benchtop_value_looks_noisy(value: str) -> bool:
+    text = normalize_space(value)
+    if not text:
+        return False
+    noisy_tokens = (
+        "JOINERY SELECTION SHEET",
+        "Address:",
+        "Client:",
+        "Date:",
+        "Document Ref:",
+        "ASHGROVE",
+        "REGENTS PARK",
+    )
+    return any(token.lower() in text.lower() for token in noisy_tokens)
 
 
 def _imperial_extract_feature_cabinetry_material(lines: list[str]) -> str:
@@ -2402,9 +2437,9 @@ def _apply_room_cleaning_rules(row: dict[str, Any], rule_flags: dict[str, bool])
         for item in _merge_other_items([], row.get("other_items", []))
         if _display_rule_text(item.get("label", ""), rule_flags) and _display_rule_text(item.get("value", ""), rule_flags)
     ]
-    row["sink_info"] = _display_rule_text(row.get("sink_info", ""), rule_flags)
-    row["basin_info"] = _display_rule_text(row.get("basin_info", ""), rule_flags)
-    row["tap_info"] = _display_rule_text(row.get("tap_info", ""), rule_flags)
+    row["sink_info"] = _clean_fixture_text(_display_rule_text(row.get("sink_info", ""), rule_flags))
+    row["basin_info"] = _clean_fixture_text(_display_rule_text(row.get("basin_info", ""), rule_flags))
+    row["tap_info"] = _clean_fixture_text(_display_rule_text(row.get("tap_info", ""), rule_flags))
     row["splashback"] = _display_rule_text(row.get("splashback", ""), rule_flags)
     row["flooring"] = _display_rule_text(row.get("flooring", ""), rule_flags)
     row["drawers_soft_close"] = normalize_soft_close_value(row.get("drawers_soft_close", ""), keyword="drawer") or normalize_soft_close_value(row.get("drawers_soft_close", ""))
@@ -2843,6 +2878,10 @@ def _clean_door_colour_value(value: Any) -> str:
     text = re.sub(r"\s*\([^)]*$", "", text)
     text = re.sub(r"\s{2,}", " ", text)
     text = text.strip(" -;,")
+    if re.fullmatch(r"(?i)(?:vertical|horizontal)\s+on.*", text):
+        return ""
+    if re.fullmatch(r"(?i)incl\.?\s+spring\s+free.*", text):
+        return ""
     if re.search(r"(?i)(kickboards?|bench\s*top|benchtop|thermolaminate notes?|carcass|shelf edges?)", text):
         return ""
     if re.search(r"(?i)\b([a-z])\1{4,}\b", text):
@@ -3286,6 +3325,9 @@ def _clean_fixture_text(value: Any) -> str:
     if isinstance(value, dict):
         return _format_fixture_mapping(value)
     text = normalize_space(str(value))
+    if "|" in text:
+        parts = [_clean_fixture_text(part) for part in re.split(r"\s*\|\s*", text) if normalize_space(part)]
+        return " | ".join(part for part in _unique(parts) if part)
     if text.startswith("[") and text.endswith("]"):
         parsed_list: Any = None
         try:
