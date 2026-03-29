@@ -291,6 +291,42 @@ class SmokeTest(unittest.TestCase):
             "Lot 8 (#25) Lake Serenity Boulevard Helensvale",
         )
 
+    def test_site_address_extraction_salvages_suffix_after_private_prefix(self) -> None:
+        documents = [
+            {
+                "file_name": "SIGNED FINAL COLOURS_FOXOVER 21 Shadowood st KENMORE 23 3 26.pdf",
+                "pages": [
+                    {
+                        "page_no": 1,
+                        "raw_text": "Address:2510-076 - Private - 21 Shadowood Street, Kenmore Hills",
+                        "text": "",
+                    }
+                ],
+            }
+        ]
+        self.assertEqual(
+            parsing_module._extract_site_address_from_documents(documents),
+            "21 Shadowood Street, Kenmore Hills",
+        )
+
+    def test_site_address_extraction_stops_before_job_number(self) -> None:
+        documents = [
+            {
+                "file_name": "evoca-example.pdf",
+                "pages": [
+                    {
+                        "page_no": 1,
+                        "raw_text": "Lot Address Lot 1038, Oyster St, Worongary QLD 4213 Job Number EVOC467",
+                        "text": "",
+                    }
+                ],
+            }
+        ]
+        self.assertEqual(
+            parsing_module._extract_site_address_from_documents(documents),
+            "Lot 1038, Oyster St, Worongary QLD 4213",
+        )
+
     def test_clarendon_job25_polish_prefers_raw_text_and_preserves_summary_detail(self) -> None:
         afc_raw = "LOT 8 No. (#25) Lake Serenity Boulevard, HELENSVALE"
         kitchen_raw = (

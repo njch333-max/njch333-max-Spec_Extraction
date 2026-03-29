@@ -921,6 +921,8 @@ ADDRESS_STREET_TYPE_PATTERN = (
 
 SITE_ADDRESS_STOP_PATTERNS: tuple[str, ...] = (
     r"(?i)\bREV(?:ISION)?\b",
+    r"(?i)\bJOB\s+NUMBER\b",
+    r"(?i)\bJOB\s+NO\.?\b",
     r"(?i)\bKITCHEN COLOUR SCHEDULE\b",
     r"(?i)\bBENCHTOP(?:S)?\b",
     r"(?i)\bDOOR(?:/PANEL)? COLOUR(?:S)?\b",
@@ -994,6 +996,7 @@ def _clean_site_address_candidate(value: str) -> str:
         return ""
     text = re.sub(r"(?i)^(?:site\s+)?address\s*:\s*", "", text)
     text = _truncate_site_address_candidate(text)
+    text = _extract_site_address_core(text)
     if not text:
         return ""
     if len(text) > 140:
@@ -1018,6 +1021,32 @@ def _truncate_site_address_candidate(value: str) -> str:
         if match and match.start() < end_index:
             end_index = match.start()
     return normalize_space(text[:end_index]).strip(" -;,")
+
+
+def _extract_site_address_core(value: str) -> str:
+    text = normalize_space(str(value or ""))
+    if not text:
+        return ""
+    text = re.sub(r"(?i)^lot\s+address\s*", "", text).strip(" -:,;")
+    dash_parts = [normalize_space(part) for part in re.split(r"\s+-\s+", text) if normalize_space(part)]
+    if len(dash_parts) > 1:
+        for index in range(len(dash_parts) - 1, -1, -1):
+            suffix = normalize_space(" - ".join(dash_parts[index:]))
+            if _looks_like_address_core(suffix):
+                text = suffix
+                break
+    text = re.sub(r"(?i)^private\s*-\s*", "", text).strip(" -:,;")
+    return normalize_space(text)
+
+
+def _looks_like_address_core(value: str) -> bool:
+    text = normalize_space(str(value or ""))
+    if not text:
+        return False
+    has_street_type = bool(re.search(rf"(?i)\b{ADDRESS_STREET_TYPE_PATTERN}\b", text))
+    has_number = bool(re.search(r"\b\d+[A-Za-z]?(?:/\d+[A-Za-z]?)?\b", text))
+    has_lot = bool(re.search(r"(?i)\blot\s+\d+\b", text))
+    return has_street_type and (has_number or has_lot)
 
 
 def _imperial_collect_fields(lines: list[str]) -> dict[str, str]:
