@@ -156,6 +156,248 @@ class SmokeTest(unittest.TestCase):
         self.assertNotIn("OPENING", models)
         self.assertNotIn("ELECTRIC", models)
 
+    def test_structure_first_parse_uses_layout_room_blocks_for_evoca(self) -> None:
+        snapshot = parse_documents(
+            job_no="38225",
+            builder_name="Evoca",
+            source_kind="spec",
+            documents=[
+                {
+                    "file_name": "evoca-layout.pdf",
+                    "role": "spec",
+                    "pages": [
+                        {
+                            "page_no": 1,
+                            "raw_text": "Robe Sliding Type Frame Colour Belgian Oak Matt",
+                            "text": "Robe Sliding Type Frame Colour Belgian Oak Matt",
+                            "needs_ocr": False,
+                            "page_layout": {
+                                "page_type": "joinery",
+                                "section_label": "ROBE JOINERY SELECTION SHEET",
+                                "room_label": "ROBE",
+                                "room_blocks": [
+                                    {
+                                        "room_label": "ROBE",
+                                        "rows": [
+                                            {
+                                                "row_label": "Base Cabinetry Colour",
+                                                "value_region_text": "Belgian Oak Matt",
+                                                "supplier_region_text": "Polytec",
+                                                "notes_region_text": "",
+                                                "row_kind": "material",
+                                            },
+                                            {
+                                                "row_label": "Handles",
+                                                "value_region_text": "4062-128-TG",
+                                                "supplier_region_text": "",
+                                                "notes_region_text": "",
+                                                "row_kind": "handle",
+                                            },
+                                        ],
+                                    }
+                                ],
+                                "rows": [],
+                            },
+                        }
+                    ],
+                }
+            ],
+        )
+        rooms = {row["room_key"]: row for row in snapshot["rooms"]}
+        self.assertIn("robe", rooms)
+        self.assertNotIn("robe_sliding_type_frame_colour", rooms)
+        self.assertEqual(rooms["robe"]["original_room_label"], "ROBE")
+
+    def test_structure_first_parse_uses_layout_room_blocks_for_simonds(self) -> None:
+        snapshot = parse_documents(
+            job_no="s1",
+            builder_name="Simonds",
+            source_kind="spec",
+            documents=[
+                {
+                    "file_name": "simonds-layout.pdf",
+                    "role": "spec",
+                    "pages": [
+                        {
+                            "page_no": 1,
+                            "raw_text": "Kitchen Wall Run Base Cabinet Panels Manufacturer Laminex",
+                            "text": "Kitchen Wall Run Base Cabinet Panels Manufacturer Laminex",
+                            "needs_ocr": False,
+                            "page_layout": {
+                                "page_type": "joinery",
+                                "section_label": "KITCHEN COLOUR SCHEDULE",
+                                "room_label": "KITCHEN",
+                                "room_blocks": [
+                                    {
+                                        "room_label": "KITCHEN",
+                                        "rows": [
+                                            {
+                                                "row_label": "Base Cabinetry Colour",
+                                                "value_region_text": "Classic White Matt",
+                                                "supplier_region_text": "Laminex",
+                                                "notes_region_text": "",
+                                                "row_kind": "material",
+                                            }
+                                        ],
+                                    }
+                                ],
+                                "rows": [],
+                            },
+                        }
+                    ],
+                }
+            ],
+        )
+        rooms = {row["room_key"]: row for row in snapshot["rooms"]}
+        self.assertIn("kitchen", rooms)
+        self.assertNotIn("kitchen_wall_run_base_cabinet_panels_manufacturer_laminex", rooms)
+        self.assertEqual(rooms["kitchen"]["original_room_label"], "KITCHEN")
+
+    def test_structure_first_parse_trims_builder_noise_from_room_titles(self) -> None:
+        snapshot = parse_documents(
+            job_no="e2",
+            builder_name="Evoca",
+            source_kind="spec",
+            documents=[
+                {
+                    "file_name": "evoca-noisy-room-labels.pdf",
+                    "role": "spec",
+                    "pages": [
+                        {
+                            "page_no": 1,
+                            "raw_text": "Robe Sliding Type Standard Frame",
+                            "text": "Robe Sliding Type Standard Frame",
+                            "needs_ocr": False,
+                            "page_layout": {
+                                "page_type": "joinery",
+                                "section_label": "ROBE SLIDING TYPE STANDARD FRAME",
+                                "room_label": "Robe Sliding Type Standard Frame",
+                                "room_blocks": [
+                                    {
+                                        "room_label": "Robe Sliding Type Standard Frame",
+                                        "rows": [
+                                            {
+                                                "row_label": "Base Cabinetry Colour",
+                                                "value_region_text": "Belgian Oak Matt",
+                                                "supplier_region_text": "Polytec",
+                                                "notes_region_text": "",
+                                                "row_kind": "material",
+                                            }
+                                        ],
+                                    }
+                                ],
+                                "rows": [],
+                            },
+                        },
+                        {
+                            "page_no": 2,
+                            "raw_text": "Study Desk",
+                            "text": "Study Desk",
+                            "needs_ocr": False,
+                            "page_layout": {
+                                "page_type": "joinery",
+                                "section_label": "STUDY DESK",
+                                "room_label": "Study Desk",
+                                "room_blocks": [
+                                    {
+                                        "room_label": "Study Desk",
+                                        "rows": [
+                                            {
+                                                "row_label": "Base Cabinetry Colour",
+                                                "value_region_text": "Classic White",
+                                                "supplier_region_text": "Polytec",
+                                                "notes_region_text": "",
+                                                "row_kind": "material",
+                                            }
+                                        ],
+                                    }
+                                ],
+                                "rows": [],
+                            },
+                        },
+                    ],
+                }
+            ],
+        )
+        rooms = {row["room_key"]: row for row in snapshot["rooms"]}
+        self.assertIn("robe", rooms)
+        self.assertIn("study", rooms)
+        self.assertNotIn("robe_sliding_type_standard_frame", rooms)
+        self.assertNotIn("study_desk", rooms)
+
+    def test_structure_first_parse_uses_sink_tap_pages_as_overlays_not_rooms(self) -> None:
+        snapshot = parse_documents(
+            job_no="s2",
+            builder_name="Simonds",
+            source_kind="spec",
+            documents=[
+                {
+                    "file_name": "simonds-layout.pdf",
+                    "role": "spec",
+                    "pages": [
+                        {
+                            "page_no": 1,
+                            "raw_text": "KITCHEN COLOUR SCHEDULE",
+                            "text": "KITCHEN COLOUR SCHEDULE",
+                            "needs_ocr": False,
+                            "page_layout": {
+                                "page_type": "joinery",
+                                "section_label": "KITCHEN COLOUR SCHEDULE",
+                                "room_label": "KITCHEN",
+                                "room_blocks": [
+                                    {
+                                        "room_label": "KITCHEN",
+                                        "rows": [
+                                            {
+                                                "row_label": "Base Cabinetry Colour",
+                                                "value_region_text": "Classic White Matt",
+                                                "supplier_region_text": "Laminex",
+                                                "notes_region_text": "",
+                                                "row_kind": "material",
+                                            }
+                                        ],
+                                    }
+                                ],
+                                "rows": [],
+                            },
+                        },
+                        {
+                            "page_no": 2,
+                            "raw_text": "SINKWARE (Kitchen Sink Range) Franke Sirius",
+                            "text": "SINKWARE (Kitchen Sink Range) Franke Sirius",
+                            "needs_ocr": False,
+                            "page_layout": {
+                                "page_type": "sinkware_tapware",
+                                "section_label": "SINKWARE & TAPWARE",
+                                "room_label": "",
+                                "room_blocks": [
+                                    {
+                                        "room_label": "Kitchen Sink Range",
+                                        "rows": [
+                                            {
+                                                "row_label": "SINKWARE (Kitchen Sink Range)",
+                                                "value_region_text": "Franke Sirius",
+                                                "supplier_region_text": "",
+                                                "notes_region_text": "",
+                                                "row_kind": "sink",
+                                            }
+                                        ],
+                                    }
+                                ],
+                                "rows": [],
+                            },
+                        },
+                    ],
+                }
+            ],
+        )
+        rooms = {row["room_key"]: row for row in snapshot["rooms"]}
+        self.assertEqual(set(rooms), {"kitchen"})
+
+    def test_structure_first_parse_trims_sinkware_suffixes_from_room_blocks(self) -> None:
+        self.assertEqual(parsing_module._clean_layout_room_label("Master Ensuite Shower"), "Master Ensuite")
+        self.assertEqual(parsing_module._clean_layout_room_label("Bathroom Bath/Spa"), "Bathroom")
+
     def test_parser_normalizes_soft_close_states(self) -> None:
         snapshot = parse_documents(
             job_no="38111",

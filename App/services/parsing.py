@@ -574,6 +574,258 @@ def _schedule_room_key(line: str) -> str:
     return source_room_key(line)
 
 
+STRUCTURE_ROOM_NOISE_PATTERNS: tuple[str, ...] = (
+    r"(?i)\baddress\b",
+    r"(?i)\bjob number\b",
+    r"(?i)\bmanufacturer\b",
+    r"(?i)\bsupplier\b",
+    r"(?i)\bmodel\b",
+    r"(?i)\bframe\b",
+    r"(?i)\bsliding\b",
+    r"(?i)\bpanel(?:s)?\b",
+    r"(?i)\bdoor(?:s)?\b",
+    r"(?i)\bcolour\b",
+    r"(?i)\bhandles?\b",
+    r"(?i)\bkickboards?\b",
+    r"(?i)\bbenchtop(?:s)?\b",
+    r"(?i)\bcabinet(?:ry)?\b",
+    r"(?i)\bspecification\b",
+    r"(?i)\bselections?\b",
+    r"(?i)\bdisclaimer\b",
+    r"(?i)\bfooter\b",
+)
+
+STRUCTURE_ROOM_SUFFIX_TRIM_PATTERNS: tuple[str, ...] = (
+    r"(?i)\b(?:sink(?:ware)?|tap(?:ware)?|basin(?:\s+tapware)?|feature waste|waste|shower base|shower mixer|shower rose|bath/spa bath|bath tapware|toilet suite|toilet roll holder|mirrors?)\b.*$",
+    r"(?i)\bshower\b.*$",
+    r"(?i)\bbath/spa\b.*$",
+    r"(?i)\bsliding\s+type\b.*$",
+    r"(?i)\btype\s+frameless\b.*$",
+    r"(?i)\bselection\s+required\b.*$",
+    r"(?i)\bnot\s+applicable\b.*$",
+    r"(?i)\bdesk\b.*$",
+    r"(?i)\bdoors?\b.*$",
+)
+
+
+def _page_has_layout_schema(page: dict[str, object]) -> bool:
+    layout = page.get("page_layout")
+    return isinstance(layout, dict) and bool(
+        layout.get("room_blocks") or layout.get("rows") or layout.get("room_label") or layout.get("section_label")
+    )
+
+
+def _document_has_layout_schema(document: dict[str, object]) -> bool:
+    return any(_page_has_layout_schema(page) for page in document.get("pages", []))
+
+
+def _layout_row_to_text(raw_row: Any) -> str:
+    if not isinstance(raw_row, dict):
+        return ""
+    row_kind = normalize_space(str(raw_row.get("row_kind", "") or "")).lower().replace(" ", "_")
+    if row_kind in {"metadata", "footer"}:
+        return ""
+    label = normalize_space(str(raw_row.get("row_label", "") or ""))
+    value_bits = [
+        normalize_space(str(raw_row.get("value_region_text", "") or "")),
+        normalize_space(str(raw_row.get("supplier_region_text", "") or "")),
+        normalize_space(str(raw_row.get("notes_region_text", "") or "")),
+    ]
+    value_text = normalize_space(" ".join(bit for bit in value_bits if bit))
+    if label and value_text:
+        return f"{label} {value_text}"
+    return label or value_text
+
+
+def _looks_like_structured_room_noise(label: str) -> bool:
+    text = normalize_space(label)
+    if not text:
+        return True
+    if re.match(r"^\d+\b", text):
+        return True
+    if _looks_like_field_label(text):
+        return True
+    if re.search(r"(?i)\b(?:joinery selection sheet|colour schedule)\b", text):
+        return False
+    return any(re.search(pattern, text) for pattern in STRUCTURE_ROOM_NOISE_PATTERNS)
+
+
+def _clean_layout_room_label(
+    room_label: str,
+    section_label: str = "",
+    fallback_key: str = "",
+) -> str:
+    candidates = [room_label, section_label]
+    for candidate in candidates:
+        text = normalize_space(str(candidate or ""))
+        if not text:
+            continue
+        for pattern in STRUCTURE_ROOM_SUFFIX_TRIM_PATTERNS:
+            text = normalize_space(re.sub(pattern, "", text))
+        if not text:
+            continue
+        cleaned = source_room_label(text, fallback_key=fallback_key)
+        if not cleaned or cleaned == "Room":
+            alias_cleaned = _extract_layout_room_alias(text)
+            if alias_cleaned:
+                cleaned = alias_cleaned
+            else:
+                continue
+        elif _looks_like_structured_room_noise(cleaned):
+            alias_cleaned = _extract_layout_room_alias(text)
+            if alias_cleaned:
+                cleaned = alias_cleaned
+            else:
+                continue
+        return cleaned
+    return ""
+
+
+def _extract_layout_room_alias(text: str) -> str:
+    normalized = normalize_space(text)
+    if not normalized:
+        return ""
+    lowered = normalized.lower()
+    for room_key, aliases in sorted(ROOM_ALIASES.items(), key=lambda item: max(len(alias) for alias in item[1]), reverse=True):
+        for alias in sorted(aliases, key=len, reverse=True):
+            if not re.search(rf"(?i)\b{re.escape(alias)}\b", lowered):
+                continue
+            label = source_room_label(alias, fallback_key=room_key)
+            if label and label != "Room":
+                return label
+    return ""
+
+
+def _layout_section_seed(
+    file_name: str,
+    page_no: int,
+    section_label: str,
+    room_label: str,
+    rows: list[dict[str, Any]],
+    page_type: str,
+    section_kind: str = "room",
+) -> dict[str, Any] | None:
+    rendered_rows = [line for raw_row in rows for line in [_layout_row_to_text(raw_row)] if line]
+    normalized_room_label = _clean_layout_room_label(room_label, section_label)
+    if section_kind == "room" and not normalized_room_label:
+        return None
+    title_line = normalized_room_label or normalize_space(section_label)
+    if not title_line:
+        return None
+    text_parts = [title_line, *rendered_rows]
+    section_text = normalize_space("\n".join(part for part in text_parts if part))
+    if not section_text:
+        return None
+    if section_kind == "special":
+        section_key = re.sub(r"[^a-z0-9]+", "_", title_line.lower()).strip("_") or "special_section"
+    else:
+        section_key = source_room_key(normalized_room_label, fallback_key=normalize_room_key(normalized_room_label))
+    return {
+        "section_key": section_key,
+        "original_section_label": normalized_room_label or title_line,
+        "section_kind": section_kind,
+        "file_name": file_name,
+        "page_nos": [page_no],
+        "page_texts": [{"page_no": page_no, "text": section_text}],
+        "text_parts": [section_text],
+        "text": section_text,
+        "page_type": page_type,
+    }
+
+
+def _append_section(sections: list[dict[str, Any]], section: dict[str, Any]) -> None:
+    for existing in sections:
+        if (
+            existing.get("section_key") == section.get("section_key")
+            and existing.get("section_kind") == section.get("section_kind")
+            and existing.get("file_name") == section.get("file_name")
+        ):
+            existing["page_nos"] = _unique([*existing.get("page_nos", []), *section.get("page_nos", [])])
+            existing.setdefault("page_texts", []).extend(section.get("page_texts", []))
+            existing.setdefault("text_parts", []).extend(section.get("text_parts", []))
+            existing["text"] = normalize_space("\n".join(existing.get("text_parts", [])))
+            if section.get("original_section_label"):
+                existing["original_section_label"] = str(section.get("original_section_label", ""))
+            return
+    sections.append(section)
+
+
+def _collect_layout_sections_for_document(document: dict[str, object]) -> list[dict[str, Any]]:
+    sections: list[dict[str, Any]] = []
+    file_name = str(document.get("file_name", "") or "")
+    for page in document.get("pages", []):
+        if not _page_has_layout_schema(page):
+            continue
+        layout = dict(page.get("page_layout") or {})
+        page_type = normalize_space(str(layout.get("page_type", "") or "")).lower().replace(" ", "_")
+        section_label = normalize_space(str(layout.get("section_label", "") or ""))
+        room_label = normalize_space(str(layout.get("room_label", "") or ""))
+        page_no = int(page.get("page_no", 0) or 0)
+        if page_type not in {"joinery", "sinkware_tapware", "special"}:
+            continue
+        room_blocks = layout.get("room_blocks", [])
+        if not isinstance(room_blocks, list) or not room_blocks:
+            room_blocks = [{"room_label": room_label, "rows": layout.get("rows", [])}]
+        if page_type == "special":
+            special_rows = [row for row in layout.get("rows", []) if isinstance(row, dict)]
+            section = _layout_section_seed(
+                file_name=file_name,
+                page_no=page_no,
+                section_label=section_label or room_label,
+                room_label=section_label or room_label,
+                rows=special_rows,
+                page_type=page_type,
+                section_kind="special",
+            )
+            if section:
+                _append_section(sections, section)
+            continue
+        if page_type == "appliance":
+            continue
+        for block in room_blocks:
+            if not isinstance(block, dict):
+                continue
+            block_label = normalize_space(str(block.get("room_label", "") or ""))
+            block_rows = [row for row in block.get("rows", []) if isinstance(row, dict)]
+            section = _layout_section_seed(
+                file_name=file_name,
+                page_no=page_no,
+                section_label=section_label,
+                room_label=block_label or room_label,
+                rows=block_rows,
+                page_type=page_type,
+            )
+            if section:
+                _append_section(sections, section)
+    return sections
+
+
+def _collect_room_sections_for_document(document: dict[str, object]) -> list[dict[str, Any]]:
+    layout_sections = _collect_layout_sections_for_document(document)
+    if layout_sections:
+        return [section for section in layout_sections if section.get("section_kind") == "room"]
+    full_text = _document_full_text(document)
+    text_sections = _collect_schedule_room_sections([document]) or _find_room_sections(full_text)
+    sections: list[dict[str, Any]] = []
+    file_name = str(document.get("file_name", "") or "")
+    pages = list(document.get("pages", []))
+    for detected_room_key, chunk in text_sections:
+        room_label = source_room_label(chunk.split("\n", 1)[0], fallback_key=detected_room_key)
+        section = {
+            "section_key": source_room_key(room_label, fallback_key=detected_room_key),
+            "original_section_label": room_label,
+            "section_kind": "room",
+            "file_name": file_name,
+            "page_nos": [int(page.get("page_no", 0) or 0) for page in pages if page.get("page_no")],
+            "page_texts": [{"page_no": int(page.get("page_no", 0) or 0), "text": chunk} for page in pages if page.get("page_no")],
+            "text_parts": [chunk],
+            "text": normalize_space(chunk),
+            "page_type": "joinery",
+        }
+        sections.append(section)
+    return sections
+
+
 def _collect_schedule_room_sections(documents: list[dict[str, object]]) -> list[tuple[str, str]]:
     sections: list[tuple[str, str]] = []
     current_key = ""
@@ -627,7 +879,14 @@ def _document_room_master_score(document: dict[str, object]) -> dict[str, Any]:
     pages = list(document.get("pages", []))
     full_text = _document_full_text(document)
     file_name = normalize_space(str(document.get("file_name", ""))).lower()
-    schedule_sections = _collect_schedule_room_sections([document])
+    if _document_has_layout_schema(document):
+        schedule_sections = [
+            (str(section.get("section_key", "")), str(section.get("text", "")))
+            for section in _collect_layout_sections_for_document(document)
+            if section.get("section_kind") == "room"
+        ]
+    else:
+        schedule_sections = _collect_schedule_room_sections([document])
     schedule_pages = sum(1 for page in pages if _looks_like_joinery_schedule_page(str(page.get("text") or "")))
     colour_schedule_hits = len(re.findall(r"(?i)\bcolour schedule\b", full_text))
     cabinetry_field_hits = len(
@@ -2816,6 +3075,177 @@ def _parse_imperial_documents(
     return apply_snapshot_cleaning_rules(payload.model_dump(), rule_flags=rule_flags)
 
 
+def _documents_have_layout_schema(documents: list[dict[str, object]]) -> bool:
+    return any(_document_has_layout_schema(document) for document in documents)
+
+
+def _select_spec_room_master_document(builder_name: str, documents: list[dict[str, object]]) -> tuple[dict[str, object] | None, str]:
+    if _is_imperial_builder(builder_name):
+        return _select_imperial_room_master_document(documents)
+    return select_room_master_document(documents, "spec")
+
+
+def _collect_spec_sections_for_document(builder_name: str, document: dict[str, object]) -> list[dict[str, Any]]:
+    if _is_imperial_builder(builder_name):
+        return _collect_imperial_sections_for_document(document)
+    if _document_has_layout_schema(document):
+        return _collect_layout_sections_for_document(document)
+    return _collect_room_sections_for_document(document)
+
+
+def _parse_spec_documents_structure_first(
+    job_no: str,
+    builder_name: str,
+    documents: list[dict[str, object]],
+    rule_flags: Any = None,
+) -> dict[str, Any]:
+    imperial_builder = _is_imperial_builder(builder_name)
+    rooms: dict[str, RoomRow] = {}
+    appliances: list[ApplianceRow] = []
+    special_sections: list[SpecialSectionRow] = []
+    warnings: list[str] = []
+    source_documents: list[dict[str, str]] = []
+    flooring_notes: list[str] = []
+    splashback_notes: list[str] = []
+    room_master_document, room_master_reason = _select_spec_room_master_document(builder_name, documents)
+    room_master_file = str(room_master_document["file_name"]) if room_master_document else ""
+    site_address = _extract_site_address_from_documents([room_master_document] if room_master_document else documents) or _extract_site_address_from_documents(documents)
+    room_master_keys: set[str] = set()
+    supplement_files: list[str] = []
+    ignored_room_like_lines_count = 0
+
+    if room_master_document:
+        for section in _collect_spec_sections_for_document(builder_name, room_master_document):
+            if section.get("section_kind") != "room":
+                continue
+            if not imperial_builder and str(section.get("page_type", "") or "") != "joinery":
+                continue
+            original_room_label = source_room_label(
+                str(section.get("original_section_label", "")),
+                fallback_key=str(section.get("section_key", "")),
+            )[:80]
+            room_key = source_room_key(original_room_label, fallback_key=str(section.get("section_key", "")))
+            if room_key:
+                room_master_keys.add(room_key)
+
+    for document in documents:
+        file_name = str(document["file_name"])
+        pages = list(document["pages"])
+        is_room_master = not room_master_document or document is room_master_document
+        if not is_room_master:
+            supplement_files.append(file_name)
+        source_documents.append(
+            {
+                "file_name": file_name,
+                "role": str(document["role"]),
+                "page_count": str(len(pages)),
+                "room_role": "room_master" if is_room_master else "supplement",
+            }
+        )
+        full_text = "\n\n".join(str(page["text"]) for page in pages if page.get("text"))
+        if not full_text.strip():
+            warnings.append(f"No extractable text found in {file_name}.")
+            continue
+        for page in pages:
+            if page.get("needs_ocr"):
+                warnings.append(f"Low-text page detected in {file_name} page {page['page_no']}.")
+
+        for section in _collect_spec_sections_for_document(builder_name, document):
+            section_kind = str(section.get("section_kind", "room") or "room")
+            if section_kind == "special":
+                if imperial_builder and is_room_master:
+                    special_sections.append(_imperial_special_section_from_section(section))
+                continue
+
+            if imperial_builder and not is_room_master:
+                continue
+
+            original_room_label = source_room_label(
+                str(section.get("original_section_label", "")),
+                fallback_key=str(section.get("section_key", "")),
+            )[:80]
+            room_key = source_room_key(original_room_label, fallback_key=str(section.get("section_key", "")))
+            target_room_key, ignore_reason = _resolve_room_target(room_key, original_room_label, room_master_keys, is_room_master)
+            if ignore_reason:
+                ignored_room_like_lines_count += 1
+                warnings.append(f"Ignored room-like section '{original_room_label}' from {file_name}: {ignore_reason}.")
+                continue
+            if is_room_master:
+                room_master_keys.add(target_room_key)
+
+            if imperial_builder:
+                row = _imperial_room_from_section(section)
+                row.room_key = target_room_key
+                row.original_room_label = original_room_label or row.original_room_label
+                if is_room_master:
+                    row.source_file = file_name
+                rooms[target_room_key] = row
+                continue
+
+            chunk = str(section.get("text", "") or "")
+            lines = _preprocess_chunk(chunk)
+            row = rooms.get(target_room_key) or RoomRow(
+                room_key=target_room_key,
+                original_room_label=original_room_label,
+                source_file=file_name,
+            )
+            if is_room_master:
+                row.original_room_label = original_room_label
+                row.source_file = file_name
+            section_pages = [
+                {"page_no": page_no, "text": text}
+                for page_no, text in [
+                    (int(page_entry.get("page_no", 0) or 0), str(page_entry.get("text", "") or ""))
+                    for page_entry in section.get("page_texts", [])
+                    if isinstance(page_entry, dict)
+                ]
+                if page_no
+            ]
+            _merge_room_section_into_row(
+                row,
+                lines,
+                chunk,
+                file_name,
+                section_pages or pages,
+                allow_material_fields=is_room_master,
+                authoritative_room_section=is_room_master,
+            )
+            rooms[target_room_key] = row
+
+        appliances.extend(_extract_appliances(full_text, file_name, pages))
+        flooring_text = _extract_global_value(full_text, "flooring")
+        splashback_text = _extract_global_value(full_text, "splashback")
+        if flooring_text:
+            flooring_notes.append(flooring_text)
+        if splashback_text:
+            splashback_notes.append(splashback_text)
+
+    payload = SnapshotPayload(
+        job_no=job_no,
+        builder_name=builder_name,
+        source_kind="spec",
+        generated_at=utc_now_iso(),
+        site_address=site_address,
+        analysis=AnalysisMeta(
+            parser_strategy=cleaning_rules.global_parser_strategy(),
+            room_master_file=room_master_file,
+            room_master_reason=room_master_reason,
+            supplement_files=supplement_files,
+            ignored_room_like_lines_count=ignored_room_like_lines_count,
+        ),
+        rooms=list(rooms.values()),
+        special_sections=special_sections,
+        appliances=_dedupe_appliances(appliances),
+        others={
+            "flooring_notes": " | ".join(_unique(flooring_notes)),
+            "splashback_notes": " | ".join(_unique(splashback_notes)),
+        },
+        warnings=_unique(warnings),
+        source_documents=source_documents,
+    )
+    return apply_snapshot_cleaning_rules(payload.model_dump(), rule_flags=rule_flags)
+
+
 def parse_documents(
     job_no: str,
     builder_name: str,
@@ -2823,6 +3253,8 @@ def parse_documents(
     documents: list[dict[str, object]],
     rule_flags: Any = None,
 ) -> dict:
+    if source_kind == "spec" and _documents_have_layout_schema(documents):
+        return _parse_spec_documents_structure_first(job_no, builder_name, documents, rule_flags=rule_flags)
     if source_kind == "spec" and _is_imperial_builder(builder_name):
         return _parse_imperial_documents(job_no, builder_name, source_kind, documents, rule_flags=rule_flags)
 
@@ -3940,10 +4372,12 @@ def _collect_room_overlays(documents: list[dict[str, object]], room_master_file:
         full_text = "\n\n".join(str(page["text"]) for page in document.get("pages", []) if page.get("text"))
         if not full_text.strip():
             continue
-        sections = _collect_schedule_room_sections([document]) or _find_room_sections(full_text)
+        sections = _collect_room_sections_for_document(document)
         material_allowed = not room_master_file or file_name == room_master_file
-        for detected_room_key, chunk in sections:
-            room_label = source_room_label(chunk.split("\n", 1)[0], fallback_key=detected_room_key)
+        for section in sections:
+            chunk = str(section.get("text", "") or "")
+            detected_room_key = str(section.get("section_key", "") or "")
+            room_label = source_room_label(str(section.get("original_section_label", "")), fallback_key=detected_room_key)
             room_key = source_room_key(room_label, fallback_key=detected_room_key)
             lines = _preprocess_chunk(chunk)
             overlay = overlays.setdefault(
