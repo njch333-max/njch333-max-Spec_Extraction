@@ -20,6 +20,7 @@
   - deterministic Westinghouse-style official product-page probing before search fallback
   - deterministic AEG Australia product-page probing on `aegaustralia.com.au`
   - Fisher & Paykel official product-page matching with official-size extraction from structured product metadata
+  - heuristic-first, vision-fallback page parsing for high-risk PDF pages, using rendered page images to recover section and row boundaries before final field mapping
   - Clarendon-only deterministic post-polish that rebuilds cleaner room text from schedule and fixture pages while preserving source-driven room ownership
   - job-page Parse buttons with clearer run-status wording
   - live-polling run history with granular worker stage messages
@@ -53,9 +54,19 @@
   - the Job page temporarily hides the Review cards while the review UX is being redesigned, without removing the backend review model
   - all user-facing timestamps are now rendered in fixed Brisbane time (`YYYY-MM-DD HH:mm AEST`) across job lists, uploads, run history, export tables, and spec-list summary
   - parsed snapshots now carry a `site_address` when the source documents expose one, and the Job Workspace / Raw Spec List headers append that address as `job no - address`
+  - Clarendon schedule polish now prefers `raw_text` over vision-normalized `text`, so kitchen schedule notes such as `KICKBOARDS`, `BULKHEAD SHADOWLINE`, `HANDLE 1/2`, `DOOR HINGES`, and `DRAWER RUNNERS` survive even when vision restructuring rewrites the page text
+  - Clarendon address extraction now uses page-header stop markers so `Site Address:` lines do not absorb nearby joinery fields such as `BENCHTOP`, `DOOR COLOUR`, or `THERMOLAMINATE NOTES`
+  - Material Summary normalization now preserves meaningful `profile`, `style`, and `model no.` detail for `Door Colours` and `Handles` instead of collapsing some values to a bare supplier
   - the Jobs list `Open` action now opens the target job in a new browser tab
   - the Job Workspace and Raw Spec List pages now start with the left navigation rail hidden and expose a client-side show/hide toggle, while the Jobs homepage keeps the rail visible
   - dense tables on the Jobs page, Job Workspace, Raw Spec List, Builders page, and Run History now collapse into stacked card-style rows below roughly `1280px` so 1080p half-screen windows remain readable without horizontal scrolling
+  - Raw Snapshot room cards now collapse into a single-field-flow layout below roughly `1280px`, with wrapped long values and no fixed wide-table minimum widths, so half-screen 1080p windows do not require horizontal dragging
+  - Imperial row parsing now recognizes auxiliary row starts such as `ISLAND CABINETRY COLOUR`, `GPO'S`, `BIN`, `HAMPER`, `HANGING RAIL`, `MIRRORED SHAVING CABINET`, and `EXTRA TOP IN ...` as stop markers, preventing benchtops, floating shelves, and handles from swallowing later rows
+  - Imperial inline split logic now avoids splitting inside ordinary words such as `CABINETRY`, reducing false row breaks caused by OCR-glued all-caps text
+  - Imperial `Hinges & Drawer Runners` rows now recover `Soft Close` even when OCR glues them to `Floor Type & Kick refacing required`
+  - Imperial sink/tap pre-heading parsing now keeps local continuation lines such as finish/model notes while still resetting on explicit basin/tub labels, improving tap recovery without reintroducing cross-room sink contamination
+  - Imperial room cards are now rebuilt from the heuristic section parser after AI merge, so room-level benchtops, cabinetry colours, floating shelves, handles, and fixture text stay tied to same-room same-row boundaries instead of being re-polluted by broader AI guesses
+  - Half-screen raw snapshot layout now explicitly removes fixed content minima and hides horizontal overflow so 1080p split-screen use can wrap long room values instead of forcing sideways dragging
   - snapshot and run metadata now record parser strategy, worker PID, and app build ID
   - single-worker lease guard to prevent stale local worker processes from racing newer code on queued jobs
   - online-first deployment helper scripts that push the current repo state to `/opt/spec-extraction`, restart production services, and verify live health
@@ -118,6 +129,7 @@
 - New parse runs always use the fixed global conservative profile
 - Smoke tests must not touch the real local app database
 - Confirmed implementation work is only done after production deployment and live verification succeed on `spec.lxtransport.online`
+- Parser-accuracy work is only done after the affected live rerun is checked against the source PDF, not just against an older webpage or snapshot
 
 ## Remaining Work
 - Refine OCR fallback for image-heavy PDFs
@@ -240,6 +252,7 @@
   - grouped-title recovery when the `... JOINERY SELECTION SHEET` text appears after body rows in extracted PDF order
   - `Floating Shelf`, `LED`, `Accessories`, and curated accessory `Others` rendering/export safety
 - Smoke tests now use an isolated temporary data directory instead of `App/data/`
+- PDF-grounded regression coverage now includes high-risk Clarendon and Imperial fixtures so parser fixes are checked against source-PDF page text instead of only older webpage outputs
 - Worker smoke test passed for:
   - upload DOCX spec
   - queue spec extraction

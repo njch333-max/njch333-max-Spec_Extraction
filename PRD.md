@@ -70,6 +70,8 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - The room-master room set must be established before supplement files are processed, so supplement-file upload order cannot create extra rooms.
 - If OpenAI is configured, use it to improve structured extraction.
 - The default OpenAI extraction model is `gpt-4.1-mini`; production and local environments should stay aligned unless a deliberate override is documented.
+- Extraction now uses a heuristic-first, vision-fallback pipeline for high-risk pages: render the PDF page to an image, ask OpenAI for page/block/row structure, then let the row-matched text fill final values.
+- Vision fallback is structure-first, not answer-first. It should correct section, room-block, and row boundaries, while final field values continue to come from the matched source row text/OCR.
 - All builders must use the fixed `Global Conservative` profile based on the accepted `37016` output style.
 - Under `Global Conservative`, heuristic room structure and cleaning remain primary, room identity is source-driven, OpenAI fills missing fields conservatively, and AI must not inject extra rooms, collapse distinct rooms into broad buckets, or overwrite already-clean room text with noisier duplicates.
 - When OpenAI and heuristic room sets disagree, keep the heuristic room layout as the primary room skeleton and merge AI fields conservatively into that layout so repeated parses of the same spec stay visually stable.
@@ -86,6 +88,8 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Supplement-file room-like lines that do not belong to the room-master set, such as glazing, door-finish, waste-colour, or stray room headings, must be ignored and surfaced as warnings instead of becoming new rooms.
 - Clarendon jobs must still pass through a deterministic post-polish stage, but that polish now runs per detected room instead of compressing output into a fixed 6-room layout.
 - Clarendon post-polish should prefer clean schedule-page text for benchtops, door colours, toe kicks, bulkheads, handles, sink/basin/tap fixtures, and soft-close states instead of falling back to OCR-noisy field fragments when the schedule pages already provide a cleaner source.
+- Clarendon polish and address extraction must prefer `raw_text` from the source PDF whenever it is present; vision-normalized `text` is only a fallback and must not erase schedule-note fields such as `KICKBOARDS`, `BULKHEAD SHADOWLINE`, `HANDLE 1/2`, `DOOR HINGES`, or `DRAWER RUNNERS`.
+- Clarendon address extraction must use page-header stop markers so `Site Address:` lines do not absorb nearby joinery body text such as `BENCHTOP`, `DOOR COLOUR`, `HANDLE`, or `THERMOLAMINATE NOTES`.
 - Appliance parsing must prefer explicit `model_no` values from labeled rows or table columns and must not use brand-only words or generic notes as model numbers.
 - Sink, basin, and tap selections must be captured as room-level fixture fields instead of appliance rows.
 - Door colour information should expose room-level splits for `Overheads`, `Base`, `Island`, and `Bar Back` whenever the source text makes those categories explicit.
@@ -96,6 +100,10 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - If no explicit `Wall Run Bench Top` is present, a plain `Bench Top` or `Cooktop Run` description defaults to `Wall Run Bench Top`.
 - Yellowwood-style joinery schedules must map `Back Benchtops` to `Wall Run Bench Top` and preserve `Waterfall Ends` as part of `Island Bench Top`.
 - Imperial-style joinery selection sheets must use page-top section titles as authoritative section boundaries, keep continuation pages with the current section until the next section title, and stop extraction at `CLIENT NAME / SIGNATURE / SIGNED DATE` footer blocks.
+- Imperial section parsing must treat obvious in-section row labels such as `ISLAND CABINETRY COLOUR`, `GPO'S`, `BIN`, `HAMPER`, `HANGING RAIL`, `MIRRORED SHAVING CABINET`, and `EXTRA TOP IN ...` as row boundaries even when they are not final business fields, so preceding benchtop, floating-shelf, handle, and cabinetry rows do not continue through them.
+- Imperial OCR-glued lines must not split inside ordinary words such as `CABINETRY`; inline marker detection should only split at real row starts or glued lowercase-to-uppercase row transitions.
+- Imperial `Hinges & Drawer Runners` rows must recover `Soft Close` even when OCR glues `Floor Type & Kick refacing required` into the same line or reorders the line fragments.
+- After OpenAI merge, Imperial room-level joinery fields must be rebuilt from the builder-specific heuristic section parser so room cards keep same-room, same-section, same-row ownership even when AI proposes broader or noisier field spans.
 - Imperial continuation must also stop when a later page switches into non-joinery full-page headings such as `APPLIANCES` or `SINKWARE & TAPWARE`.
 - Imperial-style non-room sections such as `FEATURE TALL DOORS` must be preserved separately from rooms and must never be merged into the surrounding kitchen or pantry room output.
 - Imperial accessory lists must be deduplicated within the same room so repeated `Accessories` rows do not render multiple times with the same value.
@@ -152,6 +160,8 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - The page must use `raw_spec` only and must not switch to reviewed data.
 - The page title must show `Spec List for job no - site address` when the latest parsed snapshot provides a `site_address`; if no address exists, omit the separator and address text.
 - The page must provide a left-side navigation hide/show control and should load with the navigation rail hidden by default on every visit.
+- In 1080p half-screen windows, the Raw Spec List page must remain readable without a horizontal scroll bar; dense tables should switch to stacked cards and room fields should wrap vertically instead of forcing sideways dragging.
+- In 1080p half-screen windows, the responsive layout must also remove fixed content minima and suppress page-level horizontal overflow so wrapped room cards do not still trigger a horizontal scrollbar.
 - The `Rooms` section should use one wide horizontal block per room on desktop, stacked vertically one below the next, so each field can be read without cramped narrow cards.
 - Each room card must show room fixture rows for `Sink`, `Basin`, and `Tap`.
 - Each room card must show `Door Colours` as separate `Overheads`, `Base`, `Island`, and `Bar Back` rows.
@@ -164,6 +174,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - The `Material Summary` block must deduplicate and count room-level `Door Colours`, `Handles`, and `Bench Tops` using smart normalization.
 - `Material Summary -> Bench Tops` must preserve full material, thickness, and edge/apron/waterfall details while stripping only location suffixes such as `to cooktop run`, `to island bench`, or `to powder room 2`.
 - `Material Summary -> Bench Tops` must also include floating-shelf materials when the room card captures a `Floating Shelf` material.
+- `Material Summary -> Door Colours` and `Material Summary -> Handles` must preserve real `profile`, `style`, `model no.`, and handle-family descriptions; normalization may trim pure installation-location tails, but it must not collapse a value to a bare supplier name.
 - Appliance rows on the page must expose a clickable official `Product` link and allow long URLs to wrap across multiple lines.
 - The page must also render a `Special Sections` area for non-room joinery sections such as `FEATURE TALL DOORS`.
 - The page must show `Extraction duration` in `Snapshot Summary`.
@@ -215,6 +226,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
   - production web and worker services restart successfully,
   - the affected live page or job is verified.
 - Parsing changes must be validated through a fresh online parse run for the affected job, not by inspecting an older snapshot.
+- Parser-accuracy changes must also be checked against the source PDF itself; older webpages or older snapshots are reference material only and are not acceptance criteria.
 - The repo should provide a repeatable local deployment helper so production updates do not rely on ad hoc terminal commands.
 
 ## 5. Canonical Data Requirements
@@ -228,6 +240,11 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - `analysis.note`
 - `analysis.worker_pid`
 - `analysis.app_build_id`
+- `analysis.vision_attempted`
+- `analysis.vision_succeeded`
+- `analysis.vision_pages`
+- `analysis.vision_page_count`
+- `analysis.vision_note`
 - `site_address`
 
 ### 5.1 Room Fields

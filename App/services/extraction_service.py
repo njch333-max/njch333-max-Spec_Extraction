@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -26,6 +27,15 @@ def build_spec_snapshot(
     documents = _load_documents(files, role="spec")
     _report_progress(progress_callback, "heuristic", f"Running heuristic extraction on {len(documents)} spec file(s)")
     heuristic = parsing.parse_documents(job_no=job["job_no"], builder_name=builder["name"], source_kind="spec", documents=documents, rule_flags=rule_flags)
+    documents, heuristic, vision_meta = _apply_vision_fallback(
+        job,
+        builder,
+        documents,
+        heuristic,
+        source_kind="spec",
+        rule_flags=rule_flags,
+        progress_callback=progress_callback,
+    )
     heuristic_analysis = dict(heuristic.get("analysis") or {})
     ai_result, analysis = _try_openai(
         job,
@@ -47,6 +57,11 @@ def build_spec_snapshot(
             "room_master_reason": heuristic_analysis.get("room_master_reason", ""),
             "supplement_files": heuristic_analysis.get("supplement_files", []),
             "ignored_room_like_lines_count": heuristic_analysis.get("ignored_room_like_lines_count", 0),
+            "vision_attempted": vision_meta["vision_attempted"],
+            "vision_succeeded": vision_meta["vision_succeeded"],
+            "vision_pages": vision_meta["vision_pages"],
+            "vision_page_count": vision_meta["vision_page_count"],
+            "vision_note": vision_meta["vision_note"],
         }
     )
     if ai_result:
@@ -92,6 +107,15 @@ def build_drawing_snapshot(
     documents = _load_documents(files, role="drawing")
     _report_progress(progress_callback, "heuristic", f"Running heuristic extraction on {len(documents)} drawing file(s)")
     heuristic = parsing.parse_documents(job_no=job["job_no"], builder_name=builder["name"], source_kind="drawing", documents=documents, rule_flags=rule_flags)
+    documents, heuristic, vision_meta = _apply_vision_fallback(
+        job,
+        builder,
+        documents,
+        heuristic,
+        source_kind="drawing",
+        rule_flags=rule_flags,
+        progress_callback=progress_callback,
+    )
     heuristic_analysis = dict(heuristic.get("analysis") or {})
     ai_result, analysis = _try_openai(
         job,
@@ -113,6 +137,11 @@ def build_drawing_snapshot(
             "room_master_reason": heuristic_analysis.get("room_master_reason", ""),
             "supplement_files": heuristic_analysis.get("supplement_files", []),
             "ignored_room_like_lines_count": heuristic_analysis.get("ignored_room_like_lines_count", 0),
+            "vision_attempted": vision_meta["vision_attempted"],
+            "vision_succeeded": vision_meta["vision_succeeded"],
+            "vision_pages": vision_meta["vision_pages"],
+            "vision_page_count": vision_meta["vision_page_count"],
+            "vision_note": vision_meta["vision_note"],
         }
     )
     if ai_result:
@@ -135,15 +164,385 @@ def _load_documents(files: list[dict[str, Any]], role: str) -> list[dict[str, ob
     documents: list[dict[str, object]] = []
     for file_row in files:
         path = Path(file_row["path"])
+        pages = []
+        for page in parsing.load_document_pages(path):
+            page_payload = dict(page)
+            page_payload["raw_text"] = str(page_payload.get("text", "") or "")
+            pages.append(page_payload)
         documents.append(
             {
                 "file_name": file_row["original_name"],
                 "path": str(path),
                 "role": role,
-                "pages": parsing.load_document_pages(path),
+                "pages": pages,
             }
         )
     return documents
+
+
+def _blank_vision_meta() -> dict[str, Any]:
+    return {
+        "vision_attempted": False,
+        "vision_succeeded": False,
+        "vision_pages": [],
+        "vision_page_count": 0,
+        "vision_note": "",
+    }
+
+
+def _apply_vision_fallback(
+    job: dict[str, Any],
+    builder: dict[str, Any],
+    documents: list[dict[str, object]],
+    heuristic: dict[str, Any],
+    source_kind: str,
+    rule_flags: Any = None,
+    progress_callback: ProgressCallback = None,
+) -> tuple[list[dict[str, object]], dict[str, Any], dict[str, Any]]:
+    vision_meta = _blank_vision_meta()
+    if not documents:
+        vision_meta["vision_note"] = "No source documents available for vision fallback."
+        _report_progress(progress_callback, "vision_skipped", vision_meta["vision_note"])
+        return documents, heuristic, vision_meta
+    if not runtime.OPENAI_VISION_ENABLED:
+        vision_meta["vision_note"] = "OpenAI vision fallback is disabled in runtime settings."
+        _report_progress(progress_callback, "vision_skipped", vision_meta["vision_note"])
+        return documents, heuristic, vision_meta
+    if not runtime.OPENAI_ENABLED:
+        vision_meta["vision_note"] = "OpenAI is disabled, so vision fallback was skipped."
+        _report_progress(progress_callback, "vision_skipped", vision_meta["vision_note"])
+        return documents, heuristic, vision_meta
+    if not runtime.OPENAI_API_KEY:
+        vision_meta["vision_note"] = "OPENAI_API_KEY is not configured, so vision fallback was skipped."
+        _report_progress(progress_callback, "vision_skipped", vision_meta["vision_note"])
+        return documents, heuristic, vision_meta
+
+    candidates = _select_vision_pages(
+        builder_name=str(builder.get("name", "") or ""),
+        documents=documents,
+        heuristic=heuristic,
+        source_kind=source_kind,
+    )
+    if not candidates:
+        vision_meta["vision_note"] = "No high-risk pages matched the vision fallback rules."
+        _report_progress(progress_callback, "vision_skipped", vision_meta["vision_note"])
+        return documents, heuristic, vision_meta
+
+    updated_documents: list[dict[str, object]] = []
+    for document in documents:
+        updated_documents.append(
+            {
+                **document,
+                "pages": [dict(page) for page in list(document.get("pages", []))],
+            }
+        )
+
+    attempted_pages: list[int] = []
+    applied_pages: list[int] = []
+    page_notes: list[str] = []
+    vision_meta["vision_attempted"] = True
+    max_pages = max(1, runtime.OPENAI_VISION_MAX_PAGES)
+
+    for doc_index, page_index in candidates[:max_pages]:
+        document = updated_documents[doc_index]
+        pages = list(document.get("pages", []))
+        if page_index >= len(pages):
+            continue
+        page = pages[page_index]
+        page_no = int(page.get("page_no", 0) or 0)
+        attempted_pages.append(page_no)
+        try:
+            _report_progress(
+                progress_callback,
+                "vision_prepare",
+                f"Preparing page {page_no} from {document['file_name']} for vision layout",
+            )
+            image_bytes = _render_pdf_page_png(
+                Path(str(document.get("path", ""))),
+                page_no=page_no,
+                dpi=runtime.OPENAI_VISION_DPI,
+            )
+            _report_progress(
+                progress_callback,
+                "vision_request",
+                f"Calling OpenAI vision for {document['file_name']} page {page_no}",
+            )
+            layout = _request_page_layout(
+                job_no=str(job.get("job_no", "")),
+                builder_name=str(builder.get("name", "") or ""),
+                source_kind=source_kind,
+                file_name=str(document.get("file_name", "") or ""),
+                page_no=page_no,
+                page_text=str(page.get("raw_text", page.get("text", "")) or ""),
+                image_bytes=image_bytes,
+            )
+            normalized_text = _vision_layout_to_text(layout, fallback_text=str(page.get("raw_text", page.get("text", "")) or ""))
+            if not normalized_text:
+                page_notes.append(f"page {page_no}: OpenAI vision returned no usable layout text")
+                continue
+            page["page_layout"] = layout
+            page["vision_applied"] = True
+            page["text"] = normalized_text
+            applied_pages.append(page_no)
+        except Exception as exc:
+            page_notes.append(f"page {page_no}: {_truncate_note(exc)}")
+
+    if not applied_pages:
+        vision_meta["vision_pages"] = attempted_pages
+        vision_meta["vision_page_count"] = len(attempted_pages)
+        vision_meta["vision_note"] = "; ".join(page_notes)[:400] if page_notes else "Vision fallback attempted but no page layout was applied."
+        _report_progress(progress_callback, "vision_fallback", vision_meta["vision_note"])
+        return documents, heuristic, vision_meta
+
+    try:
+        _report_progress(
+            progress_callback,
+            "vision_apply",
+            f"Re-running heuristic extraction with vision-normalized layout on {len(applied_pages)} page(s)",
+        )
+        heuristic = parsing.parse_documents(
+            job_no=str(job.get("job_no", "")),
+            builder_name=str(builder.get("name", "") or ""),
+            source_kind=source_kind,
+            documents=updated_documents,
+            rule_flags=rule_flags,
+        )
+    except Exception as exc:
+        vision_meta["vision_pages"] = attempted_pages
+        vision_meta["vision_page_count"] = len(attempted_pages)
+        vision_meta["vision_note"] = f"Vision layout applied but heuristic re-parse failed: {_truncate_note(exc)}"
+        _report_progress(progress_callback, "vision_fallback", vision_meta["vision_note"])
+        return documents, heuristic, vision_meta
+
+    vision_meta["vision_succeeded"] = True
+    vision_meta["vision_pages"] = applied_pages
+    vision_meta["vision_page_count"] = len(applied_pages)
+    success_note = f"Vision fallback applied to {len(applied_pages)} page(s): {', '.join(str(page_no) for page_no in applied_pages)}."
+    if page_notes:
+        success_note = f"{success_note} Partial issues: {'; '.join(page_notes)[:220]}"
+    vision_meta["vision_note"] = success_note[:400]
+    return updated_documents, heuristic, vision_meta
+
+
+def _select_vision_pages(
+    builder_name: str,
+    documents: list[dict[str, object]],
+    heuristic: dict[str, Any],
+    source_kind: str,
+) -> list[tuple[int, int]]:
+    candidates: list[tuple[int, int]] = []
+    for doc_index, document in enumerate(documents):
+        document_path = Path(str(document.get("path", "") or ""))
+        if document_path.suffix.lower() != ".pdf":
+            continue
+        pages = list(document.get("pages", []))
+        for page_index, page in enumerate(pages):
+            if _page_requires_vision(
+                builder_name=builder_name,
+                source_kind=source_kind,
+                file_name=str(document.get("file_name", "") or ""),
+                page=page,
+                heuristic=heuristic,
+            ):
+                candidates.append((doc_index, page_index))
+    return candidates
+
+
+def _page_requires_vision(
+    builder_name: str,
+    source_kind: str,
+    file_name: str,
+    page: dict[str, Any],
+    heuristic: dict[str, Any],
+) -> bool:
+    text = str(page.get("raw_text", page.get("text", "")) or "")
+    if not text:
+        return False
+    upper = text.upper()
+    if bool(page.get("needs_ocr")):
+        return True
+    if _looks_like_glued_field_page(text):
+        return True
+    if _looks_like_mixed_field_value_page(text):
+        return True
+    if _looks_like_reversed_sinkware_page(text):
+        return True
+    if _looks_like_high_risk_table_page(text, builder_name=builder_name, source_kind=source_kind):
+        return True
+    if "JOINERY SELECTION SHEET" in upper and "imperial" in builder_name.strip().lower():
+        return True
+    if "SINKWARE & TAPWARE" in upper:
+        return True
+    if "APPLIANCES" in upper and ("MODEL" in upper or "SUPPLIER" in upper or "NOTES" in upper):
+        return True
+    _ = heuristic
+    _ = file_name
+    return False
+
+
+def _looks_like_glued_field_page(text: str) -> bool:
+    glue_patterns = (
+        r"(?i)(?:HANDLES|BENCHTOPS?|SPLASHBACK|KICKBOARDS?|BASE CABINETRY COLOUR|UPPER CABINETRY COLOUR|TALL CABINETRY COLOUR|FLOATING SHELV(?:ES|ING)|GPO'?S|BIN|HAMPER)(?=[A-Z])",
+        r"(?i)(?:AREA / ITEM|NOTES|SUPPLIER)(?=[A-Z])",
+    )
+    return any(re.search(pattern, text) for pattern in glue_patterns)
+
+
+def _looks_like_mixed_field_value_page(text: str) -> bool:
+    lines = [parsing.normalize_space(line) for line in str(text).splitlines() if parsing.normalize_space(line)]
+    for line in lines:
+        upper = line.upper()
+        if "BENCHTOP" in upper and any(token in upper for token in ("KICKBOARD", "HANDLES", "GPO", "BIN", "HAMPER")):
+            return True
+        if "SPLASHBACK" in upper and any(token in upper for token in ("BENCHTOP", "HANDLES", "KICKBOARD")):
+            return True
+        if "HANDLES" in upper and any(token in upper for token in ("BASE CABINETRY COLOUR", "UPPER CABINETRY COLOUR", "BENCHTOP")):
+            return True
+    return False
+
+
+def _looks_like_reversed_sinkware_page(text: str) -> bool:
+    upper = text.upper()
+    sinkware_heading = upper.find("SINKWARE & TAPWARE")
+    room_block = min(
+        [index for index in (upper.find("SINKWARE ("), upper.find("TAPWARE (")) if index >= 0] or [-1],
+    )
+    return sinkware_heading >= 0 and room_block >= 0 and room_block < sinkware_heading
+
+
+def _looks_like_high_risk_table_page(text: str, builder_name: str, source_kind: str) -> bool:
+    upper = text.upper()
+    has_table_headers = "AREA / ITEM" in upper and ("SUPPLIER" in upper or "NOTES" in upper)
+    if has_table_headers:
+        return True
+    if source_kind == "spec" and "COLOUR SCHEDULE" in upper and "SUPPLIER DESCRIPTION" in upper:
+        return True
+    if "imperial" in builder_name.strip().lower() and any(
+        marker in upper for marker in ("JOINERY SELECTION SHEET", "SINKWARE & TAPWARE", "APPLIANCES")
+    ):
+        return True
+    return False
+
+
+def _render_pdf_page_png(path: Path, page_no: int, dpi: int) -> bytes:
+    try:
+        import fitz
+    except ImportError as exc:  # pragma: no cover - runtime guard
+        raise RuntimeError("PyMuPDF is not installed for vision page rendering.") from exc
+
+    if not path.exists():
+        raise RuntimeError(f"Source PDF was not found for vision fallback: {path}")
+    with fitz.open(str(path)) as document:
+        if page_no < 1 or page_no > document.page_count:
+            raise RuntimeError(f"Requested page {page_no} is outside the PDF page range.")
+        page = document.load_page(page_no - 1)
+        scale = max(float(dpi) / 72.0, 1.0)
+        matrix = fitz.Matrix(scale, scale)
+        pixmap = page.get_pixmap(matrix=matrix, alpha=False)
+        return pixmap.tobytes("png")
+
+
+def _request_page_layout(
+    job_no: str,
+    builder_name: str,
+    source_kind: str,
+    file_name: str,
+    page_no: int,
+    page_text: str,
+    image_bytes: bytes,
+) -> dict[str, Any]:
+    prompt = {
+        "job_no": job_no,
+        "builder_name": builder_name,
+        "source_kind": source_kind,
+        "file_name": file_name,
+        "page_no": page_no,
+        "instructions": (
+            "You are correcting PDF table structure. Return JSON only. "
+            "Identify the page_type, section_label, room_label, and rows. "
+            "Rows must preserve the visible table or block order and must not mix adjacent rows. "
+            "Each row must include row_label, value_region_text, supplier_region_text, notes_region_text, and row_kind. "
+            "Use row_kind only from: material, handle, accessory, sink, tap, basin, metadata, footer, other. "
+            "Treat disclaimers, signatures, dates, and client blocks as metadata or footer, not material rows."
+        ),
+        "ocr_text": page_text,
+    }
+    encoded_image = base64.b64encode(image_bytes).decode("ascii")
+    response_json = _post_responses_api_content(
+        [
+            {"type": "input_text", "text": json.dumps(prompt, ensure_ascii=False)},
+            {"type": "input_image", "image_url": f"data:image/png;base64,{encoded_image}"},
+        ]
+    )
+    output_text = _extract_output_text(response_json)
+    if not output_text:
+        raise RuntimeError("OpenAI vision returned no output text.")
+    parsed = _parse_openai_json_output(output_text)
+    if isinstance(parsed.get("page_layout"), dict):
+        parsed = parsed["page_layout"]
+    if not isinstance(parsed, dict):
+        raise RuntimeError("OpenAI vision returned a non-object page layout.")
+    return _normalize_page_layout(parsed)
+
+
+def _normalize_page_layout(layout: dict[str, Any]) -> dict[str, Any]:
+    page_type = str(layout.get("page_type", "unknown") or "unknown").strip().lower().replace(" ", "_")
+    if page_type not in {"joinery", "sinkware_tapware", "appliance", "special", "unknown"}:
+        page_type = "unknown"
+    normalized_rows: list[dict[str, str]] = []
+    for raw_row in layout.get("rows", []):
+        if not isinstance(raw_row, dict):
+            continue
+        normalized_rows.append(
+            {
+                "row_label": parsing.normalize_space(str(raw_row.get("row_label", "") or "")),
+                "value_region_text": parsing.normalize_space(str(raw_row.get("value_region_text", "") or "")),
+                "supplier_region_text": parsing.normalize_space(str(raw_row.get("supplier_region_text", "") or "")),
+                "notes_region_text": parsing.normalize_space(str(raw_row.get("notes_region_text", "") or "")),
+                "row_kind": str(raw_row.get("row_kind", "other") or "other").strip().lower().replace(" ", "_"),
+            }
+        )
+    return {
+        "page_type": page_type,
+        "section_label": parsing.normalize_space(str(layout.get("section_label", "") or "")),
+        "room_label": parsing.normalize_space(str(layout.get("room_label", "") or "")),
+        "rows": normalized_rows,
+    }
+
+
+def _vision_layout_to_text(layout: dict[str, Any], fallback_text: str = "") -> str:
+    if not isinstance(layout, dict):
+        return fallback_text
+    lines: list[str] = []
+    section_label = parsing.normalize_space(str(layout.get("section_label", "") or ""))
+    room_label = parsing.normalize_space(str(layout.get("room_label", "") or ""))
+    if section_label:
+        lines.append(section_label)
+    elif room_label:
+        lines.append(room_label)
+
+    for raw_row in layout.get("rows", []):
+        if not isinstance(raw_row, dict):
+            continue
+        row_kind = str(raw_row.get("row_kind", "other") or "other").strip().lower()
+        if row_kind in {"metadata", "footer"}:
+            continue
+        label = parsing.normalize_space(str(raw_row.get("row_label", "") or ""))
+        value_bits = [
+            parsing.normalize_space(str(raw_row.get("value_region_text", "") or "")),
+            parsing.normalize_space(str(raw_row.get("supplier_region_text", "") or "")),
+            parsing.normalize_space(str(raw_row.get("notes_region_text", "") or "")),
+        ]
+        value_text = parsing.normalize_space(" ".join(bit for bit in value_bits if bit))
+        if label and value_text:
+            lines.append(f"{label} {value_text}")
+        elif label:
+            lines.append(label)
+        elif value_text:
+            lines.append(value_text)
+
+    normalized = parsing.normalize_space("\n".join(line for line in lines if line))
+    return normalized or fallback_text
 
 
 def _try_openai(
@@ -161,6 +560,11 @@ def _try_openai(
         "openai_attempted": False,
         "openai_succeeded": False,
         "openai_model": runtime.OPENAI_MODEL,
+        "vision_attempted": False,
+        "vision_succeeded": False,
+        "vision_pages": [],
+        "vision_page_count": 0,
+        "vision_note": "",
         "note": "",
     }
     if parser_strategy == "heuristic_only":
@@ -260,13 +664,20 @@ def _try_openai(
 
 
 def _post_responses_api(prompt: dict[str, Any]) -> dict[str, Any]:
+    return _post_responses_api_content(
+        [{"type": "input_text", "text": json.dumps(prompt, ensure_ascii=False)}],
+        model=runtime.OPENAI_MODEL,
+    )
+
+
+def _post_responses_api_content(content: list[dict[str, Any]], model: str = "") -> dict[str, Any]:
     body = json.dumps(
         {
-            "model": runtime.OPENAI_MODEL,
+            "model": model or runtime.OPENAI_MODEL,
             "input": [
                 {
                     "role": "user",
-                    "content": [{"type": "input_text", "text": json.dumps(prompt, ensure_ascii=False)}],
+                    "content": content,
                 }
             ],
         }
@@ -681,6 +1092,7 @@ CLARENDON_FIELD_STOP_MARKERS = (
     r"THERMOLAMINATE NOTES",
     r"CARCASS",
     r"STANDARD WHITE",
+    r"PLAIN GLASS DISPLAY CABINET",
     r"HANDLES?\s*-",
     r"HANDLE \d+\s*-",
     r"DOOR HINGES",
@@ -774,6 +1186,15 @@ def _apply_builder_specific_polish(
     rule_flags: Any = None,
     progress_callback: ProgressCallback = None,
 ) -> dict[str, Any]:
+    if "imperial" in builder_name.strip().lower():
+        return _apply_imperial_row_polish(
+            snapshot,
+            documents,
+            builder_name=builder_name,
+            parser_strategy=parser_strategy,
+            rule_flags=rule_flags,
+            progress_callback=progress_callback,
+        )
     if "clarendon" not in builder_name.strip().lower():
         return snapshot
     return _apply_clarendon_reference_polish(
@@ -810,6 +1231,43 @@ def _apply_clarendon_reference_polish(
     return parsing.apply_snapshot_cleaning_rules(polished, rule_flags=rule_flags)
 
 
+def _apply_imperial_row_polish(
+    snapshot: dict[str, Any],
+    documents: list[dict[str, object]],
+    builder_name: str,
+    parser_strategy: str,
+    rule_flags: Any = None,
+    progress_callback: ProgressCallback = None,
+) -> dict[str, Any]:
+    if parser_strategy not in {"stable_hybrid", cleaning_rules.global_parser_strategy()} or "imperial" not in builder_name.strip().lower():
+        return snapshot
+    _report_progress(progress_callback, "imperial_polish", "Rebuilding Imperial room rows from source PDF text boundaries")
+    raw_documents: list[dict[str, object]] = []
+    for document in documents:
+        raw_pages: list[dict[str, object]] = []
+        for page in list(document.get("pages", [])):
+            raw_page = dict(page)
+            raw_page["text"] = str(page.get("raw_text", page.get("text", "")) or "")
+            raw_pages.append(raw_page)
+        raw_documents.append({**document, "pages": raw_pages})
+    heuristic = parsing.parse_documents(
+        job_no=str(snapshot.get("job_no", "")),
+        builder_name=builder_name,
+        source_kind=str(snapshot.get("source_kind", "spec")),
+        documents=raw_documents,
+        rule_flags=rule_flags,
+    )
+    heuristic = parsing.enrich_snapshot_rooms(heuristic, raw_documents, rule_flags=rule_flags)
+    polished = dict(snapshot)
+    polished["rooms"] = list(heuristic.get("rooms", []))
+    polished["special_sections"] = list(heuristic.get("special_sections", []))
+    if heuristic.get("site_address"):
+        polished["site_address"] = heuristic["site_address"]
+    if heuristic.get("source_documents"):
+        polished["source_documents"] = heuristic["source_documents"]
+    return parsing.apply_snapshot_cleaning_rules(polished, rule_flags=rule_flags)
+
+
 def _select_clarendon_room_overlay(room: dict[str, Any], overlays: dict[str, dict[str, Any]]) -> dict[str, Any]:
     room_key = str(room.get("room_key", ""))
     overlay = _blank_clarendon_overlay()
@@ -828,7 +1286,7 @@ def _collect_clarendon_polish_overlays(documents: list[dict[str, object]], room_
         file_name = str(document.get("file_name", ""))
         material_allowed = not room_master_file or file_name == room_master_file
         for page in document.get("pages", []):
-            text = parsing.normalize_space(str(page.get("text") or ""))
+            text = str(page.get("raw_text", page.get("text", "")) or page.get("text", "") or "")
             if not text:
                 continue
             schedule_room_key = _clarendon_schedule_room_key(_clarendon_spacing_normalize(text))
@@ -1025,6 +1483,23 @@ def _clarendon_spacing_normalize(text: str) -> str:
     )
     normalized = re.sub(r"(?i)(COLOUR SCHEDULE)(?=[A-Z])", r"\1 ", normalized)
     normalized = re.sub(r"(?i)(SUPPLIER DESCRIPTION DESIGN COMMENTS)(?=[A-Z])", r"\1 ", normalized)
+    for label_pattern in (
+        r"BENCHTOP(?: COLOUR \d+)?(?:S)?\s*-",
+        r"DOOR COLOUR(?: \d+)?\s*-",
+        r"DOOR/PANEL COLOUR(?: \d+)?\s*-",
+        r"PLAIN GLASS DISPLAY CABINET",
+        r"HANDLE \d+\s*-",
+        r"HANDLES?\s*-",
+        r"DOOR HINGES",
+        r"DRAWER RUNNERS",
+        r"KICKBOARDS?\s*:",
+        r"BULKHEAD SHADOWLINE\s*:",
+    ):
+        normalized = re.sub(rf"(?i)(?<=\w)({label_pattern})", r" \1", normalized)
+    normalized = re.sub(r"(?i)(PROFILE)(PLAIN GLASS DISPLAY CABINET)", r"\1 \2", normalized)
+    normalized = re.sub(r"(?i)(PROFILE)(HANDLE \d+\s*-)", r"\1 \2", normalized)
+    normalized = re.sub(r"(?i)(DOWN)(DRAWER LOCATION)", r"\1 \2", normalized)
+    normalized = re.sub(r"(?i)(UP)(DOOR HINGES)", r"\1 \2", normalized)
     return normalized
 
 
@@ -1075,7 +1550,7 @@ def _extract_clarendon_kitchen_benchtops(segment: str, template_family: str) -> 
     if not normalized:
         return result
     match = re.search(
-        r"(?is)^(?P<material>.+?)\s*-\s*(?P<wall>.+?)\s*-\s*TO\s+(?:THE\s+)?(?:COOKTOP RUN|WALL RUN|WALL BENCH|WALL SIDE)\s*(?:/|$)\s*(?P<island>.+?)\s*-\s*TO\s+(?:THE\s+)?ISLAND(?:\s+BENCH(?:TOP)?)?(?P<tail>.*)$",
+        r"(?is)^(?P<material>.+?)\s*-\s*(?P<wall>.+?)\s*-\s*TO\s+(?:THE\s+)?(?:COOKTOP\s*\+\s*SIDE\s+BENCHTOP|COOKTOP(?:\s+RUN)?|WALL RUN|WALL BENCH|WALL SIDE|SIDE BENCHTOP|SIDE BENCH)\s*(?:/|$)\s*(?P<island>.+?)\s*-\s*TO\s+(?:THE\s+)?ISLAND(?:\s+BENCH(?:TOP)?)?(?P<tail>.*)$",
         normalized,
     )
     if not match:
@@ -1275,7 +1750,10 @@ def _extract_clarendon_notes_block(text: str) -> str:
 
 
 def _clarendon_extract_note_value(notes_block: str, label: str) -> str:
-    match = re.search(rf"(?is){re.escape(label)}\s*:\s*([^*]+)", notes_block)
+    match = re.search(
+        rf"(?is){re.escape(label)}\s*:\s*(.+?)(?=(?:\*\s*[A-Z][A-Z /&']+\s*:|HANDLE \d+\s*-|HANDLES?\s*-|DOOR HINGES|DRAWER RUNNERS|$))",
+        notes_block,
+    )
     return parsing.normalize_space(match.group(1)) if match else ""
 
 
@@ -1336,6 +1814,7 @@ def _clarendon_clean_door_group_text(value: Any) -> str:
     for entry in entries:
         text = parsing._clean_door_colour_value(entry)
         text = re.sub(r"(?i)\b(?:plain glass|'?glazing bar'?) display cabinet with.*$", "", text)
+        text = re.sub(r"(?i)\b(?:plain glass\s+)?display cabinet\b.*$", "", text)
         text = re.sub(r"(?i)\bto tall open shelves\b.*$", "", text)
         text = _clarendon_to_readable_text(text)
         text = _clarendon_inline_text(text)
@@ -1351,6 +1830,8 @@ def _clarendon_clean_toe_kick_text(value: Any) -> str:
     lowered = text.lower()
     if "n/a" in lowered and "floating" in lowered:
         return "N/A floating - no kickboard"
+    if "matching melamine finish" in lowered:
+        return "Matching Melamine finish"
     return text
 
 
@@ -1362,6 +1843,8 @@ def _clarendon_clean_bulkhead_text(value: Any) -> str:
         cleaned = cleaned.strip(" -;,.")
         if cleaned:
             cleaned = re.sub(r"(?i)^as\s+", "", cleaned)
+            if cleaned.lower() == "matching melamine finish":
+                cleaned = "matching Melamine finish"
             return f"Bulkhead shadowline as {cleaned[:1].lower() + cleaned[1:]}"
     if "matching melamine finish" in lowered:
         return "Bulkhead shadowline as matching Melamine finish"

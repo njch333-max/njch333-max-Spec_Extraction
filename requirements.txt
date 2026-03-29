@@ -3,6 +3,7 @@ uvicorn
 jinja2
 openpyxl
 pypdf
+pymupdf
 python-multipart
 httpx
 itsdangerous

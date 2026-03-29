@@ -29,6 +29,9 @@
       <li><strong>OpenAI attempted:</strong> {{ "Yes" if raw_analysis.openai_attempted else "No" }}</li>
       <li><strong>OpenAI succeeded:</strong> {{ "Yes" if raw_analysis.openai_succeeded else "No" }}</li>
       <li><strong>Model:</strong> {{ raw_analysis.openai_model or "Not used" }}</li>
+      <li><strong>Vision attempted:</strong> {{ "Yes" if raw_analysis.vision_attempted else "No" }}</li>
+      <li><strong>Vision succeeded:</strong> {{ "Yes" if raw_analysis.vision_succeeded else "No" }}</li>
+      <li><strong>Vision pages:</strong> {{ raw_analysis.vision_pages|join(", ") if raw_analysis.vision_pages else "None" }}</li>
       <li><strong>Generated at:</strong> {{ raw_generated_at or raw_snapshot.generated_at }}</li>
       <li><strong>Extraction duration:</strong> {{ raw_extraction_duration or "Not recorded" }}</li>
       <li><strong>Rooms:</strong> {{ raw_spec_rooms|length }}</li>
@@ -48,6 +51,12 @@
     <div class="subcard">
       <h4>Analysis Note</h4>
       <p class="muted">{{ raw_analysis.note }}</p>
+    </div>
+    {% endif %}
+    {% if raw_analysis.vision_note %}
+    <div class="subcard">
+      <h4>Vision Note</h4>
+      <p class="muted">{{ raw_analysis.vision_note }}</p>
     </div>
     {% endif %}
   </article>
@@ -275,7 +284,7 @@
       <p class="muted">{{ material_summary.door_colours.count }} distinct item{{ "" if material_summary.door_colours.count == 1 else "s" }}</p>
       <ul class="summary-list">
         {% for item in material_summary.door_colours.entries %}
-        <li>{{ item }}</li>
+        <li>{{ item.display_text }}</li>
         {% else %}
         <li class="muted">No door colours found.</li>
         {% endfor %}
@@ -286,7 +295,7 @@
       <p class="muted">{{ material_summary.handles.count }} distinct item{{ "" if material_summary.handles.count == 1 else "s" }}</p>
       <ul class="summary-list">
         {% for item in material_summary.handles.entries %}
-        <li>{{ item }}</li>
+        <li>{{ item.display_text }}</li>
         {% else %}
         <li class="muted">No handles found.</li>
         {% endfor %}
@@ -297,7 +306,7 @@
       <p class="muted">{{ material_summary.bench_tops.count }} distinct item{{ "" if material_summary.bench_tops.count == 1 else "s" }}</p>
       <ul class="summary-list">
         {% for item in material_summary.bench_tops.entries %}
-        <li>{{ item }}</li>
+        <li>{{ item.display_text }}</li>
         {% else %}
         <li class="muted">No bench tops found.</li>
         {% endfor %}

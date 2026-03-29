@@ -108,7 +108,7 @@ def upload_to_staging(
         relative = local_path.relative_to(root).as_posix()
         remote_stage = posixpath.join(staging_dir, relative)
         remote_mkdirs(sftp, posixpath.dirname(remote_stage))
-        sftp.put(str(local_path), remote_stage)
+        sftp.put(str(local_path), remote_stage, confirm=False)
         mode = 0o755 if local_path.suffix.lower() == ".sh" else 0o644
         staged.append((remote_stage, posixpath.join("/opt/spec-extraction", relative), mode))
     return staged
@@ -173,6 +173,14 @@ def main() -> int:
         finally:
             sftp.close()
         install_staged_files(client, staged, password)
+        exit_code, out, err = run_remote(
+            client,
+            "cd /opt/spec-extraction && if [ -x .venv/bin/python ]; then .venv/bin/python -m pip install -r requirements.txt; else python3 -m pip install -r requirements.txt; fi",
+            password,
+            require_sudo=False,
+        )
+        if exit_code != 0:
+            raise RuntimeError(f"Failed to install Python requirements: {out}{err}")
         if not args.no_restart:
             for service in ("spec-extraction-web.service", "spec-extraction-worker.service"):
                 exit_code, out, err = run_remote(client, f"systemctl restart {service}", password, require_sudo=True)

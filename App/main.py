@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ from App.services.export_service import build_exports, build_spec_list_excel
 from App.services.runtime import (
     HOST_DOMAIN,
     HTTPS_ONLY,
+    JOBS_ROOT,
     MAX_UPLOAD_MB,
     SECRET_KEY,
     SESSION_DOMAIN,
@@ -236,6 +238,33 @@ async def create_job_action(
     ensure_job_dirs(clean_job_no)
     _set_flash(request, "success", f"Job '{clean_job_no}' created.")
     return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+
+
+@app.post("/jobs/{job_id}/delete")
+async def delete_job_action(request: Request, job_id: int, csrf_token: str = Form("")):
+    if not _require_page_user(request):
+        return RedirectResponse("/login", status_code=303)
+    verify_csrf(request, csrf_token)
+    job = store.get_job(job_id)
+    if not job:
+        _set_flash(request, "error", "Job not found.")
+        return RedirectResponse("/jobs", status_code=303)
+    active_run = next(
+        (
+            run
+            for run in store.list_runs(job_id)
+            if str(run.get("status", "")).lower() in {"queued", "running"}
+        ),
+        None,
+    )
+    if active_run:
+        _set_flash(request, "error", "Cannot delete a job while a parse run is queued or running.")
+        return RedirectResponse("/jobs", status_code=303)
+    job_root = JOBS_ROOT / str(job["job_no"])
+    store.delete_job(job_id)
+    shutil.rmtree(job_root, ignore_errors=True)
+    _set_flash(request, "success", f"Job '{job['job_no']}' deleted.")
+    return RedirectResponse("/jobs", status_code=303)
 
 
 @app.get("/jobs/{job_id}")
@@ -589,6 +618,15 @@ def _present_jobs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for row in rows:
         item = dict(row)
         item["created_at"] = _format_brisbane_time(item.get("created_at", ""))
+        room_count = ""
+        raw_snapshot_json = item.get("raw_snapshot_json", "")
+        if raw_snapshot_json:
+            try:
+                raw_snapshot = json.loads(str(raw_snapshot_json))
+                room_count = len([entry for entry in raw_snapshot.get("rooms", []) if isinstance(entry, dict)])
+            except (TypeError, ValueError, json.JSONDecodeError):
+                room_count = ""
+        item["room_count"] = room_count
         presented.append(item)
     return presented
 
@@ -976,6 +1014,11 @@ def _present_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "loading": "Loading files",
             "extracting": "Parsing",
             "heuristic": "Heuristic extraction",
+            "vision_prepare": "Preparing vision",
+            "vision_request": "Calling OpenAI Vision",
+            "vision_apply": "Applying visual layout",
+            "vision_fallback": "Vision fallback",
+            "vision_skipped": "Vision skipped",
             "openai_prepare": "Preparing OpenAI",
             "openai_request": "Calling OpenAI",
             "openai_merge": "Merging AI result",
@@ -1034,6 +1077,11 @@ def _analysis_from_snapshot(snapshot: dict[str, Any] | None) -> dict[str, Any]:
         "openai_attempted": bool(analysis.get("openai_attempted", False)),
         "openai_succeeded": bool(analysis.get("openai_succeeded", False)),
         "openai_model": analysis.get("openai_model", ""),
+        "vision_attempted": bool(analysis.get("vision_attempted", False)),
+        "vision_succeeded": bool(analysis.get("vision_succeeded", False)),
+        "vision_pages": [int(item) for item in analysis.get("vision_pages", []) if str(item).strip().isdigit()],
+        "vision_page_count": int(analysis.get("vision_page_count", 0) or 0),
+        "vision_note": analysis.get("vision_note", ""),
         "note": analysis.get("note", ""),
         "worker_pid": int(analysis.get("worker_pid", 0) or 0),
         "app_build_id": analysis.get("app_build_id", ""),
@@ -1049,50 +1097,76 @@ def _normalize_soft_close_display(value: Any, keyword: str) -> str:
 
 
 def _build_material_summary(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    rooms = [row for row in snapshot.get("rooms", []) if isinstance(row, dict)]
-    door_colour_values: list[str] = []
-    handle_values: list[str] = []
-    benchtop_values: list[str] = []
-    for row in rooms:
-        benchtop_groups = _split_room_benchtops(row)
-        door_sources = [
-            row.get("door_colours_overheads", ""),
-            row.get("door_colours_base", ""),
-            row.get("door_colours_tall", ""),
-            row.get("door_colours_island", ""),
-            row.get("door_colours_bar_back", ""),
-        ]
-        if not any(_display_value(value) for value in door_sources):
-            door_sources.append(row.get("door_panel_colours", []))
-        for value in door_sources:
-            door_colour_values.extend(_split_material_values(value))
-        handle_values.extend(_split_material_values(row.get("handles", [])))
-        for value in (
-            benchtop_groups["bench_tops_wall_run"],
-            benchtop_groups["bench_tops_island"],
-            benchtop_groups["bench_tops_other"],
-            row.get("floating_shelf", ""),
-        ):
-            benchtop_values.extend(_split_material_values(value))
-
+    rooms = _flatten_rooms(snapshot)
     return {
-        "door_colours": _material_bucket("Door Colours", door_colour_values, _normalize_door_colour_summary_value),
-        "handles": _material_bucket("Handles", handle_values, _normalize_handle_summary_value),
-        "bench_tops": _material_bucket("Bench Tops", benchtop_values, _normalize_benchtop_summary_value),
+        "door_colours": _material_bucket_with_rooms(
+            "Door Colours",
+            rooms,
+            lambda row: [
+                row.get("door_colours_overheads", ""),
+                row.get("door_colours_base", ""),
+                row.get("door_colours_tall", ""),
+                row.get("door_colours_island", ""),
+                row.get("door_colours_bar_back", ""),
+            ] if any(
+                _display_value(value)
+                for value in (
+                    row.get("door_colours_overheads", ""),
+                    row.get("door_colours_base", ""),
+                    row.get("door_colours_tall", ""),
+                    row.get("door_colours_island", ""),
+                    row.get("door_colours_bar_back", ""),
+                )
+            ) else [row.get("door_panel_colours", "")],
+            _normalize_door_colour_summary_value,
+        ),
+        "handles": _material_bucket_with_rooms(
+            "Handles",
+            rooms,
+            lambda row: [row.get("handles", "")],
+            _normalize_handle_summary_value,
+        ),
+        "bench_tops": _material_bucket_with_rooms(
+            "Bench Tops",
+            rooms,
+            lambda row: [
+                row.get("bench_tops_wall_run", ""),
+                row.get("bench_tops_island", ""),
+                row.get("bench_tops_other", ""),
+                row.get("floating_shelf", ""),
+            ],
+            _normalize_benchtop_summary_value,
+        ),
     }
 
 
-def _material_bucket(label: str, values: list[str], normalizer: Any) -> dict[str, Any]:
-    ordered: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        normalized = normalizer(value)
-        key = normalized.lower()
-        if not normalized or key in seen:
-            continue
-        ordered.append(normalized)
-        seen.add(key)
-    return {"label": label, "count": len(ordered), "entries": ordered}
+def _material_bucket_with_rooms(
+    label: str,
+    rooms: list[dict[str, Any]],
+    value_getter: Any,
+    normalizer: Any,
+) -> dict[str, Any]:
+    ordered_entries: list[dict[str, Any]] = []
+    lookup: dict[str, dict[str, Any]] = {}
+    for room in rooms:
+        room_label = _display_value(room.get("original_room_label", "")) or _display_value(room.get("room_key", "")) or "Room"
+        for value in value_getter(room):
+            for item in _split_material_values(value):
+                normalized = normalizer(item)
+                key = normalized.lower()
+                if not normalized:
+                    continue
+                entry = lookup.get(key)
+                if not entry:
+                    entry = {"text": normalized, "rooms": []}
+                    lookup[key] = entry
+                    ordered_entries.append(entry)
+                if room_label not in entry["rooms"]:
+                    entry["rooms"].append(room_label)
+    for entry in ordered_entries:
+        rooms_display = " / ".join(entry["rooms"])
+        entry["display_text"] = f"{entry['text']} ({rooms_display})" if rooms_display else entry["text"]
+    return {"label": label, "count": len(ordered_entries), "entries": ordered_entries}
 
 
 def _split_material_values(value: Any) -> list[str]:
@@ -1112,19 +1186,30 @@ def _split_material_values(value: Any) -> list[str]:
 def _normalize_door_colour_summary_value(value: str) -> str:
     text = parsing.normalize_space(value)
     text = re.sub(r"\([^)]*(upper|overhead|base|island|bar back|cabinet|panel|run|shelf)[^)]*\)", "", text, flags=re.IGNORECASE)
-    text = re.sub(
-        r"\b(to|for)\b[^|;]*\b(upper|overhead|base|island|bar back|cabinet|cabinetry|panel|panels|run|shelf|shelves)\b.*$",
-        "",
+    text = _strip_summary_location_tail(
         text,
-        flags=re.IGNORECASE,
+        (
+            r"(?i)\b(?:plain glass\s+)?display cabinet\b.*$",
+            r"(?i)\bto tall open shelves\b.*$",
+            r"(?i)\b(?:to|for)\b[^|;]*\b(upper|overhead|base|island|bar back|cabinetry|run|shelf|shelves)\b.*$",
+        ),
     )
-    return _clean_summary_segments(text, {"upper", "overhead", "base", "island", "bar back", "cabinet", "cabinetry", "panel", "panels", "run", "shelf", "shelves"})
+    return text
 
 
 def _normalize_handle_summary_value(value: str) -> str:
     text = parsing.normalize_space(value)
     text = re.sub(r"\([^)]*(location|up/down|left/right|door|drawer|centre|center)[^)]*\)", "", text, flags=re.IGNORECASE)
-    return _clean_summary_segments(text, {"location", "door", "doors", "drawer", "drawers", "centre", "center", "profile", "up/down", "left/right"})
+    return _strip_summary_location_tail(
+        text,
+        (
+            r"(?i)\bdoor location\b.*$",
+            r"(?i)\bdown\s*drawer location\b.*$",
+            r"(?i)\bdrawer location\b.*$",
+            r"(?i)\b(?:centre|center)\s+to\s+profile\b.*$",
+            r"(?i)\bto\s+(?:base|upper|overhead|base cabinets?|upper cabinets?|cabinet locations?)\b.*$",
+        ),
+    )
 
 
 def _normalize_benchtop_summary_value(value: str) -> str:
@@ -1157,3 +1242,16 @@ def _clean_summary_segments(text: str, location_tokens: set[str]) -> str:
     result = " - ".join(cleaned_segments) if cleaned_segments else parsing.normalize_space(text)
     result = re.sub(r"\s{2,}", " ", result)
     return result.strip(" -;,")
+
+
+def _strip_summary_location_tail(text: str, patterns: tuple[str, ...]) -> str:
+    normalized = parsing.normalize_space(text)
+    if not normalized:
+        return ""
+    end_index = len(normalized)
+    for pattern in patterns:
+        match = re.search(pattern, normalized)
+        if match and match.start() < end_index:
+            end_index = match.start()
+    cleaned = parsing.normalize_space(normalized[:end_index])
+    return cleaned.strip(" -;,")

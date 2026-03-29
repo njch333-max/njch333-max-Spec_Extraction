@@ -67,8 +67,10 @@
 1. Read uploaded files from job folders.
 2. Extract text from PDF or DOCX.
 3. Flag low-text PDF pages for OCR/vision fallback.
-4. Run heuristic extraction into canonical schema, including explicit appliance model parsing from labeled rows.
-5. Enrich room rows with fixture fields (`sink_info`, `basin_info`, `tap_info`), split door-colour fields (`door_colours_overheads`, `door_colours_base`, `door_colours_tall`, `door_colours_island`, `door_colours_bar_back`), and derived bench-top fields (`bench_tops_wall_run`, `bench_tops_island`, `bench_tops_other`).
+4. For high-risk pages, render the PDF page to an image and run an OpenAI vision layout pass that returns page type, room/section identity, and row/block boundaries.
+5. Feed those layout boundaries back into parsing so the final field mapper reads only the matched row/block text instead of letting OCR order decide row ownership.
+6. Run heuristic extraction into canonical schema, including explicit appliance model parsing from labeled rows.
+7. Enrich room rows with fixture fields (`sink_info`, `basin_info`, `tap_info`), split door-colour fields (`door_colours_overheads`, `door_colours_base`, `door_colours_tall`, `door_colours_island`, `door_colours_bar_back`), and derived bench-top fields (`bench_tops_wall_run`, `bench_tops_island`, `bench_tops_other`).
 6. For Yellowwood-style schedule PDFs, parse room sections page-by-page from joinery schedule pages instead of scanning the whole document blindly, so `Back Benchtops`, island bench fields, vanity colours, and cabinet-only materials are mapped from the correct pages.
 7. Remove plumbing fixtures from appliance rows so they only appear on room rows.
 8. If OpenAI is enabled, send consolidated text and template context for higher-quality structured output.
@@ -90,6 +92,7 @@
 12. For stable-hybrid room merges, prefer heuristic accessories and reject AI-only door-colour subgroup values that collapse to orientation notes instead of real material text.
 13. For Clarendon-only spec runs, apply a deterministic post-polish stage after source-driven room detection:
   - rebuild stable room text from colour-schedule and fixture pages for each detected room
+  - prefer `page.raw_text` over vision-normalized `page.text` when rebuilding schedule overlays and address candidates
   - prefer clean schedule-page values over OCR-noisy field fragments
   - use same-room-only overlay selection for material fields, while allowing grouped-room fixture fallback only for sink/basin/tap enrichment
   - only let generic `DOORS/PANELS` text fall back to `Base` when the same room section has no explicit overhead/base/island/bar-back cabinetry markers
@@ -103,6 +106,9 @@
   - stop section text collection at footer markers such as `CLIENT NAME`, `SIGNATURE`, and `SIGNED DATE`
   - avoid turning `... TO TOP OF BENCHTOP` layout text plus a later `OFFICE JOINERY SELECTION SHEET` title into a fake benchtop field
   - parse table-style rows so `BENCHTOPS`, `SPLASHBACK`, `UPPER CABINETRY COLOUR + TALL CABINETS`, `BASE CABINETRY COLOUR`, `KICKBOARDS`, and `HANDLES` stay on their own row boundaries
+  - treat auxiliary all-caps row starts such as `ISLAND CABINETRY COLOUR`, `GPO'S`, `BIN`, `HAMPER`, `HANGING RAIL`, `MIRRORED SHAVING CABINET`, and `EXTRA TOP IN ...` as stop markers for the previous row, even when those rows do not yet map to a top-level room field
+  - only split glued inline markers at real row starts or lowercase-to-uppercase row transitions, so words such as `CABINETRY` are never broken into fake `BIN` rows
+  - recover `Soft Close` from `Hinges & Drawer Runners` even when OCR glues that row to `Floor Type & Kick refacing required`
   - keep material ownership same-room-only, same-section-only, and same-row-or-adjacent-only so kitchen rows cannot absorb pantry, office, appliance, or tapware values
   - default a plain `BENCHTOP` or `COOKTOP RUN` row to `Wall Run Bench Top` when no explicit wall-run row exists
   - deduplicate repeated `Accessories` values inside the same room card
@@ -110,12 +116,13 @@
   - prefer builder-specific Imperial sink/tap overlay text over noisier AI fixture guesses when both are present
   - emit non-room sections such as `FEATURE TALL DOORS` into `special_sections[]` instead of merging them into nearby room cards
   - recover delayed Imperial handle lines that appear later in the same section while rejecting adjacent cabinet-colour rows as handle noise
-15. Apply the fixed global cleaning rules after heuristic, merge, Clarendon post-polish, and Imperial section parsing so brand casing, door-colour cleanup, kitchen-only bench-top splitting, tall-cabinet capture, and soft-close normalization stay consistent across all builders.
-16. Record analysis metadata in the snapshot: mode, parser strategy, attempted, succeeded, model, note, and runtime identifiers (`worker_pid`, `app_build_id`).
-17. Normalize drawer and hinge states to `Soft Close`, `Not Soft Close`, or blank.
-18. Look up official appliance resources by `make + model_no`, first probing deterministic brand-site model URLs where supported and then falling back to search-based discovery; AEG, Westinghouse, and Fisher & Paykel now extract official dimensions from product pages when available, including JSON-like structured metadata.
-19. Extract an optional `site_address` from the authoritative source text and carry it in the snapshot for header display on the Job Workspace and Raw Spec List pages.
-20. Save the raw snapshot.
+15. After AI merge, rebuild Imperial `rooms[]` and `special_sections[]` from the heuristic section parser before final cleaning so room-level fields remain tied to same-room same-row boundaries instead of inheriting broader AI guesses.
+16. Apply the fixed global cleaning rules after heuristic, merge, Clarendon post-polish, and Imperial section parsing so brand casing, door-colour cleanup, kitchen-only bench-top splitting, tall-cabinet capture, and soft-close normalization stay consistent across all builders.
+17. Record analysis metadata in the snapshot: mode, parser strategy, attempted, succeeded, model, note, vision-fallback metadata (`vision_attempted`, `vision_succeeded`, `vision_pages`, `vision_page_count`, `vision_note`), and runtime identifiers (`worker_pid`, `app_build_id`).
+18. Normalize drawer and hinge states to `Soft Close`, `Not Soft Close`, or blank.
+19. Look up official appliance resources by `make + model_no`, first probing deterministic brand-site model URLs where supported and then falling back to search-based discovery; AEG, Westinghouse, and Fisher & Paykel now extract official dimensions from product pages when available, including JSON-like structured metadata.
+20. Extract an optional `site_address` from the authoritative source text and carry it in the snapshot for header display on the Job Workspace and Raw Spec List pages.
+21. Save the raw snapshot.
 
 ### 3.5 Review Pipeline
 1. Load latest raw snapshot.
@@ -140,6 +147,7 @@
 13. Never fall back to `reviews` when rendering the raw Spec List page.
 14. Start the page shell with the left navigation rail collapsed by default and let the user toggle it open client-side when needed.
 15. When a parsed `site_address` exists, append it to the page heading as `job no - site address`; otherwise omit the separator.
+16. Below roughly `1280px`, remove fixed wide-table minimum widths, force card containers to `min-width: 0`, and suppress page-level horizontal overflow so the raw snapshot remains readable in 1080p half-screen windows without horizontal dragging.
 
 ### 3.7 Upload Interaction
 1. Job detail uses the existing upload POST route.
@@ -273,6 +281,8 @@ Major changes must update:
 - `PRD.md`
 - `Arch.md`
 - `Project_state.md`
+
+Parser-accuracy changes must be validated against the source PDF itself after a fresh rerun. Older webpages or snapshots are useful references, but they are not the acceptance source of truth.
 
 This rule is enforced by the major-change checkpoint script.
 

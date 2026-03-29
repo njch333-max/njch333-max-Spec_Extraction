@@ -282,7 +282,8 @@ def list_jobs(job_query: str = "") -> list[dict[str, Any]]:
         """
         SELECT j.*, b.name AS builder_name, b.slug AS builder_slug,
                (SELECT COUNT(*) FROM job_files jf WHERE jf.job_id = j.id AND jf.file_role = 'spec') AS spec_file_count,
-               (SELECT COUNT(*) FROM job_files jf WHERE jf.job_id = j.id AND jf.file_role = 'drawing') AS drawing_file_count
+               (SELECT COUNT(*) FROM job_files jf WHERE jf.job_id = j.id AND jf.file_role = 'drawing') AS drawing_file_count,
+               (SELECT data_json FROM snapshots s WHERE s.job_id = j.id AND s.snapshot_kind = 'raw_spec') AS raw_snapshot_json
         FROM jobs j
         JOIN builders b ON b.id = j.builder_id
         """
@@ -325,6 +326,11 @@ def update_job_status(job_id: int, status: str) -> None:
             "UPDATE jobs SET status = ?, updated_at = ? WHERE id = ?",
             (status, utc_now_iso(), job_id),
         )
+
+
+def delete_job(job_id: int) -> None:
+    with connect() as conn:
+        conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
 
 
 def create_job_file(job_id: int, file_role: str, stored_name: str, original_name: str, mime_type: str, size_bytes: int) -> int:

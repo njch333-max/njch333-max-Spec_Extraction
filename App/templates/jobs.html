@@ -58,8 +58,9 @@
           <th>Status</th>
           <th>Spec Files</th>
           <th>Drawings</th>
+          <th>Rooms</th>
           <th>Created</th>
-          <th>Open</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -70,11 +71,18 @@
           <td data-label="Status"><span class="status-chip status-{{ job.status }}">{{ job.status }}</span></td>
           <td data-label="Spec Files">{{ job.spec_file_count }}</td>
           <td data-label="Drawings">{{ job.drawing_file_count }}</td>
+          <td data-label="Rooms">{{ job.room_count if job.room_count != "" else "-" }}</td>
           <td data-label="Created">{{ job.created_at }}</td>
-          <td data-label="Open"><a href="/jobs/{{ job.id }}" class="text-link" target="_blank" rel="noopener">Open</a></td>
+          <td data-label="Actions" class="actions">
+            <a href="/jobs/{{ job.id }}" class="text-link" target="_blank" rel="noopener">Open</a>
+            <form method="post" action="/jobs/{{ job.id }}/delete" onsubmit="return confirm('Delete job {{ job.job_no }} and all server files?');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="danger-button">Delete</button>
+            </form>
+          </td>
         </tr>
         {% else %}
-        <tr><td colspan="7" class="empty-cell">{{ "No jobs matched the current search." if job_query else "No jobs created yet." }}</td></tr>
+        <tr><td colspan="8" class="empty-cell">{{ "No jobs matched the current search." if job_query else "No jobs created yet." }}</td></tr>
         {% endfor %}
       </tbody>
     </table>

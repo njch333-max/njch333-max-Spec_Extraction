@@ -9,6 +9,11 @@ class AnalysisMeta(BaseModel):
     openai_attempted: bool = False
     openai_succeeded: bool = False
     openai_model: str = ""
+    vision_attempted: bool = False
+    vision_succeeded: bool = False
+    vision_pages: list[int] = Field(default_factory=list)
+    vision_page_count: int = 0
+    vision_note: str = ""
     note: str = ""
     rule_config_updated_at: str = ""
     rule_flags: dict[str, bool] = Field(default_factory=dict)

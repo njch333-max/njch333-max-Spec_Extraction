@@ -164,6 +164,15 @@ textarea { resize: vertical; }
   cursor: pointer;
 }
 
+.danger-button {
+  border: 0;
+  border-radius: 999px;
+  padding: 11px 16px;
+  cursor: pointer;
+  background: rgba(181, 68, 52, 0.14);
+  color: var(--danger);
+}
+
 .primary-button {
   background: linear-gradient(135deg, var(--accent), #2f8f97);
   color: white;
@@ -402,6 +411,11 @@ th {
 }
 
 @media (max-width: 1280px) {
+  html,
+  body {
+    overflow-x: hidden;
+  }
+
   .page-head,
   .split-head {
     flex-direction: column;
@@ -416,10 +430,56 @@ th {
 
   .content {
     padding: 18px;
+    min-width: 0;
+  }
+
+  .content > *,
+  .card,
+  .section,
+  .content-card,
+  .table-wrap,
+  .table-cardify,
+  .room-card,
+  .room-card-head,
+  .room-card-head > div,
+  .room-field-list,
+  .room-meta-list,
+  .plain-list li,
+  .warning-box,
+  .subcard {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
   }
 
   .room-card {
     grid-template-columns: 1fr;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .room-card-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .room-card-head h4,
+  .room-card-head p {
+    overflow-wrap: anywhere;
+  }
+
+  .table-wrap,
+  .table-wrap.wide-table {
+    overflow-x: visible;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .wide-table table.table-cardify,
+  .table-wrap table.table-cardify {
+    min-width: 0 !important;
+    width: 100%;
   }
 
   .table-cardify {
@@ -445,15 +505,17 @@ th {
     border: 1px solid rgba(23, 34, 44, 0.08);
     border-radius: 16px;
     background: rgba(255, 255, 255, 0.74);
+    min-width: 0;
   }
 
   .table-cardify td {
     border-bottom: 1px solid rgba(23, 34, 44, 0.08);
     padding: 8px 0;
     display: grid;
-    grid-template-columns: 118px minmax(0, 1fr);
-    gap: 10px;
+    grid-template-columns: 1fr;
+    gap: 6px;
     align-items: start;
+    overflow-wrap: anywhere;
   }
 
   .table-cardify td:last-child {
@@ -463,6 +525,7 @@ th {
 
   .table-cardify td::before {
     content: attr(data-label);
+    display: block;
     font-size: 12px;
     font-weight: 700;
     text-transform: uppercase;
@@ -478,5 +541,43 @@ th {
   .table-cardify td.actions > *,
   .table-cardify td[data-label="Actions"] > * {
     justify-self: start;
+  }
+
+  .room-field-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .room-field-row strong {
+    font-size: 12px;
+  }
+
+  .room-field-row span {
+    display: block;
+    padding-left: 12px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .room-card *,
+  .room-field-list,
+  .room-meta-list,
+  .stack,
+  .card,
+  .section,
+  .content-card {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .room-meta-list .room-field-row span,
+  .room-field-row.room-field-stack span {
+    padding-left: 0;
+  }
+
+  .plain-list {
+    list-style: none;
+    padding-left: 0;
   }
 }

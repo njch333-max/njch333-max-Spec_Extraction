@@ -122,6 +122,9 @@
       <li><strong>OpenAI attempted:</strong> {{ "Yes" if raw_analysis.openai_attempted else "No" }}</li>
       <li><strong>OpenAI succeeded:</strong> {{ "Yes" if raw_analysis.openai_succeeded else "No" }}</li>
       <li><strong>Model:</strong> {{ raw_analysis.openai_model or "Not used" }}</li>
+      <li><strong>Vision attempted:</strong> {{ "Yes" if raw_analysis.vision_attempted else "No" }}</li>
+      <li><strong>Vision succeeded:</strong> {{ "Yes" if raw_analysis.vision_succeeded else "No" }}</li>
+      <li><strong>Vision pages:</strong> {{ raw_analysis.vision_pages|join(", ") if raw_analysis.vision_pages else "None" }}</li>
       <li><strong>Worker PID:</strong> {{ raw_analysis.worker_pid or "Not recorded" }}</li>
       <li><strong>Build ID:</strong> {{ raw_analysis.app_build_id or "Not recorded" }}</li>
       <li><strong>Room master file:</strong> {{ raw_analysis.room_master_file or "Single-file parse" }}</li>
@@ -145,6 +148,12 @@
     <div class="subcard">
       <h4>Analysis Note</h4>
       <p class="muted">{{ raw_analysis.note }}</p>
+    </div>
+    {% endif %}
+    {% if raw_analysis.vision_note %}
+    <div class="subcard">
+      <h4>Vision Note</h4>
+      <p class="muted">{{ raw_analysis.vision_note }}</p>
     </div>
     {% endif %}
     {% if raw_snapshot.warnings %}
