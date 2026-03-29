@@ -971,7 +971,7 @@ class SmokeTest(unittest.TestCase):
             mock.patch.object(extraction_service.runtime, "OPENAI_VISION_ENABLED", True),
             mock.patch.object(extraction_service.runtime, "OPENAI_VISION_MAX_PAGES", 4),
             mock.patch("App.services.extraction_service._load_documents", return_value=documents),
-            mock.patch("App.services.extraction_service._select_vision_pages", return_value=[(0, 0)]),
+            mock.patch("App.services.extraction_service._page_requires_vision", return_value=True),
             mock.patch("App.services.extraction_service._render_pdf_page_png", return_value=b"png"),
             mock.patch(
                 "App.services.extraction_service._request_page_layout",
@@ -992,7 +992,7 @@ class SmokeTest(unittest.TestCase):
             ),
             mock.patch(
                 "App.services.extraction_service.parsing.parse_documents",
-                side_effect=[heuristic_initial, heuristic_after_vision],
+                return_value=heuristic_after_vision,
             ),
             mock.patch(
                 "App.services.extraction_service.parsing.enrich_snapshot_rooms",
@@ -1026,8 +1026,13 @@ class SmokeTest(unittest.TestCase):
                 builder={"name": "Imperial"},
                 files=[{"path": "imperial.pdf", "original_name": "imperial.pdf"}],
                 template_files=[],
-            )
+        )
         self.assertEqual(snapshot["rooms"][0]["door_colours_base"], "Polytec - Classic White Matt")
+        self.assertTrue(snapshot["analysis"]["layout_attempted"])
+        self.assertTrue(snapshot["analysis"]["layout_succeeded"])
+        self.assertEqual(snapshot["analysis"]["layout_mode"], "heavy_vision")
+        self.assertEqual(snapshot["analysis"]["layout_pages"], [1])
+        self.assertEqual(snapshot["analysis"]["heavy_vision_pages"], [1])
         self.assertTrue(snapshot["analysis"]["vision_attempted"])
         self.assertTrue(snapshot["analysis"]["vision_succeeded"])
         self.assertEqual(snapshot["analysis"]["vision_pages"], [1])

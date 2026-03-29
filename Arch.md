@@ -65,15 +65,15 @@
 
 ### 3.4 Extraction Pipeline
 1. Read uploaded files from job folders.
-2. Extract text from PDF or DOCX.
-3. Flag low-text PDF pages for OCR/vision fallback.
-4. For high-risk pages, render the PDF page to an image and run an OpenAI vision layout pass that returns page type, room/section identity, and row/block boundaries.
-5. Feed those layout boundaries back into parsing so the final field mapper reads only the matched row/block text instead of letting OCR order decide row ownership.
+2. Extract `raw_text` from PDF or DOCX and keep it alongside a normalized `text` copy.
+3. Build a lightweight page-layout object for every spec page, including `page_type`, `section_label`, `room_label`, `room_blocks`, and `rows`.
+4. Escalate joinery schedules, colour schedules, sinkware/tapware pages, appliance tables, and OCR-glued or order-reversed pages into the heavy OpenAI vision layout path.
+5. Replace each page's working text with layout-normalized text so later parsers read row-local boundaries instead of free-flow OCR order.
 6. Run heuristic extraction into canonical schema, including explicit appliance model parsing from labeled rows.
 7. Enrich room rows with fixture fields (`sink_info`, `basin_info`, `tap_info`), split door-colour fields (`door_colours_overheads`, `door_colours_base`, `door_colours_tall`, `door_colours_island`, `door_colours_bar_back`), and derived bench-top fields (`bench_tops_wall_run`, `bench_tops_island`, `bench_tops_other`).
-6. For Yellowwood-style schedule PDFs, parse room sections page-by-page from joinery schedule pages instead of scanning the whole document blindly, so `Back Benchtops`, island bench fields, vanity colours, and cabinet-only materials are mapped from the correct pages.
-7. Remove plumbing fixtures from appliance rows so they only appear on room rows.
-8. If OpenAI is enabled, send consolidated text and template context for higher-quality structured output.
+8. For Yellowwood-style schedule PDFs, parse room sections page-by-page from joinery schedule pages instead of scanning the whole document blindly, so `Back Benchtops`, island bench fields, vanity colours, and cabinet-only materials are mapped from the correct pages.
+9. Remove plumbing fixtures from appliance rows so they only appear on room rows.
+10. If OpenAI is enabled, send consolidated layout-normalized text and template context for higher-quality structured output.
    Default model target: `gpt-4.1-mini` unless an environment override is explicitly applied.
 9. Normalize OpenAI text output before JSON parsing so fenced JSON or small prefatory text does not trigger an unnecessary fallback.
 10. Apply the fixed `Global Conservative` profile for every Builder:
@@ -118,7 +118,7 @@
   - recover delayed Imperial handle lines that appear later in the same section while rejecting adjacent cabinet-colour rows as handle noise
 15. After AI merge, rebuild Imperial `rooms[]` and `special_sections[]` from the heuristic section parser before final cleaning so room-level fields remain tied to same-room same-row boundaries instead of inheriting broader AI guesses.
 16. Apply the fixed global cleaning rules after heuristic, merge, Clarendon post-polish, and Imperial section parsing so brand casing, door-colour cleanup, kitchen-only bench-top splitting, tall-cabinet capture, and soft-close normalization stay consistent across all builders.
-17. Record analysis metadata in the snapshot: mode, parser strategy, attempted, succeeded, model, note, vision-fallback metadata (`vision_attempted`, `vision_succeeded`, `vision_pages`, `vision_page_count`, `vision_note`), and runtime identifiers (`worker_pid`, `app_build_id`).
+17. Record analysis metadata in the snapshot: mode, parser strategy, layout metadata (`layout_attempted`, `layout_succeeded`, `layout_mode`, `layout_pages`, `heavy_vision_pages`, `layout_note`), vision metadata (`vision_attempted`, `vision_succeeded`, `vision_pages`, `vision_page_count`, `vision_note`), and runtime identifiers (`worker_pid`, `app_build_id`).
 18. Normalize drawer and hinge states to `Soft Close`, `Not Soft Close`, or blank.
 19. Look up official appliance resources by `make + model_no`, first probing deterministic brand-site model URLs where supported and then falling back to search-based discovery; AEG, Westinghouse, and Fisher & Paykel now extract official dimensions from product pages when available, including JSON-like structured metadata.
 20. Extract an optional `site_address` from the authoritative source text and carry it in the snapshot for header display on the Job Workspace and Raw Spec List pages.

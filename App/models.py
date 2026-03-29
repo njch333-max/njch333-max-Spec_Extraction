@@ -6,6 +6,12 @@ from pydantic import BaseModel, Field
 class AnalysisMeta(BaseModel):
     mode: str = "heuristic_only"
     parser_strategy: str = "global_conservative"
+    layout_attempted: bool = False
+    layout_succeeded: bool = False
+    layout_mode: str = ""
+    layout_pages: list[int] = Field(default_factory=list)
+    heavy_vision_pages: list[int] = Field(default_factory=list)
+    layout_note: str = ""
     openai_attempted: bool = False
     openai_succeeded: bool = False
     openai_model: str = ""

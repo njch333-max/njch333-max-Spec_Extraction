@@ -1065,6 +1065,7 @@ def _analysis_from_snapshot(snapshot: dict[str, Any] | None) -> dict[str, Any]:
     analysis = dict((snapshot or {}).get("analysis") or {})
     mode = analysis.get("mode", "heuristic_only")
     parser_strategy = str(analysis.get("parser_strategy", "") or "")
+    layout_mode = str(analysis.get("layout_mode", "") or "")
     return {
         "mode": mode,
         "label": {
@@ -1074,6 +1075,17 @@ def _analysis_from_snapshot(snapshot: dict[str, Any] | None) -> dict[str, Any]:
         }.get(mode, mode.replace("_", " ").title()),
         "parser_strategy": parser_strategy,
         "parser_strategy_label": cleaning_rules.parser_strategy_label(parser_strategy) if parser_strategy else "Not recorded",
+        "layout_attempted": bool(analysis.get("layout_attempted", False)),
+        "layout_succeeded": bool(analysis.get("layout_succeeded", False)),
+        "layout_mode": layout_mode,
+        "layout_mode_label": {
+            "lightweight": "Lightweight structure",
+            "mixed": "Structure-first mixed",
+            "heavy_vision": "High-precision vision",
+        }.get(layout_mode, layout_mode.replace("_", " ").title() if layout_mode else "Not recorded"),
+        "layout_pages": [int(item) for item in analysis.get("layout_pages", []) if str(item).strip().isdigit()],
+        "heavy_vision_pages": [int(item) for item in analysis.get("heavy_vision_pages", []) if str(item).strip().isdigit()],
+        "layout_note": analysis.get("layout_note", ""),
         "openai_attempted": bool(analysis.get("openai_attempted", False)),
         "openai_succeeded": bool(analysis.get("openai_succeeded", False)),
         "openai_model": analysis.get("openai_model", ""),

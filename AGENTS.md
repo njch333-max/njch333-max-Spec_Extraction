@@ -37,6 +37,8 @@ If a change affects user-visible behavior, architecture, storage, deployment, wo
 8. Treat a task as complete only after local checks pass, production services are restarted successfully, and the affected live page or job is verified.
 9. For parser-accuracy work, the source PDF is the acceptance source of truth. Do not sign off based only on older webpages or older snapshots.
 10. When a builder-specific polish path has access to both `raw_text` and vision-normalized `text`, prefer `raw_text` for field recovery and use normalized `text` only as a fallback.
+11. Treat spec parsing as structure-first work: every spec page should go through page-layout analysis before final field extraction, and complex table pages should escalate to the heavy vision layout path.
+12. Keep field ownership same-room-only, same-section-only, and same-row-or-row-fragment-only. Do not borrow supplier, note, or model text across adjacent rows.
 
 ## Verification Expectations
 - The app should boot with `uvicorn App.main:app`

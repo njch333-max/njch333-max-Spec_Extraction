@@ -55,6 +55,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 ### 4.4 Extraction
 - Extract text directly from digital PDFs and DOCX files.
 - Mark low-text PDF pages for OCR or vision fallback.
+- All spec parsing must follow a structure-first pipeline: detect page layout first, then fill field values only from matched room and row blocks.
 - Only allow parsing to start when the job already has at least one matching uploaded file.
 - Store extraction metadata for each raw snapshot, including whether OpenAI was attempted, whether it succeeded, and which model was used.
 - Produce a canonical JSON result containing:
@@ -72,6 +73,8 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - The default OpenAI extraction model is `gpt-4.1-mini`; production and local environments should stay aligned unless a deliberate override is documented.
 - Extraction now uses a heuristic-first, vision-fallback pipeline for high-risk pages: render the PDF page to an image, ask OpenAI for page/block/row structure, then let the row-matched text fill final values.
 - Vision fallback is structure-first, not answer-first. It should correct section, room-block, and row boundaries, while final field values continue to come from the matched source row text/OCR.
+- Every spec page must receive at least lightweight layout analysis. Joinery schedules, colour schedules, sinkware/tapware pages, appliance tables, and OCR-glued or order-reversed pages must escalate to the heavy vision layout path by default.
+- Layout analysis must emit `page_type`, `section_label`, `room_label`, `room_blocks`, and `rows`, and later extraction stages may only read values from those matched blocks instead of scanning freely across the page.
 - All builders must use the fixed `Global Conservative` profile based on the accepted `37016` output style.
 - Under `Global Conservative`, heuristic room structure and cleaning remain primary, room identity is source-driven, OpenAI fills missing fields conservatively, and AI must not inject extra rooms, collapse distinct rooms into broad buckets, or overwrite already-clean room text with noisier duplicates.
 - When OpenAI and heuristic room sets disagree, keep the heuristic room layout as the primary room skeleton and merge AI fields conservatively into that layout so repeated parses of the same spec stay visually stable.
@@ -82,6 +85,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - When a room-master file uses grouped room headings such as `Vanities`, grouped output should be preserved and supplement files must enrich that grouped room instead of splitting it into extra bathroom/ensuite/powder rows.
 - Room material fields must remain room-local. Benchtops, door colours, handles, toe kicks, bulkheads, and splashbacks should come only from the matched room section, and supplement files must not leak another room's material text into the current room.
 - Material ownership must be same-room-only, same-section-only, and same-row-or-adjacent-only: the parser may not borrow benchtop, splashback, accessory, tap, or other material text from another room, another section, or a later unrelated row.
+- Across all builders, supplier, note, model, and profile text must also stay row-local. Those fragments may only be attached to the field that owns the same source row or row fragment.
 - Room-local material ownership must also hold inside grouped rooms. If the authoritative room is `Vanities`, only the `VANITIES COLOUR SCHEDULE` section may define its benchtops and door colours; fixture supplements may add basin/tap/sink details only.
 - Composite supplement headings such as `Kitchen/Pantry/Family/Meals` must not generate a single synthetic room; independent rooms should only be created when the authoritative room-master file contains explicit room-specific colour-schedule pages such as `MEALS ROOM COLOUR SCHEDULE`.
 - Generic `DOORS/PANELS` or `Door/Panel Colour` values may fall back to `Base` only when the same room section has no explicit `Overhead Cupboards`, `Base Cupboards & Drawers`, `Island Bench Base Cupboards & Drawers`, or `Island Bar Back` group markers.
@@ -213,6 +217,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - The Jobs page `Open` action must continue to open in a new browser tab.
 - The Job Workspace title must show `job no - site address` when the latest parsed raw or drawing snapshot exposes a `site_address`.
 - At roughly `1280px` width and below, main pages should switch from wide tables to stacked card-style layouts so a 1080p half-screen browser can be read without horizontal scrolling.
+- Job diagnostics should expose structure-analysis metadata, including whether layout analysis ran, whether it succeeded, which pages were analyzed, which pages escalated to heavy vision, and a short layout note.
 
 ### 4.13 Git Rollback Tooling
 - Provide local Git helper scripts to initialize, checkpoint, inspect history, and restore from previous commits.

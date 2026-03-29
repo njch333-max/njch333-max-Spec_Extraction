@@ -15,6 +15,11 @@ from App.services import cleaning_rules, parsing, runtime
 ProgressCallback = Callable[[str, str], None] | None
 
 
+LAYOUT_ROW_LABELS: tuple[str, ...] = tuple(
+    sorted(set(parsing.FIELD_LABELS) | {"SINKWARE", "TAPWARE", "APPLIANCES", "AREA / ITEM"}, key=len, reverse=True)
+)
+
+
 def build_spec_snapshot(
     job: dict[str, Any],
     builder: dict[str, Any],
@@ -25,17 +30,15 @@ def build_spec_snapshot(
     rule_flags = cleaning_rules.global_rule_flags()
     parser_strategy = cleaning_rules.global_parser_strategy()
     documents = _load_documents(files, role="spec")
-    _report_progress(progress_callback, "heuristic", f"Running heuristic extraction on {len(documents)} spec file(s)")
-    heuristic = parsing.parse_documents(job_no=job["job_no"], builder_name=builder["name"], source_kind="spec", documents=documents, rule_flags=rule_flags)
-    documents, heuristic, vision_meta = _apply_vision_fallback(
+    documents, vision_meta = _apply_layout_pipeline(
         job,
         builder,
         documents,
-        heuristic,
         source_kind="spec",
-        rule_flags=rule_flags,
         progress_callback=progress_callback,
     )
+    _report_progress(progress_callback, "heuristic", f"Running heuristic extraction on {len(documents)} spec file(s)")
+    heuristic = parsing.parse_documents(job_no=job["job_no"], builder_name=builder["name"], source_kind="spec", documents=documents, rule_flags=rule_flags)
     heuristic_analysis = dict(heuristic.get("analysis") or {})
     ai_result, analysis = _try_openai(
         job,
@@ -53,6 +56,12 @@ def build_spec_snapshot(
             "rule_flags": rule_flags,
             "worker_pid": os.getpid(),
             "app_build_id": runtime.APP_BUILD_ID,
+            "layout_attempted": vision_meta["layout_attempted"],
+            "layout_succeeded": vision_meta["layout_succeeded"],
+            "layout_mode": vision_meta["layout_mode"],
+            "layout_pages": vision_meta["layout_pages"],
+            "heavy_vision_pages": vision_meta["heavy_vision_pages"],
+            "layout_note": vision_meta["layout_note"],
             "room_master_file": heuristic_analysis.get("room_master_file", ""),
             "room_master_reason": heuristic_analysis.get("room_master_reason", ""),
             "supplement_files": heuristic_analysis.get("supplement_files", []),
@@ -133,6 +142,12 @@ def build_drawing_snapshot(
             "rule_flags": rule_flags,
             "worker_pid": os.getpid(),
             "app_build_id": runtime.APP_BUILD_ID,
+            "layout_attempted": vision_meta["layout_attempted"],
+            "layout_succeeded": vision_meta["layout_succeeded"],
+            "layout_mode": vision_meta["layout_mode"],
+            "layout_pages": vision_meta["layout_pages"],
+            "heavy_vision_pages": vision_meta["heavy_vision_pages"],
+            "layout_note": vision_meta["layout_note"],
             "room_master_file": heuristic_analysis.get("room_master_file", ""),
             "room_master_reason": heuristic_analysis.get("room_master_reason", ""),
             "supplement_files": heuristic_analysis.get("supplement_files", []),
@@ -167,7 +182,8 @@ def _load_documents(files: list[dict[str, Any]], role: str) -> list[dict[str, ob
         pages = []
         for page in parsing.load_document_pages(path):
             page_payload = dict(page)
-            page_payload["raw_text"] = str(page_payload.get("text", "") or "")
+            page_payload["raw_text"] = str(page_payload.get("raw_text", page_payload.get("text", "")) or "")
+            page_payload["text"] = str(page_payload.get("text", page_payload["raw_text"]) or "")
             pages.append(page_payload)
         documents.append(
             {
@@ -182,11 +198,386 @@ def _load_documents(files: list[dict[str, Any]], role: str) -> list[dict[str, ob
 
 def _blank_vision_meta() -> dict[str, Any]:
     return {
+        "layout_attempted": False,
+        "layout_succeeded": False,
+        "layout_mode": "",
+        "layout_pages": [],
+        "heavy_vision_pages": [],
+        "layout_note": "",
         "vision_attempted": False,
         "vision_succeeded": False,
         "vision_pages": [],
         "vision_page_count": 0,
         "vision_note": "",
+    }
+
+
+def _unique_page_numbers(values: list[int]) -> list[int]:
+    ordered: list[int] = []
+    seen: set[int] = set()
+    for value in values:
+        try:
+            page_no = int(value)
+        except (TypeError, ValueError):
+            continue
+        if page_no <= 0 or page_no in seen:
+            continue
+        seen.add(page_no)
+        ordered.append(page_no)
+    return ordered
+
+
+def _apply_layout_pipeline(
+    job: dict[str, Any],
+    builder: dict[str, Any],
+    documents: list[dict[str, object]],
+    source_kind: str,
+    progress_callback: ProgressCallback = None,
+) -> tuple[list[dict[str, object]], dict[str, Any]]:
+    layout_meta = _blank_vision_meta()
+    if not documents:
+        layout_meta["layout_note"] = "No source documents available for layout analysis."
+        return documents, layout_meta
+
+    builder_name = str(builder.get("name", "") or "")
+    updated_documents: list[dict[str, object]] = []
+    layout_pages: list[int] = []
+    heavy_candidates: list[tuple[int, int]] = []
+
+    _report_progress(progress_callback, "layout_prepare", f"Building page layouts for {len(documents)} {source_kind} file(s)")
+    for doc_index, document in enumerate(documents):
+        updated_document = {**document, "pages": [dict(page) for page in list(document.get("pages", []))]}
+        pages = list(updated_document.get("pages", []))
+        for page_index, page in enumerate(pages):
+            page_no = int(page.get("page_no", 0) or 0)
+            raw_text = str(page.get("raw_text", page.get("text", "")) or "")
+            heuristic_layout = _build_heuristic_page_layout(
+                builder_name=builder_name,
+                source_kind=source_kind,
+                file_name=str(updated_document.get("file_name", "") or ""),
+                page=page,
+            )
+            page["page_layout"] = heuristic_layout
+            page["layout_mode"] = "lightweight"
+            page["text"] = _vision_layout_to_text(heuristic_layout, fallback_text=raw_text)
+            layout_pages.append(page_no)
+            if source_kind == "spec" and _page_requires_vision(
+                builder_name=builder_name,
+                source_kind=source_kind,
+                file_name=str(updated_document.get("file_name", "") or ""),
+                page=page,
+                heuristic={},
+            ):
+                heavy_candidates.append((doc_index, page_index))
+        updated_documents.append(updated_document)
+
+    layout_meta["layout_attempted"] = True
+    layout_meta["layout_pages"] = _unique_page_numbers(layout_pages)
+    layout_meta["layout_succeeded"] = bool(layout_pages)
+    layout_meta["layout_mode"] = "lightweight"
+    layout_meta["layout_note"] = f"Lightweight structure analysis applied to {len(layout_meta['layout_pages'])} page(s)."
+
+    if not heavy_candidates:
+        layout_meta["vision_note"] = "No pages matched the heavy vision layout rules."
+        return updated_documents, layout_meta
+    if not runtime.OPENAI_VISION_ENABLED:
+        layout_meta["vision_note"] = "OpenAI vision fallback is disabled in runtime settings."
+        return updated_documents, layout_meta
+    if not runtime.OPENAI_ENABLED:
+        layout_meta["vision_note"] = "OpenAI is disabled, so heavy vision layout was skipped."
+        return updated_documents, layout_meta
+    if not runtime.OPENAI_API_KEY:
+        layout_meta["vision_note"] = "OPENAI_API_KEY is not configured, so heavy vision layout was skipped."
+        return updated_documents, layout_meta
+
+    attempted_pages: list[int] = []
+    applied_pages: list[int] = []
+    page_notes: list[str] = []
+    layout_meta["vision_attempted"] = True
+    max_pages = max(1, runtime.OPENAI_VISION_MAX_PAGES)
+
+    for doc_index, page_index in heavy_candidates[:max_pages]:
+        document = updated_documents[doc_index]
+        pages = list(document.get("pages", []))
+        if page_index >= len(pages):
+            continue
+        page = pages[page_index]
+        page_no = int(page.get("page_no", 0) or 0)
+        attempted_pages.append(page_no)
+        try:
+            _report_progress(progress_callback, "vision_prepare", f"Preparing page {page_no} from {document['file_name']} for heavy vision layout")
+            image_bytes = _render_pdf_page_png(
+                Path(str(document.get("path", ""))),
+                page_no=page_no,
+                dpi=runtime.OPENAI_VISION_DPI,
+            )
+            _report_progress(progress_callback, "vision_request", f"Calling OpenAI vision for {document['file_name']} page {page_no}")
+            layout = _request_page_layout(
+                job_no=str(job.get("job_no", "")),
+                builder_name=builder_name,
+                source_kind=source_kind,
+                file_name=str(document.get("file_name", "") or ""),
+                page_no=page_no,
+                page_text=str(page.get("raw_text", page.get("text", "")) or ""),
+                image_bytes=image_bytes,
+            )
+            normalized_text = _vision_layout_to_text(layout, fallback_text=str(page.get("raw_text", page.get("text", "")) or ""))
+            if not normalized_text:
+                page_notes.append(f"page {page_no}: OpenAI vision returned no usable layout text")
+                continue
+            page["page_layout"] = layout
+            page["vision_applied"] = True
+            page["layout_mode"] = "heavy_vision"
+            page["text"] = normalized_text
+            applied_pages.append(page_no)
+        except Exception as exc:
+            page_notes.append(f"page {page_no}: {_truncate_note(exc)}")
+
+    layout_meta["vision_pages"] = _unique_page_numbers(applied_pages if applied_pages else attempted_pages)
+    layout_meta["vision_page_count"] = len(layout_meta["vision_pages"])
+    layout_meta["heavy_vision_pages"] = _unique_page_numbers(applied_pages)
+    layout_meta["vision_succeeded"] = bool(applied_pages)
+    if applied_pages:
+        layout_meta["layout_mode"] = "heavy_vision" if len(applied_pages) == len(layout_meta["layout_pages"]) else "mixed"
+        layout_meta["layout_note"] = (
+            f"Structure-first parsing applied to {len(layout_meta['layout_pages'])} page(s); "
+            f"heavy vision layout corrected {len(layout_meta['heavy_vision_pages'])} page(s)."
+        )
+    if applied_pages:
+        success_note = f"Heavy vision layout applied to {len(layout_meta['heavy_vision_pages'])} page(s): {', '.join(str(page_no) for page_no in layout_meta['heavy_vision_pages'])}."
+        if len(heavy_candidates) > max_pages:
+            success_note = f"{success_note} Skipped {len(heavy_candidates) - max_pages} candidate page(s) because of the configured page cap."
+        if page_notes:
+            success_note = f"{success_note} Partial issues: {'; '.join(page_notes)[:220]}"
+        layout_meta["vision_note"] = success_note[:400]
+    else:
+        note = "Heavy vision layout attempted but no page layout was applied."
+        if page_notes:
+            note = "; ".join(page_notes)[:400]
+        layout_meta["vision_note"] = note
+    return updated_documents, layout_meta
+
+
+def _build_heuristic_page_layout(
+    builder_name: str,
+    source_kind: str,
+    file_name: str,
+    page: dict[str, Any],
+) -> dict[str, Any]:
+    raw_text = str(page.get("raw_text", page.get("text", "")) or "")
+    lines = [parsing.normalize_space(line) for line in raw_text.replace("\r", "\n").split("\n") if parsing.normalize_space(line)]
+    page_type = _infer_page_type_from_text(builder_name, source_kind, raw_text)
+    section_label, room_label = _infer_layout_labels(builder_name, lines, page_type)
+    if page_type == "sinkware_tapware":
+        room_blocks = _heuristic_sink_tap_room_blocks(lines)
+        rows = [row for block in room_blocks for row in block.get("rows", [])]
+    else:
+        rows = _split_lines_to_layout_rows(lines, page_type=page_type)
+        room_blocks = [{"room_label": room_label, "rows": rows}] if (room_label or rows) else []
+    return _normalize_page_layout(
+        {
+            "page_type": page_type,
+            "section_label": section_label,
+            "room_label": room_label,
+            "room_blocks": room_blocks,
+            "rows": rows,
+            "file_name": file_name,
+        }
+    )
+
+
+def _infer_page_type_from_text(builder_name: str, source_kind: str, text: str) -> str:
+    upper = str(text or "").upper()
+    if source_kind != "spec":
+        return "unknown"
+    if "SINKWARE & TAPWARE" in upper or "SINKWARE (" in upper or "TAPWARE (" in upper:
+        return "sinkware_tapware"
+    if "APPLIANCES" in upper or ("MODEL" in upper and "SUPPLIER" in upper and "AREA / ITEM" in upper):
+        return "appliance"
+    if "FEATURE TALL DOORS" in upper:
+        return "special"
+    if "JOINERY SELECTION SHEET" in upper or "COLOUR SCHEDULE" in upper or "SUPPLIER DESCRIPTION" in upper:
+        return "joinery"
+    if "imperial" in builder_name.strip().lower():
+        return "joinery"
+    return "unknown"
+
+
+def _infer_layout_labels(builder_name: str, lines: list[str], page_type: str) -> tuple[str, str]:
+    joined = "\n".join(lines)
+    if "imperial" in builder_name.strip().lower():
+        section_label = parsing.normalize_space(getattr(parsing, "_extract_imperial_section_title")(joined) or "")
+        if section_label:
+            room_label = parsing.normalize_space(re.sub(r"(?i)\bJOINERY SELECTION SHEET\b", "", section_label)).strip(" -")
+            if room_label.upper() in {"FEATURE TALL DOORS", "APPLIANCES", "SINKWARE & TAPWARE"}:
+                room_label = ""
+            return section_label, room_label
+    if page_type == "sinkware_tapware":
+        return "SINKWARE & TAPWARE", ""
+    for line in lines[:12]:
+        if "COLOUR SCHEDULE" in line.upper():
+            return line, parsing.source_room_label(line)
+    for line in lines[:8]:
+        label = parsing.source_room_label(line)
+        if label and label not in {"Room", "room"}:
+            return line, label
+    return "", ""
+
+
+def _heuristic_sink_tap_room_blocks(lines: list[str]) -> list[dict[str, Any]]:
+    room_blocks: list[dict[str, Any]] = []
+    current_block: dict[str, Any] | None = None
+    current_row: dict[str, str] | None = None
+    heading_re = re.compile(r"(?i)^(?P<label>SINKWARE|TAPWARE)\s*\((?P<room>[^)]+)\)\s*(?P<tail>.*)$")
+    for line in lines:
+        if _looks_like_layout_metadata_line(line):
+            continue
+        heading_match = heading_re.match(line)
+        if heading_match:
+            room_label = parsing.normalize_space(heading_match.group("room"))
+            if not current_block or current_block.get("room_label") != room_label:
+                current_block = {"room_label": room_label, "rows": []}
+                room_blocks.append(current_block)
+            current_row = {
+                "row_label": f"{heading_match.group('label').upper()} ({room_label})",
+                "value_region_text": parsing.normalize_space(heading_match.group("tail")),
+                "supplier_region_text": "",
+                "notes_region_text": "",
+                "row_kind": heading_match.group("label").strip().lower(),
+            }
+            current_block["rows"].append(current_row)
+            continue
+        if current_row is not None:
+            if current_row["value_region_text"]:
+                current_row["value_region_text"] = f"{current_row['value_region_text']} {line}".strip()
+            else:
+                current_row["value_region_text"] = line
+    return room_blocks
+
+
+def _split_lines_to_layout_rows(lines: list[str], page_type: str) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    current: dict[str, str] | None = None
+    for line in lines:
+        if _looks_like_layout_metadata_line(line):
+            if current:
+                rows.append(current)
+                current = None
+            continue
+        label, remainder = _match_layout_row_label(line)
+        if label:
+            if current:
+                rows.append(current)
+            current = {
+                "row_label": label,
+                "value_region_text": remainder,
+                "supplier_region_text": "",
+                "notes_region_text": "",
+                "row_kind": _infer_layout_row_kind(label, page_type),
+            }
+            continue
+        if current is None:
+            current = {
+                "row_label": "",
+                "value_region_text": line,
+                "supplier_region_text": "",
+                "notes_region_text": "",
+                "row_kind": _infer_layout_row_kind("", page_type, line),
+            }
+            continue
+        if _looks_like_supplier_only_line(line):
+            current["supplier_region_text"] = f"{current['supplier_region_text']} {line}".strip()
+        elif current["notes_region_text"]:
+            current["notes_region_text"] = f"{current['notes_region_text']} {line}".strip()
+        elif current["value_region_text"]:
+            current["value_region_text"] = f"{current['value_region_text']} {line}".strip()
+        else:
+            current["value_region_text"] = line
+    if current:
+        rows.append(current)
+    return rows
+
+
+def _match_layout_row_label(line: str) -> tuple[str, str]:
+    text = parsing.normalize_space(line)
+    sink_tap_match = re.match(r"(?i)^(SINKWARE|TAPWARE)\s*\(([^)]+)\)\s*(.*)$", text)
+    if sink_tap_match:
+        label = f"{sink_tap_match.group(1).upper()} ({parsing.normalize_space(sink_tap_match.group(2))})"
+        return label, parsing.normalize_space(sink_tap_match.group(3))
+    for candidate in LAYOUT_ROW_LABELS:
+        if text.lower().startswith(candidate.lower()):
+            remainder = parsing.normalize_space(text[len(candidate) :])
+            return candidate, remainder
+    return "", ""
+
+
+def _infer_layout_row_kind(label: str, page_type: str, line: str = "") -> str:
+    upper = f"{label} {line}".upper()
+    if page_type == "sinkware_tapware":
+        if upper.startswith("SINKWARE"):
+            return "sink"
+        if upper.startswith("TAPWARE"):
+            return "tap"
+        if upper.startswith("BASIN"):
+            return "basin"
+    if "HANDLE" in upper:
+        return "handle"
+    if any(token in upper for token in ("ACCESSORIES", "GPO", "BIN", "HAMPER")):
+        return "accessory"
+    if any(token in upper for token in ("SINK", "DROP IN TUB")):
+        return "sink"
+    if "BASIN" in upper:
+        return "basin"
+    if any(token in upper for token in ("TAP", "MIXER")):
+        return "tap"
+    if _looks_like_layout_metadata_line(upper):
+        return "metadata"
+    if page_type == "appliance":
+        return "other"
+    return "material"
+
+
+def _looks_like_layout_metadata_line(line: str) -> bool:
+    text = parsing.normalize_space(line)
+    upper = text.upper()
+    if not upper:
+        return True
+    metadata_tokens = (
+        "ADDRESS:",
+        "SITE ADDRESS:",
+        "CLIENT:",
+        "DATE:",
+        "DOCUMENT REF:",
+        "DESIGNER:",
+        "CLIENT NAME:",
+        "SIGNATURE:",
+        "SIGNED DATE:",
+        "ALL COLOURS SHOWN",
+        "PRODUCT AVAILABILITY",
+        "PAGE ",
+        "AREA / ITEM SPECS / DESCRIPTION IMAGE SUPPLIER NOTES",
+    )
+    return any(token in upper for token in metadata_tokens)
+
+
+def _looks_like_supplier_only_line(line: str) -> bool:
+    text = parsing.normalize_space(line)
+    upper = text.upper()
+    if not text:
+        return False
+    return upper in {
+        "POLYTEC",
+        "LAMINEX",
+        "CAESARSTONE",
+        "SMARTSTONE",
+        "WK STONE",
+        "ABI INTERIORS",
+        "HETTICH",
+        "MOMO",
+        "HAFELE",
+        "ABEY",
+        "FRANKE",
+        "TITUS TEKFORM",
     }
 
 
@@ -359,6 +750,18 @@ def _page_requires_vision(
     if not text:
         return False
     upper = text.upper()
+    if source_kind == "spec" and any(
+        marker in upper
+        for marker in (
+            "COLOUR SCHEDULE",
+            "JOINERY SELECTION SHEET",
+            "SINKWARE & TAPWARE",
+            "SINKWARE (",
+            "TAPWARE (",
+            "APPLIANCES",
+        )
+    ):
+        return True
     if bool(page.get("needs_ocr")):
         return True
     if _looks_like_glued_field_page(text):
@@ -459,9 +862,10 @@ def _request_page_layout(
         "page_no": page_no,
         "instructions": (
             "You are correcting PDF table structure. Return JSON only. "
-            "Identify the page_type, section_label, room_label, and rows. "
+            "Identify the page_type, section_label, room_label, room_blocks, and rows. "
             "Rows must preserve the visible table or block order and must not mix adjacent rows. "
             "Each row must include row_label, value_region_text, supplier_region_text, notes_region_text, and row_kind. "
+            "When a page contains multiple room blocks, room_blocks must preserve each room_label and its rows in visible order. "
             "Use row_kind only from: material, handle, accessory, sink, tap, basin, metadata, footer, other. "
             "Treat disclaimers, signatures, dates, and client blocks as metadata or footer, not material rows."
         ),
@@ -489,23 +893,30 @@ def _normalize_page_layout(layout: dict[str, Any]) -> dict[str, Any]:
     page_type = str(layout.get("page_type", "unknown") or "unknown").strip().lower().replace(" ", "_")
     if page_type not in {"joinery", "sinkware_tapware", "appliance", "special", "unknown"}:
         page_type = "unknown"
-    normalized_rows: list[dict[str, str]] = []
-    for raw_row in layout.get("rows", []):
-        if not isinstance(raw_row, dict):
+    normalized_rows = _normalize_layout_rows(layout.get("rows", []))
+    normalized_blocks: list[dict[str, Any]] = []
+    for raw_block in layout.get("room_blocks", []):
+        if not isinstance(raw_block, dict):
             continue
-        normalized_rows.append(
+        block_rows = _normalize_layout_rows(raw_block.get("rows", []))
+        normalized_blocks.append(
             {
-                "row_label": parsing.normalize_space(str(raw_row.get("row_label", "") or "")),
-                "value_region_text": parsing.normalize_space(str(raw_row.get("value_region_text", "") or "")),
-                "supplier_region_text": parsing.normalize_space(str(raw_row.get("supplier_region_text", "") or "")),
-                "notes_region_text": parsing.normalize_space(str(raw_row.get("notes_region_text", "") or "")),
-                "row_kind": str(raw_row.get("row_kind", "other") or "other").strip().lower().replace(" ", "_"),
+                "room_label": parsing.normalize_space(str(raw_block.get("room_label", "") or "")),
+                "rows": block_rows,
             }
         )
+    if not normalized_blocks and (normalized_rows or layout.get("room_label")):
+        normalized_blocks = [
+            {
+                "room_label": parsing.normalize_space(str(layout.get("room_label", "") or "")),
+                "rows": normalized_rows,
+            }
+        ]
     return {
         "page_type": page_type,
         "section_label": parsing.normalize_space(str(layout.get("section_label", "") or "")),
         "room_label": parsing.normalize_space(str(layout.get("room_label", "") or "")),
+        "room_blocks": normalized_blocks,
         "rows": normalized_rows,
     }
 
@@ -521,28 +932,66 @@ def _vision_layout_to_text(layout: dict[str, Any], fallback_text: str = "") -> s
     elif room_label:
         lines.append(room_label)
 
-    for raw_row in layout.get("rows", []):
-        if not isinstance(raw_row, dict):
-            continue
-        row_kind = str(raw_row.get("row_kind", "other") or "other").strip().lower()
-        if row_kind in {"metadata", "footer"}:
-            continue
-        label = parsing.normalize_space(str(raw_row.get("row_label", "") or ""))
-        value_bits = [
-            parsing.normalize_space(str(raw_row.get("value_region_text", "") or "")),
-            parsing.normalize_space(str(raw_row.get("supplier_region_text", "") or "")),
-            parsing.normalize_space(str(raw_row.get("notes_region_text", "") or "")),
-        ]
-        value_text = parsing.normalize_space(" ".join(bit for bit in value_bits if bit))
-        if label and value_text:
-            lines.append(f"{label} {value_text}")
-        elif label:
-            lines.append(label)
-        elif value_text:
-            lines.append(value_text)
+    room_blocks = layout.get("room_blocks", [])
+    if isinstance(room_blocks, list) and room_blocks:
+        for block in room_blocks:
+            if not isinstance(block, dict):
+                continue
+            block_room = parsing.normalize_space(str(block.get("room_label", "") or ""))
+            if block_room and block_room != room_label and block_room != section_label:
+                lines.append(block_room)
+            for raw_row in block.get("rows", []):
+                rendered = _render_layout_row_text(raw_row)
+                if rendered:
+                    lines.append(rendered)
+    else:
+        for raw_row in layout.get("rows", []):
+            rendered = _render_layout_row_text(raw_row)
+            if rendered:
+                lines.append(rendered)
 
     normalized = parsing.normalize_space("\n".join(line for line in lines if line))
     return normalized or fallback_text
+
+
+def _normalize_layout_rows(raw_rows: Any) -> list[dict[str, str]]:
+    normalized_rows: list[dict[str, str]] = []
+    for raw_row in raw_rows or []:
+        if not isinstance(raw_row, dict):
+            continue
+        row_kind = str(raw_row.get("row_kind", "other") or "other").strip().lower().replace(" ", "_")
+        if row_kind not in {"material", "handle", "accessory", "sink", "tap", "basin", "metadata", "footer", "other"}:
+            row_kind = "other"
+        normalized_rows.append(
+            {
+                "row_label": parsing.normalize_space(str(raw_row.get("row_label", "") or "")),
+                "value_region_text": parsing.normalize_space(str(raw_row.get("value_region_text", "") or "")),
+                "supplier_region_text": parsing.normalize_space(str(raw_row.get("supplier_region_text", "") or "")),
+                "notes_region_text": parsing.normalize_space(str(raw_row.get("notes_region_text", "") or "")),
+                "row_kind": row_kind,
+            }
+        )
+    return normalized_rows
+
+
+def _render_layout_row_text(raw_row: Any) -> str:
+    if not isinstance(raw_row, dict):
+        return ""
+    row_kind = str(raw_row.get("row_kind", "other") or "other").strip().lower()
+    if row_kind in {"metadata", "footer"}:
+        return ""
+    label = parsing.normalize_space(str(raw_row.get("row_label", "") or ""))
+    value_bits = [
+        parsing.normalize_space(str(raw_row.get("value_region_text", "") or "")),
+        parsing.normalize_space(str(raw_row.get("supplier_region_text", "") or "")),
+        parsing.normalize_space(str(raw_row.get("notes_region_text", "") or "")),
+    ]
+    value_text = parsing.normalize_space(" ".join(bit for bit in value_bits if bit))
+    if label and value_text:
+        return f"{label} {value_text}"
+    if label:
+        return label
+    return value_text
 
 
 def _try_openai(
@@ -557,6 +1006,12 @@ def _try_openai(
     analysis = {
         "mode": "heuristic_only",
         "parser_strategy": parser_strategy,
+        "layout_attempted": False,
+        "layout_succeeded": False,
+        "layout_mode": "",
+        "layout_pages": [],
+        "heavy_vision_pages": [],
+        "layout_note": "",
         "openai_attempted": False,
         "openai_succeeded": False,
         "openai_model": runtime.OPENAI_MODEL,

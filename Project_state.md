@@ -21,6 +21,8 @@
   - deterministic AEG Australia product-page probing on `aegaustralia.com.au`
   - Fisher & Paykel official product-page matching with official-size extraction from structured product metadata
   - heuristic-first, vision-fallback page parsing for high-risk PDF pages, using rendered page images to recover section and row boundaries before final field mapping
+  - structure-first spec parsing for all builders, with lightweight page-layout analysis on every spec page and heavy OpenAI vision layout applied selectively to complex table pages
+  - layout diagnostics recorded per snapshot, including `layout_attempted`, `layout_succeeded`, `layout_mode`, `layout_pages`, `heavy_vision_pages`, and `layout_note`
   - Clarendon-only deterministic post-polish that rebuilds cleaner room text from schedule and fixture pages while preserving source-driven room ownership
   - job-page Parse buttons with clearer run-status wording
   - live-polling run history with granular worker stage messages
@@ -253,6 +255,7 @@
   - `Floating Shelf`, `LED`, `Accessories`, and curated accessory `Others` rendering/export safety
 - Smoke tests now use an isolated temporary data directory instead of `App/data/`
 - PDF-grounded regression coverage now includes high-risk Clarendon and Imperial fixtures so parser fixes are checked against source-PDF page text instead of only older webpage outputs
+- Source-PDF acceptance is now the default parser QA rule: parser changes are considered correct only after the live rerun is checked against the source PDF, not just an older webpage or snapshot
 - Worker smoke test passed for:
   - upload DOCX spec
   - queue spec extraction

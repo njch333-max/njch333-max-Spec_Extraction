@@ -17,3 +17,4 @@ App/.env
 .env
 deploy/
 spec-extraction-deploy.zip
+tmp_pdf_checks/
