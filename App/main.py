@@ -281,6 +281,7 @@ def job_detail_page(request: Request, job_id: int):
     runs = _present_runs(store.list_runs(job_id))
     raw_snapshot_row = store.get_snapshot(job_id, "raw_spec")
     drawing_snapshot_row = store.get_snapshot(job_id, "drawing")
+    raw_verification = store.get_job_snapshot_verification(job_id, "raw_spec")
     review_row = store.get_review(job_id)
     review_snapshot = review_row["data"] if review_row else (raw_snapshot_row["data"] if raw_snapshot_row else _blank_snapshot(job))
     exports = _list_export_files(dirs["export_dir"])
@@ -300,6 +301,8 @@ def job_detail_page(request: Request, job_id: int):
             runs=runs,
             raw_snapshot=raw_snapshot_row["data"] if raw_snapshot_row else None,
             raw_analysis=_analysis_from_snapshot(raw_snapshot_row["data"] if raw_snapshot_row else None),
+            raw_verification=raw_verification,
+            raw_verification_summary=_verification_summary(raw_verification),
             drawing_snapshot=drawing_snapshot_row["data"] if drawing_snapshot_row else None,
             drawing_analysis=_analysis_from_snapshot(drawing_snapshot_row["data"] if drawing_snapshot_row else None),
             review_snapshot=review_snapshot,
@@ -325,6 +328,7 @@ def run_history_partial(request: Request, job_id: int):
             f"Run History {job['job_no']}",
             job=job,
             runs=_present_runs(store.list_runs(job_id)),
+            raw_verification_summary=_verification_summary(store.get_job_snapshot_verification(job_id, "raw_spec")),
         ),
     )
 
@@ -338,6 +342,7 @@ def spec_list_page(request: Request, job_id: int):
         return RedirectResponse("/jobs", status_code=303)
     raw_snapshot_row = store.get_snapshot(job_id, "raw_spec")
     raw_snapshot = raw_snapshot_row["data"] if raw_snapshot_row else None
+    raw_verification = store.get_job_snapshot_verification(job_id, "raw_spec")
     latest_spec_run = _latest_completed_run(store.list_runs(job_id), "spec")
     return templates.TemplateResponse(
         request,
@@ -352,6 +357,8 @@ def spec_list_page(request: Request, job_id: int):
             raw_snapshot=raw_snapshot,
             raw_generated_at=_format_brisbane_time((raw_snapshot or {}).get("generated_at", "")),
             raw_analysis=_analysis_from_snapshot(raw_snapshot),
+            raw_verification=raw_verification,
+            raw_verification_summary=_verification_summary(raw_verification),
             raw_extraction_duration=_format_run_duration(latest_spec_run),
             raw_spec_rooms=_flatten_rooms(raw_snapshot or {}),
             raw_special_sections=_flatten_special_sections(raw_snapshot or {}),
@@ -375,6 +382,9 @@ def spec_list_excel_download(request: Request, job_id: int):
     if not raw_snapshot_row:
         _set_flash(request, "error", "No raw spec snapshot is available for this job.")
         return RedirectResponse(f"/jobs/{job_id}/spec-list", status_code=303)
+    if not store.is_job_snapshot_verification_passed(job_id, "raw_spec"):
+        _set_flash(request, "error", "PDF QA must pass before exporting the raw spec list.")
+        return RedirectResponse(f"/jobs/{job_id}/pdf-qa", status_code=303)
     path = Path(build_spec_list_excel(job["job_no"], raw_snapshot_row["data"]))
     return FileResponse(
         path,
@@ -503,6 +513,9 @@ async def export_job_action(request: Request, job_id: int, csrf_token: str = For
     if not snapshot:
         _set_flash(request, "error", "No spec snapshot is available for export.")
         return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+    if not store.is_job_snapshot_verification_passed(job_id, "raw_spec"):
+        _set_flash(request, "error", "PDF QA must pass before generating formal exports.")
+        return RedirectResponse(f"/jobs/{job_id}/pdf-qa", status_code=303)
     build_exports(job["job_no"], snapshot)
     _set_flash(request, "success", "Export files generated.")
     return RedirectResponse(f"/jobs/{job_id}", status_code=303)
@@ -515,9 +528,57 @@ def download_export(request: Request, job_id: int, file_name: str):
     job = store.get_job(job_id)
     if not job:
         return RedirectResponse("/jobs", status_code=303)
+    if not store.is_job_snapshot_verification_passed(job_id, "raw_spec"):
+        _set_flash(request, "error", "PDF QA must pass before downloading formal exports.")
+        return RedirectResponse(f"/jobs/{job_id}/pdf-qa", status_code=303)
     dirs = ensure_job_dirs(job["job_no"])
     path = dirs["export_dir"] / Path(file_name).name
     return FileResponse(path, filename=path.name)
+
+
+@app.get("/jobs/{job_id}/pdf-qa")
+def pdf_qa_page(request: Request, job_id: int):
+    if not _require_page_user(request):
+        return RedirectResponse("/login", status_code=303)
+    job = store.get_job(job_id)
+    if not job:
+        return RedirectResponse("/jobs", status_code=303)
+    raw_snapshot_row = store.get_snapshot(job_id, "raw_spec")
+    if not raw_snapshot_row:
+        _set_flash(request, "error", "No raw spec snapshot is available for PDF QA yet.")
+        return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+    verification = store.get_job_snapshot_verification(job_id, "raw_spec")
+    return templates.TemplateResponse(
+        request,
+        "pdf_qa.html",
+        _context(
+            request,
+            f"PDF QA {job['job_no']}",
+            sidebar_collapsible=True,
+            sidebar_default_hidden=True,
+            job=job,
+            job_site_address=_job_site_address(raw_snapshot_row["data"], None),
+            raw_snapshot=raw_snapshot_row["data"],
+            raw_verification=verification,
+            raw_verification_summary=_verification_summary(verification),
+            verification_groups=_group_verification_items((verification or {}).get("checklist", [])),
+        ),
+    )
+
+
+@app.post("/jobs/{job_id}/pdf-qa/save")
+async def save_pdf_qa_action(request: Request, job_id: int):
+    return await _persist_pdf_qa_action(request, job_id, mode="save")
+
+
+@app.post("/jobs/{job_id}/pdf-qa/mark-pass")
+async def mark_pdf_qa_pass_action(request: Request, job_id: int):
+    return await _persist_pdf_qa_action(request, job_id, mode="mark_pass")
+
+
+@app.post("/jobs/{job_id}/pdf-qa/mark-fail")
+async def mark_pdf_qa_fail_action(request: Request, job_id: int):
+    return await _persist_pdf_qa_action(request, job_id, mode="mark_fail")
 
 
 @app.get("/api/health")
@@ -969,6 +1030,117 @@ def _job_site_address(raw_snapshot: dict[str, Any] | None, drawing_snapshot: dic
             if value:
                 return value
     return ""
+
+
+async def _persist_pdf_qa_action(request: Request, job_id: int, mode: str) -> RedirectResponse:
+    if not _require_page_user(request):
+        return RedirectResponse("/login", status_code=303)
+    form = await request.form()
+    verify_csrf(request, str(form.get("csrf_token", "")))
+    job = store.get_job(job_id)
+    if not job:
+        _set_flash(request, "error", "Job not found.")
+        return RedirectResponse("/jobs", status_code=303)
+    raw_snapshot_row = store.get_snapshot(job_id, "raw_spec")
+    if not raw_snapshot_row:
+        _set_flash(request, "error", "No raw spec snapshot is available for PDF QA.")
+        return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+    verification = store.get_job_snapshot_verification(job_id, "raw_spec")
+    if not verification:
+        _set_flash(request, "error", "No PDF QA checklist is available for the current raw spec snapshot.")
+        return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+    checklist, notes = _verification_payload_from_form(form)
+    checked_by = current_user(request) or ""
+    if mode == "mark_fail":
+        saved = store.save_snapshot_verification(int(verification["snapshot_id"]), checklist, checked_by, notes, force_status="failed")
+        _set_flash(request, "error", "PDF QA marked as failed.")
+        return RedirectResponse(f"/jobs/{job_id}/pdf-qa", status_code=303)
+    saved = store.save_snapshot_verification(int(verification["snapshot_id"]), checklist, checked_by, notes)
+    status = str((saved or {}).get("status", "pending") or "pending")
+    if mode == "mark_pass":
+        if status != "passed":
+            _set_flash(request, "error", "PDF QA cannot be marked as passed until every checklist item is Pass or N/A.")
+        else:
+            _set_flash(request, "success", "PDF QA passed. Formal exports are now unlocked.")
+        return RedirectResponse(f"/jobs/{job_id}/pdf-qa", status_code=303)
+    if status == "passed":
+        _set_flash(request, "success", "PDF QA checklist saved and marked as passed.")
+    elif status == "failed":
+        _set_flash(request, "error", "PDF QA checklist saved with failed items.")
+    else:
+        _set_flash(request, "success", "PDF QA checklist saved.")
+    return RedirectResponse(f"/jobs/{job_id}/pdf-qa", status_code=303)
+
+
+def _verification_payload_from_form(form: Any) -> tuple[list[dict[str, Any]], str]:
+    checklist: list[dict[str, Any]] = []
+    item_count = int(form.get("item_count", 0) or 0)
+    for index in range(item_count):
+        checklist.append(
+            {
+                "section_type": str(form.get(f"section_type_{index}", "") or ""),
+                "entity_label": str(form.get(f"entity_label_{index}", "") or ""),
+                "field_name": str(form.get(f"field_name_{index}", "") or ""),
+                "extracted_value": str(form.get(f"extracted_value_{index}", "") or ""),
+                "source_page_refs": str(form.get(f"source_page_refs_{index}", "") or ""),
+                "pdf_page_ref": str(form.get(f"pdf_page_ref_{index}", "") or ""),
+                "status": str(form.get(f"status_{index}", "pending") or "pending"),
+                "qa_note": str(form.get(f"qa_note_{index}", "") or ""),
+            }
+        )
+    notes = str(form.get("notes", "") or "")
+    return checklist, notes
+
+
+def _verification_summary(verification: dict[str, Any] | None) -> dict[str, Any]:
+    checklist = list((verification or {}).get("checklist", []) or [])
+    counts = {"pass": 0, "fail": 0, "na": 0, "pending": 0}
+    for item in checklist:
+        status = str(item.get("status", "pending") or "pending").lower()
+        if status not in counts:
+            status = "pending"
+        counts[status] += 1
+    total = len(checklist)
+    done = counts["pass"] + counts["na"]
+    status = str((verification or {}).get("status", "pending") or "pending").lower()
+    if status not in {"pending", "passed", "failed"}:
+        status = "pending"
+    return {
+        "status": status,
+        "status_label": {
+            "pending": "Pending PDF QA",
+            "passed": "PDF QA Passed",
+            "failed": "PDF QA Failed",
+        }.get(status, "Pending PDF QA"),
+        "status_class": {
+            "pending": "warning",
+            "passed": "ready",
+            "failed": "failed",
+        }.get(status, "warning"),
+        "checked_by": str((verification or {}).get("checked_by", "") or ""),
+        "checked_at": _format_brisbane_time((verification or {}).get("checked_at", "")),
+        "notes": str((verification or {}).get("notes", "") or ""),
+        "counts": counts,
+        "total": total,
+        "done": done,
+        "can_export": status == "passed",
+    }
+
+
+def _group_verification_items(checklist: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    groups: list[dict[str, Any]] = []
+    lookup: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in checklist:
+        if not isinstance(item, dict):
+            continue
+        key = (str(item.get("section_type", "") or ""), str(item.get("entity_label", "") or ""))
+        group = lookup.get(key)
+        if not group:
+            group = {"section_type": key[0], "entity_label": key[1], "checklist_items": []}
+            lookup[key] = group
+            groups.append(group)
+        group["checklist_items"].append(item)
+    return groups
 
 
 def _list_export_files(export_dir: Path) -> list[dict[str, Any]]:

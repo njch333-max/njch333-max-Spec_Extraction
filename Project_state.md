@@ -22,7 +22,12 @@
   - Fisher & Paykel official product-page matching with official-size extraction from structured product metadata
   - heuristic-first, vision-fallback page parsing for high-risk PDF pages, using rendered page images to recover section and row boundaries before final field mapping
   - structure-first spec parsing for all builders, with lightweight page-layout analysis on every spec page and heavy OpenAI vision layout applied selectively to complex table pages
+  - shared structure-first `spec` parsing entrypoint for all builders, so new builders no longer default back to the legacy room-section text scan as their main room-creation path
   - layout diagnostics recorded per snapshot, including `layout_attempted`, `layout_succeeded`, `layout_mode`, `layout_pages`, `heavy_vision_pages`, and `layout_note`
+  - automatic field-level PDF QA records for every new `raw_spec` snapshot, stored separately from review data
+  - dedicated `/jobs/{id}/pdf-qa` workflow with checklist save / pass / fail actions
+  - raw-spec pages remain visible before signoff, but formal exports are now locked until the latest raw snapshot passes PDF QA
+  - Job Workspace now shows a PDF QA status card, and Raw Snapshot pages show a clear pending-QA warning when the latest spec has not been signed off
   - Clarendon-only deterministic post-polish that rebuilds cleaner room text from schedule and fixture pages while preserving source-driven room ownership
   - job-page Parse buttons with clearer run-status wording
   - live-polling run history with granular worker stage messages
@@ -132,6 +137,7 @@
 - Smoke tests must not touch the real local app database
 - Confirmed implementation work is only done after production deployment and live verification succeed on `spec.lxtransport.online`
 - Parser-accuracy work is only done after the affected live rerun is checked against the source PDF, not just against an older webpage or snapshot
+- All new `spec` parse runs now default to field-level PDF QA. A parser fix is not considered complete until the latest live run passes that QA against the source PDF.
 
 ## Remaining Work
 - Refine OCR fallback for image-heavy PDFs
@@ -150,6 +156,7 @@
 - Build the future comparison UI and diff logic
 - Decide whether to add a global all-job Spec List index in a later phase
 - Continue validating parsing changes through fresh online reruns on the affected jobs instead of relying on older snapshots
+- Continue pushing the shared structure layer deeper into strict row-fragment field reconstruction so high-precision layout analysis also controls final field ownership, not just room/section boundaries
 
 ## Risks
 - OCR fallback is currently warning-driven unless stronger OCR infrastructure or OpenAI vision is configured

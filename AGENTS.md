@@ -39,6 +39,9 @@ If a change affects user-visible behavior, architecture, storage, deployment, wo
 10. When a builder-specific polish path has access to both `raw_text` and vision-normalized `text`, prefer `raw_text` for field recovery and use normalized `text` only as a fallback.
 11. Treat spec parsing as structure-first work: every spec page should go through page-layout analysis before final field extraction, and complex table pages should escalate to the heavy vision layout path.
 12. Keep field ownership same-room-only, same-section-only, and same-row-or-row-fragment-only. Do not borrow supplier, note, or model text across adjacent rows.
+13. All new `spec` parse runs for all builders must enter field-level PDF QA automatically. Raw results may be viewed before signoff, but they are not formally accepted until PDF QA passes.
+14. Formal spec exports are locked behind PDF QA. Do not treat a raw spec snapshot as complete, export-ready, or “fixed” until the current raw snapshot verification is `passed`.
+15. Parser-accuracy work is only complete after the affected live rerun passes PDF QA against the source PDF page-by-page. Older webpages and older snapshots are reference material only.
 
 ## Verification Expectations
 - The app should boot with `uvicorn App.main:app`
@@ -66,4 +69,4 @@ Expected workflow after confirmed implementation:
 2. Deploy to `spec.lxtransport.online`.
 3. Restart `spec-extraction-web.service` and `spec-extraction-worker.service`.
 4. Verify `/api/health`.
-5. If parsing logic changed, re-run the affected online job, confirm the latest run uses the new build, and compare the result against the source PDF before closing the task.
+5. If parsing logic changed, re-run the affected online job, confirm the latest run uses the new build, complete PDF QA against the source PDF, and only then close the task.

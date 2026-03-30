@@ -20,7 +20,7 @@ from App.services import cleaning_rules, extraction_service, parsing as parsing_
 from App.services.appliance_official import _build_direct_product_candidates, _extract_size_from_text, _primary_model_token
 from App.services.export_service import build_spec_list_excel
 from App.services.parsing import enrich_snapshot_rooms, parse_documents
-from App.services.runtime import ensure_job_dirs
+from App.services.runtime import ensure_job_dirs, utc_now_iso
 
 
 class SmokeTest(unittest.TestCase):
@@ -38,6 +38,7 @@ class SmokeTest(unittest.TestCase):
         with store.connect() as conn:
             conn.execute("DELETE FROM auth_events")
             conn.execute("DELETE FROM reviews")
+            conn.execute("DELETE FROM snapshot_verifications")
             conn.execute("DELETE FROM snapshots")
             conn.execute("DELETE FROM runs")
             conn.execute("DELETE FROM job_files")
@@ -2728,6 +2729,7 @@ class SmokeTest(unittest.TestCase):
         self.assertNotIn("<td>Sink</td>", page.text)
         self.assertIn("Not Soft Close", page.text)
 
+        self._mark_raw_spec_qa_passed(job_id)
         export_response = client.get(f"/jobs/{job_id}/spec-list.xlsx")
         self.assertEqual(export_response.status_code, 200)
         workbook = load_workbook(io.BytesIO(export_response.content))
@@ -2753,6 +2755,94 @@ class SmokeTest(unittest.TestCase):
         meta_rows = [row[0] for row in meta_sheet.iter_rows(min_row=2, values_only=True)]
         self.assertIn("analysis_mode", meta_rows)
         self.assertIn("analysis_rule_flags", meta_rows)
+
+    def test_raw_spec_snapshot_creates_pending_pdf_qa_and_blocks_exports(self) -> None:
+        builder_id = store.create_builder("Imperial", "imperial", "")
+        job_id = store.create_job("38251", builder_id, "Pending QA", "")
+        store.upsert_snapshot(
+            job_id,
+            "raw_spec",
+            {
+                "job_no": "38251",
+                "builder_name": "Imperial",
+                "source_kind": "spec",
+                "generated_at": utc_now_iso(),
+                "analysis": {},
+                "rooms": [
+                    {
+                        "room_key": "kitchen",
+                        "original_room_label": "KITCHEN",
+                        "bench_tops_wall_run": "20mm Caesarstone - Fresh Concrete",
+                        "page_refs": "1-3",
+                    }
+                ],
+                "appliances": [],
+                "special_sections": [],
+                "others": {},
+                "warnings": [],
+                "source_documents": [],
+            },
+        )
+        verification = store.get_job_snapshot_verification(job_id, "raw_spec")
+        self.assertIsNotNone(verification)
+        self.assertEqual(verification["status"], "pending")
+        self.assertGreater(len(verification["checklist"]), 0)
+
+        client = TestClient(app)
+        self._login(client)
+
+        spec_page = client.get(f"/jobs/{job_id}/spec-list")
+        self.assertEqual(spec_page.status_code, 200)
+        self.assertIn("Pending PDF QA", spec_page.text)
+
+        export_response = client.get(f"/jobs/{job_id}/spec-list.xlsx", follow_redirects=False)
+        self.assertEqual(export_response.status_code, 303)
+        self.assertEqual(export_response.headers["location"], f"/jobs/{job_id}/pdf-qa")
+
+    def test_pdf_qa_page_can_mark_snapshot_passed_and_unlock_exports(self) -> None:
+        builder_id = store.create_builder("Clarendon", "clarendon", "")
+        job_id = store.create_job("37796", builder_id, "QA Pass", "")
+        store.upsert_snapshot(
+            job_id,
+            "raw_spec",
+            {
+                "job_no": "37796",
+                "builder_name": "Clarendon",
+                "source_kind": "spec",
+                "generated_at": utc_now_iso(),
+                "analysis": {},
+                "rooms": [
+                    {
+                        "room_key": "kitchen",
+                        "original_room_label": "KITCHEN",
+                        "bench_tops_wall_run": "Quantum Zero White Swirl - 20MM Pencil Round Edge",
+                        "door_colours_base": "Polytec Aston White Smooth Finish Thermolaminate - Hampton EM9 Profile",
+                        "page_refs": "2",
+                    }
+                ],
+                "appliances": [],
+                "special_sections": [],
+                "others": {},
+                "warnings": [],
+                "source_documents": [],
+            },
+        )
+
+        client = TestClient(app)
+        self._login(client)
+        qa_page = client.get(f"/jobs/{job_id}/pdf-qa")
+        self.assertEqual(qa_page.status_code, 200)
+        csrf = qa_page.text.split('name="csrf_token" value="', 1)[1].split('"', 1)[0]
+        verification = store.get_job_snapshot_verification(job_id, "raw_spec")
+        self.assertIsNotNone(verification)
+        payload = self._qa_form_payload(verification, csrf, item_status="pass")
+        response = client.post(f"/jobs/{job_id}/pdf-qa/mark-pass", data=payload, follow_redirects=False)
+        self.assertEqual(response.status_code, 303)
+        updated = store.get_job_snapshot_verification(job_id, "raw_spec")
+        self.assertEqual(updated["status"], "passed")
+
+        export_response = client.get(f"/jobs/{job_id}/spec-list.xlsx", follow_redirects=False)
+        self.assertEqual(export_response.status_code, 200)
 
     def test_spec_list_page_hides_non_kitchen_island_bar_back_and_implicit_overheads(self) -> None:
         builder_id = store.create_builder("Clarendon", "clarendon", "")
@@ -3178,8 +3268,8 @@ class SmokeTest(unittest.TestCase):
             documents=documents,
         )
         rooms = {row["room_key"]: row for row in snapshot["rooms"]}
-        self.assertIn("living_office", rooms)
-        office = rooms["living_office"]
+        self.assertIn("living_and_office", rooms)
+        office = rooms["living_and_office"]
         self.assertEqual(office["original_room_label"], "LIVING & OFFICE")
         self.assertEqual(office["bench_tops_other"], "Tasmanian Oak Matt - Laminate Benchtop - 33mm square edge")
         self.assertEqual(office["door_colours_base"], "Polytec - Classic White Matt")
@@ -4059,7 +4149,7 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(pantry["door_colours_tall"], "Polytec - Notaio Walnut Woodmatt VERTICAL GRAIN")
         self.assertEqual(pantry["sink_info"], "undermount - specs tbc - Taphole location: Ctr of sink")
 
-        laundry = rooms["laundry_mud_room"]
+        laundry = rooms["laundry_and_mud_room"]
         self.assertIn("33mm", laundry["bench_tops_other"])
         self.assertIn("Notaio Walnut laminate", laundry["bench_tops_other"])
         self.assertIn("20MM", laundry["bench_tops_other"])
@@ -4069,7 +4159,7 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(laundry["accessories"], ["Tanova - Designer Laundry System, 1 X 65L Metal Hamper, White PART NO: LTDS45.165L.WH"])
         self.assertNotIn("SUBJECT TO SUPPLIER", " ".join(laundry["handles"]))
 
-        living_office = rooms["living_office"]
+        living_office = rooms["living_and_office"]
         self.assertIn("33mm Polytec", living_office["bench_tops_other"])
         self.assertIn("10x10 edge", living_office["bench_tops_other"])
         self.assertIn("INTERNAL", living_office["floating_shelf"])
@@ -4422,6 +4512,33 @@ class SmokeTest(unittest.TestCase):
         response = client.get(f"/jobs/{job_id}")
         self.assertEqual(response.status_code, 200)
         self.assertNotIn("<span class=\"eyebrow\">Review</span>", response.text)
+
+    def _mark_raw_spec_qa_passed(self, job_id: int) -> None:
+        verification = store.get_job_snapshot_verification(job_id, "raw_spec")
+        self.assertIsNotNone(verification)
+        checklist = []
+        for item in verification["checklist"]:
+            updated = dict(item)
+            updated["status"] = "pass"
+            updated["pdf_page_ref"] = updated.get("source_page_refs", "") or "1"
+            checklist.append(updated)
+        saved = store.save_snapshot_verification(int(verification["snapshot_id"]), checklist, checked_by="admin", notes="Automated test pass")
+        self.assertIsNotNone(saved)
+        self.assertEqual(saved["status"], "passed")
+
+    def _qa_form_payload(self, verification: dict[str, object], csrf: str, item_status: str = "pass") -> dict[str, str]:
+        payload: dict[str, str] = {"csrf_token": csrf, "item_count": str(len(verification.get("checklist", []))), "notes": "QA test"}
+        for index, item in enumerate(verification.get("checklist", [])):
+            row = dict(item)
+            payload[f"section_type_{index}"] = str(row.get("section_type", ""))
+            payload[f"entity_label_{index}"] = str(row.get("entity_label", ""))
+            payload[f"field_name_{index}"] = str(row.get("field_name", ""))
+            payload[f"extracted_value_{index}"] = str(row.get("extracted_value", ""))
+            payload[f"source_page_refs_{index}"] = str(row.get("source_page_refs", ""))
+            payload[f"pdf_page_ref_{index}"] = str(row.get("source_page_refs", "") or "1")
+            payload[f"status_{index}"] = item_status
+            payload[f"qa_note_{index}"] = ""
+        return payload
 
     def _login(self, client: TestClient) -> str:
         login_page = client.get("/login")

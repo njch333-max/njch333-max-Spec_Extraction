@@ -113,6 +113,19 @@ def init_db() -> None:
                 updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS snapshot_verifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                snapshot_id INTEGER NOT NULL UNIQUE REFERENCES snapshots(id) ON DELETE CASCADE,
+                snapshot_kind TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending',
+                checked_by TEXT NOT NULL DEFAULT '',
+                checked_at TEXT NOT NULL DEFAULT '',
+                notes TEXT NOT NULL DEFAULT '',
+                checklist_json TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS auth_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL,
@@ -129,6 +142,14 @@ def init_db() -> None:
         _ensure_column(conn, "runs", "app_build_id", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, "runs", "parser_strategy", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, "runs", "worker_token", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "snapshot_verifications", "snapshot_kind", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "snapshot_verifications", "status", "TEXT NOT NULL DEFAULT 'pending'")
+        _ensure_column(conn, "snapshot_verifications", "checked_by", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "snapshot_verifications", "checked_at", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "snapshot_verifications", "notes", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "snapshot_verifications", "checklist_json", "TEXT NOT NULL DEFAULT '[]'")
+        _ensure_column(conn, "snapshot_verifications", "created_at", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "snapshot_verifications", "updated_at", "TEXT NOT NULL DEFAULT ''")
         conn.execute(
             """
             UPDATE builders
@@ -538,6 +559,11 @@ def upsert_snapshot(job_id: int, snapshot_kind: str, data: dict[str, Any]) -> No
                 """,
                 (job_id, snapshot_kind, payload, now, now),
             )
+            snapshot_id = int(conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"])
+        if existing:
+            snapshot_id = int(existing["id"])
+        if snapshot_kind == "raw_spec" and str(data.get("source_kind", "") or "spec").lower() == "spec":
+            _upsert_snapshot_verification_locked(conn, snapshot_id, snapshot_kind, data)
 
 
 def get_snapshot(job_id: int, snapshot_kind: str) -> dict[str, Any] | None:
@@ -567,12 +593,310 @@ def get_review(job_id: int) -> dict[str, Any] | None:
     return row
 
 
+def get_snapshot_verification(snapshot_id: int) -> dict[str, Any] | None:
+    row = fetch_one("SELECT * FROM snapshot_verifications WHERE snapshot_id = ?", (snapshot_id,))
+    if not row:
+        return None
+    row["checklist"] = _load_checklist_json(row.get("checklist_json", "[]"))
+    row["status"] = _normalize_verification_status(row.get("status", "pending"))
+    return row
+
+
+def get_job_snapshot_verification(job_id: int, snapshot_kind: str = "raw_spec") -> dict[str, Any] | None:
+    row = fetch_one(
+        """
+        SELECT sv.*, s.job_id, s.snapshot_kind, s.id AS joined_snapshot_id
+        FROM snapshot_verifications sv
+        JOIN snapshots s ON s.id = sv.snapshot_id
+        WHERE s.job_id = ? AND s.snapshot_kind = ?
+        """,
+        (job_id, snapshot_kind),
+    )
+    if not row:
+        return None
+    row["snapshot_id"] = int(row.get("joined_snapshot_id", row.get("snapshot_id", 0)) or 0)
+    row["checklist"] = _load_checklist_json(row.get("checklist_json", "[]"))
+    row["status"] = _normalize_verification_status(row.get("status", "pending"))
+    return row
+
+
+def save_snapshot_verification(
+    snapshot_id: int,
+    checklist: list[dict[str, Any]],
+    checked_by: str,
+    notes: str = "",
+    force_status: str | None = None,
+) -> dict[str, Any] | None:
+    now = utc_now_iso()
+    normalized_checklist = _normalize_verification_checklist(checklist)
+    status = _normalize_verification_status(force_status or _verification_status_from_checklist(normalized_checklist))
+    with connect() as conn:
+        existing = conn.execute(
+            "SELECT id, created_at FROM snapshot_verifications WHERE snapshot_id = ?",
+            (snapshot_id,),
+        ).fetchone()
+        payload = json.dumps(normalized_checklist, ensure_ascii=False)
+        checked_at = now if checked_by else ""
+        if existing:
+            conn.execute(
+                """
+                UPDATE snapshot_verifications
+                SET status = ?, checked_by = ?, checked_at = ?, notes = ?, checklist_json = ?, updated_at = ?
+                WHERE snapshot_id = ?
+                """,
+                (status, checked_by, checked_at, notes, payload, now, snapshot_id),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO snapshot_verifications (
+                    snapshot_id, snapshot_kind, status, checked_by, checked_at, notes, checklist_json, created_at, updated_at
+                )
+                VALUES (?, '', ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (snapshot_id, status, checked_by, checked_at, notes, payload, now, now),
+            )
+    return get_snapshot_verification(snapshot_id)
+
+
+def is_job_snapshot_verification_passed(job_id: int, snapshot_kind: str = "raw_spec") -> bool:
+    verification = get_job_snapshot_verification(job_id, snapshot_kind)
+    return bool(verification and verification.get("status") == "passed")
+
+
 def insert_auth_event(username: str, action: str, detail: str = "") -> None:
     with connect() as conn:
         conn.execute(
             "INSERT INTO auth_events (username, action, detail, created_at) VALUES (?, ?, ?, ?)",
             (username, action, detail, utc_now_iso()),
         )
+
+
+def _upsert_snapshot_verification_locked(
+    conn: sqlite3.Connection,
+    snapshot_id: int,
+    snapshot_kind: str,
+    snapshot_data: dict[str, Any],
+) -> None:
+    now = utc_now_iso()
+    checklist = _build_snapshot_verification_checklist(snapshot_data)
+    payload = json.dumps(checklist, ensure_ascii=False)
+    existing = conn.execute(
+        "SELECT id, created_at FROM snapshot_verifications WHERE snapshot_id = ?",
+        (snapshot_id,),
+    ).fetchone()
+    if existing:
+        conn.execute(
+            """
+            UPDATE snapshot_verifications
+            SET snapshot_kind = ?, status = 'pending', checked_by = '', checked_at = '', notes = '', checklist_json = ?, updated_at = ?
+            WHERE snapshot_id = ?
+            """,
+            (snapshot_kind, payload, now, snapshot_id),
+        )
+    else:
+        conn.execute(
+            """
+            INSERT INTO snapshot_verifications (
+                snapshot_id, snapshot_kind, status, checked_by, checked_at, notes, checklist_json, created_at, updated_at
+            )
+            VALUES (?, ?, 'pending', '', '', '', ?, ?, ?)
+            """,
+            (snapshot_id, snapshot_kind, payload, now, now),
+        )
+
+
+def _build_snapshot_verification_checklist(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    checklist: list[dict[str, Any]] = []
+    rooms = snapshot.get("rooms", [])
+    for room in rooms if isinstance(rooms, list) else []:
+        if not isinstance(room, dict):
+            continue
+        room_label = _verification_room_label(room)
+        page_refs = _verification_text(room.get("page_refs", ""))
+        _append_verification_item(
+            checklist,
+            section_type="room",
+            entity_label=room_label,
+            field_name="room_title",
+            extracted_value=room_label,
+            source_page_refs=page_refs,
+        )
+        for field_name, source_key in (
+            ("bench_tops_wall_run", "bench_tops_wall_run"),
+            ("bench_tops_island", "bench_tops_island"),
+            ("bench_tops_other", "bench_tops_other"),
+            ("door_colours_overheads", "door_colours_overheads"),
+            ("door_colours_base", "door_colours_base"),
+            ("door_colours_tall", "door_colours_tall"),
+            ("door_colours_island", "door_colours_island"),
+            ("door_colours_bar_back", "door_colours_bar_back"),
+            ("toe_kick", "toe_kick"),
+            ("bulkheads", "bulkheads"),
+            ("handles", "handles"),
+            ("floating_shelf", "floating_shelf"),
+            ("accessories", "accessories"),
+            ("others", "other_items"),
+            ("sink", "sink_info"),
+            ("basin", "basin_info"),
+            ("tap", "tap_info"),
+            ("drawers", "drawers_soft_close"),
+            ("hinges", "hinges_soft_close"),
+            ("splashback", "splashback"),
+            ("flooring", "flooring"),
+        ):
+            _append_verification_item(
+                checklist,
+                section_type="room",
+                entity_label=room_label,
+                field_name=field_name,
+                extracted_value=_verification_text(room.get(source_key, "")),
+                source_page_refs=page_refs,
+            )
+    appliances = snapshot.get("appliances", [])
+    for appliance in appliances if isinstance(appliances, list) else []:
+        if not isinstance(appliance, dict):
+            continue
+        entity_label = _verification_text(appliance.get("appliance_type", "")) or "Appliance"
+        extracted_value = " | ".join(
+            value
+            for value in (
+                _verification_text(appliance.get("make", "")),
+                _verification_text(appliance.get("model_no", "")),
+                _verification_text(appliance.get("overall_size", "")),
+            )
+            if value
+        )
+        _append_verification_item(
+            checklist,
+            section_type="appliance",
+            entity_label=entity_label,
+            field_name="appliance",
+            extracted_value=extracted_value,
+            source_page_refs=_verification_text(appliance.get("page_refs", "")),
+        )
+    special_sections = snapshot.get("special_sections", [])
+    for section in special_sections if isinstance(special_sections, list) else []:
+        if not isinstance(section, dict):
+            continue
+        entity_label = _verification_text(section.get("original_section_label", "")) or _verification_text(section.get("section_key", "")) or "Special Section"
+        _append_verification_item(
+            checklist,
+            section_type="special",
+            entity_label=entity_label,
+            field_name="fields",
+            extracted_value=_verification_text(section.get("fields", "")),
+            source_page_refs=_verification_text(section.get("page_refs", "")),
+        )
+    return checklist
+
+
+def _append_verification_item(
+    checklist: list[dict[str, Any]],
+    section_type: str,
+    entity_label: str,
+    field_name: str,
+    extracted_value: str,
+    source_page_refs: str,
+) -> None:
+    checklist.append(
+        {
+            "section_type": section_type,
+            "entity_label": entity_label,
+            "field_name": field_name,
+            "extracted_value": extracted_value,
+            "source_page_refs": source_page_refs,
+            "pdf_page_ref": "",
+            "status": "pending",
+            "qa_note": "",
+        }
+    )
+
+
+def _verification_room_label(room: dict[str, Any]) -> str:
+    return _verification_text(room.get("original_room_label", "")) or _verification_text(room.get("room_key", "")) or "Room"
+
+
+def _verification_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (list, tuple, set)):
+        parts = [_verification_text(item) for item in value]
+        return " | ".join(part for part in parts if part)
+    if isinstance(value, dict):
+        if "label" in value and "value" in value:
+            label = _verification_text(value.get("label", ""))
+            item_value = _verification_text(value.get("value", ""))
+            return f"{label}: {item_value}".strip(": ")
+        parts = []
+        for key, item in value.items():
+            key_text = _verification_text(key)
+            item_text = _verification_text(item)
+            if key_text and item_text:
+                parts.append(f"{key_text}: {item_text}")
+            elif item_text:
+                parts.append(item_text)
+        return " | ".join(parts)
+    return str(value).strip()
+
+
+def _load_checklist_json(value: Any) -> list[dict[str, Any]]:
+    try:
+        raw_items = json.loads(str(value or "[]"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return []
+    if not isinstance(raw_items, list):
+        return []
+    return _normalize_verification_checklist(raw_items)
+
+
+def _normalize_verification_checklist(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        normalized.append(
+            {
+                "section_type": str(item.get("section_type", "") or ""),
+                "entity_label": str(item.get("entity_label", "") or ""),
+                "field_name": str(item.get("field_name", "") or ""),
+                "extracted_value": str(item.get("extracted_value", "") or ""),
+                "source_page_refs": str(item.get("source_page_refs", "") or ""),
+                "pdf_page_ref": str(item.get("pdf_page_ref", "") or ""),
+                "status": _normalize_item_status(item.get("status", "pending")),
+                "qa_note": str(item.get("qa_note", "") or ""),
+            }
+        )
+    return normalized
+
+
+def _normalize_verification_status(value: Any) -> str:
+    text = str(value or "pending").strip().lower()
+    if text in {"passed", "failed", "pending"}:
+        return text
+    return "pending"
+
+
+def _normalize_item_status(value: Any) -> str:
+    text = str(value or "pending").strip().lower()
+    if text in {"pass", "fail", "na", "pending"}:
+        return text
+    return "pending"
+
+
+def _verification_status_from_checklist(checklist: list[dict[str, Any]]) -> str:
+    if not checklist:
+        return "pending"
+    seen_pending = False
+    for item in checklist:
+        status = _normalize_item_status(item.get("status", "pending"))
+        if status == "fail":
+            return "failed"
+        if status not in {"pass", "na"}:
+            seen_pending = True
+    return "pending" if seen_pending else "passed"
 
 
 init_db()

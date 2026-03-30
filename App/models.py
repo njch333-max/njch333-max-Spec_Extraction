@@ -31,6 +31,27 @@ class AnalysisMeta(BaseModel):
     ignored_room_like_lines_count: int = 0
 
 
+class VerificationChecklistItem(BaseModel):
+    section_type: str = ""
+    entity_label: str = ""
+    field_name: str = ""
+    extracted_value: str = ""
+    source_page_refs: str = ""
+    pdf_page_ref: str = ""
+    status: str = "pending"
+    qa_note: str = ""
+
+
+class SnapshotVerification(BaseModel):
+    snapshot_id: int = 0
+    snapshot_kind: str = ""
+    status: str = "pending"
+    checked_by: str = ""
+    checked_at: str = ""
+    notes: str = ""
+    checklist: list[VerificationChecklistItem] = Field(default_factory=list)
+
+
 class RoomRow(BaseModel):
     room_key: str = ""
     original_room_label: str = ""

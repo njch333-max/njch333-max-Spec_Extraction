@@ -178,6 +178,15 @@ textarea { resize: vertical; }
   color: white;
 }
 
+.primary-button.button-disabled,
+.ghost-button.button-disabled,
+.primary-button[disabled],
+.ghost-button[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 .ghost-button {
   background: rgba(23, 34, 44, 0.08);
   color: var(--ink);
@@ -201,6 +210,16 @@ textarea { resize: vertical; }
 .table-wrap {
   overflow-x: auto;
   margin-top: 14px;
+}
+
+.warning-card {
+  border-color: rgba(181, 68, 52, 0.18);
+  background: rgba(255, 249, 247, 0.96);
+}
+
+.qa-readonly {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 table {

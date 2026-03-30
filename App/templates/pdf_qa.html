@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <span class="eyebrow">PDF QA</span>
+    <h2>{{ job.job_no }}{% if job_site_address %} - {{ job_site_address }}{% endif %}</h2>
+    <p>{{ job.builder_name }}{% if job.title %} | {{ job.title }}{% endif %}</p>
+  </div>
+  <div class="head-actions">
+    <a href="/jobs/{{ job.id }}/spec-list" class="ghost-button">Back to Raw Snapshot</a>
+    <a href="/jobs/{{ job.id }}" class="ghost-button">Back to Job</a>
+  </div>
+</section>
+
+<section class="grid-two">
+  <article class="card">
+    <h3>QA Summary</h3>
+    <p><span class="status-chip status-{{ raw_verification_summary.status_class }}">{{ raw_verification_summary.status_label }}</span></p>
+    <ul class="plain-list">
+      <li><strong>Total items:</strong> {{ raw_verification_summary.total }}</li>
+      <li><strong>Completed:</strong> {{ raw_verification_summary.done }}</li>
+      <li><strong>Pass:</strong> {{ raw_verification_summary.counts.pass }}</li>
+      <li><strong>Fail:</strong> {{ raw_verification_summary.counts.fail }}</li>
+      <li><strong>Pending:</strong> {{ raw_verification_summary.counts.pending }}</li>
+      <li><strong>N/A:</strong> {{ raw_verification_summary.counts.na }}</li>
+      <li><strong>Checked by:</strong> {{ raw_verification_summary.checked_by or "Not checked yet" }}</li>
+      <li><strong>Checked at:</strong> {{ raw_verification_summary.checked_at or "Not checked yet" }}</li>
+    </ul>
+    {% if raw_verification_summary.notes %}
+    <div class="subcard">
+      <h4>Notes</h4>
+      <p class="muted">{{ raw_verification_summary.notes }}</p>
+    </div>
+    {% endif %}
+  </article>
+
+  <article class="card">
+    <h3>QA Rules</h3>
+    <ul class="plain-list">
+      <li><strong>Truth source:</strong> Source PDF page text and page image.</li>
+      <li><strong>Pass gate:</strong> Every checklist item must be `Pass` or `N/A`.</li>
+      <li><strong>Export lock:</strong> Formal exports remain blocked until PDF QA passes.</li>
+      <li><strong>Scope:</strong> This checklist covers the latest `raw_spec` snapshot only.</li>
+    </ul>
+  </article>
+</section>
+
+<section class="card">
+  <form method="post" action="/jobs/{{ job.id }}/pdf-qa/save" class="stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="split-head">
+      <div>
+        <h3>Checklist</h3>
+        <p class="muted">Review each extracted field against the source PDF and update its status, PDF page reference, and notes.</p>
+      </div>
+      <div class="head-actions">
+        <button type="submit" class="ghost-button">Save QA Draft</button>
+        <button type="submit" class="primary-button" formaction="/jobs/{{ job.id }}/pdf-qa/mark-pass">Mark QA Passed</button>
+        <button type="submit" class="danger-button" formaction="/jobs/{{ job.id }}/pdf-qa/mark-fail">Mark QA Failed</button>
+      </div>
+    </div>
+    <input type="hidden" name="item_count" value="{{ raw_verification.checklist|length if raw_verification else 0 }}">
+    {% set namespace_offset = namespace(value=0) %}
+    {% for group in verification_groups %}
+    <article class="subcard qa-group">
+      <h4>{{ group.entity_label or group.section_type|title }}</h4>
+      <div class="table-wrap">
+        <table class="table-cardify qa-table">
+          <thead>
+            <tr>
+              <th>Field</th>
+              <th>Extracted Value</th>
+              <th>Source Pages</th>
+              <th>PDF Page Ref</th>
+              <th>Status</th>
+              <th>QA Note</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in group.checklist_items %}
+            {% set idx = namespace_offset.value %}
+            <tr>
+              <td data-label="Field">
+                {{ item.field_name }}
+                <input type="hidden" name="section_type_{{ idx }}" value="{{ item.section_type }}">
+                <input type="hidden" name="entity_label_{{ idx }}" value="{{ item.entity_label }}">
+                <input type="hidden" name="field_name_{{ idx }}" value="{{ item.field_name }}">
+              </td>
+              <td data-label="Extracted Value">
+                <div class="qa-readonly">{{ item.extracted_value or "-" }}</div>
+                <input type="hidden" name="extracted_value_{{ idx }}" value="{{ item.extracted_value }}">
+              </td>
+              <td data-label="Source Pages">
+                <div class="qa-readonly">{{ item.source_page_refs or "-" }}</div>
+                <input type="hidden" name="source_page_refs_{{ idx }}" value="{{ item.source_page_refs }}">
+              </td>
+              <td data-label="PDF Page Ref">
+                <input type="text" name="pdf_page_ref_{{ idx }}" value="{{ item.pdf_page_ref }}" placeholder="e.g. 2">
+              </td>
+              <td data-label="Status">
+                <select name="status_{{ idx }}">
+                  <option value="pending" {% if item.status == "pending" %}selected{% endif %}>Pending</option>
+                  <option value="pass" {% if item.status == "pass" %}selected{% endif %}>Pass</option>
+                  <option value="fail" {% if item.status == "fail" %}selected{% endif %}>Fail</option>
+                  <option value="na" {% if item.status == "na" %}selected{% endif %}>N/A</option>
+                </select>
+              </td>
+              <td data-label="QA Note">
+                <textarea name="qa_note_{{ idx }}" rows="2" placeholder="Optional QA note">{{ item.qa_note }}</textarea>
+              </td>
+            </tr>
+            {% set namespace_offset.value = idx + 1 %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+    {% else %}
+    <p class="muted">No checklist items were generated for the latest raw spec snapshot.</p>
+    {% endfor %}
+    <label class="wide">
+      <span>Overall QA Notes</span>
+      <textarea name="notes" rows="4" placeholder="Optional summary for this QA review.">{{ raw_verification_summary.notes }}</textarea>
+    </label>
+  </form>
+</section>
+{% endblock %}

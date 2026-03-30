@@ -143,6 +143,19 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Preserve reviewed data separately from raw machine extraction.
 - The Job page should temporarily hide the Review cards until a later redesign is ready; the underlying review data model and save/export behavior may remain in the backend.
 
+### 4.5A PDF QA
+- Every new `spec` parse run must automatically create a field-level PDF QA checklist for the latest `raw_spec` snapshot.
+- PDF QA is separate from `review`; it must not reuse or overwrite the review data model.
+- The PDF QA checklist must cover room titles, room material fields, fixtures, soft-close states, flooring, accessories/others, and appliance rows.
+- The latest raw spec snapshot remains visible before QA, but must be clearly marked as `Pending PDF QA` until signed off.
+- Formal spec exports are blocked until the latest raw spec PDF QA status is `passed`.
+- The PDF QA workflow must support:
+  - saving checklist progress,
+  - marking a snapshot `passed` only when all checklist items are `pass` or `na`,
+  - marking a snapshot `failed`,
+  - recording `checked_by`, `checked_at`, `notes`, and per-field `pdf_page_ref` / `qa_note`.
+- Parser-accuracy changes are only complete after the affected live rerun passes PDF QA against the source PDF.
+
 ### 4.6 Export
 - Export reviewed data to:
   - one Excel workbook with multiple sheets
@@ -151,6 +164,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Export the raw spec snapshot from a dedicated Spec List page as a standalone Excel workbook.
 - Preserve Unicode content, including Chinese and special characters, in Excel and CSV outputs.
 - Export official `Product`, `Spec`, and `Manual` appliance links as dedicated columns and keep them clickable in Excel.
+- Formal export actions, including raw spec Excel export and generated job exports, must stay locked until the latest raw spec PDF QA passes.
 
 ### 4.7 Raw Spec List Page
 - Provide a separate login-protected page for a single job that displays the raw spec snapshot as read-only lists/tables.
@@ -164,6 +178,8 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - The page must use `raw_spec` only and must not switch to reviewed data.
 - The page title must show `Spec List for job no - site address` when the latest parsed snapshot provides a `site_address`; if no address exists, omit the separator and address text.
 - The page must provide a left-side navigation hide/show control and should load with the navigation rail hidden by default on every visit.
+- The page must show the latest PDF QA state for the current raw snapshot.
+- If the latest raw snapshot has not passed PDF QA, the page must render a prominent `Pending PDF QA` warning and keep raw data visible for checking.
 - In 1080p half-screen windows, the Raw Spec List page must remain readable without a horizontal scroll bar; dense tables should switch to stacked cards and room fields should wrap vertically instead of forcing sideways dragging.
 - In 1080p half-screen windows, the responsive layout must also remove fixed content minima and suppress page-level horizontal overflow so wrapped room cards do not still trigger a horizontal scrollbar.
 - The `Rooms` section should use one wide horizontal block per room on desktop, stacked vertically one below the next, so each field can be read without cramped narrow cards.
@@ -231,7 +247,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
   - production web and worker services restart successfully,
   - the affected live page or job is verified.
 - Parsing changes must be validated through a fresh online parse run for the affected job, not by inspecting an older snapshot.
-- Parser-accuracy changes must also be checked against the source PDF itself; older webpages or older snapshots are reference material only and are not acceptance criteria.
+- Parser-accuracy changes must also be checked against the source PDF itself through field-level PDF QA; older webpages or older snapshots are reference material only and are not acceptance criteria.
 - The repo should provide a repeatable local deployment helper so production updates do not rely on ad hoc terminal commands.
 
 ## 5. Canonical Data Requirements
@@ -251,6 +267,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - `analysis.vision_page_count`
 - `analysis.vision_note`
 - `site_address`
+- `pdf_qa_status`
 
 ### 5.1 Room Fields
 - `room_key`

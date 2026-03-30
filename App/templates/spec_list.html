@@ -8,7 +8,12 @@
   </div>
   <div class="head-actions">
     {% if raw_snapshot %}
+      {% if raw_verification_summary.can_export %}
     <a href="/jobs/{{ job.id }}/spec-list.xlsx" class="primary-button">Export Excel</a>
+      {% else %}
+    <span class="primary-button button-disabled" aria-disabled="true">Export Excel</span>
+      {% endif %}
+    <a href="/jobs/{{ job.id }}/pdf-qa" class="ghost-button">Open PDF QA</a>
     {% endif %}
     <a href="/jobs/{{ job.id }}" class="ghost-button">Back to Job</a>
   </div>
@@ -20,6 +25,17 @@
   <p>Run and complete a spec parse first, then reopen this page.</p>
 </section>
 {% else %}
+{% if not raw_verification_summary.can_export %}
+<section class="card warning-card">
+  <span class="eyebrow">Pending PDF QA</span>
+  <h3>Formal export is locked</h3>
+  <p>The latest raw spec snapshot is visible for review, but it must pass field-level PDF QA before formal exports are available.</p>
+  <p class="muted">Status: {{ raw_verification_summary.status_label }} | Pass {{ raw_verification_summary.counts.pass }} | Fail {{ raw_verification_summary.counts.fail }} | Pending {{ raw_verification_summary.counts.pending }}</p>
+  <div class="head-actions">
+    <a href="/jobs/{{ job.id }}/pdf-qa" class="primary-button">Open PDF QA</a>
+  </div>
+</section>
+{% endif %}
 <section class="grid-two">
   <article class="card">
     <h3>Snapshot Summary</h3>
@@ -42,6 +58,7 @@
       <li><strong>Rooms:</strong> {{ raw_spec_rooms|length }}</li>
       <li><strong>Appliances:</strong> {{ raw_spec_appliances|length }}</li>
       <li><strong>Warnings:</strong> {{ raw_spec_warnings|length }}</li>
+      <li><strong>PDF QA:</strong> {{ raw_verification_summary.status_label }}</li>
       <li><strong>Room master file:</strong> {{ raw_analysis.room_master_file or "Single-file parse" }}</li>
       <li><strong>Supplement files:</strong> {{ raw_analysis.supplement_files|join(", ") if raw_analysis.supplement_files else "None" }}</li>
       <li><strong>Ignored unmatched room-like lines:</strong> {{ raw_analysis.ignored_room_like_lines_count }}</li>

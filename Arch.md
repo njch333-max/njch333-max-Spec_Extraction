@@ -46,6 +46,7 @@
   - `job_files`
   - `runs`
   - `snapshots`
+  - `snapshot_verifications`
   - `reviews`
   - `auth_events`
 - All data access goes through `store.py`
@@ -123,6 +124,7 @@
 19. Look up official appliance resources by `make + model_no`, first probing deterministic brand-site model URLs where supported and then falling back to search-based discovery; AEG, Westinghouse, and Fisher & Paykel now extract official dimensions from product pages when available, including JSON-like structured metadata.
 20. Extract an optional `site_address` from the authoritative source text and carry it in the snapshot for header display on the Job Workspace and Raw Spec List pages.
 21. Save the raw snapshot.
+22. Immediately generate or reset a `snapshot_verifications` row for the latest `raw_spec` snapshot with status `pending` and a field-level checklist derived from the extracted room/appliance fields.
 
 ### 3.5 Review Pipeline
 1. Load latest raw snapshot.
@@ -131,23 +133,39 @@
 4. Save edited values as a reviewed snapshot, preserving the expanded appliance link fields.
 5. Export from the reviewed snapshot if present, otherwise from raw snapshot.
 
-### 3.6 Raw Spec List Pipeline
+### 3.6 PDF QA Pipeline
+1. Every new `raw_spec` snapshot creates or resets a one-to-one `snapshot_verifications` row.
+2. The verification record stores:
+  - `snapshot_id`
+  - `snapshot_kind`
+  - `status`
+  - `checked_by`
+  - `checked_at`
+  - `notes`
+  - `checklist_json`
+3. `checklist_json` stores field-level items such as room title, benchtops, cabinetry colour splits, toe kick, bulkheads, handles, floating shelf, accessories/others, sink/basin/tap, drawers/hinges/flooring, and appliance rows.
+4. The PDF QA page edits those checklist items directly and can save, mark pass, or mark fail.
+5. `passed` is only valid when every checklist item is `pass` or `na` and no item is `fail`.
+6. Raw snapshots remain visible while QA is pending or failed, but formal exports are blocked until the latest raw-spec verification is `passed`.
+
+### 3.7 Raw Spec List Pipeline
 1. Load `snapshots.snapshot_kind = raw_spec` for the requested job.
-2. Flatten room, appliance, and other fields into read-only page rows.
-3. Render the `Rooms` section as a vertical stack of wide horizontal room cards on desktop, with one display row per field and a separate metadata column.
-4. Show room fixtures (`Sink`, `Basin`, `Tap`) directly on the room card and split door colours into `Overheads`, `Base`, `Tall`, `Island`, and `Bar Back`, while trimming location-only suffixes and filtering obvious OCR noise.
-5. Only the kitchen card expands bench tops into `Wall Run` and `Island`; all other rooms collapse to a single `Benchtop` display row.
-6. Non-kitchen cards only render door-colour groups that are both allowed for that room and actually present; `Island` and `Bar Back` are kitchen-only UI rows.
-7. Filter plumbing fixtures out of the `Appliances` table and export.
-8. Render a `Material Summary` section that smart-deduplicates room-level door colours, handle models, and bench tops, using the split wall-run/island bench-top values when available, preserving distinct thickness/edge variants, and including floating-shelf materials in the bench-top summary bucket.
-9. Render appliance official links as a clickable wrapped `Product` column.
-10. Render non-room joinery sections such as `FEATURE TALL DOORS` in a dedicated `Special Sections` block instead of folding them into nearby rooms.
-11. Show `Generated at` and `Extraction duration` in Brisbane time / human-readable duration format on the raw Spec List page.
-12. Export that raw snapshot through a dedicated Excel route, including a `Special Sections` worksheet and the expanded room fields for `Floating Shelf`, `LED`, `Accessories`, and curated accessory `Others`.
-13. Never fall back to `reviews` when rendering the raw Spec List page.
-14. Start the page shell with the left navigation rail collapsed by default and let the user toggle it open client-side when needed.
-15. When a parsed `site_address` exists, append it to the page heading as `job no - site address`; otherwise omit the separator.
-16. Below roughly `1280px`, remove fixed wide-table minimum widths, force card containers to `min-width: 0`, and suppress page-level horizontal overflow so the raw snapshot remains readable in 1080p half-screen windows without horizontal dragging.
+2. Load the latest matching `snapshot_verifications` row for PDF QA state.
+3. Flatten room, appliance, and other fields into read-only page rows.
+4. Render the `Rooms` section as a vertical stack of wide horizontal room cards on desktop, with one display row per field and a separate metadata column.
+5. Show room fixtures (`Sink`, `Basin`, `Tap`) directly on the room card and split door colours into `Overheads`, `Base`, `Tall`, `Island`, and `Bar Back`, while trimming location-only suffixes and filtering obvious OCR noise.
+6. Only the kitchen card expands bench tops into `Wall Run` and `Island`; all other rooms collapse to a single `Benchtop` display row.
+7. Non-kitchen cards only render door-colour groups that are both allowed for that room and actually present; `Island` and `Bar Back` are kitchen-only UI rows.
+8. Filter plumbing fixtures out of the `Appliances` table and export.
+9. Render a `Material Summary` section that smart-deduplicates room-level door colours, handle models, and bench tops, using the split wall-run/island bench-top values when available, preserving distinct thickness/edge variants, and including floating-shelf materials in the bench-top summary bucket.
+10. Render appliance official links as a clickable wrapped `Product` column.
+11. Render non-room joinery sections such as `FEATURE TALL DOORS` in a dedicated `Special Sections` block instead of folding them into nearby rooms.
+12. Show `Generated at`, `Extraction duration`, and the current PDF QA status in Brisbane time / human-readable duration format on the raw Spec List page.
+13. Export that raw snapshot through a dedicated Excel route, including a `Special Sections` worksheet and the expanded room fields for `Floating Shelf`, `LED`, `Accessories`, and curated accessory `Others`, but only when PDF QA has passed.
+14. Never fall back to `reviews` when rendering the raw Spec List page.
+15. Start the page shell with the left navigation rail collapsed by default and let the user toggle it open client-side when needed.
+16. When a parsed `site_address` exists, append it to the page heading as `job no - site address`; otherwise omit the separator.
+17. Below roughly `1280px`, remove fixed wide-table minimum widths, force card containers to `min-width: 0`, and suppress page-level horizontal overflow so the raw snapshot remains readable in 1080p half-screen windows without horizontal dragging.
 
 ### 3.7 Upload Interaction
 1. Job detail uses the existing upload POST route.
@@ -260,6 +278,10 @@
 - `GET /jobs/{job_id}`
 - `GET /jobs/{job_id}/spec-list`
 - `GET /jobs/{job_id}/spec-list.xlsx`
+- `GET /jobs/{job_id}/pdf-qa`
+- `POST /jobs/{job_id}/pdf-qa/save`
+- `POST /jobs/{job_id}/pdf-qa/mark-pass`
+- `POST /jobs/{job_id}/pdf-qa/mark-fail`
 - `POST /jobs/{job_id}/files/upload`
 - `POST /jobs/files/{file_id}/delete`
 - `GET /jobs/files/{file_id}/download`

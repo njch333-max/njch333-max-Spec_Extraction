@@ -3086,10 +3086,12 @@ def _select_spec_room_master_document(builder_name: str, documents: list[dict[st
 
 
 def _collect_spec_sections_for_document(builder_name: str, document: dict[str, object]) -> list[dict[str, Any]]:
+    if _document_has_layout_schema(document):
+        layout_sections = _collect_layout_sections_for_document(document)
+        if layout_sections:
+            return layout_sections
     if _is_imperial_builder(builder_name):
         return _collect_imperial_sections_for_document(document)
-    if _document_has_layout_schema(document):
-        return _collect_layout_sections_for_document(document)
     return _collect_room_sections_for_document(document)
 
 
@@ -3253,10 +3255,8 @@ def parse_documents(
     documents: list[dict[str, object]],
     rule_flags: Any = None,
 ) -> dict:
-    if source_kind == "spec" and _documents_have_layout_schema(documents):
+    if source_kind == "spec":
         return _parse_spec_documents_structure_first(job_no, builder_name, documents, rule_flags=rule_flags)
-    if source_kind == "spec" and _is_imperial_builder(builder_name):
-        return _parse_imperial_documents(job_no, builder_name, source_kind, documents, rule_flags=rule_flags)
 
     rooms: dict[str, RoomRow] = {}
     appliances: list[ApplianceRow] = []
