@@ -1545,7 +1545,7 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(snapshot["analysis"]["vision_pages"], [1])
         self.assertEqual(snapshot["analysis"]["vision_page_count"], 1)
 
-    def test_build_spec_snapshot_uses_docling_layout_before_heavy_vision(self) -> None:
+    def test_build_spec_snapshot_dual_runs_docling_and_heavy_vision_for_key_tables(self) -> None:
         documents = [
             {
                 "file_name": "imperial.pdf",
@@ -1576,7 +1576,8 @@ class SmokeTest(unittest.TestCase):
             "analysis": {"mode": "heuristic_only", "room_master_file": "imperial.pdf"},
         }
         with (
-            mock.patch.object(extraction_service.runtime, "OPENAI_ENABLED", False),
+            mock.patch.object(extraction_service.runtime, "OPENAI_ENABLED", True),
+            mock.patch.object(extraction_service.runtime, "OPENAI_API_KEY", "test-key"),
             mock.patch.object(extraction_service.runtime, "OPENAI_VISION_ENABLED", True),
             mock.patch.object(extraction_service.runtime, "OPENAI_VISION_MAX_PAGES", 4),
             mock.patch("App.services.extraction_service._load_documents", return_value=documents),
@@ -1595,6 +1596,24 @@ class SmokeTest(unittest.TestCase):
                             "supplier_region_text": "Polytec",
                             "notes_region_text": "",
                             "row_kind": "material",
+                        }
+                    ],
+                },
+            ),
+            mock.patch("App.services.extraction_service._render_pdf_page_png", return_value=b"png"),
+            mock.patch(
+                "App.services.extraction_service._request_page_layout",
+                return_value={
+                    "page_type": "joinery",
+                    "section_label": "NA KITCHEN JOINERY SELECTION SHEET",
+                    "room_label": "NA KITCHEN",
+                    "rows": [
+                        {
+                            "row_label": "HANDLES",
+                            "value_region_text": "Belluno 9995772",
+                            "supplier_region_text": "Hettich",
+                            "notes_region_text": "Base cabs",
+                            "row_kind": "handle",
                         }
                     ],
                 },
@@ -1637,12 +1656,15 @@ class SmokeTest(unittest.TestCase):
                 template_files=[],
             )
         self.assertEqual(snapshot["rooms"][0]["door_colours_base"], "Polytec - Classic White Matt")
-        self.assertEqual(snapshot["analysis"]["layout_mode"], "docling")
-        self.assertEqual(snapshot["analysis"]["layout_provider"], "docling")
+        self.assertEqual(snapshot["analysis"]["layout_mode"], "mixed")
+        self.assertEqual(snapshot["analysis"]["layout_provider"], "mixed")
         self.assertTrue(snapshot["analysis"]["docling_attempted"])
         self.assertTrue(snapshot["analysis"]["docling_succeeded"])
         self.assertEqual(snapshot["analysis"]["docling_pages"], [1])
-        self.assertFalse(snapshot["analysis"]["vision_attempted"])
+        self.assertTrue(snapshot["analysis"]["vision_attempted"])
+        self.assertTrue(snapshot["analysis"]["vision_succeeded"])
+        self.assertEqual(snapshot["analysis"]["vision_pages"], [1])
+        self.assertEqual(snapshot["analysis"]["heavy_vision_pages"], [1])
 
     def test_docling_markdown_to_layout_restores_joinery_rows(self) -> None:
         markdown = (
@@ -1669,6 +1691,173 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("Kickboards", labels)
         base_row = next(row for row in rows if row["row_label"] == "Base Cabinetry Colour")
         self.assertEqual(base_row["row_kind"], "material")
+
+    def test_merge_page_layouts_combines_rows_and_drops_footer_noise(self) -> None:
+        docling_layout = {
+            "page_type": "joinery",
+            "section_label": "KITCHEN JOINERY SELECTION SHEET",
+            "room_label": "KITCHEN",
+            "room_blocks": [
+                {
+                    "room_label": "KITCHEN",
+                    "rows": [
+                        {
+                            "row_label": "BASE CABINETRY COLOUR",
+                            "value_region_text": "Classic White Matt",
+                            "supplier_region_text": "",
+                            "notes_region_text": "",
+                            "row_kind": "material",
+                        }
+                    ],
+                }
+            ],
+            "rows": [],
+        }
+        vision_layout = {
+            "page_type": "joinery",
+            "section_label": "NA KITCHEN JOINERY SELECTION SHEET",
+            "room_label": "NA KITCHEN",
+            "room_blocks": [
+                {
+                    "room_label": "NA KITCHEN",
+                    "rows": [
+                        {
+                            "row_label": "BASE CABINETRY COLOUR",
+                            "value_region_text": "Classic White Matt",
+                            "supplier_region_text": "Polytec",
+                            "notes_region_text": "",
+                            "row_kind": "material",
+                        },
+                        {
+                            "row_label": "HANDLES",
+                            "value_region_text": "Belluno 9995772",
+                            "supplier_region_text": "Hettich",
+                            "notes_region_text": "Base cabs",
+                            "row_kind": "handle",
+                        },
+                        {
+                            "row_label": "Client",
+                            "value_region_text": "Jason",
+                            "supplier_region_text": "",
+                            "notes_region_text": "",
+                            "row_kind": "metadata",
+                        },
+                    ],
+                }
+            ],
+            "rows": [],
+        }
+        merged = extraction_service._merge_page_layouts(docling_layout, vision_layout, builder_name="Imperial", raw_page_text="KITCHEN JOINERY SELECTION SHEET")
+        self.assertEqual(merged["room_label"], "KITCHEN")
+        rows = merged["room_blocks"][0]["rows"]
+        labels = [row["row_label"] for row in rows]
+        self.assertIn("BASE CABINETRY COLOUR", labels)
+        self.assertIn("HANDLES", labels)
+        self.assertNotIn("Client", labels)
+        base_row = next(row for row in rows if row["row_label"] == "BASE CABINETRY COLOUR")
+        self.assertEqual(base_row["supplier_region_text"], "Polytec")
+
+    def test_build_spec_snapshot_keeps_docling_when_vision_cross_check_fails(self) -> None:
+        documents = [
+            {
+                "file_name": "imperial.pdf",
+                "path": "imperial.pdf",
+                "role": "spec",
+                "pages": [
+                    {
+                        "page_no": 1,
+                        "text": "BASE CABINETRY COLOURClassic White Matt Polytec",
+                        "raw_text": "BASE CABINETRY COLOURClassic White Matt Polytec",
+                        "needs_ocr": True,
+                    }
+                ],
+            }
+        ]
+        heuristic_after_docling = {
+            "job_no": "38211",
+            "builder_name": "Imperial",
+            "source_kind": "spec",
+            "generated_at": "2026-03-29T10:00:00+00:00",
+            "site_address": "",
+            "rooms": [{"room_key": "kitchen", "original_room_label": "KITCHEN", "door_colours_base": "Polytec - Classic White Matt"}],
+            "special_sections": [],
+            "appliances": [],
+            "others": {"flooring_notes": "", "splashback_notes": "", "manual_notes": ""},
+            "warnings": [],
+            "source_documents": [],
+            "analysis": {"mode": "heuristic_only", "room_master_file": "imperial.pdf"},
+        }
+        with (
+            mock.patch.object(extraction_service.runtime, "OPENAI_ENABLED", True),
+            mock.patch.object(extraction_service.runtime, "OPENAI_API_KEY", "test-key"),
+            mock.patch.object(extraction_service.runtime, "OPENAI_VISION_ENABLED", True),
+            mock.patch.object(extraction_service.runtime, "OPENAI_VISION_MAX_PAGES", 4),
+            mock.patch("App.services.extraction_service._load_documents", return_value=documents),
+            mock.patch("App.services.extraction_service._page_requires_vision", return_value=True),
+            mock.patch("App.services.extraction_service._docling_available", return_value=True),
+            mock.patch(
+                "App.services.extraction_service._request_docling_page_layout",
+                return_value={
+                    "page_type": "joinery",
+                    "section_label": "KITCHEN JOINERY SELECTION SHEET",
+                    "room_label": "KITCHEN",
+                    "rows": [
+                        {
+                            "row_label": "BASE CABINETRY COLOUR",
+                            "value_region_text": "Classic White Matt",
+                            "supplier_region_text": "Polytec",
+                            "notes_region_text": "",
+                            "row_kind": "material",
+                        }
+                    ],
+                },
+            ),
+            mock.patch("App.services.extraction_service._render_pdf_page_png", return_value=b"png"),
+            mock.patch("App.services.extraction_service._request_page_layout", side_effect=RuntimeError("429 test failure")),
+            mock.patch(
+                "App.services.extraction_service.parsing.parse_documents",
+                return_value=heuristic_after_docling,
+            ),
+            mock.patch(
+                "App.services.extraction_service.parsing.enrich_snapshot_rooms",
+                side_effect=lambda payload, _documents, rule_flags=None: payload,
+            ),
+            mock.patch("App.services.extraction_service._stabilize_snapshot_layout", side_effect=lambda payload, **_: payload),
+            mock.patch("App.services.extraction_service._apply_builder_specific_polish", side_effect=lambda payload, *_args, **_kwargs: payload),
+            mock.patch("App.services.extraction_service._enrich_snapshot_appliances", side_effect=lambda payload, *_args, **_kwargs: payload),
+            mock.patch(
+                "App.services.extraction_service._try_openai",
+                return_value=(
+                    None,
+                    {
+                        "mode": "heuristic_only",
+                        "parser_strategy": "global_conservative",
+                        "openai_attempted": False,
+                        "openai_succeeded": False,
+                        "openai_model": "gpt-4.1-mini",
+                        "vision_attempted": False,
+                        "vision_succeeded": False,
+                        "vision_pages": [],
+                        "vision_page_count": 0,
+                        "vision_note": "",
+                        "note": "",
+                    },
+                ),
+            ),
+        ):
+            snapshot = extraction_service.build_spec_snapshot(
+                job={"job_no": "38211"},
+                builder={"name": "Imperial"},
+                files=[{"path": "imperial.pdf", "original_name": "imperial.pdf"}],
+                template_files=[],
+            )
+        self.assertEqual(snapshot["analysis"]["layout_mode"], "docling")
+        self.assertEqual(snapshot["analysis"]["layout_provider"], "docling")
+        self.assertTrue(snapshot["analysis"]["docling_attempted"])
+        self.assertTrue(snapshot["analysis"]["docling_succeeded"])
+        self.assertTrue(snapshot["analysis"]["vision_attempted"])
+        self.assertFalse(snapshot["analysis"]["vision_succeeded"])
+        self.assertIn("429 test failure", snapshot["analysis"]["vision_note"])
 
     def test_vision_layout_to_text_preserves_row_boundaries(self) -> None:
         layout = {

@@ -453,12 +453,14 @@ def _apply_layout_pipeline(
         return updated_documents, layout_meta
 
     max_pages = max(1, runtime.OPENAI_VISION_MAX_PAGES)
+    candidate_pages = heavy_candidates[:max_pages]
     docling_attempted_pages: list[int] = []
     docling_applied_pages: list[int] = []
     docling_notes: list[str] = []
+    docling_layouts: dict[tuple[int, int], dict[str, Any]] = {}
     if source_kind == "spec" and _docling_available():
         layout_meta["docling_attempted"] = True
-        for doc_index, page_index in heavy_candidates[:max_pages]:
+        for doc_index, page_index in candidate_pages:
             document = updated_documents[doc_index]
             pages = list(document.get("pages", []))
             if page_index >= len(pages):
@@ -478,10 +480,7 @@ def _apply_layout_pipeline(
                 if not _layout_is_usable(layout, raw_page_text=str(page.get("raw_text", page.get("text", "")) or "")):
                     docling_notes.append(f"page {page_no}: Docling returned no usable room/row structure")
                     continue
-                page["page_layout"] = layout
-                page["layout_mode"] = "docling"
-                page["docling_applied"] = True
-                page["text"] = _vision_layout_to_text(layout, fallback_text=str(page.get("raw_text", page.get("text", "")) or ""))
+                docling_layouts[(doc_index, page_index)] = layout
                 docling_applied_pages.append(page_no)
             except Exception as exc:
                 docling_notes.append(f"page {page_no}: {_truncate_note(exc)}")
@@ -505,42 +504,32 @@ def _apply_layout_pipeline(
                 "; ".join(docling_notes)[:400] if docling_notes else "Docling layout attempted but no usable page layout was applied."
             )
 
-    remaining_heavy_candidates = [
-        (doc_index, page_index)
-        for doc_index, page_index in heavy_candidates
-        if not bool(
-            list(updated_documents[doc_index].get("pages", []))[page_index].get("docling_applied")
-        )
-    ]
-
-    if not remaining_heavy_candidates:
-        if docling_applied_pages:
-            _apply_docling_layout_meta(layout_meta, docling_applied_pages)
-        else:
-            layout_meta["vision_note"] = "No heavy vision fallback was needed after lightweight structure analysis."
-        return updated_documents, layout_meta
     if not runtime.OPENAI_VISION_ENABLED:
         if docling_applied_pages:
             _apply_docling_layout_meta(layout_meta, docling_applied_pages)
-        layout_meta["vision_note"] = "OpenAI vision fallback is disabled in runtime settings."
+        layout_meta["vision_note"] = "OpenAI vision structure cross-check is disabled in runtime settings."
+        _apply_final_layout_pages(updated_documents, candidate_pages, docling_layouts=docling_layouts, vision_layouts={})
         return updated_documents, layout_meta
     if not runtime.OPENAI_ENABLED:
         if docling_applied_pages:
             _apply_docling_layout_meta(layout_meta, docling_applied_pages)
-        layout_meta["vision_note"] = "OpenAI is disabled, so heavy vision layout was skipped."
+        layout_meta["vision_note"] = "OpenAI is disabled, so heavy vision structure cross-check was skipped."
+        _apply_final_layout_pages(updated_documents, candidate_pages, docling_layouts=docling_layouts, vision_layouts={})
         return updated_documents, layout_meta
     if not runtime.OPENAI_API_KEY:
         if docling_applied_pages:
             _apply_docling_layout_meta(layout_meta, docling_applied_pages)
-        layout_meta["vision_note"] = "OPENAI_API_KEY is not configured, so heavy vision layout was skipped."
+        layout_meta["vision_note"] = "OPENAI_API_KEY is not configured, so heavy vision structure cross-check was skipped."
+        _apply_final_layout_pages(updated_documents, candidate_pages, docling_layouts=docling_layouts, vision_layouts={})
         return updated_documents, layout_meta
 
     attempted_pages: list[int] = []
     applied_pages: list[int] = []
     page_notes: list[str] = []
+    vision_layouts: dict[tuple[int, int], dict[str, Any]] = {}
     layout_meta["vision_attempted"] = True
 
-    for doc_index, page_index in remaining_heavy_candidates[:max_pages]:
+    for doc_index, page_index in candidate_pages:
         document = updated_documents[doc_index]
         pages = list(document.get("pages", []))
         if page_index >= len(pages):
@@ -565,44 +554,60 @@ def _apply_layout_pipeline(
                 page_text=str(page.get("raw_text", page.get("text", "")) or ""),
                 image_bytes=image_bytes,
             )
-            normalized_text = _vision_layout_to_text(layout, fallback_text=str(page.get("raw_text", page.get("text", "")) or ""))
-            if not normalized_text:
-                page_notes.append(f"page {page_no}: OpenAI vision returned no usable layout text")
+            if not _layout_is_usable(layout, raw_page_text=str(page.get("raw_text", page.get("text", "")) or "")):
+                page_notes.append(f"page {page_no}: OpenAI vision returned no usable room/row structure")
                 continue
-            page["page_layout"] = layout
-            page["vision_applied"] = True
-            page["layout_mode"] = "heavy_vision"
-            page["text"] = normalized_text
+            vision_layouts[(doc_index, page_index)] = layout
             applied_pages.append(page_no)
         except Exception as exc:
             page_notes.append(f"page {page_no}: {_truncate_note(exc)}")
 
+    mixed_pages, final_docling_pages, final_vision_pages = _apply_final_layout_pages(
+        updated_documents,
+        candidate_pages,
+        docling_layouts=docling_layouts,
+        vision_layouts=vision_layouts,
+        builder_name=builder_name,
+    )
+
     layout_meta["vision_pages"] = _unique_page_numbers(applied_pages if applied_pages else attempted_pages)
     layout_meta["vision_page_count"] = len(layout_meta["vision_pages"])
-    layout_meta["heavy_vision_pages"] = _unique_page_numbers(applied_pages)
+    layout_meta["heavy_vision_pages"] = _unique_page_numbers(final_vision_pages if final_vision_pages else applied_pages)
     layout_meta["vision_succeeded"] = bool(applied_pages)
-    if applied_pages:
-        layout_meta["layout_mode"] = "mixed" if docling_applied_pages else "heavy_vision"
-        layout_meta["layout_provider"] = "mixed" if docling_applied_pages else "heavy_vision"
+    if mixed_pages:
+        layout_meta["layout_mode"] = "mixed"
+        layout_meta["layout_provider"] = "mixed"
         layout_meta["layout_note"] = (
             f"Structure-first parsing applied to {len(layout_meta['layout_pages'])} page(s); "
-            f"{'Docling corrected ' + str(len(_unique_page_numbers(docling_applied_pages))) + ' page(s); ' if docling_applied_pages else ''}"
-            f"heavy vision layout corrected {len(layout_meta['heavy_vision_pages'])} page(s)."
+            f"Docling corrected {len(_unique_page_numbers(docling_applied_pages))} page(s); "
+            f"heavy vision checked {len(_unique_page_numbers(applied_pages))} page(s); "
+            f"merged structure applied to {len(_unique_page_numbers(mixed_pages))} page(s)."
         )
+    elif final_vision_pages:
+        layout_meta["layout_mode"] = "heavy_vision"
+        layout_meta["layout_provider"] = "heavy_vision"
+        layout_meta["layout_note"] = (
+            f"Structure-first parsing applied to {len(layout_meta['layout_pages'])} page(s); "
+            f"heavy vision corrected {len(_unique_page_numbers(final_vision_pages))} page(s)."
+        )
+    elif final_docling_pages:
+        _apply_docling_layout_meta(layout_meta, final_docling_pages)
     if applied_pages:
-        success_note = f"Heavy vision layout applied to {len(layout_meta['heavy_vision_pages'])} page(s): {', '.join(str(page_no) for page_no in layout_meta['heavy_vision_pages'])}."
-        if len(remaining_heavy_candidates) > max_pages:
-            success_note = f"{success_note} Skipped {len(remaining_heavy_candidates) - max_pages} candidate page(s) because of the configured page cap."
+        success_note = f"Heavy vision structure checked {len(layout_meta['vision_pages'])} page(s): {', '.join(str(page_no) for page_no in layout_meta['vision_pages'])}."
+        if mixed_pages:
+            success_note = f"{success_note} Mixed Docling/OpenAI structure applied to {len(_unique_page_numbers(mixed_pages))} page(s): {', '.join(str(page_no) for page_no in _unique_page_numbers(mixed_pages))}."
+        if len(heavy_candidates) > max_pages:
+            success_note = f"{success_note} Skipped {len(heavy_candidates) - max_pages} candidate page(s) because of the configured page cap."
         if page_notes:
             success_note = f"{success_note} Partial issues: {'; '.join(page_notes)[:220]}"
         layout_meta["vision_note"] = success_note[:400]
     else:
-        note = "Heavy vision layout attempted but no page layout was applied."
+        note = "Heavy vision structure cross-check attempted but no usable page layout was applied."
         if page_notes:
             note = "; ".join(page_notes)[:400]
         layout_meta["vision_note"] = note
-        if docling_applied_pages:
-            _apply_docling_layout_meta(layout_meta, docling_applied_pages)
+        if final_docling_pages:
+            _apply_docling_layout_meta(layout_meta, final_docling_pages)
     return updated_documents, layout_meta
 
 
@@ -990,6 +995,464 @@ def _apply_docling_layout_meta(layout_meta: dict[str, Any], applied_pages: list[
         f"Structure-first parsing applied to {len(layout_meta['layout_pages'])} page(s); "
         f"Docling corrected {len(_unique_page_numbers(applied_pages))} page(s)."
     )
+
+
+_MERGE_ROOM_TITLE_NOISE_PATTERNS: tuple[str, ...] = (
+    r"(?i)^(?:na|n/?a)\b[\s:./-]*",
+    r"(?i)^ref\.?\s*number\b[\s:./-]*",
+    r"(?i)^(?:image|notes|supplier|client|date|address|document ref|document reference|designer)\b[\s:./-]*",
+)
+
+
+def _apply_final_layout_pages(
+    documents: list[dict[str, object]],
+    candidate_pages: list[tuple[int, int]],
+    docling_layouts: dict[tuple[int, int], dict[str, Any]],
+    vision_layouts: dict[tuple[int, int], dict[str, Any]],
+    builder_name: str = "",
+) -> tuple[list[int], list[int], list[int]]:
+    mixed_pages: list[int] = []
+    final_docling_pages: list[int] = []
+    final_vision_pages: list[int] = []
+    for doc_index, page_index in candidate_pages:
+        pages = list(documents[doc_index].get("pages", []))
+        if page_index >= len(pages):
+            continue
+        page = pages[page_index]
+        page_no = int(page.get("page_no", 0) or 0)
+        raw_page_text = str(page.get("raw_text", page.get("text", "")) or "")
+        docling_layout = docling_layouts.get((doc_index, page_index))
+        vision_layout = vision_layouts.get((doc_index, page_index))
+        final_layout: dict[str, Any] | None = None
+        layout_mode = "lightweight"
+        if docling_layout and vision_layout:
+            merged_layout = _merge_page_layouts(
+                docling_layout,
+                vision_layout,
+                builder_name=builder_name,
+                raw_page_text=raw_page_text,
+            )
+            if _layout_is_usable(merged_layout, raw_page_text=raw_page_text):
+                final_layout = merged_layout
+                layout_mode = "mixed"
+                mixed_pages.append(page_no)
+            else:
+                final_layout = _prefer_more_complete_layout(docling_layout, vision_layout, raw_page_text=raw_page_text)
+                layout_mode = "docling" if final_layout is docling_layout else "heavy_vision"
+        elif docling_layout:
+            final_layout = docling_layout
+            layout_mode = "docling"
+        elif vision_layout:
+            final_layout = vision_layout
+            layout_mode = "heavy_vision"
+
+        if not final_layout:
+            continue
+        page["page_layout"] = final_layout
+        page["layout_mode"] = layout_mode
+        page["docling_applied"] = bool(docling_layout)
+        page["vision_applied"] = bool(vision_layout)
+        page["text"] = _vision_layout_to_text(final_layout, fallback_text=raw_page_text)
+        if docling_layout:
+            final_docling_pages.append(page_no)
+        if vision_layout:
+            final_vision_pages.append(page_no)
+    return _unique_page_numbers(mixed_pages), _unique_page_numbers(final_docling_pages), _unique_page_numbers(final_vision_pages)
+
+
+def _prefer_more_complete_layout(
+    primary: dict[str, Any],
+    secondary: dict[str, Any],
+    raw_page_text: str = "",
+) -> dict[str, Any]:
+    primary_score = _layout_completeness_score(primary, raw_page_text=raw_page_text)
+    secondary_score = _layout_completeness_score(secondary, raw_page_text=raw_page_text)
+    return primary if primary_score >= secondary_score else secondary
+
+
+def _layout_completeness_score(layout: dict[str, Any], raw_page_text: str = "") -> int:
+    rows = [
+        row
+        for row in parsing._page_layout_rows(_normalize_page_layout(layout))
+        if _layout_row_is_mergeable(row)
+    ]
+    room_blocks = layout.get("room_blocks", []) or []
+    room_bonus = 50 if room_blocks else 0
+    room_label = _clean_merged_room_label(str(layout.get("room_label", "") or ""), str(layout.get("section_label", "") or ""))
+    title_bonus = 50 if _is_plausible_merged_room_label(room_label) else 0
+    if not rows and not raw_page_text.strip():
+        return 0
+    return room_bonus + title_bonus + sum(_layout_row_score(row) for row in rows)
+
+
+def _merge_page_layouts(
+    primary: dict[str, Any],
+    secondary: dict[str, Any],
+    *,
+    builder_name: str = "",
+    raw_page_text: str = "",
+) -> dict[str, Any]:
+    primary_layout = _normalize_page_layout(primary)
+    secondary_layout = _normalize_page_layout(secondary)
+    page_type = _merge_layout_page_type(primary_layout, secondary_layout, builder_name=builder_name, raw_page_text=raw_page_text)
+    section_label = _merge_section_label(
+        str(primary_layout.get("section_label", "") or ""),
+        str(secondary_layout.get("section_label", "") or ""),
+        page_type=page_type,
+    )
+    room_label = _merge_room_label(
+        str(primary_layout.get("room_label", "") or ""),
+        str(secondary_layout.get("room_label", "") or ""),
+        section_label=section_label,
+    )
+    primary_blocks = _coerce_layout_blocks_for_merge(primary_layout, section_label=section_label, room_label=room_label)
+    secondary_blocks = _coerce_layout_blocks_for_merge(secondary_layout, section_label=section_label, room_label=room_label)
+    merged_blocks = _merge_layout_blocks(
+        primary_blocks,
+        secondary_blocks,
+        section_label=section_label,
+        room_label=room_label,
+        page_type=page_type,
+    )
+    merged_rows = [row for block in merged_blocks for row in block.get("rows", [])]
+    if not merged_blocks:
+        merged_rows = _merge_layout_rows(primary_layout.get("rows", []), secondary_layout.get("rows", []), page_type=page_type)
+    merged_layout = {
+        "page_type": page_type,
+        "section_label": section_label,
+        "room_label": room_label,
+        "room_blocks": merged_blocks,
+        "rows": merged_rows,
+    }
+    return _normalize_page_layout(merged_layout)
+
+
+def _merge_layout_page_type(
+    primary_layout: dict[str, Any],
+    secondary_layout: dict[str, Any],
+    *,
+    builder_name: str = "",
+    raw_page_text: str = "",
+) -> str:
+    primary_type = str(primary_layout.get("page_type", "unknown") or "unknown")
+    secondary_type = str(secondary_layout.get("page_type", "unknown") or "unknown")
+    if primary_type == secondary_type:
+        return primary_type
+    if primary_type == "unknown":
+        return secondary_type
+    if secondary_type == "unknown":
+        return primary_type
+    heuristic_type = _infer_page_type_from_text(builder_name, "spec", raw_page_text)
+    if heuristic_type in {primary_type, secondary_type}:
+        return heuristic_type
+    priority = {
+        "sinkware_tapware": 4,
+        "appliance": 3,
+        "joinery": 2,
+        "special": 1,
+        "unknown": 0,
+    }
+    return primary_type if priority.get(primary_type, 0) >= priority.get(secondary_type, 0) else secondary_type
+
+
+def _merge_section_label(primary_label: str, secondary_label: str, *, page_type: str = "") -> str:
+    candidates = [_clean_merged_section_label(primary_label), _clean_merged_section_label(secondary_label)]
+    candidates = [candidate for candidate in candidates if candidate]
+    if not candidates:
+        return ""
+    if len(candidates) == 1 or candidates[0] == candidates[1]:
+        return candidates[0]
+    ranked = sorted(candidates, key=lambda value: _layout_section_score(value, page_type=page_type), reverse=True)
+    return ranked[0]
+
+
+def _clean_merged_section_label(label: str) -> str:
+    return parsing.normalize_space(str(label or ""))
+
+
+def _layout_section_score(label: str, *, page_type: str = "") -> int:
+    cleaned = _clean_merged_section_label(label)
+    if not cleaned:
+        return 0
+    upper = cleaned.upper()
+    score = len(cleaned)
+    if "JOINERY SELECTION SHEET" in upper:
+        score += 120
+    if "COLOUR SCHEDULE" in upper:
+        score += 100
+    if "SINKWARE" in upper or "TAPWARE" in upper:
+        score += 90
+    if "APPLIANCE" in upper:
+        score += 80
+    if page_type == "joinery" and "JOINERY" in upper:
+        score += 30
+    return score
+
+
+def _merge_room_label(primary_label: str, secondary_label: str, *, section_label: str = "") -> str:
+    candidates = [
+        _clean_merged_room_label(primary_label, section_label),
+        _clean_merged_room_label(secondary_label, section_label),
+    ]
+    candidates = [candidate for candidate in candidates if candidate]
+    if not candidates:
+        return ""
+    if len(candidates) == 1 or candidates[0] == candidates[1]:
+        return candidates[0]
+    ranked = sorted(candidates, key=_layout_room_title_score, reverse=True)
+    return ranked[0]
+
+
+def _clean_merged_room_label(label: str, section_label: str = "") -> str:
+    cleaned = parsing.normalize_space(str(label or ""))
+    if not cleaned:
+        return ""
+    cleaner = getattr(parsing, "_clean_layout_room_label", None)
+    if callable(cleaner):
+        cleaned = cleaner(cleaned, section_label)
+    else:
+        cleaned = parsing.source_room_label(cleaned, fallback_key=parsing.normalize_room_key(cleaned))
+    for pattern in _MERGE_ROOM_TITLE_NOISE_PATTERNS:
+        cleaned = re.sub(pattern, "", cleaned).strip(" -:/")
+    return parsing.normalize_space(cleaned)
+
+
+def _layout_room_title_score(label: str) -> int:
+    cleaned = _clean_merged_room_label(label)
+    if not cleaned:
+        return 0
+    score = len(cleaned)
+    if _is_plausible_merged_room_label(cleaned):
+        score += 120
+    noise_checker = getattr(parsing, "_looks_like_structured_room_noise", None)
+    if callable(noise_checker) and noise_checker(cleaned):
+        score -= 120
+    if re.search(r"(?i)\b(?:manufacturer|colour|type|model|sink|tapware|notes|supplier|document ref|selection required)\b", cleaned):
+        score -= 80
+    return score
+
+
+def _is_plausible_merged_room_label(label: str) -> bool:
+    cleaned = _clean_merged_room_label(label)
+    if not cleaned:
+        return False
+    checker = getattr(parsing, "_looks_like_plausible_room_label", None)
+    if callable(checker):
+        return bool(checker(cleaned))
+    return bool(cleaned) and not re.search(r"(?i)\b(?:manufacturer|colour|type|model|sink|tapware|notes|supplier|document ref)\b", cleaned)
+
+
+def _coerce_layout_blocks_for_merge(layout: dict[str, Any], *, section_label: str = "", room_label: str = "") -> list[dict[str, Any]]:
+    blocks = []
+    raw_blocks = layout.get("room_blocks", []) or []
+    default_room_label = _merge_room_label(str(layout.get("room_label", "") or ""), room_label, section_label=section_label) or room_label or section_label
+    for raw_block in raw_blocks:
+        if not isinstance(raw_block, dict):
+            continue
+        rows = _merge_layout_rows(raw_block.get("rows", []), [], page_type=str(layout.get("page_type", "") or ""))
+        if not rows:
+            continue
+        block_label = _merge_room_label(str(raw_block.get("room_label", "") or ""), default_room_label, section_label=section_label) or default_room_label
+        if block_label:
+            blocks.append({"room_label": block_label, "rows": rows})
+    if blocks:
+        return blocks
+    top_rows = _merge_layout_rows(layout.get("rows", []), [], page_type=str(layout.get("page_type", "") or ""))
+    if top_rows and default_room_label:
+        return [{"room_label": default_room_label, "rows": top_rows}]
+    return []
+
+
+def _layout_room_identity(label: str) -> str:
+    cleaned = _clean_merged_room_label(label)
+    if not cleaned:
+        return ""
+    return parsing.source_room_key(cleaned, fallback_key=parsing.normalize_room_key(cleaned))
+
+
+def _merge_layout_blocks(
+    primary_blocks: list[dict[str, Any]],
+    secondary_blocks: list[dict[str, Any]],
+    *,
+    section_label: str = "",
+    room_label: str = "",
+    page_type: str = "",
+) -> list[dict[str, Any]]:
+    merged_blocks: list[dict[str, Any]] = []
+    used_secondary: set[int] = set()
+    for primary_block in primary_blocks:
+        match_index = _find_best_layout_block_match(primary_block, secondary_blocks, used_secondary)
+        if match_index is None:
+            if primary_block.get("rows"):
+                merged_blocks.append(primary_block)
+            continue
+        used_secondary.add(match_index)
+        secondary_block = secondary_blocks[match_index]
+        merged_label = _merge_room_label(
+            str(primary_block.get("room_label", "") or ""),
+            str(secondary_block.get("room_label", "") or ""),
+            section_label=section_label,
+        ) or room_label
+        merged_rows = _merge_layout_rows(primary_block.get("rows", []), secondary_block.get("rows", []), page_type=page_type)
+        if merged_label and merged_rows:
+            merged_blocks.append({"room_label": merged_label, "rows": merged_rows})
+    for index, secondary_block in enumerate(secondary_blocks):
+        if index in used_secondary:
+            continue
+        if secondary_block.get("room_label") and secondary_block.get("rows"):
+            merged_blocks.append(secondary_block)
+    return merged_blocks
+
+
+def _find_best_layout_block_match(
+    primary_block: dict[str, Any],
+    secondary_blocks: list[dict[str, Any]],
+    used_secondary: set[int],
+) -> int | None:
+    primary_identity = _layout_room_identity(str(primary_block.get("room_label", "") or ""))
+    best_index: int | None = None
+    best_score = -1
+    for index, secondary_block in enumerate(secondary_blocks):
+        if index in used_secondary:
+            continue
+        secondary_identity = _layout_room_identity(str(secondary_block.get("room_label", "") or ""))
+        score = 0
+        if primary_identity and secondary_identity and primary_identity == secondary_identity:
+            score += 100
+        primary_label = _clean_merged_room_label(str(primary_block.get("room_label", "") or ""))
+        secondary_label = _clean_merged_room_label(str(secondary_block.get("room_label", "") or ""))
+        if primary_label and secondary_label and primary_label == secondary_label:
+            score += 80
+        if score > best_score:
+            best_score = score
+            best_index = index
+    return best_index if best_score > 0 else None
+
+
+def _merge_layout_rows(primary_rows: Any, secondary_rows: Any, *, page_type: str = "") -> list[dict[str, str]]:
+    left_rows = [row for row in _normalize_layout_rows(primary_rows) if _layout_row_is_mergeable(row)]
+    right_rows = [row for row in _normalize_layout_rows(secondary_rows) if _layout_row_is_mergeable(row)]
+    if not left_rows:
+        return right_rows
+    if not right_rows:
+        return left_rows
+    merged_rows: list[dict[str, str]] = []
+    used_secondary: set[int] = set()
+    for primary_row in left_rows:
+        match_index = _find_best_layout_row_match(primary_row, right_rows, used_secondary)
+        if match_index is None:
+            merged_rows.append(dict(primary_row))
+            continue
+        used_secondary.add(match_index)
+        merged_rows.append(_merge_single_layout_row(primary_row, right_rows[match_index], page_type=page_type))
+    for index, secondary_row in enumerate(right_rows):
+        if index not in used_secondary:
+            merged_rows.append(dict(secondary_row))
+    return [row for row in _normalize_layout_rows(merged_rows) if _layout_row_is_mergeable(row)]
+
+
+def _layout_row_signature(row: dict[str, str]) -> str:
+    return parsing.normalize_space(str(row.get("row_label", "") or "")).casefold()
+
+
+def _find_best_layout_row_match(
+    primary_row: dict[str, str],
+    secondary_rows: list[dict[str, str]],
+    used_secondary: set[int],
+) -> int | None:
+    primary_signature = _layout_row_signature(primary_row)
+    primary_kind = str(primary_row.get("row_kind", "") or "")
+    best_index: int | None = None
+    best_score = -1
+    for index, secondary_row in enumerate(secondary_rows):
+        if index in used_secondary:
+            continue
+        secondary_signature = _layout_row_signature(secondary_row)
+        secondary_kind = str(secondary_row.get("row_kind", "") or "")
+        score = 0
+        if primary_signature and secondary_signature and primary_signature == secondary_signature:
+            score += 100
+        elif primary_signature and secondary_signature and (
+            primary_signature in secondary_signature or secondary_signature in primary_signature
+        ):
+            score += 60
+        if primary_kind and secondary_kind and primary_kind == secondary_kind:
+            score += 20
+        if score > best_score:
+            best_score = score
+            best_index = index
+    return best_index if best_score > 0 else None
+
+
+def _merge_single_layout_row(primary_row: dict[str, str], secondary_row: dict[str, str], *, page_type: str = "") -> dict[str, str]:
+    primary_score = _layout_row_score(primary_row)
+    secondary_score = _layout_row_score(secondary_row)
+    preferred = primary_row if primary_score >= secondary_score else secondary_row
+    other = secondary_row if preferred is primary_row else primary_row
+    merged = dict(preferred)
+    merged["row_label"] = parsing.normalize_space(
+        str(preferred.get("row_label", "") or "") or str(other.get("row_label", "") or "")
+    )
+    if str(merged.get("row_kind", "other") or "other") == "other" and str(other.get("row_kind", "other") or "other") != "other":
+        merged["row_kind"] = str(other.get("row_kind", "other") or "other")
+    for field in ("value_region_text", "supplier_region_text"):
+        preferred_value = parsing.normalize_space(str(preferred.get(field, "") or ""))
+        other_value = parsing.normalize_space(str(other.get(field, "") or ""))
+        merged[field] = _merge_layout_field(preferred_value, other_value)
+    merged["notes_region_text"] = _merge_layout_field(
+        parsing.normalize_space(str(preferred.get("notes_region_text", "") or "")),
+        parsing.normalize_space(str(other.get("notes_region_text", "") or "")),
+        allow_union=True,
+    )
+    if page_type == "sinkware_tapware" and str(merged.get("row_kind", "other") or "other") == "other":
+        merged["row_kind"] = _infer_layout_row_kind(str(merged.get("row_label", "") or ""), page_type, str(merged.get("value_region_text", "") or ""))
+    return merged
+
+
+def _merge_layout_field(primary_value: str, secondary_value: str, *, allow_union: bool = False) -> str:
+    left = parsing.normalize_space(primary_value)
+    right = parsing.normalize_space(secondary_value)
+    if not left:
+        return right
+    if not right:
+        return left
+    if left.casefold() == right.casefold():
+        return left
+    if left in right:
+        return right
+    if right in left:
+        return left
+    if allow_union:
+        return parsing.normalize_space(f"{left} | {right}")
+    return left if len(left) >= len(right) else right
+
+
+def _layout_row_score(row: dict[str, str]) -> int:
+    if not _layout_row_is_mergeable(row):
+        return -1000
+    label = parsing.normalize_space(str(row.get("row_label", "") or ""))
+    value = parsing.normalize_space(str(row.get("value_region_text", "") or ""))
+    supplier = parsing.normalize_space(str(row.get("supplier_region_text", "") or ""))
+    notes = parsing.normalize_space(str(row.get("notes_region_text", "") or ""))
+    return (100 if label else 0) + (80 if value else 0) + (40 if supplier else 0) + (30 if notes else 0) + len(value) + len(supplier) + len(notes)
+
+
+def _layout_row_is_mergeable(row: dict[str, str]) -> bool:
+    if not isinstance(row, dict):
+        return False
+    row_kind = str(row.get("row_kind", "other") or "other").strip().lower()
+    if row_kind in {"metadata", "footer"}:
+        return False
+    label = parsing.normalize_space(str(row.get("row_label", "") or ""))
+    value = parsing.normalize_space(str(row.get("value_region_text", "") or ""))
+    supplier = parsing.normalize_space(str(row.get("supplier_region_text", "") or ""))
+    notes = parsing.normalize_space(str(row.get("notes_region_text", "") or ""))
+    if not any((label, value, supplier, notes)):
+        return False
+    if label and re.match(r"(?i)^(?:client|date|signature|designer|document ref|image|notes|supplier|ref\.?\s*number)$", label):
+        return False
+    merged_text = " ".join(part for part in (label, value, supplier, notes) if part)
+    return not re.search(r"(?i)\b(?:client name|signed date|signature|all colours shown|product availability)\b", merged_text)
 
 
 def _build_heuristic_page_layout(
