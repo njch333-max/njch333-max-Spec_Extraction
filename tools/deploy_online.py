@@ -108,7 +108,7 @@ def upload_to_staging(
         relative = local_path.relative_to(root).as_posix()
         remote_stage = posixpath.join(staging_dir, relative)
         remote_mkdirs(sftp, posixpath.dirname(remote_stage))
-        sftp.put(str(local_path), remote_stage, confirm=False)
+        sftp.put(str(local_path), remote_stage, confirm=True)
         mode = 0o755 if local_path.suffix.lower() == ".sh" else 0o644
         staged.append((remote_stage, posixpath.join("/opt/spec-extraction", relative), mode))
     return staged

@@ -6,11 +6,14 @@ import os
 import shutil
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest import mock
 
 TEST_DATA_DIR = Path(tempfile.mkdtemp(prefix="spec-extraction-test-data-"))
 os.environ["SPEC_EXTRACTION_DATA_DIR"] = str(TEST_DATA_DIR)
+os.environ["SPEC_EXTRACTION_ENABLE_OPENAI"] = "0"
+os.environ["SPEC_EXTRACTION_ENABLE_OPENAI_VISION"] = "0"
 
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
@@ -325,6 +328,147 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("study", rooms)
         self.assertNotIn("robe_sliding_type_standard_frame", rooms)
         self.assertNotIn("study_desk", rooms)
+
+    def test_imperial_tap_overlay_prefers_layout_rows_and_ignores_client_metadata(self) -> None:
+        documents = [
+            {
+                "file_name": "imperial-tap.pdf",
+                "role": "spec",
+                "pages": [
+                    {
+                        "page_no": 8,
+                        "text": "Client Name: Eloise Cawcutt-Foxover\nTAPWARE (KITCHEN) Franke Eos Neo pull out tap copper TA9601CP",
+                        "raw_text": "Client Name: Eloise Cawcutt-Foxover\nTAPWARE (KITCHEN) Franke Eos Neo pull out tap copper TA9601CP",
+                        "needs_ocr": False,
+                        "page_layout": {
+                            "page_type": "unknown",
+                            "section_label": "TAPWARE (KITCHEN)",
+                            "room_label": "KITCHEN",
+                            "room_blocks": [
+                                {
+                                    "room_label": "KITCHEN",
+                                    "rows": [
+                                        {
+                                            "row_label": "Tap",
+                                            "value_region_text": "Franke Eos Neo pull out tap copper TA9601CP",
+                                            "supplier_region_text": "BY CLIENT",
+                                            "notes_region_text": "",
+                                            "row_kind": "tap",
+                                        }
+                                    ],
+                                }
+                            ],
+                            "rows": [
+                                {
+                                    "row_label": "client name",
+                                    "value_region_text": "Eloise Cawcutt-Foxover",
+                                    "supplier_region_text": "",
+                                    "notes_region_text": "",
+                                    "row_kind": "metadata",
+                                }
+                            ],
+                        },
+                    }
+                ],
+            }
+        ]
+        overlays = parsing_module._collect_imperial_room_overlays(documents)
+        self.assertEqual(overlays["kitchen"]["tap_info"], "Franke Eos Neo pull out tap copper TA9601CP")
+
+    def test_clean_handle_entries_merges_supplier_only_prefix_with_description(self) -> None:
+        cleaned = parsing_module._clean_handle_entries(
+            [
+                "Furnware",
+                "Finger Pull on Uppers",
+                "Momo Barrington Eclipse Plain 96mm in Matt Brass Part Number:BEPL96.MBR - Horizontal on Drawers and Vertical on Doors",
+            ]
+        )
+        self.assertIn(
+            "Furnware - Momo Barrington Eclipse Plain 96mm in Matt Brass Part Number:BEPL96.MBR - Horizontal on Drawers and Vertical on Doors",
+            cleaned,
+        )
+        self.assertIn("Finger Pull on Uppers", cleaned)
+
+    def test_imperial_toe_kick_cleaner_preserves_match_above_materials(self) -> None:
+        cleaned = parsing_module._imperial_clean_toe_kick_value(
+            [
+                "MATCH ABOVE Polytec Classic White Matt or Laminex Gumnut Natural Finish 2606 or Laminex Blackbutt Truescale Natural Finish 2618",
+                "Polytec + Laminex",
+                "",
+            ]
+        )
+        self.assertEqual(
+            cleaned,
+            "Match Above Polytec Classic White Matt / Laminex Gumnut Natural Finish 2606 / Laminex Blackbutt Truescale Natural Finish 2618",
+        )
+
+    def test_openai_request_retries_after_http_429(self) -> None:
+        response_payload = {"output_text": "{\"page_type\": \"joinery\"}"}
+
+        class _FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self) -> bytes:
+                import json
+
+                return json.dumps(response_payload).encode("utf-8")
+
+        too_many = urllib.error.HTTPError(
+            url="https://api.openai.com/v1/responses",
+            code=429,
+            msg="Too Many Requests",
+            hdrs={"Retry-After": "0"},
+            fp=io.BytesIO(b""),
+        )
+        with mock.patch.object(extraction_service.runtime, "OPENAI_REQUEST_MIN_INTERVAL_SECONDS", 0.0), mock.patch.object(
+            extraction_service.runtime, "OPENAI_REQUEST_MAX_RETRIES", 2
+        ), mock.patch.object(extraction_service.runtime, "OPENAI_REQUEST_RETRY_BASE_SECONDS", 0.0), mock.patch(
+            "App.services.extraction_service.time.sleep", return_value=None
+        ), mock.patch(
+            "App.services.extraction_service.urllib.request.urlopen",
+            side_effect=[too_many, _FakeResponse()],
+        ) as mocked_urlopen:
+            extraction_service._LAST_OPENAI_REQUEST_AT = 0.0
+            payload = extraction_service._post_responses_api_content([{"type": "input_text", "text": "{}"}], model="gpt-test")
+        self.assertEqual(payload, response_payload)
+        self.assertEqual(mocked_urlopen.call_count, 2)
+
+    def test_extract_site_address_from_glued_simonds_header(self) -> None:
+        raw_text = (
+            "Colour Selections\n"
+            "Project Administrator:Lyn SpicerClient Name:Lot 4269, 2 BELLTHORPE STREET REDLAND BAY QLD 4165"
+            "Job Address: Colour Consultant:Jess McMahon"
+        )
+        self.assertEqual(
+            parsing_module._extract_site_address_from_text(raw_text),
+            "Lot 4269, 2 BELLTHORPE STREET REDLAND BAY QLD 4165",
+        )
+
+    def test_generic_sinkware_overlay_does_not_pollute_tall_cabinetry(self) -> None:
+        section = {
+            "page_type": "sinkware_tapware",
+            "original_section_label": "Ensuite",
+            "file_name": "sample.pdf",
+            "page_nos": [13],
+            "text": "Ensuite sinkware page",
+            "layout_rows": [
+                {"row_label": "Basin", "value_text": "", "supplier_text": "", "notes_text": ""},
+                {"row_label": "Type", "value_text": "Overmount", "supplier_text": "", "notes_text": ""},
+                {
+                    "row_label": "Floor Waste",
+                    "value_text": "Spin Gun Metal Tall Basin Mixer (SP110-GM)",
+                    "supplier_text": "",
+                    "notes_text": "",
+                },
+            ],
+        }
+        overlay = extraction_service._extract_generic_layout_overlay(section)
+        self.assertEqual(overlay["door_colours_tall"], "")
+        self.assertEqual(overlay["basin_info"], "Overmount")
 
     def test_structure_first_parse_uses_sink_tap_pages_as_overlays_not_rooms(self) -> None:
         snapshot = parse_documents(
@@ -2432,8 +2576,9 @@ class SmokeTest(unittest.TestCase):
         builder_id = store.create_builder("Clarendon", "clarendon", "")
         job_id = store.create_job("37529", builder_id, "Run Status Test", "")
         run_id = store.create_run(job_id, "spec")
-        self.assertTrue(store.acquire_worker_lease("worker-a", 4242, "build-test"))
-        self.assertFalse(store.acquire_worker_lease("worker-b", 9898, "build-other"))
+        with mock.patch("App.services.store._pid_is_running", side_effect=lambda pid: int(pid or 0) == 4242):
+            self.assertTrue(store.acquire_worker_lease("worker-a", 4242, "build-test"))
+            self.assertFalse(store.acquire_worker_lease("worker-b", 9898, "build-other"))
         claimed = store.claim_next_run(worker_pid=4242, app_build_id="build-test", worker_token="worker-a")
         self.assertEqual(claimed["id"], run_id)
         store.update_run_runtime_metadata(run_id, "global_conservative", 4242, "build-test")
@@ -3027,7 +3172,9 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(kitchen["door_colours_base"], "Polytec - EM0 - Ascot Profile Door - in Gossamer White Smooth")
         self.assertEqual(kitchen["drawers_soft_close"], "Soft Close")
         self.assertEqual(kitchen["hinges_soft_close"], "Soft Close")
-        self.assertEqual(kitchen["toe_kick"], ["Polytec Gossamer White Smooth", "Polytec Boston Oak Woodmatt under talls"])
+        self.assertTrue(kitchen["toe_kick"])
+        self.assertIn("Gossamer White Smooth", " ".join(kitchen["toe_kick"]))
+        self.assertIn("Boston Oak Woodmatt", " ".join(kitchen["toe_kick"]))
         self.assertEqual(
             kitchen["handles"],
             [
@@ -4366,6 +4513,197 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(bed_1_robes["door_colours_base"], "Polytec - Florentine Walnut - Woodmatt")
         self.assertTrue(any("Momo Barrington Eclipse Plain 96mm in Matt Brass Part Number:BEPL96.MBR" in entry for entry in bed_1_robes["handles"]))
 
+    def test_parse_documents_imperial_job38_layout_rows_drive_row_local_fields(self) -> None:
+        documents = [
+            {
+                "file_name": "SIGNED FINAL COLOURS_FOXOVER 21 Shadowood st KENMORE 23 3 26.pdf",
+                "role": "spec",
+                "pages": [
+                    {
+                        "page_no": 1,
+                        "raw_text": (
+                            "Address:2510-076 - Private - 21 Shadowood Street, Kenmore Hills\n"
+                            "Client:Eloise Cawcutt Foxover\n"
+                            "Date:20.3.26\n"
+                            "KITCHEN JOINERY SELECTION SHEET\n"
+                            "Hinges & Drawer Runners:Soft Close Floor Type & Kick refacing required:NA\n"
+                            "SPLASHBACK Tiles by client Installed By Imperial STD tile with white grout\n"
+                            "BENCHTOP Caesarstone Fresh Concrete 20mm Pencil Round Edge\n"
+                            "FEATURE TALL CABINETRY COLOUR + bar back Laminex Gumnut Natural Finish 2606\n"
+                        ),
+                        "text": "",
+                        "needs_ocr": False,
+                        "page_layout": {
+                            "page_type": "joinery",
+                            "section_label": "KITCHEN",
+                            "room_label": "MICROWAVE LEAVE STANDARD SPACE BY CLIENT",
+                            "room_blocks": [
+                                {
+                                    "room_label": "MICROWAVE LEAVE STANDARD SPACE BY CLIENT",
+                                    "rows": [
+                                        {"row_label": "SPLASHBACK", "row_kind": "material", "value_region_text": "Tiles by client", "supplier_region_text": "", "notes_region_text": "Installed By Imperial STD tile with white grout"},
+                                        {"row_label": "BENCHTOP", "row_kind": "material", "value_region_text": "Fresh Concrete 20mm Pencil Round Edge", "supplier_region_text": "Caesarstone", "notes_region_text": ""},
+                                        {"row_label": "FEATURE TALL CABINETRY COLOUR + bar back", "row_kind": "material", "value_region_text": "Gumnut Natural Finish 2606", "supplier_region_text": "Laminex", "notes_region_text": ""},
+                                        {"row_label": "Hinges & Drawer Runners", "row_kind": "metadata", "value_region_text": "Soft Close", "supplier_region_text": "", "notes_region_text": ""},
+                                        {"row_label": "Floor Type & Kick refacing required", "row_kind": "metadata", "value_region_text": "NA", "supplier_region_text": "", "notes_region_text": ""},
+                                    ],
+                                }
+                            ],
+                        },
+                    },
+                    {
+                        "page_no": 2,
+                        "raw_text": (
+                            "GLASS INLAY DOORS TO OVERHEAD FEATURE CABINETRY\n"
+                            "Reeded Glass Inlay Feature doors In Laminex Gumnut Natural Finish 2606 with Coloured internals and shelves in - Laminex Blackbutt Truescale internals\n"
+                            "FEATURE TIMBER LOOK FLOATING SHELVES 51mm thick floating shelves Laminex Blackbutt Truescale Natural Finish 2618\n"
+                            "BASE CABINETRY COLOUR Polytec Classic White Matt\n"
+                            "KICKBOARDS MATCH ABOVE Polytec Classic White Matt or Laminex Gumnut Natural Finish 2606 or Laminex Blackbutt Truescale Natural Finish 2618\n"
+                        ),
+                        "text": "",
+                        "needs_ocr": False,
+                        "page_layout": {
+                            "page_type": "joinery",
+                            "section_label": "KITCHEN",
+                            "room_label": "KITCHEN",
+                            "room_blocks": [
+                                {
+                                    "room_label": "KITCHEN",
+                                    "rows": [
+                                        {"row_label": "GLASS INLAY DOORS TO OVERHEAD FEATURE CABINETRY", "row_kind": "material", "value_region_text": "Reeded Glass Inlay Feature doors In Laminex Gumnut Natural Finish 2606 with Coloured internals and shelves in", "supplier_region_text": "Laminex", "notes_region_text": "Laminex Blackbutt Truescale internals"},
+                                        {"row_label": "FEATURE TIMBER LOOK FLOATING SHELVES", "row_kind": "material", "value_region_text": "51mm thick floating shelves Blackbutt Truescale Natural Finish 2618", "supplier_region_text": "Laminex", "notes_region_text": ""},
+                                        {"row_label": "BASE CABINETRY COLOUR", "row_kind": "material", "value_region_text": "Classic White Matt", "supplier_region_text": "Polytec", "notes_region_text": "Includes single cabinet on bar back area"},
+                                        {"row_label": "KICKBOARDS", "row_kind": "material", "value_region_text": "MATCH ABOVE", "supplier_region_text": "Polytec + Laminex", "notes_region_text": "Polytec Classic White Matt or Laminex Gumnut Natural Finish 2606 or Laminex Blackbutt Truescale Natural Finish 2618"},
+                                    ],
+                                }
+                            ],
+                        },
+                    },
+                    {
+                        "page_no": 3,
+                        "raw_text": (
+                            "LIP PULL HANDLES - DRAWERS ABI INTERIORS Rappana Cabinetry pull extended 100mm brushed copper (10469) SUPPLIED BY CLIENT INSTALLED BY IMPERIAL Installed Horizontally\n"
+                            "HANDLES - BASE CABS + OVERHEAD CABS ABI INTERIORS Elsa Cabinetry Knob- brushed copper (14494) for any of the other doors and the gas strut oh doors. SUPPLIED BY CLIENT INSTALLED BY IMPERIAL\n"
+                            "FEATURE LIP PULL PANTRY HANDLES ABI INTERIORS 2 X Rappana Cabinetry Pull Extended 800mm - Brushed Copper SUPPLIED BY CLIENT INSTALLED BY IMPERIAL Installed Vertically to pantry doors only\n"
+                        ),
+                        "text": "",
+                        "needs_ocr": False,
+                        "page_layout": {
+                            "page_type": "joinery",
+                            "section_label": "KITCHEN",
+                            "room_label": "KITCHEN",
+                            "room_blocks": [
+                                {
+                                    "room_label": "KITCHEN",
+                                    "rows": [
+                                        {"row_label": "LIP PULL HANDLES - DRAWERS", "row_kind": "handle", "value_region_text": "Rappana Cabinetry pull extended 100mm brushed copper (10469)", "supplier_region_text": "ABI INTERIORS", "notes_region_text": "SUPPLIED BY CLIENT INSTALLED BY IMPERIAL Installed Horizontally"},
+                                        {"row_label": "HANDLES - BASE CABS + OVERHEAD CABS", "row_kind": "handle", "value_region_text": "Elsa Cabinetry Knob- brushed copper (14494) for any of the other doors and the gas strut oh doors.", "supplier_region_text": "ABI INTERIORS", "notes_region_text": "SUPPLIED BY CLIENT INSTALLED BY IMPERIAL"},
+                                        {"row_label": "FEATURE LIP PULL PANTRY HANDLES", "row_kind": "handle", "value_region_text": "2 X Rappana Cabinetry Pull Extended 800mm - Brushed Copper", "supplier_region_text": "ABI INTERIORS", "notes_region_text": "SUPPLIED BY CLIENT INSTALLED BY IMPERIAL Installed Vertically to pantry doors only"},
+                                    ],
+                                }
+                            ],
+                        },
+                    },
+                    {
+                        "page_no": 4,
+                        "raw_text": (
+                            "NA\n"
+                            "DINING BANQUETTE JOINERY SELECTION SHEET\n"
+                            "BASE CABINETRY COLOUR Polytec Classic White Matt\n"
+                            "BENCHTOP Polytec Classic White Matt Laminate Benchtop 33mm\n"
+                            "HANDLES - BASE CABS Rappana Cabinetry Pull 50mm Brushed Copper SUPPLIED BY CLIENT Installed Horizontally\n"
+                            "KICKBOARDS Polytec Classic White Matt\n"
+                        ),
+                        "text": "",
+                        "needs_ocr": False,
+                        "page_layout": {
+                            "page_type": "joinery",
+                            "section_label": "NA DINING BANQUETTE",
+                            "room_label": "NA DINING BANQUETTE",
+                            "room_blocks": [
+                                {
+                                    "room_label": "NA DINING BANQUETTE",
+                                    "rows": [
+                                        {"row_label": "BASE CABINETRY COLOUR", "row_kind": "material", "value_region_text": "Classic White Matt", "supplier_region_text": "Polytec", "notes_region_text": ""},
+                                        {"row_label": "BENCHTOP", "row_kind": "material", "value_region_text": "Classic White Matt Laminate Benchtop 33mm", "supplier_region_text": "Polytec", "notes_region_text": ""},
+                                        {"row_label": "KICKBOARDS", "row_kind": "material", "value_region_text": "Classic White Matt", "supplier_region_text": "Polytec", "notes_region_text": ""},
+                                        {"row_label": "HANDLES - BASE CABS", "row_kind": "handle", "value_region_text": "Rappana Cabinetry Pull 50mm Brushed Copper", "supplier_region_text": "ABI INTERIORS", "notes_region_text": "SUPPLIED BY CLIENT Installed Horizontally"},
+                                    ],
+                                }
+                            ],
+                        },
+                    },
+                    {
+                        "page_no": 7,
+                        "raw_text": "SINKWARE (KITCHEN) ABEY Schock horizontal double bowl sink bronze N200BZ TOP MOUNT Taphole location: Tap Landing Centred to back",
+                        "text": "",
+                        "needs_ocr": False,
+                        "page_layout": {
+                            "page_type": "sinkware_tapware",
+                            "section_label": "SINKWARE & TAPWARE",
+                            "room_label": "KITCHEN",
+                            "room_blocks": [
+                                {
+                                    "room_label": "KITCHEN",
+                                    "rows": [
+                                        {"row_label": "SINKWARE (KITCHEN)", "row_kind": "sink", "value_region_text": "ABEY Schock horizontal double bowl sink bronze N200BZ", "supplier_region_text": "", "notes_region_text": "TOP MOUNT Taphole location: Tap Landing Centred to back"},
+                                    ],
+                                }
+                            ],
+                        },
+                    },
+                    {
+                        "page_no": 8,
+                        "raw_text": "Tap Franke Eos Neo pull out tap copper TA9601CP TAPWARE (KITCHEN) BY CLIENT Eloise Cawcutt-Foxover",
+                        "text": "",
+                        "needs_ocr": False,
+                        "page_layout": {
+                            "page_type": "sinkware_tapware",
+                            "section_label": "SINKWARE & TAPWARE",
+                            "room_label": "KITCHEN",
+                            "room_blocks": [
+                                {
+                                    "room_label": "KITCHEN",
+                                    "rows": [
+                                        {"row_label": "TAPWARE (KITCHEN)", "row_kind": "tap", "value_region_text": "Franke Eos Neo pull out tap copper TA9601CP", "supplier_region_text": "", "notes_region_text": "BY CLIENT"},
+                                    ],
+                                }
+                            ],
+                        },
+                    },
+                ],
+            }
+        ]
+        snapshot = enrich_snapshot_rooms(parse_documents("38251", "Imperial", "spec", documents), documents)
+        rooms = {row["room_key"]: row for row in snapshot["rooms"]}
+        kitchen = rooms["kitchen"]
+        self.assertEqual(snapshot["site_address"], "21 Shadowood Street, Kenmore Hills")
+        self.assertEqual(kitchen["bench_tops_wall_run"], "20mm Caesarstone - Fresh Concrete - Pencil Round Edge")
+        self.assertEqual(kitchen["door_colours_base"], "Polytec - Classic White Matt")
+        self.assertIn("Reeded Glass Inlay", kitchen["door_colours_overheads"])
+        self.assertEqual(kitchen["door_colours_tall"], "Laminex - Gumnut Natural Finish 2606")
+        self.assertEqual(kitchen["door_colours_bar_back"], "Laminex - Gumnut Natural Finish 2606")
+        self.assertIn("51mm", kitchen["floating_shelf"])
+        self.assertIn("Blackbutt", kitchen["floating_shelf"])
+        self.assertTrue(kitchen["toe_kick"])
+        self.assertEqual(len(kitchen["handles"]), 3)
+        self.assertEqual(kitchen["drawers_soft_close"], "Soft Close")
+        self.assertEqual(kitchen["hinges_soft_close"], "Soft Close")
+        self.assertEqual(kitchen["flooring"], "NA")
+        self.assertNotIn("FEATURE TALL", kitchen["bench_tops_wall_run"])
+        self.assertNotIn("Foxover", kitchen["tap_info"])
+        self.assertIn("Franke Eos Neo", kitchen["tap_info"])
+        dining = rooms["dining_banquette"]
+        self.assertEqual(dining["original_room_label"], "DINING BANQUETTE")
+        self.assertEqual(dining["door_colours_base"], "Polytec - Classic White Matt")
+        self.assertIn("33mm Polytec - Classic White Matt", dining["bench_tops_other"])
+        self.assertIn("Laminate Benchtop", dining["bench_tops_other"])
+        self.assertEqual(dining["toe_kick"], ["Polytec - Classic White Matt"])
+        self.assertEqual(
+            dining["handles"],
+            ["ABI Interiors - Rappana Cabinetry Pull 50mm Brushed Copper - SUPPLIED BY CLIENT Installed Horizontally"],
+        )
+
     def test_job_detail_and_spec_list_titles_show_snapshot_site_address(self) -> None:
         builder_id = store.create_builder("Imperial", "imperial", "")
         job_id = store.create_job("37813.2", builder_id, "", "")
@@ -4512,6 +4850,180 @@ class SmokeTest(unittest.TestCase):
         response = client.get(f"/jobs/{job_id}")
         self.assertEqual(response.status_code, 200)
         self.assertNotIn("<span class=\"eyebrow\">Review</span>", response.text)
+
+    def test_shared_generic_overlay_filters_simonds_placeholder_fragments(self) -> None:
+        section = {
+            "original_section_label": "Laundry",
+            "page_type": "joinery",
+            "file_name": "simonds.pdf",
+            "page_nos": [9],
+            "text": "Laundry layout",
+            "layout_rows": [
+                {"row_label": "Manufacturer", "value_text": "Laminex", "supplier_text": "", "notes_text": "", "row_kind": "material"},
+                {"row_label": "Finish", "value_text": "Natural", "supplier_text": "", "notes_text": "", "row_kind": "material"},
+                {"row_label": "Profile", "value_text": "(N/A)", "supplier_text": "", "notes_text": "", "row_kind": "material"},
+                {"row_label": "Colour", "value_text": "Chalk White", "supplier_text": "", "notes_text": "", "row_kind": "material"},
+                {"row_label": "Kickboard", "value_text": "", "supplier_text": "", "notes_text": "", "row_kind": "material"},
+                {"row_label": "Manufacturer", "value_text": "N/A", "supplier_text": "", "notes_text": "", "row_kind": "handle"},
+                {"row_label": "Model", "value_text": "C137 Black 100m", "supplier_text": "", "notes_text": "", "row_kind": "handle"},
+                {"row_label": "Fixing", "value_text": "Horizontal", "supplier_text": "", "notes_text": "", "row_kind": "handle"},
+                {"row_label": "Cabinetry Handles", "value_text": "", "supplier_text": "", "notes_text": "", "row_kind": "handle"},
+                {"row_label": "Manufacturer", "value_text": "(N/A)", "supplier_text": "", "notes_text": "", "row_kind": "handle"},
+                {"row_label": "Model", "value_text": "up to 20mm Drop Down - No Handle", "supplier_text": "", "notes_text": "", "row_kind": "handle"},
+                {"row_label": "Style", "value_text": "Soft Close", "supplier_text": "", "notes_text": "", "row_kind": "handle"},
+                {"row_label": "Profile", "value_text": "Hanging Rail", "supplier_text": "", "notes_text": "", "row_kind": "handle"},
+                {"row_label": "Overhead Cabinetry Handles", "value_text": "(N/A)", "supplier_text": "", "notes_text": "", "row_kind": "handle"},
+                {"row_label": "Manufacturer", "value_text": "Everhard", "supplier_text": "", "notes_text": "", "row_kind": "sink"},
+                {"row_label": "Range", "value_text": "Milano", "supplier_text": "", "notes_text": "", "row_kind": "sink"},
+                {"row_label": "Style", "value_text": "Vegie Mixer", "supplier_text": "", "notes_text": "", "row_kind": "sink"},
+                {"row_label": "Finish", "value_text": "Chrome", "supplier_text": "", "notes_text": "", "row_kind": "sink"},
+                {"row_label": "Laundry Trough", "value_text": "", "supplier_text": "", "notes_text": "", "row_kind": "sink"},
+                {"row_label": "Manufacturer", "value_text": "Alder", "supplier_text": "", "notes_text": "", "row_kind": "tap"},
+                {"row_label": "Laundry Tapware", "value_text": "+ ALDER SACHI", "supplier_text": "", "notes_text": "", "row_kind": "tap"},
+                {"row_label": "Manufacturer", "value_text": "(N/A)", "supplier_text": "", "notes_text": "", "row_kind": "accessory"},
+                {"row_label": "Style", "value_text": "Excellence Squareline 45L", "supplier_text": "", "notes_text": "", "row_kind": "accessory"},
+                {"row_label": "Finish", "value_text": "Stainless Steel", "supplier_text": "", "notes_text": "", "row_kind": "accessory"},
+                {"row_label": "Accessories", "value_text": "N/A", "supplier_text": "", "notes_text": "", "row_kind": "accessory"},
+                {"row_label": "Robe Hook", "value_text": "IN MATT BLACK", "supplier_text": "", "notes_text": "", "row_kind": "accessory"},
+            ],
+        }
+        overlay = extraction_service._extract_generic_layout_overlay(section)
+        self.assertEqual(overlay["toe_kick"], ["Laminex - Chalk White"])
+        self.assertEqual(overlay["handles"], ["C137 Black 100m - Horizontal", "up to 20mm Drop Down - No Handle"])
+        self.assertIn("Everhard", overlay["sink_info"])
+        self.assertIn("Milano", overlay["sink_info"])
+        self.assertIn("Alder", overlay["tap_info"])
+        self.assertIn("ALDER SACHI", overlay["tap_info"])
+        self.assertIn("Robe Hook - IN MATT BLACK", overlay["accessories"])
+
+    def test_shared_generic_polish_clears_placeholder_values_when_layout_block_is_present(self) -> None:
+        row = {
+            "room_key": "kitchen",
+            "original_room_label": "Kitchen",
+            "handles": ["Door Handle Drawer Handle **"],
+            "sink_info": "Model Type #N/A",
+            "tap_info": "Type Location Centre of Sink",
+            "basin_info": "Not Applicable Model Type",
+            "accessories": ["WC**"],
+        }
+        overlay = {
+            "has_handles_block": True,
+            "handles": [],
+            "has_sink_block": True,
+            "sink_info": "",
+            "has_tap_block": True,
+            "tap_info": "",
+            "has_basin_block": True,
+            "basin_info": "",
+            "has_accessories_block": True,
+            "accessories": [],
+        }
+        polished = extraction_service._polish_generic_layout_room(row, overlay)
+        self.assertEqual(polished["handles"], [])
+        self.assertEqual(polished["sink_info"], "")
+        self.assertEqual(polished["tap_info"], "")
+        self.assertEqual(polished["basin_info"], "")
+        self.assertEqual(polished["accessories"], [])
+
+    def test_infer_page_type_detects_generic_sinkware_tables_without_explicit_header(self) -> None:
+        text = (
+            "Vanity Basin Tapware Matt Black\n"
+            "Toilet Roll Holder\n"
+            "Toilet Suite\n"
+            "Shower Base\n"
+            "Shower Frame\n"
+            "Shower Mixer\n"
+            "Floor Waste\n"
+            "Wet Area Location\n"
+        )
+        page_type = extraction_service._infer_page_type_from_text("Simonds", "spec", text)
+        self.assertEqual(page_type, "sinkware_tapware")
+
+    def test_heuristic_sink_tap_room_blocks_recovers_wet_area_location_room(self) -> None:
+        lines = [
+            "Additional Wet Area",
+            "Location Ensuite 3",
+            "Vanity Basin",
+            "Manufacturer Caroma",
+            "Range Liano II",
+            "Model 400mm Round Above Counter Basin",
+            "Vanity Basin Tapware",
+            "Manufacturer Alder",
+        ]
+        blocks = extraction_service._heuristic_sink_tap_room_blocks(lines)
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(blocks[0]["room_label"], "Ensuite 3")
+
+    def test_invalid_room_heading_candidate_rejects_field_titles(self) -> None:
+        self.assertTrue(extraction_service._looks_like_invalid_room_heading_candidate("Floating Vanity"))
+        self.assertTrue(extraction_service._looks_like_invalid_room_heading_candidate("Robe Sliding Type Frame Colour"))
+        self.assertFalse(extraction_service._looks_like_invalid_room_heading_candidate("Dining Banquette"))
+
+    def test_build_layout_from_pdf_tables_parses_evoca_sink_table(self) -> None:
+        lines = [
+            "20 PLUMBING FIXTURES & TAPWARE",
+            "Kitchen",
+            "Sink",
+            "Model",
+            "Type",
+            "Accessories",
+        ]
+        page = {
+            "table_rows": [
+                [
+                    ["20 PLUMBING FIXTURES & TAPWARE", "", "", ""],
+                    ["", "Kitchen", "", ""],
+                    ["-", "Sink\nModel\nType\nAccessories", "", ""],
+                    ["", "", "Burazzo 450mm Gun Metal Single Bowl Sink (BU454525S-GM) ($370)", ""],
+                    ["", "", "#N/A\nNot Applicable", ""],
+                    ["-", "Sink Mixer\nType\nLocation", "", ""],
+                    ["", "", "Zara Gun Metal Pull-Out (ZA120-GM)", ""],
+                    ["", "", "Centre of Sink", ""],
+                ]
+            ]
+        }
+        blocks = extraction_service._build_layout_from_pdf_tables("Evoca", "sinkware_tapware", lines, page)
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(blocks[0]["room_label"], "Kitchen")
+        labels = [row["row_label"] for row in blocks[0]["rows"]]
+        self.assertIn("Model", labels)
+        self.assertIn("Sink Mixer", labels)
+        model_row = next(row for row in blocks[0]["rows"] if row["row_label"] == "Model")
+        self.assertIn("Burazzo 450mm Gun Metal Single Bowl Sink", model_row["value_region_text"])
+
+    def test_table_row_explicit_room_label_accepts_bathroom_and_rejects_placeholder(self) -> None:
+        self.assertEqual(
+            extraction_service._table_row_explicit_room_label(["", "Bathroom", None, None]),
+            "Bathroom",
+        )
+        self.assertEqual(
+            extraction_service._table_row_explicit_room_label(["", "#N/A\nNot Applicable", None, None]),
+            "",
+        )
+
+    def test_build_generic_layout_blocks_supports_sink_prefix_rows(self) -> None:
+        rows = [
+            {"row_label": "Manufacturer", "value_text": "Caroma", "row_kind": "material"},
+            {"row_label": "Range", "value_text": "Liano II", "row_kind": "material"},
+            {"row_label": "Model", "value_text": "400mm Round Above Counter Basin", "row_kind": "material"},
+            {"row_label": "Finish", "value_text": "White", "row_kind": "material"},
+            {"row_label": "Vanity Basin", "value_text": "", "row_kind": "basin"},
+            {"row_label": "Manufacturer", "value_text": "Alder", "row_kind": "material"},
+            {"row_label": "Range", "value_text": "Samm", "row_kind": "material"},
+            {"row_label": "Model", "value_text": "Wall Basin Mixer", "row_kind": "material"},
+            {"row_label": "Finish", "value_text": "Matt Black", "row_kind": "material"},
+            {"row_label": "Vanity Basin Tapware", "value_text": "", "row_kind": "tap"},
+        ]
+        blocks = extraction_service._build_generic_layout_blocks(rows, page_type="sinkware_tapware")
+        self.assertEqual(len(blocks), 2)
+        self.assertEqual(blocks[0]["anchor_label"], "Vanity Basin")
+        self.assertEqual(blocks[1]["anchor_label"], "Vanity Basin Tapware")
+        basin_values = [row.get("value_text", "") for row in blocks[0]["rows"]]
+        tap_values = [row.get("value_text", "") for row in blocks[1]["rows"]]
+        self.assertIn("Caroma", basin_values)
+        self.assertIn("400mm Round Above Counter Basin", basin_values)
+        self.assertIn("Alder", tap_values)
+        self.assertIn("Wall Basin Mixer", tap_values)
 
     def _mark_raw_spec_qa_passed(self, job_id: int) -> None:
         verification = store.get_job_snapshot_verification(job_id, "raw_spec")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from typing import Any
 
@@ -398,7 +399,21 @@ def create_run(job_id: int, run_kind: str) -> int:
             (job_id, run_kind, now, APP_BUILD_ID, ""),
         )
         conn.execute("UPDATE jobs SET status = ?, updated_at = ? WHERE id = ?", ("queued", now, job_id))
-        return int(cur.lastrowid)
+    return int(cur.lastrowid)
+
+
+def _pid_is_running(pid: int) -> bool:
+    try:
+        normalized_pid = int(pid or 0)
+    except (TypeError, ValueError):
+        return False
+    if normalized_pid <= 0:
+        return False
+    try:
+        os.kill(normalized_pid, 0)
+    except OSError:
+        return False
+    return True
 
 
 def list_runs(job_id: int) -> list[dict[str, Any]]:
@@ -421,7 +436,9 @@ def acquire_worker_lease(owner_token: str, worker_pid: int, app_build_id: str, t
             )
             conn.commit()
             return True
-        if row.get("owner_token") == owner_token or str(row.get("expires_at", "")) <= now:
+        lease_pid = int(row.get("worker_pid", 0) or 0)
+        lease_stale = str(row.get("expires_at", "")) <= now or not _pid_is_running(lease_pid)
+        if row.get("owner_token") == owner_token or lease_stale:
             conn.execute(
                 """
                 UPDATE worker_leases

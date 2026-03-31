@@ -4,6 +4,7 @@ jinja2
 openpyxl
 pypdf
 pymupdf
+pdfplumber
 python-multipart
 httpx
 itsdangerous
