@@ -162,7 +162,11 @@
       <li><strong>Layout attempted:</strong> {{ "Yes" if raw_analysis.layout_attempted else "No" }}</li>
       <li><strong>Layout succeeded:</strong> {{ "Yes" if raw_analysis.layout_succeeded else "No" }}</li>
       <li><strong>Layout mode:</strong> {{ raw_analysis.layout_mode_label }}</li>
+      <li><strong>Layout provider:</strong> {{ raw_analysis.layout_provider or "heuristic" }}</li>
       <li><strong>Layout pages:</strong> {{ raw_analysis.layout_pages|join(", ") if raw_analysis.layout_pages else "None" }}</li>
+      <li><strong>Docling attempted:</strong> {{ "Yes" if raw_analysis.docling_attempted else "No" }}</li>
+      <li><strong>Docling succeeded:</strong> {{ "Yes" if raw_analysis.docling_succeeded else "No" }}</li>
+      <li><strong>Docling pages:</strong> {{ raw_analysis.docling_pages|join(", ") if raw_analysis.docling_pages else "None" }}</li>
       <li><strong>Heavy vision pages:</strong> {{ raw_analysis.heavy_vision_pages|join(", ") if raw_analysis.heavy_vision_pages else "None" }}</li>
       <li><strong>Vision attempted:</strong> {{ "Yes" if raw_analysis.vision_attempted else "No" }}</li>
       <li><strong>Vision succeeded:</strong> {{ "Yes" if raw_analysis.vision_succeeded else "No" }}</li>
@@ -196,6 +200,12 @@
     <div class="subcard">
       <h4>Layout Note</h4>
       <p class="muted">{{ raw_analysis.layout_note }}</p>
+    </div>
+    {% endif %}
+    {% if raw_analysis.docling_note %}
+    <div class="subcard">
+      <h4>Docling Note</h4>
+      <p class="muted">{{ raw_analysis.docling_note }}</p>
     </div>
     {% endif %}
     {% if raw_analysis.vision_note %}

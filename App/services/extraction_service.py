@@ -1,20 +1,28 @@
 from __future__ import annotations
 
 import base64
+import html
 import json
 import os
 import re
+import tempfile
 import time
 import urllib.request
 import urllib.error
 from pathlib import Path
 from typing import Any, Callable
 
+from pypdf import PdfReader, PdfWriter
+
 from App.services import appliance_official
 from App.services import cleaning_rules, parsing, runtime
 
 
 ProgressCallback = Callable[[str, str], None] | None
+
+_DOCLING_CONVERTER: Any = None
+_DOCLING_CONVERTER_CLASS: Any = None
+_DOCLING_IMPORT_ERROR: Exception | None = None
 
 
 EXTRA_LAYOUT_ROW_LABELS: tuple[str, ...] = (
@@ -205,9 +213,14 @@ def build_spec_snapshot(
             "layout_attempted": vision_meta["layout_attempted"],
             "layout_succeeded": vision_meta["layout_succeeded"],
             "layout_mode": vision_meta["layout_mode"],
+            "layout_provider": vision_meta["layout_provider"],
             "layout_pages": vision_meta["layout_pages"],
             "heavy_vision_pages": vision_meta["heavy_vision_pages"],
             "layout_note": vision_meta["layout_note"],
+            "docling_attempted": vision_meta["docling_attempted"],
+            "docling_succeeded": vision_meta["docling_succeeded"],
+            "docling_pages": vision_meta["docling_pages"],
+            "docling_note": vision_meta["docling_note"],
             "room_master_file": heuristic_analysis.get("room_master_file", ""),
             "room_master_reason": heuristic_analysis.get("room_master_reason", ""),
             "supplement_files": heuristic_analysis.get("supplement_files", []),
@@ -291,9 +304,14 @@ def build_drawing_snapshot(
             "layout_attempted": vision_meta["layout_attempted"],
             "layout_succeeded": vision_meta["layout_succeeded"],
             "layout_mode": vision_meta["layout_mode"],
+            "layout_provider": vision_meta["layout_provider"],
             "layout_pages": vision_meta["layout_pages"],
             "heavy_vision_pages": vision_meta["heavy_vision_pages"],
             "layout_note": vision_meta["layout_note"],
+            "docling_attempted": vision_meta["docling_attempted"],
+            "docling_succeeded": vision_meta["docling_succeeded"],
+            "docling_pages": vision_meta["docling_pages"],
+            "docling_note": vision_meta["docling_note"],
             "room_master_file": heuristic_analysis.get("room_master_file", ""),
             "room_master_reason": heuristic_analysis.get("room_master_reason", ""),
             "supplement_files": heuristic_analysis.get("supplement_files", []),
@@ -347,9 +365,14 @@ def _blank_vision_meta() -> dict[str, Any]:
         "layout_attempted": False,
         "layout_succeeded": False,
         "layout_mode": "",
+        "layout_provider": "heuristic",
         "layout_pages": [],
         "heavy_vision_pages": [],
         "layout_note": "",
+        "docling_attempted": False,
+        "docling_succeeded": False,
+        "docling_pages": [],
+        "docling_note": "",
         "vision_attempted": False,
         "vision_succeeded": False,
         "vision_pages": [],
@@ -386,10 +409,6 @@ def _apply_layout_pipeline(
         return documents, layout_meta
 
     builder_name = str(builder.get("name", "") or "")
-    if source_kind == "spec" and "clarendon" in builder_name.strip().lower():
-        layout_meta["layout_note"] = "Layout pipeline skipped for Clarendon spec pages to preserve raw_text-driven schedule extraction."
-        layout_meta["vision_note"] = "Clarendon spec parsing currently prefers raw_text over structure-first layout normalization."
-        return documents, layout_meta
     updated_documents: list[dict[str, object]] = []
     layout_pages: list[int] = []
     heavy_candidates: list[tuple[int, int]] = []
@@ -425,18 +444,94 @@ def _apply_layout_pipeline(
     layout_meta["layout_pages"] = _unique_page_numbers(layout_pages)
     layout_meta["layout_succeeded"] = bool(layout_pages)
     layout_meta["layout_mode"] = "lightweight"
+    layout_meta["layout_provider"] = "heuristic"
     layout_meta["layout_note"] = f"Lightweight structure analysis applied to {len(layout_meta['layout_pages'])} page(s)."
 
     if not heavy_candidates:
+        layout_meta["docling_note"] = "No pages matched the Docling layout rules."
         layout_meta["vision_note"] = "No pages matched the heavy vision layout rules."
         return updated_documents, layout_meta
+
+    max_pages = max(1, runtime.OPENAI_VISION_MAX_PAGES)
+    docling_attempted_pages: list[int] = []
+    docling_applied_pages: list[int] = []
+    docling_notes: list[str] = []
+    if source_kind == "spec" and _docling_available():
+        layout_meta["docling_attempted"] = True
+        for doc_index, page_index in heavy_candidates[:max_pages]:
+            document = updated_documents[doc_index]
+            pages = list(document.get("pages", []))
+            if page_index >= len(pages):
+                continue
+            page = pages[page_index]
+            page_no = int(page.get("page_no", 0) or 0)
+            docling_attempted_pages.append(page_no)
+            try:
+                _report_progress(progress_callback, "layout_prepare", f"Calling Docling for {document['file_name']} page {page_no}")
+                layout = _request_docling_page_layout(
+                    builder_name=builder_name,
+                    source_kind=source_kind,
+                    file_name=str(document.get("file_name", "") or ""),
+                    page=page,
+                    document_path=Path(str(document.get("path", "") or "")),
+                )
+                if not _layout_is_usable(layout, raw_page_text=str(page.get("raw_text", page.get("text", "")) or "")):
+                    docling_notes.append(f"page {page_no}: Docling returned no usable room/row structure")
+                    continue
+                page["page_layout"] = layout
+                page["layout_mode"] = "docling"
+                page["docling_applied"] = True
+                page["text"] = _vision_layout_to_text(layout, fallback_text=str(page.get("raw_text", page.get("text", "")) or ""))
+                docling_applied_pages.append(page_no)
+            except Exception as exc:
+                docling_notes.append(f"page {page_no}: {_truncate_note(exc)}")
+    elif source_kind == "spec":
+        layout_meta["docling_note"] = "Docling is not installed or unavailable in the runtime environment."
+    else:
+        layout_meta["docling_note"] = "Docling is only enabled for spec parsing."
+
+    layout_meta["docling_pages"] = _unique_page_numbers(docling_applied_pages if docling_applied_pages else docling_attempted_pages)
+    layout_meta["docling_succeeded"] = bool(docling_applied_pages)
+    if layout_meta["docling_attempted"] and not layout_meta["docling_note"]:
+        if docling_applied_pages:
+            note = f"Docling layout applied to {len(docling_applied_pages)} page(s): {', '.join(str(page_no) for page_no in _unique_page_numbers(docling_applied_pages))}."
+            if len(heavy_candidates) > max_pages:
+                note = f"{note} Skipped {len(heavy_candidates) - max_pages} candidate page(s) because of the configured page cap."
+            if docling_notes:
+                note = f"{note} Partial issues: {'; '.join(docling_notes)[:220]}"
+            layout_meta["docling_note"] = note[:400]
+        else:
+            layout_meta["docling_note"] = (
+                "; ".join(docling_notes)[:400] if docling_notes else "Docling layout attempted but no usable page layout was applied."
+            )
+
+    remaining_heavy_candidates = [
+        (doc_index, page_index)
+        for doc_index, page_index in heavy_candidates
+        if not bool(
+            list(updated_documents[doc_index].get("pages", []))[page_index].get("docling_applied")
+        )
+    ]
+
+    if not remaining_heavy_candidates:
+        if docling_applied_pages:
+            _apply_docling_layout_meta(layout_meta, docling_applied_pages)
+        else:
+            layout_meta["vision_note"] = "No heavy vision fallback was needed after lightweight structure analysis."
+        return updated_documents, layout_meta
     if not runtime.OPENAI_VISION_ENABLED:
+        if docling_applied_pages:
+            _apply_docling_layout_meta(layout_meta, docling_applied_pages)
         layout_meta["vision_note"] = "OpenAI vision fallback is disabled in runtime settings."
         return updated_documents, layout_meta
     if not runtime.OPENAI_ENABLED:
+        if docling_applied_pages:
+            _apply_docling_layout_meta(layout_meta, docling_applied_pages)
         layout_meta["vision_note"] = "OpenAI is disabled, so heavy vision layout was skipped."
         return updated_documents, layout_meta
     if not runtime.OPENAI_API_KEY:
+        if docling_applied_pages:
+            _apply_docling_layout_meta(layout_meta, docling_applied_pages)
         layout_meta["vision_note"] = "OPENAI_API_KEY is not configured, so heavy vision layout was skipped."
         return updated_documents, layout_meta
 
@@ -444,9 +539,8 @@ def _apply_layout_pipeline(
     applied_pages: list[int] = []
     page_notes: list[str] = []
     layout_meta["vision_attempted"] = True
-    max_pages = max(1, runtime.OPENAI_VISION_MAX_PAGES)
 
-    for doc_index, page_index in heavy_candidates[:max_pages]:
+    for doc_index, page_index in remaining_heavy_candidates[:max_pages]:
         document = updated_documents[doc_index]
         pages = list(document.get("pages", []))
         if page_index >= len(pages):
@@ -488,15 +582,17 @@ def _apply_layout_pipeline(
     layout_meta["heavy_vision_pages"] = _unique_page_numbers(applied_pages)
     layout_meta["vision_succeeded"] = bool(applied_pages)
     if applied_pages:
-        layout_meta["layout_mode"] = "heavy_vision" if len(applied_pages) == len(layout_meta["layout_pages"]) else "mixed"
+        layout_meta["layout_mode"] = "mixed" if docling_applied_pages else "heavy_vision"
+        layout_meta["layout_provider"] = "mixed" if docling_applied_pages else "heavy_vision"
         layout_meta["layout_note"] = (
             f"Structure-first parsing applied to {len(layout_meta['layout_pages'])} page(s); "
+            f"{'Docling corrected ' + str(len(_unique_page_numbers(docling_applied_pages))) + ' page(s); ' if docling_applied_pages else ''}"
             f"heavy vision layout corrected {len(layout_meta['heavy_vision_pages'])} page(s)."
         )
     if applied_pages:
         success_note = f"Heavy vision layout applied to {len(layout_meta['heavy_vision_pages'])} page(s): {', '.join(str(page_no) for page_no in layout_meta['heavy_vision_pages'])}."
-        if len(heavy_candidates) > max_pages:
-            success_note = f"{success_note} Skipped {len(heavy_candidates) - max_pages} candidate page(s) because of the configured page cap."
+        if len(remaining_heavy_candidates) > max_pages:
+            success_note = f"{success_note} Skipped {len(remaining_heavy_candidates) - max_pages} candidate page(s) because of the configured page cap."
         if page_notes:
             success_note = f"{success_note} Partial issues: {'; '.join(page_notes)[:220]}"
         layout_meta["vision_note"] = success_note[:400]
@@ -505,7 +601,382 @@ def _apply_layout_pipeline(
         if page_notes:
             note = "; ".join(page_notes)[:400]
         layout_meta["vision_note"] = note
+        if docling_applied_pages:
+            _apply_docling_layout_meta(layout_meta, docling_applied_pages)
     return updated_documents, layout_meta
+
+
+def _docling_available() -> bool:
+    return _get_docling_converter_class() is not None
+
+
+def _get_docling_converter() -> Any:
+    global _DOCLING_CONVERTER
+    converter_class = _get_docling_converter_class()
+    if converter_class is None:
+        raise RuntimeError("Docling is not installed in the runtime environment.")
+    if _DOCLING_CONVERTER is None:
+        _DOCLING_CONVERTER = converter_class()
+    return _DOCLING_CONVERTER
+
+
+def _get_docling_converter_class() -> Any:
+    global _DOCLING_CONVERTER_CLASS, _DOCLING_IMPORT_ERROR
+    if _DOCLING_CONVERTER_CLASS is not None:
+        return _DOCLING_CONVERTER_CLASS
+    if _DOCLING_IMPORT_ERROR is not None:
+        return None
+    try:  # pragma: no cover - optional runtime dependency
+        from docling.document_converter import DocumentConverter as converter_class
+    except ImportError as exc:  # pragma: no cover - graceful fallback when docling is unavailable
+        _DOCLING_IMPORT_ERROR = exc
+        return None
+    _DOCLING_CONVERTER_CLASS = converter_class
+    return _DOCLING_CONVERTER_CLASS
+
+
+def _write_single_page_pdf(source_path: Path, page_no: int, destination_path: Path) -> None:
+    reader = PdfReader(str(source_path))
+    if page_no < 1 or page_no > len(reader.pages):
+        raise RuntimeError(f"Requested page {page_no} is outside the PDF page range.")
+    writer = PdfWriter()
+    writer.add_page(reader.pages[page_no - 1])
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    with destination_path.open("wb") as handle:
+        writer.write(handle)
+
+
+def _request_docling_page_layout(
+    builder_name: str,
+    source_kind: str,
+    file_name: str,
+    page: dict[str, Any],
+    document_path: Path,
+) -> dict[str, Any]:
+    if not _docling_available():
+        raise RuntimeError("Docling is not installed in the runtime environment.")
+    page_no = int(page.get("page_no", 0) or 0)
+    if not document_path.exists():
+        raise RuntimeError(f"Source PDF was not found for Docling layout: {document_path}")
+    with tempfile.TemporaryDirectory(prefix="spec-docling-") as temp_dir:
+        subset_path = Path(temp_dir) / f"page-{page_no}.pdf"
+        _write_single_page_pdf(document_path, page_no=page_no, destination_path=subset_path)
+        result = _get_docling_converter().convert(str(subset_path))
+        markdown = result.document.export_to_markdown()
+    return _docling_markdown_to_layout(
+        markdown,
+        builder_name=builder_name,
+        source_kind=source_kind,
+        file_name=file_name,
+        raw_page_text=str(page.get("raw_text", page.get("text", "")) or ""),
+    )
+
+
+def _docling_markdown_to_layout(
+    markdown: str,
+    builder_name: str,
+    source_kind: str,
+    file_name: str,
+    raw_page_text: str,
+) -> dict[str, Any]:
+    source = html.unescape(str(markdown or "")).replace("\r", "\n")
+    heading_lines = _docling_heading_lines(source)
+    heuristic_text = "\n".join(heading_lines) if heading_lines else source
+    page_type = _infer_page_type_from_text(builder_name, source_kind, f"{raw_page_text}\n{heuristic_text}")
+    section_label, room_label = _infer_layout_labels(builder_name, heading_lines or _docling_plain_lines(source), page_type)
+    if not section_label:
+        section_label = _docling_section_label_from_headings(heading_lines)
+    if not room_label and section_label:
+        _, room_label = _infer_layout_labels(builder_name, [section_label], page_type)
+
+    if page_type == "sinkware_tapware":
+        room_blocks = _docling_sink_tap_room_blocks(source, builder_name=builder_name)
+        rows = [row for block in room_blocks for row in block.get("rows", [])]
+    else:
+        rows = []
+        for table in _docling_markdown_tables(source):
+            rows.extend(_docling_table_to_rows(table, page_type=page_type))
+        if not rows:
+            lines = _docling_plain_lines(source)
+            rows = _split_lines_to_layout_rows(lines, page_type=page_type)
+        room_blocks = [{"room_label": room_label, "rows": rows}] if (room_label or rows) else []
+
+    return _normalize_page_layout(
+        {
+            "page_type": page_type,
+            "section_label": section_label,
+            "room_label": room_label,
+            "room_blocks": room_blocks,
+            "rows": rows,
+            "file_name": file_name,
+        }
+    )
+
+
+def _docling_heading_lines(markdown: str) -> list[str]:
+    results: list[str] = []
+    for line in str(markdown or "").splitlines():
+        match = re.match(r"^\s{0,3}#{1,6}\s+(.*)$", line)
+        if not match:
+            continue
+        heading = parsing.normalize_space(html.unescape(match.group(1)))
+        if heading and heading not in results:
+            results.append(heading)
+    return results
+
+
+def _docling_section_label_from_headings(headings: list[str]) -> str:
+    for heading in headings:
+        upper = heading.upper()
+        if any(marker in upper for marker in ("JOINERY SELECTION SHEET", "COLOUR SCHEDULE", "SINKWARE & TAPWARE", "APPLIANCES")):
+            return heading
+    return headings[0] if headings else ""
+
+
+def _docling_plain_lines(markdown: str) -> list[str]:
+    lines: list[str] = []
+    in_table = False
+    for raw_line in str(markdown or "").splitlines():
+        line = parsing.normalize_space(html.unescape(raw_line))
+        if not line or line == "<!-- image -->":
+            if not raw_line.lstrip().startswith("|"):
+                in_table = False
+            continue
+        if raw_line.lstrip().startswith("|"):
+            in_table = True
+            continue
+        if in_table:
+            continue
+        if line not in lines:
+            lines.append(line)
+    return lines
+
+
+def _docling_markdown_tables(markdown: str) -> list[list[list[str]]]:
+    tables: list[list[str]] = []
+    current: list[str] = []
+    for raw_line in str(markdown or "").splitlines():
+        if raw_line.lstrip().startswith("|"):
+            current.append(raw_line.rstrip())
+            continue
+        if current:
+            tables.append(current)
+            current = []
+    if current:
+        tables.append(current)
+
+    parsed_tables: list[list[list[str]]] = []
+    for raw_table in tables:
+        rows: list[list[str]] = []
+        for raw_row in raw_table:
+            stripped = raw_row.strip()
+            if not stripped.startswith("|"):
+                continue
+            inner = stripped.strip("|")
+            if re.fullmatch(r"[\s:\-|]+", inner):
+                continue
+            cells = [parsing.normalize_space(html.unescape(cell)) for cell in inner.split("|")]
+            if any(cells):
+                rows.append(cells)
+        if rows:
+            parsed_tables.append(rows)
+    return parsed_tables
+
+
+def _docling_table_to_rows(table: list[list[str]], page_type: str) -> list[dict[str, str]]:
+    if not table:
+        return []
+    header_map: dict[str, int] = {}
+    start_index = 0
+    first_row = table[0]
+    if any(_docling_is_table_header_cell(cell) for cell in first_row):
+        start_index = 1
+        for index, cell in enumerate(first_row):
+            upper = cell.upper()
+            if "AREA / ITEM" in upper or upper == "ITEM":
+                header_map["label"] = index
+            elif "SPECS / DESCRIPTION" in upper or "DESCRIPTION" in upper or "SELECTION LEVEL" in upper:
+                header_map["value"] = index
+            elif "SUPPLIER" in upper or "MANUFACTURER" in upper:
+                header_map["supplier"] = index
+            elif "NOTES" in upper or "COMMENT" in upper:
+                header_map["notes"] = index
+    rows: list[dict[str, str]] = []
+    for cells in table[start_index:]:
+        record = _docling_cells_to_row(cells, page_type=page_type, header_map=header_map)
+        if record:
+            rows.append(record)
+    return rows
+
+
+def _docling_is_table_header_cell(cell: str) -> bool:
+    upper = parsing.normalize_space(cell).upper()
+    return any(
+        token in upper
+        for token in ("AREA / ITEM", "SPECS / DESCRIPTION", "SUPPLIER", "NOTES", "SELECTION LEVEL", "MANUFACTURER")
+    )
+
+
+def _docling_cells_to_row(cells: list[str], page_type: str, header_map: dict[str, int]) -> dict[str, str] | None:
+    normalized_cells = [parsing.normalize_space(cell) for cell in cells]
+    if not any(normalized_cells):
+        return None
+    label_cell = ""
+    if "label" in header_map and header_map["label"] < len(normalized_cells):
+        label_cell = normalized_cells[header_map["label"]]
+    elif normalized_cells:
+        label_cell = normalized_cells[0]
+    label, remainder = _match_layout_row_label(label_cell)
+    if not label:
+        label, remainder = _match_layout_row_label(" ".join(cell for cell in normalized_cells[:2] if cell))
+    if not label:
+        candidate = parsing.normalize_space(label_cell)
+        if candidate and not _looks_like_layout_metadata_line(candidate):
+            label = candidate
+    if not label:
+        return None
+    if label.upper() in {"AREA / ITEM", "ITEM", "SUPPLIER", "NOTES"}:
+        return None
+
+    value = ""
+    supplier = ""
+    notes = ""
+    if header_map:
+        if "value" in header_map and header_map["value"] < len(normalized_cells):
+            value = normalized_cells[header_map["value"]]
+        if "supplier" in header_map and header_map["supplier"] < len(normalized_cells):
+            supplier = normalized_cells[header_map["supplier"]]
+        if "notes" in header_map and header_map["notes"] < len(normalized_cells):
+            notes = normalized_cells[header_map["notes"]]
+    else:
+        remaining = [cell for cell in normalized_cells[1:] if cell]
+        if remaining:
+            value = remaining[0]
+        if len(remaining) == 2:
+            if _docling_looks_like_note_cell(remaining[1]):
+                notes = remaining[1]
+            else:
+                supplier = remaining[1]
+        elif len(remaining) >= 3:
+            value = " ".join(part for part in remaining[:-2] if part).strip() or remaining[0]
+            supplier = remaining[-2]
+            notes = remaining[-1]
+    if remainder:
+        value = parsing.normalize_space(f"{remainder} {value}")
+    if not value and len(normalized_cells) > 1:
+        value = parsing.normalize_space(" ".join(cell for cell in normalized_cells[1:] if cell))
+    if not value and _looks_like_layout_metadata_line(label):
+        return None
+    return {
+        "row_label": label,
+        "value_region_text": value,
+        "supplier_region_text": supplier,
+        "notes_region_text": notes,
+        "row_kind": _infer_layout_row_kind(label, page_type, value),
+    }
+
+
+def _docling_looks_like_note_cell(text: str) -> bool:
+    upper = parsing.normalize_space(text).upper()
+    return any(
+        token in upper
+        for token in (
+            "INSTALLED",
+            "SUPPLIED BY CLIENT",
+            "HORIZONTAL",
+            "VERTICAL",
+            "OVERHANG",
+            "TAPHOLE",
+            "LOCATION",
+            "MATCH ABOVE",
+            "STD",
+            "ONLY",
+        )
+    )
+
+
+def _docling_sink_tap_room_blocks(markdown: str, builder_name: str) -> list[dict[str, Any]]:
+    del builder_name
+    lines = _docling_plain_lines(markdown)
+    blocks: list[dict[str, Any]] = []
+    current_room = ""
+    current_label = ""
+    current_values: list[str] = []
+    for line in lines:
+        label, remainder = _match_layout_row_label(line)
+        heading_match = re.match(r"(?i)^(SINKWARE|TAPWARE)\s*\(([^)]+)\)\s*(.*)$", line)
+        if heading_match:
+            if current_room and current_label:
+                _append_docling_sink_tap_row(blocks, current_room, current_label, current_values)
+            current_room = parsing.source_room_label(heading_match.group(2), fallback_key=parsing.source_room_key(heading_match.group(2)))
+            current_label = heading_match.group(1).upper()
+            current_values = [remainder] if remainder else []
+            continue
+        if label and current_room and label.upper() in {"SINKWARE", "TAPWARE"}:
+            _append_docling_sink_tap_row(blocks, current_room, current_label, current_values)
+            current_label = label.upper()
+            current_values = [remainder] if remainder else []
+            continue
+        if current_room and current_label and not _looks_like_layout_metadata_line(line):
+            current_values.append(line)
+    if current_room and current_label:
+        _append_docling_sink_tap_row(blocks, current_room, current_label, current_values)
+    return blocks
+
+
+def _append_docling_sink_tap_row(
+    blocks: list[dict[str, Any]],
+    room_label: str,
+    row_label: str,
+    values: list[str],
+) -> None:
+    block = next((item for item in blocks if item.get("room_label") == room_label), None)
+    if block is None:
+        block = {"room_label": room_label, "rows": []}
+        blocks.append(block)
+    value = parsing.normalize_space(" ".join(part for part in values if parsing.normalize_space(part)))
+    if not value:
+        return
+    block["rows"].append(
+        {
+            "row_label": row_label,
+            "value_region_text": value,
+            "supplier_region_text": "",
+            "notes_region_text": "",
+            "row_kind": _infer_layout_row_kind(row_label, "sinkware_tapware", value),
+        }
+    )
+
+
+def _layout_is_usable(layout: dict[str, Any], raw_page_text: str = "") -> bool:
+    if not isinstance(layout, dict):
+        return False
+    rows = parsing._page_layout_rows(layout)
+    if not rows:
+        return False
+    page_type = parsing._effective_layout_page_type(
+        "",
+        parsing.normalize_space(str(layout.get("page_type", "") or "")).lower(),
+        raw_page_text,
+        layout,
+    )
+    if page_type == "joinery" and not any(parsing.normalize_space(str(row.get("row_label", "") or "")) for row in rows):
+        return False
+    if page_type == "sinkware_tapware":
+        return any(
+            parsing.normalize_space(str(row.get("row_kind", "") or "")).lower() in {"sink", "tap", "basin"}
+            for row in rows
+        )
+    return True
+
+
+def _apply_docling_layout_meta(layout_meta: dict[str, Any], applied_pages: list[int]) -> None:
+    layout_meta["layout_mode"] = "docling"
+    layout_meta["layout_provider"] = "docling"
+    layout_meta["layout_note"] = (
+        f"Structure-first parsing applied to {len(layout_meta['layout_pages'])} page(s); "
+        f"Docling corrected {len(_unique_page_numbers(applied_pages))} page(s)."
+    )
 
 
 def _build_heuristic_page_layout(
@@ -1609,26 +2080,32 @@ def _match_layout_row_label(line: str) -> tuple[str, str]:
 def _infer_layout_row_kind(label: str, page_type: str, line: str = "") -> str:
     label_upper = parsing.normalize_space(str(label or "")).upper()
     upper = f"{label} {line}".upper()
+    def has_token(*tokens: str) -> bool:
+        return any(re.search(rf"(?<![A-Z0-9]){re.escape(token.upper())}(?![A-Z0-9])", upper) for token in tokens)
+
+    def label_has_token(*tokens: str) -> bool:
+        return any(re.search(rf"(?<![A-Z0-9]){re.escape(token.upper())}(?![A-Z0-9])", label_upper) for token in tokens)
+
     if page_type == "sinkware_tapware":
         if label_upper.startswith("SINKWARE"):
             return "sink"
         if label_upper.startswith("TAPWARE"):
             return "tap"
-        if any(token in label_upper for token in ("TAP", "TAPWARE", "MIXER", "SPOUT")):
+        if label_has_token("TAP", "TAPWARE", "MIXER", "SPOUT"):
             return "tap"
         if label_upper.startswith("BASIN"):
             return "basin"
-    if any(token in label_upper for token in ("TAP", "TAPWARE", "MIXER", "SPOUT")):
+    if label_has_token("TAP", "TAPWARE", "MIXER", "SPOUT"):
         return "tap"
-    if "BASIN" in label_upper:
+    if label_has_token("BASIN"):
         return "basin"
-    if any(token in upper for token in ("BENCHTOP", "UNDERBENCH", "CABINET PANELS", "KICKBOARD", "OVERHEAD", "FLOATING SHELF", "SHELVING")):
+    if has_token("BENCHTOP", "UNDERBENCH", "CABINET PANELS", "KICKBOARD", "OVERHEAD", "FLOATING SHELF", "SHELVING"):
         return "material"
-    if "HANDLE" in upper:
+    if has_token("HANDLE"):
         return "handle"
-    if any(token in upper for token in ("ACCESSORIES", "GPO", "BIN", "HAMPER")):
+    if has_token("ACCESSORIES", "GPO", "BIN", "HAMPER"):
         return "accessory"
-    if any(token in label_upper for token in ("SINK", "DROP IN TUB", "TROUGH", "TUB", "BATH")):
+    if label_has_token("SINK", "DROP IN TUB", "TROUGH", "TUB", "BATH"):
         return "sink"
     if _looks_like_layout_metadata_line(upper):
         return "metadata"

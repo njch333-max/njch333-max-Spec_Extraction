@@ -5,6 +5,7 @@ openpyxl
 pypdf
 pymupdf
 pdfplumber
+docling
 python-multipart
 httpx
 itsdangerous

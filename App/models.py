@@ -9,9 +9,14 @@ class AnalysisMeta(BaseModel):
     layout_attempted: bool = False
     layout_succeeded: bool = False
     layout_mode: str = ""
+    layout_provider: str = "heuristic"
     layout_pages: list[int] = Field(default_factory=list)
     heavy_vision_pages: list[int] = Field(default_factory=list)
     layout_note: str = ""
+    docling_attempted: bool = False
+    docling_succeeded: bool = False
+    docling_pages: list[int] = Field(default_factory=list)
+    docling_note: str = ""
     openai_attempted: bool = False
     openai_succeeded: bool = False
     openai_model: str = ""

@@ -1476,6 +1476,7 @@ class SmokeTest(unittest.TestCase):
             mock.patch.object(extraction_service.runtime, "OPENAI_VISION_MAX_PAGES", 4),
             mock.patch("App.services.extraction_service._load_documents", return_value=documents),
             mock.patch("App.services.extraction_service._page_requires_vision", return_value=True),
+            mock.patch("App.services.extraction_service._docling_available", return_value=False),
             mock.patch("App.services.extraction_service._render_pdf_page_png", return_value=b"png"),
             mock.patch(
                 "App.services.extraction_service._request_page_layout",
@@ -1535,12 +1536,139 @@ class SmokeTest(unittest.TestCase):
         self.assertTrue(snapshot["analysis"]["layout_attempted"])
         self.assertTrue(snapshot["analysis"]["layout_succeeded"])
         self.assertEqual(snapshot["analysis"]["layout_mode"], "heavy_vision")
+        self.assertEqual(snapshot["analysis"]["layout_provider"], "heavy_vision")
         self.assertEqual(snapshot["analysis"]["layout_pages"], [1])
         self.assertEqual(snapshot["analysis"]["heavy_vision_pages"], [1])
+        self.assertFalse(snapshot["analysis"]["docling_attempted"])
         self.assertTrue(snapshot["analysis"]["vision_attempted"])
         self.assertTrue(snapshot["analysis"]["vision_succeeded"])
         self.assertEqual(snapshot["analysis"]["vision_pages"], [1])
         self.assertEqual(snapshot["analysis"]["vision_page_count"], 1)
+
+    def test_build_spec_snapshot_uses_docling_layout_before_heavy_vision(self) -> None:
+        documents = [
+            {
+                "file_name": "imperial.pdf",
+                "path": "imperial.pdf",
+                "role": "spec",
+                "pages": [
+                    {
+                        "page_no": 1,
+                        "text": "BASE CABINETRY COLOURClassic White Matt Polytec",
+                        "raw_text": "BASE CABINETRY COLOURClassic White Matt Polytec",
+                        "needs_ocr": True,
+                    }
+                ],
+            }
+        ]
+        heuristic_after_docling = {
+            "job_no": "38211",
+            "builder_name": "Imperial",
+            "source_kind": "spec",
+            "generated_at": "2026-03-29T10:00:00+00:00",
+            "site_address": "",
+            "rooms": [{"room_key": "kitchen", "original_room_label": "KITCHEN", "door_colours_base": "Polytec - Classic White Matt"}],
+            "special_sections": [],
+            "appliances": [],
+            "others": {"flooring_notes": "", "splashback_notes": "", "manual_notes": ""},
+            "warnings": [],
+            "source_documents": [],
+            "analysis": {"mode": "heuristic_only", "room_master_file": "imperial.pdf"},
+        }
+        with (
+            mock.patch.object(extraction_service.runtime, "OPENAI_ENABLED", False),
+            mock.patch.object(extraction_service.runtime, "OPENAI_VISION_ENABLED", True),
+            mock.patch.object(extraction_service.runtime, "OPENAI_VISION_MAX_PAGES", 4),
+            mock.patch("App.services.extraction_service._load_documents", return_value=documents),
+            mock.patch("App.services.extraction_service._page_requires_vision", return_value=True),
+            mock.patch("App.services.extraction_service._docling_available", return_value=True),
+            mock.patch(
+                "App.services.extraction_service._request_docling_page_layout",
+                return_value={
+                    "page_type": "joinery",
+                    "section_label": "KITCHEN JOINERY SELECTION SHEET",
+                    "room_label": "KITCHEN",
+                    "rows": [
+                        {
+                            "row_label": "BASE CABINETRY COLOUR",
+                            "value_region_text": "Classic White Matt",
+                            "supplier_region_text": "Polytec",
+                            "notes_region_text": "",
+                            "row_kind": "material",
+                        }
+                    ],
+                },
+            ),
+            mock.patch(
+                "App.services.extraction_service.parsing.parse_documents",
+                return_value=heuristic_after_docling,
+            ),
+            mock.patch(
+                "App.services.extraction_service.parsing.enrich_snapshot_rooms",
+                side_effect=lambda payload, _documents, rule_flags=None: payload,
+            ),
+            mock.patch("App.services.extraction_service._stabilize_snapshot_layout", side_effect=lambda payload, **_: payload),
+            mock.patch("App.services.extraction_service._apply_builder_specific_polish", side_effect=lambda payload, *_args, **_kwargs: payload),
+            mock.patch("App.services.extraction_service._enrich_snapshot_appliances", side_effect=lambda payload, *_args, **_kwargs: payload),
+            mock.patch(
+                "App.services.extraction_service._try_openai",
+                return_value=(
+                    None,
+                    {
+                        "mode": "heuristic_only",
+                        "parser_strategy": "global_conservative",
+                        "openai_attempted": False,
+                        "openai_succeeded": False,
+                        "openai_model": "gpt-4.1-mini",
+                        "vision_attempted": False,
+                        "vision_succeeded": False,
+                        "vision_pages": [],
+                        "vision_page_count": 0,
+                        "vision_note": "",
+                        "note": "",
+                    },
+                ),
+            ),
+        ):
+            snapshot = extraction_service.build_spec_snapshot(
+                job={"job_no": "38211"},
+                builder={"name": "Imperial"},
+                files=[{"path": "imperial.pdf", "original_name": "imperial.pdf"}],
+                template_files=[],
+            )
+        self.assertEqual(snapshot["rooms"][0]["door_colours_base"], "Polytec - Classic White Matt")
+        self.assertEqual(snapshot["analysis"]["layout_mode"], "docling")
+        self.assertEqual(snapshot["analysis"]["layout_provider"], "docling")
+        self.assertTrue(snapshot["analysis"]["docling_attempted"])
+        self.assertTrue(snapshot["analysis"]["docling_succeeded"])
+        self.assertEqual(snapshot["analysis"]["docling_pages"], [1])
+        self.assertFalse(snapshot["analysis"]["vision_attempted"])
+
+    def test_docling_markdown_to_layout_restores_joinery_rows(self) -> None:
+        markdown = (
+            "## KITCHEN JOINERY SELECTION SHEET\n\n"
+            "| AREA / ITEM | SPECS / DESCRIPTION | SUPPLIER | NOTES |\n"
+            "|---|---|---|---|\n"
+            "| BENCHTOP | Caesarstone Fresh Concrete 20mm Pencil Round Edge | Caesarstone | |\n"
+            "| BASE CABINETRY COLOUR | Polytec Classic White Matt | Polytec | |\n"
+            "| KICKBOARDS | MATCH ABOVE Polytec Classic White Matt | Polytec + Laminex | |\n"
+        )
+        layout = extraction_service._docling_markdown_to_layout(
+            markdown,
+            builder_name="Imperial",
+            source_kind="spec",
+            file_name="imperial.pdf",
+            raw_page_text="KITCHEN JOINERY SELECTION SHEET",
+        )
+        self.assertEqual(layout["page_type"], "joinery")
+        self.assertEqual(layout["room_label"], "KITCHEN")
+        rows = layout["room_blocks"][0]["rows"]
+        labels = [row["row_label"] for row in rows]
+        self.assertIn("Benchtop", labels)
+        self.assertIn("Base Cabinetry Colour", labels)
+        self.assertIn("Kickboards", labels)
+        base_row = next(row for row in rows if row["row_label"] == "Base Cabinetry Colour")
+        self.assertEqual(base_row["row_kind"], "material")
 
     def test_vision_layout_to_text_preserves_row_boundaries(self) -> None:
         layout = {
