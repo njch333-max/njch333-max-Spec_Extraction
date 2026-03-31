@@ -621,6 +621,8 @@ def _looks_like_invalid_room_heading_candidate(text: str) -> bool:
     lowered = normalized.lower()
     if not normalized:
         return True
+    if normalized.upper().strip("()[]{} ") in {"N/A", "NA", "#N/A", "NOT APPLICABLE"}:
+        return True
     if re.search(r"\b\d+\s*no\b", lowered) and any(token in lowered for token in ("hook", "rail", "holder")):
         return True
     exact_room_aliases = {
@@ -1199,7 +1201,7 @@ def _prepare_simonds_layout_text(text: str) -> str:
     for pattern, replacement in split_label_repairs:
         normalized = re.sub(pattern, replacement, normalized)
     continuation_headings = (
-        ("Kitchen", ("Wall Run Benchtop", "Kitchen Sink", "Kitchen Tapware", "Island/Penisula Benchtop")),
+        ("Kitchen", ("Additional Kitchen/Butlers/Kitchenette", "Wall Run Benchtop", "Kitchen Sink", "Kitchen Tapware", "Island/Penisula Benchtop")),
         ("Pantry", ("Pantry Sink", "Pantry Tapware")),
         ("Laundry", ("Laundry Trough", "Laundry Tapware")),
         ("Master Ensuite", ("Master Ensuite",)),
@@ -1313,12 +1315,29 @@ def _looks_like_layout_room_heading(line: str, following_lines: list[str] | None
     return False
 
 
+def _looks_like_row_fragment_prelude(lines: list[str], page_type: str) -> bool:
+    meaningful = [parsing.normalize_space(line) for line in lines if parsing.normalize_space(line)]
+    if len(meaningful) < 2:
+        return False
+    prefix_like = 0
+    for line in meaningful:
+        if _looks_like_layout_metadata_line(line) or _looks_like_major_section_heading(line):
+            return False
+        label, _ = _match_layout_row_label(line)
+        if label or parsing._looks_like_field_label(line):
+            prefix_like += 1
+            continue
+        return False
+    return prefix_like >= 2
+
+
 def _heuristic_room_heading_blocks(lines: list[str], page_type: str, builder_name: str) -> list[dict[str, Any]]:
     trimmed_lines = _trim_lines_to_primary_section(lines, page_type=page_type)
     blocks: list[dict[str, Any]] = []
     current_label = ""
     current_lines: list[str] = []
     heading_indices: list[int] = []
+    leading_lines: list[str] = []
 
     def flush() -> None:
         nonlocal current_label, current_lines
@@ -1344,9 +1363,14 @@ def _heuristic_room_heading_blocks(lines: list[str], page_type: str, builder_nam
             flush()
             current_label = parsing.normalize_space(re.sub(r"^[\-\u2022]+\s*", "", line))
             heading_indices.append(index)
+            if not blocks and not current_lines and _looks_like_row_fragment_prelude(leading_lines, page_type):
+                current_lines = list(leading_lines)
+            leading_lines = []
             continue
         if current_label:
             current_lines.append(line)
+        elif not blocks:
+            leading_lines.append(line)
     flush()
     if page_type == "sinkware_tapware" and len(blocks) == 1 and len(heading_indices) == 1 and heading_indices[0] > 0:
         leading_lines = [
@@ -3188,6 +3212,11 @@ def _blank_generic_layout_overlay() -> dict[str, Any]:
         "door_colours_tall": "",
         "door_colours_island": "",
         "door_colours_bar_back": "",
+        "has_explicit_base": False,
+        "has_explicit_overheads": False,
+        "has_explicit_tall": False,
+        "has_explicit_island": False,
+        "has_explicit_bar_back": False,
         "toe_kick": [],
         "handles": [],
         "floating_shelf": "",
@@ -3239,7 +3268,18 @@ def _merge_generic_layout_overlay(left: dict[str, Any], right: dict[str, Any]) -
     merged["handles"] = _merge_list_field(merged.get("handles", []), right.get("handles", []))
     merged["accessories"] = _merge_list_field(merged.get("accessories", []), right.get("accessories", []))
     merged["other_items"] = parsing._merge_other_items(merged.get("other_items", []), right.get("other_items", []))
-    for field_name in ("has_sink_block", "has_tap_block", "has_basin_block", "has_handles_block", "has_accessories_block"):
+    for field_name in (
+        "has_sink_block",
+        "has_tap_block",
+        "has_basin_block",
+        "has_handles_block",
+        "has_accessories_block",
+        "has_explicit_base",
+        "has_explicit_overheads",
+        "has_explicit_tall",
+        "has_explicit_island",
+        "has_explicit_bar_back",
+    ):
         merged[field_name] = bool(merged.get(field_name) or right.get(field_name))
     return merged
 
@@ -3321,7 +3361,7 @@ def _classify_generic_anchor(row: dict[str, Any], page_type: str = "") -> str:
     if "benchtop" in raw_label:
         return "bench"
     if ("island" in raw_label or "penisula" in raw_label or "peninsula" in raw_label) and any(
-        token in raw_label for token in ("base cabinet panels", "feature panels", "cabinet panels")
+        token in raw_label for token in ("base cabinet panels", "cabinet panels")
     ):
         return "island"
     if "waterfall end" in raw_label:
@@ -3513,11 +3553,20 @@ def _build_generic_layout_blocks(layout_rows: list[dict[str, Any]], page_type: s
         if prefix_mode:
             label = _normalize_generic_row_label(str(row.get("row_label", "") or ""))
             if (
-                page_type == "sinkware_tapware"
-                and current is not None
+                current is not None
                 and label in GENERIC_LAYOUT_PREFIX_PROPERTY_LABELS
-                and (_has_prefix_properties(current) or pending)
                 and _upcoming_anchor_within(layout_rows, index)
+                and (
+                    (
+                        page_type == "sinkware_tapware"
+                        and (_has_prefix_properties(current) or pending)
+                    )
+                    or (
+                        _generic_anchor_prefers_future_prefix(str(current.get("anchor_kind", "") or ""))
+                        and (_has_prefix_properties(current) or pending)
+                    )
+                    or _current_block_has_property_label(current, label)
+                )
             ):
                 pending.append(row)
             elif current is not None and _row_should_attach_to_current_anchor(current, row, page_type):
@@ -3891,6 +3940,11 @@ def _looks_like_placeholder_entry(value: str) -> bool:
     )
 
 
+def _room_label_is_wet_area(room_label: str) -> bool:
+    lowered = parsing.normalize_space(room_label).lower()
+    return any(token in lowered for token in ("bathroom", "ensuite", "powder", "wc", "toilet"))
+
+
 def _extract_generic_layout_overlay(section: dict[str, Any]) -> dict[str, Any]:
     layout_rows = [row for row in section.get("layout_rows", []) if isinstance(row, dict)]
     if not layout_rows:
@@ -3918,21 +3972,25 @@ def _extract_generic_layout_overlay(section: dict[str, Any]) -> dict[str, Any]:
                 overlay["bench_tops_wall_run"] = parsing._merge_text(overlay["bench_tops_wall_run"], bench_text)
         elif kind == "base":
             text = _format_generic_material_from_parts(parts)
+            overlay["has_explicit_base"] = True
             overlay["door_colours_base"] = parsing._merge_text(overlay["door_colours_base"], text)
             if text:
                 last_cabinetry_material = text
         elif kind == "island":
             text = _format_generic_material_from_parts(parts)
+            overlay["has_explicit_island"] = True
             overlay["door_colours_island"] = parsing._merge_text(overlay["door_colours_island"], text)
             if text:
                 last_cabinetry_material = text
         elif kind == "overheads":
             text = _format_generic_material_from_parts(parts)
+            overlay["has_explicit_overheads"] = True
             overlay["door_colours_overheads"] = parsing._merge_text(overlay["door_colours_overheads"], text)
             if text:
                 last_cabinetry_material = text
         elif kind == "tall":
             text = _format_generic_material_from_parts(parts)
+            overlay["has_explicit_tall"] = True
             overlay["door_colours_tall"] = parsing._merge_text(overlay["door_colours_tall"], text)
             if text:
                 last_cabinetry_material = text
@@ -3986,7 +4044,14 @@ def _extract_generic_layout_overlay(section: dict[str, Any]) -> dict[str, Any]:
             overlay["basin_info"] = parsing._merge_text(overlay["basin_info"], text)
         elif kind == "accessories":
             overlay["has_accessories_block"] = True
-            text = _format_generic_accessory_from_parts(parts, anchor_label=str(block.get("anchor_label", "") or ""))
+            anchor_text = str(block.get("anchor_label", "") or "")
+            anchor_lower = _normalize_generic_row_label(anchor_text)
+            if (
+                anchor_lower in {"robe hook", "hand towel rail", "towel rail", "toilet roll holder", "toilet suite"}
+                and not _room_label_is_wet_area(overlay["original_room_label"])
+            ):
+                continue
+            text = _format_generic_accessory_from_parts(parts, anchor_label=anchor_text)
             if text and text not in overlay["accessories"]:
                 overlay["accessories"].append(text)
         elif kind == "other":
@@ -4045,6 +4110,9 @@ def _polish_generic_layout_room(row: dict[str, Any], overlay: dict[str, Any]) ->
     ):
         if overlay.get(field_name):
             polished[field_name] = overlay[field_name]
+    for field_name in ("has_explicit_base", "has_explicit_overheads", "has_explicit_tall", "has_explicit_island", "has_explicit_bar_back"):
+        if overlay.get(field_name):
+            polished[field_name] = True
     if overlay.get("toe_kick"):
         polished["toe_kick"] = [entry for entry in overlay["toe_kick"] if not _looks_like_placeholder_entry(entry)]
     if any(overlay.get(field_name) for field_name in ("bench_tops_wall_run", "bench_tops_island", "bench_tops_other")):

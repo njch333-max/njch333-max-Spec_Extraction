@@ -4974,8 +4974,43 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("Everhard", overlay["sink_info"])
         self.assertIn("Milano", overlay["sink_info"])
         self.assertIn("Alder", overlay["tap_info"])
-        self.assertIn("ALDER SACHI", overlay["tap_info"])
-        self.assertIn("Robe Hook - IN MATT BLACK", overlay["accessories"])
+        self.assertEqual(overlay["tap_info"], "Alder")
+        self.assertEqual(overlay["accessories"], ["Excellence Squareline 45L - Stainless Steel"])
+
+    def test_polish_generic_layout_room_preserves_explicit_overheads_for_non_kitchen(self) -> None:
+        row = {
+            "room_key": "laundry",
+            "original_room_label": "Laundry",
+            "door_colours_base": "old base",
+            "door_colours_overheads": "old overhead",
+            "has_explicit_base": False,
+            "has_explicit_overheads": False,
+        }
+        overlay = {
+            "door_colours_base": "Laminex - Chalk White - S/Edge",
+            "door_colours_overheads": "Laminex - Blackened Legno - S/Edge",
+            "has_explicit_base": True,
+            "has_explicit_overheads": True,
+        }
+        polished = extraction_service._polish_generic_layout_room(row, overlay)
+        cleaned = parsing_module.apply_snapshot_cleaning_rules({"rooms": [polished], "warnings": [], "others": {}, "appliances": []})
+        laundry = cleaned["rooms"][0]
+        self.assertEqual(laundry["door_colours_base"], "Laminex - Chalk White - S/Edge")
+        self.assertEqual(laundry["door_colours_overheads"], "Laminex - Blackened Legno - S/Edge")
+
+    def test_extract_generic_layout_overlay_skips_wet_area_accessory_noise_for_non_wet_rooms(self) -> None:
+        section = {
+            "original_section_label": "Kitchen",
+            "file_name": "simonds.pdf",
+            "page_nos": [15],
+            "text": "Kitchen",
+            "page_type": "joinery",
+            "layout_rows": [
+                {"row_label": "Robe Hook", "value_text": "IN MATT BLACK", "supplier_text": "", "notes_text": "", "row_kind": "material"},
+            ],
+        }
+        overlay = extraction_service._extract_generic_layout_overlay(section)
+        self.assertEqual(overlay["accessories"], [])
 
     def test_prepare_simonds_layout_text_inserts_exact_continuation_heading_and_strips_internal_paint_noise(self) -> None:
         raw_text = (
