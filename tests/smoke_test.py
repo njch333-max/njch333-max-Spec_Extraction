@@ -5064,6 +5064,20 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(rows[1]["value_region_text"], "Not Applicable")
         self.assertEqual(rows[2]["value_region_text"], "Guest Towel Rail")
 
+    def test_sink_tap_blocks_split_shower_rail_and_screen_into_separate_anchors(self) -> None:
+        rows = [
+            {"row_label": "Basin Mixer", "value_region_text": "", "row_kind": "tap"},
+            {"row_label": "Type", "value_region_text": "Spin Gun Metal In-wall Mixer (SP141-GM)", "row_kind": "material"},
+            {"row_label": "Shower Rail / Rose", "value_region_text": "Omega Integrated Gun Metal Shower System", "row_kind": "material"},
+            {"row_label": "Shower Screen", "value_region_text": "Semi-frameless with Clear Toughened Glass", "row_kind": "material"},
+            {"row_label": "Shower Screen Colour", "value_region_text": "Gunmetal", "row_kind": "material"},
+        ]
+        blocks = extraction_service._build_generic_layout_blocks(rows, page_type="sinkware_tapware")
+        labels = [block["anchor_label"] for block in blocks]
+        self.assertIn("Basin Mixer", labels)
+        self.assertIn("Shower Rail / Rose", labels)
+        self.assertIn("Shower Screen", labels)
+
     def _mark_raw_spec_qa_passed(self, job_id: int) -> None:
         verification = store.get_job_snapshot_verification(job_id, "raw_spec")
         self.assertIsNotNone(verification)
