@@ -616,7 +616,20 @@ def _get_docling_converter() -> Any:
     if converter_class is None:
         raise RuntimeError("Docling is not installed in the runtime environment.")
     if _DOCLING_CONVERTER is None:
-        _DOCLING_CONVERTER = converter_class()
+        from docling.datamodel.base_models import InputFormat
+        from docling.datamodel.pipeline_options import PdfPipelineOptions
+        from docling.document_converter import PdfFormatOption
+
+        pdf_options = PdfPipelineOptions()
+        # We only need structural recovery from text-based builder PDFs here.
+        # Keeping OCR off avoids making the runtime depend on Tesseract/EasyOCR.
+        pdf_options.do_ocr = False
+        _DOCLING_CONVERTER = converter_class(
+            allowed_formats=[InputFormat.PDF],
+            format_options={
+                InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_options),
+            },
+        )
     return _DOCLING_CONVERTER
 
 
