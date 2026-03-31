@@ -5052,6 +5052,18 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("Burazzo 450mm Gun Metal Single Bowl Sink", overlay["sink_info"])
         self.assertEqual(overlay["tap_info"], "Zara Gun Metal Pull-Out (ZA120-GM) - Centre of Sink")
 
+    def test_table_group_label_rows_shifts_not_applicable_from_accessories_anchor_to_first_child(self) -> None:
+        rows = extraction_service._table_group_label_rows(
+            "Accessories\nRobe Hook\nHand Towel Rail\nTowel Rail",
+            ["Not Applicable\nGuest Towel Rail\nDouble Towel Rail\nToilet Roll Holder"],
+            "sinkware_tapware",
+        )
+        self.assertEqual(rows[0]["row_label"], "Accessories")
+        self.assertEqual(rows[0]["value_region_text"], "")
+        self.assertEqual(rows[1]["row_label"], "Robe Hook")
+        self.assertEqual(rows[1]["value_region_text"], "Not Applicable")
+        self.assertEqual(rows[2]["value_region_text"], "Guest Towel Rail")
+
     def _mark_raw_spec_qa_passed(self, job_id: int) -> None:
         verification = store.get_job_snapshot_verification(job_id, "raw_spec")
         self.assertIsNotNone(verification)

@@ -754,9 +754,21 @@ def _table_group_label_rows(
             values.extend(parts)
     rows: list[dict[str, Any]] = []
     value_index = 0
+    shift_accessory_placeholder = bool(
+        labels
+        and labels[0] in {"Accessories", "Accessories & Toilet Suite"}
+        and len(labels) > 1
+        and values
+        and values[0].lower() in {"not applicable", "#n/a"}
+    )
     for label in labels:
         normalized_label = label
-        if normalized_label in {"Sink", "Basin", "Bath", "Shower", "Accessories", "Accessories & Toilet Suite"} and value_index < len(values) and values[value_index].lower() in {"not applicable", "#n/a"}:
+        if shift_accessory_placeholder and normalized_label in {"Accessories", "Accessories & Toilet Suite"}:
+            value_text = ""
+        elif shift_accessory_placeholder and normalized_label not in {"Accessories", "Accessories & Toilet Suite"} and value_index == 0:
+            value_text = values[value_index]
+            value_index += 1
+        elif normalized_label in {"Sink", "Basin", "Bath", "Shower", "Accessories", "Accessories & Toilet Suite"} and value_index < len(values) and values[value_index].lower() in {"not applicable", "#n/a"}:
             value_text = values[value_index]
             value_index += 1
         elif normalized_label in {"Sink", "Basin", "Bath", "Shower", "Sink Mixer", "Basin Mixer", "Bath Mixer / Spout"}:
