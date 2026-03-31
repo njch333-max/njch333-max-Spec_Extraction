@@ -5098,6 +5098,24 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(tap_rows.count("Manufacturer"), 1)
         self.assertIn("Model", tap_rows)
 
+    def test_build_generic_layout_blocks_redirects_initial_tap_prefix_properties_to_future_anchor(self) -> None:
+        rows = [
+            {"row_label": "Kitchen Sink", "value_region_text": "", "supplier_region_text": "", "notes_region_text": "", "row_kind": "sink"},
+            {"row_label": "Manufacturer", "value_region_text": "Franke", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            {"row_label": "Range", "value_region_text": "Sirius", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            {"row_label": "Model", "value_region_text": "SID 110-34", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            {"row_label": "Manufacturer", "value_region_text": "Alder", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            {"row_label": "Model", "value_region_text": "Rectangle Sink Mixer", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            {"row_label": "Kitchen Tapware", "value_region_text": "", "supplier_region_text": "", "notes_region_text": "", "row_kind": "tap"},
+        ]
+        blocks = extraction_service._build_generic_layout_blocks(rows, page_type="joinery")
+        self.assertEqual([(block["anchor_kind"], block["anchor_label"]) for block in blocks], [("sink", "Kitchen Sink"), ("tap", "Kitchen Tapware")])
+        sink_rows = [row["row_label"] for row in blocks[0]["rows"]]
+        tap_rows = [row["row_label"] for row in blocks[1]["rows"]]
+        self.assertEqual(sink_rows.count("Manufacturer"), 1)
+        self.assertEqual(tap_rows.count("Manufacturer"), 1)
+        self.assertIn("Model", tap_rows)
+
     def test_normalize_layout_rows_splits_embedded_waterfall_end_anchor(self) -> None:
         rows = extraction_service._normalize_layout_rows(
             [
@@ -5275,6 +5293,43 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("400mm Round Above Counter Basin", basin_values)
         self.assertIn("Alder", tap_values)
         self.assertIn("Wall Basin Mixer", tap_values)
+
+    def test_extract_generic_layout_overlay_maps_island_base_panels_to_island_colour(self) -> None:
+        section = {
+            "original_section_label": "Kitchen",
+            "file_name": "simonds.pdf",
+            "page_nos": [8],
+            "text": "Kitchen",
+            "page_type": "joinery",
+            "layout_rows": [
+                {"row_label": "Island/Penisula Base Cabinet Panels", "value_text": "", "supplier_text": "", "notes_text": "", "row_kind": "material"},
+                {"row_label": "Manufacturer", "value_text": "Laminex", "supplier_text": "", "notes_text": "", "row_kind": "material"},
+                {"row_label": "Colour", "value_text": "Chalk White", "supplier_text": "", "notes_text": "", "row_kind": "material"},
+            ],
+        }
+        overlay = extraction_service._extract_generic_layout_overlay(section)
+        self.assertEqual(overlay["door_colours_island"], "Laminex - Chalk White")
+        self.assertEqual(overlay["door_colours_base"], "")
+
+    def test_polish_generic_layout_room_preserves_island_and_bar_back_fields(self) -> None:
+        row = {
+            "room_key": "kitchen",
+            "original_room_label": "Kitchen",
+            "door_colours_base": "",
+            "door_colours_overheads": "",
+            "door_colours_tall": "",
+            "door_colours_island": "",
+            "door_colours_bar_back": "",
+            "floating_shelf": "",
+        }
+        overlay = {
+            "door_colours_island": "Laminex - Chalk White",
+            "door_colours_bar_back": "Laminex - Gumnut Natural Finish 2606",
+            "floating_shelf": "",
+        }
+        polished = extraction_service._polish_generic_layout_room(row, overlay)
+        self.assertEqual(polished["door_colours_island"], "Laminex - Chalk White")
+        self.assertEqual(polished["door_colours_bar_back"], "Laminex - Gumnut Natural Finish 2606")
 
     def test_generic_fixture_formatter_keeps_real_tap_with_centre_of_sink_note(self) -> None:
         formatted = extraction_service._format_generic_fixture_from_parts(

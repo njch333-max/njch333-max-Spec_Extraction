@@ -3093,6 +3093,9 @@ GENERIC_LAYOUT_FUTURE_PREFIX_ANCHOR_KINDS: set[str] = {
     "other",
     "soft_close",
     "flooring",
+    "sink",
+    "tap",
+    "basin",
 }
 
 GENERIC_LAYOUT_PREFIX_PROPERTY_LABELS: set[str] = {
@@ -3317,6 +3320,10 @@ def _classify_generic_anchor(row: dict[str, Any], page_type: str = "") -> str:
         return "flooring"
     if "benchtop" in raw_label:
         return "bench"
+    if ("island" in raw_label or "penisula" in raw_label or "peninsula" in raw_label) and any(
+        token in raw_label for token in ("base cabinet panels", "feature panels", "cabinet panels")
+    ):
+        return "island"
     if "waterfall end" in raw_label:
         return "other"
     if "feature panels" in raw_label:
@@ -3914,6 +3921,11 @@ def _extract_generic_layout_overlay(section: dict[str, Any]) -> dict[str, Any]:
             overlay["door_colours_base"] = parsing._merge_text(overlay["door_colours_base"], text)
             if text:
                 last_cabinetry_material = text
+        elif kind == "island":
+            text = _format_generic_material_from_parts(parts)
+            overlay["door_colours_island"] = parsing._merge_text(overlay["door_colours_island"], text)
+            if text:
+                last_cabinetry_material = text
         elif kind == "overheads":
             text = _format_generic_material_from_parts(parts)
             overlay["door_colours_overheads"] = parsing._merge_text(overlay["door_colours_overheads"], text)
@@ -4019,6 +4031,8 @@ def _polish_generic_layout_room(row: dict[str, Any], overlay: dict[str, Any]) ->
         "door_colours_base",
         "door_colours_overheads",
         "door_colours_tall",
+        "door_colours_island",
+        "door_colours_bar_back",
         "floating_shelf",
         "sink_info",
         "tap_info",
