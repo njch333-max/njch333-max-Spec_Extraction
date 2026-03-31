@@ -1494,6 +1494,8 @@ def _infer_layout_row_kind(label: str, page_type: str, line: str = "") -> str:
             return "sink"
         if label_upper.startswith("TAPWARE"):
             return "tap"
+        if any(token in label_upper for token in ("TAP", "TAPWARE", "MIXER", "SPOUT")):
+            return "tap"
         if label_upper.startswith("BASIN"):
             return "basin"
     if any(token in label_upper for token in ("TAP", "TAPWARE", "MIXER", "SPOUT")):
@@ -3189,18 +3191,59 @@ def _classify_generic_anchor(row: dict[str, Any], page_type: str = "") -> str:
     raw_label = _normalize_generic_row_label(str(row.get("row_label", "") or ""))
     label = _generic_anchor_signal(row)
     row_kind = parsing.normalize_space(str(row.get("row_kind", "") or "")).lower().replace(" ", "_")
-    if row_kind in {"sink", "tap", "basin"}:
-        return row_kind
     if "hinges & drawer runners" in raw_label:
         return "soft_close"
     if "floor type & kick refacing required" in raw_label or raw_label == "flooring":
         return "flooring"
+    if "benchtop" in raw_label:
+        return "bench"
+    if any(token in raw_label for token in ("underbench", "base cabinet panels", "cabinet panels")):
+        return "base"
+    if "overhead cupboards" in raw_label or raw_label == "overheads" or "shaving cabinets" in raw_label:
+        return "overheads"
+    if "tall" in raw_label or "pantry doors" in raw_label:
+        return "tall"
+    if "kickboard" in raw_label:
+        return "toe_kick"
+    if "gpo" in raw_label or "hamper" in raw_label:
+        return "accessories"
+    if any(token in raw_label for token in ("drawers", "contrasting facings", "selection required", "robe fitout", "robe hanging rail")):
+        return "other"
+    if "handles" in raw_label or raw_label == "handle":
+        return "handles"
+    if any(token in raw_label for token in ("shelving", "floating shelf")):
+        return "floating_shelf"
     if page_type == "sinkware_tapware":
-        if any(token in raw_label for token in ("basin mixer", "tapware", "mixer", "spout", "shower rail", "shower rose", "shower mixer", "tap")):
+        if any(
+            token in raw_label
+            for token in (
+                "vanity basin tapware",
+                "sink mixer",
+                "tub mixer",
+                "basin mixer",
+                "tapware",
+                "tap",
+            )
+        ):
             return "tap"
+        if any(
+            token in raw_label
+            for token in (
+                "bath mixer / spout",
+                "bath spout model",
+                "shower mixer",
+                "shower rose",
+                "shower rail",
+                "shower screen",
+                "feature waste",
+                "floor waste",
+                "bath",
+            )
+        ):
+            return "other"
         if "basin" in raw_label:
             return "basin"
-        if any(token in raw_label for token in ("sink", "tub", "bath")):
+        if any(token in raw_label for token in ("sink", "tub", "trough")):
             return "sink"
         if any(
             token in raw_label
@@ -3212,31 +3255,14 @@ def _classify_generic_anchor(row: dict[str, Any], page_type: str = "") -> str:
                 "robe hook",
                 "hand towel rail",
                 "towel rail",
-                "mirror",
             )
         ):
             return "accessories"
-        if "floor waste" in raw_label:
+        if "mirror" in raw_label:
             return "other"
         return "other"
-    if "benchtop" in label:
-        return "bench"
-    if any(token in label for token in ("underbench", "base cabinet panels", "cabinet panels")):
-        return "base"
-    if "overhead cupboards" in label or label == "overheads" or "shaving cabinets" in label:
-        return "overheads"
-    if "tall" in label or "pantry doors" in label:
-        return "tall"
-    if "kickboard" in label:
-        return "toe_kick"
-    if "gpo" in label or "hamper" in label:
-        return "accessories"
-    if any(token in label for token in ("drawers", "contrasting facings", "selection required", "robe fitout", "robe hanging rail")):
-        return "other"
-    if "handles" in label or label == "handle":
-        return "handles"
-    if any(token in label for token in ("shelving", "floating shelf")):
-        return "floating_shelf"
+    if row_kind in {"sink", "tap", "basin"}:
+        return row_kind
     if "tapware" in label or "mixer" in label or "spout" in label:
         return "tap"
     if "basin" in label:
@@ -3695,8 +3721,6 @@ def _extract_generic_layout_overlay(section: dict[str, Any]) -> dict[str, Any]:
         parts = _collect_generic_block_parts(block)
         kind = str(block.get("anchor_kind", "") or "")
         anchor_label = _normalize_generic_row_label(str(block.get("anchor_label", "") or ""))
-        if page_type == "sinkware_tapware" and kind in {"bench", "base", "overheads", "tall", "toe_kick", "floating_shelf", "handles"}:
-            continue
         if kind == "bench":
             bench_text = _format_generic_material_from_parts(parts)
             if not bench_text:

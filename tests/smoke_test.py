@@ -5078,6 +5078,63 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("Shower Rail / Rose", labels)
         self.assertIn("Shower Screen", labels)
 
+    def test_generic_sinkware_overlay_keeps_basin_mixer_separate_from_shower_rows(self) -> None:
+        section = {
+            "original_section_label": "Ensuite",
+            "page_type": "sinkware_tapware",
+            "file_name": "wet-area.pdf",
+            "page_nos": [13],
+            "text": "Ensuite wet area",
+            "layout_rows": [
+                {"row_label": "Basin", "value_region_text": "", "row_kind": "basin"},
+                {"row_label": "Model", "value_region_text": "Eden Bench Mount Gloss White (FL135-W)", "row_kind": "material"},
+                {"row_label": "Type", "value_region_text": "Overmount", "row_kind": "material"},
+                {"row_label": "Basin Mixer", "value_region_text": "", "row_kind": "basin"},
+                {"row_label": "Type", "value_region_text": "Spin Gun Metal Tall Basin Mixer (SP110-GM)", "row_kind": "material"},
+                {"row_label": "Location", "value_region_text": "Centre of Basin", "row_kind": "material"},
+                {"row_label": "Shower Rail / Rose", "value_region_text": "Omega Integrated Gun Metal Shower System", "row_kind": "material"},
+                {"row_label": "Shower Screen", "value_region_text": "Semi-frameless with Clear Toughened Glass", "row_kind": "material"},
+            ],
+        }
+        overlay = extraction_service._extract_generic_layout_overlay(section)
+        self.assertIn("Spin Gun Metal Tall Basin Mixer", overlay["tap_info"])
+        self.assertNotIn("Omega Integrated Gun Metal Shower System", overlay["tap_info"])
+        other_labels = {item.get("label") for item in overlay["other_items"]}
+        self.assertIn("Shower Rail / Rose", other_labels)
+        self.assertIn("Shower Screen", other_labels)
+
+    def test_generic_sinkware_overlay_keeps_cabinetry_rows_from_same_room(self) -> None:
+        section = {
+            "original_section_label": "Master Ensuite",
+            "page_type": "sinkware_tapware",
+            "file_name": "simonds-wet-area.pdf",
+            "page_nos": [10],
+            "text": "Master Ensuite joinery + wet area",
+            "layout_rows": [
+                {"row_label": "Benchtop", "value_region_text": "", "row_kind": "material"},
+                {"row_label": "Manufacturer", "value_region_text": "Caesarstone - Mineral", "row_kind": "material"},
+                {"row_label": "Profile", "value_region_text": "20mm Arris", "row_kind": "material"},
+                {"row_label": "Range", "value_region_text": "Caesarstone Standard M1", "row_kind": "material"},
+                {"row_label": "Colour", "value_region_text": "Organic White", "row_kind": "material"},
+                {"row_label": "Base Cabinet Panels", "value_region_text": "", "row_kind": "material"},
+                {"row_label": "Manufacturer", "value_region_text": "Laminex", "row_kind": "material"},
+                {"row_label": "Finish", "value_region_text": "Natural", "row_kind": "material"},
+                {"row_label": "Profile", "value_region_text": "S/Edge", "row_kind": "material"},
+                {"row_label": "Colour", "value_region_text": "Blackened Legno", "row_kind": "material"},
+                {"row_label": "Kickboard", "value_region_text": "", "row_kind": "material"},
+                {"row_label": "Manufacturer", "value_region_text": "Laminex", "row_kind": "material"},
+                {"row_label": "Finish", "value_region_text": "Natural", "row_kind": "material"},
+                {"row_label": "Colour", "value_region_text": "Blackened Legno", "row_kind": "material"},
+                {"row_label": "Cabinetry Handles", "value_region_text": "", "row_kind": "handle"},
+                {"row_label": "Model", "value_region_text": "L Shaped Finger Pull", "row_kind": "material"},
+            ],
+        }
+        overlay = extraction_service._extract_generic_layout_overlay(section)
+        self.assertEqual(overlay["bench_tops_wall_run"], "20mm Caesarstone - Mineral - Organic White - Arris")
+        self.assertEqual(overlay["door_colours_base"], "Laminex - Blackened Legno - S/Edge")
+        self.assertEqual(overlay["toe_kick"], ["Laminex - Blackened Legno"])
+        self.assertEqual(overlay["handles"], ["L Shaped Finger Pull"])
+
     def _mark_raw_spec_qa_passed(self, job_id: int) -> None:
         verification = store.get_job_snapshot_verification(job_id, "raw_spec")
         self.assertIsNotNone(verification)
