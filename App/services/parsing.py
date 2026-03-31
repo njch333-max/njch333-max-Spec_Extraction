@@ -391,6 +391,10 @@ ROOM_SCHEDULE_PATTERNS = (
     r"kitchen",
     r"pantry",
     r"wip",
+    r"study desk",
+    r"make(?:\s+up|up)\s+desk",
+    r"dining banquette",
+    r"alfresco",
     r"robe(?:s)?",
     r"wir",
     r"theatre(?:\s+room)?",
@@ -600,6 +604,9 @@ def source_room_label(label: str, fallback_key: str = "") -> str:
     text = re.sub(r"(?i)\b(WALK[- ]IN[- ]PANTRY)\b\s+PANTRY$", r"\1", text)
     for pattern in ROOM_HEADING_CLEANUP_PATTERNS:
         text = re.sub(pattern, "", text)
+    exact_specific_match = _extract_specific_room_heading(text)
+    if exact_specific_match:
+        return exact_specific_match
     for pattern in ROOM_HEADING_TRIM_MARKERS:
         text = re.sub(pattern, "", text)
     if ":" in text:
@@ -820,6 +827,11 @@ STRUCTURE_ROOM_NOISE_PATTERNS: tuple[str, ...] = (
     r"(?i)\bselections?\b",
     r"(?i)\bdisclaimer\b",
     r"(?i)\bfooter\b",
+    r"(?i)\btowel\b",
+    r"(?i)\bhooks?\b",
+    r"(?i)\bref\.?\s*number\b",
+    r"(?i)\bdocument ref\b",
+    r"(?i)\bselection required\b",
 )
 
 STRUCTURE_ROOM_SUFFIX_TRIM_PATTERNS: tuple[str, ...] = (
@@ -934,6 +946,9 @@ def _clean_layout_room_label(
         text = normalize_space(str(candidate or ""))
         if not text:
             continue
+        exact_specific = _extract_specific_room_heading(text)
+        if exact_specific:
+            return exact_specific
         for pattern in STRUCTURE_ROOM_SUFFIX_TRIM_PATTERNS:
             text = normalize_space(re.sub(pattern, "", text))
         if not text:
@@ -1103,7 +1118,7 @@ def _layout_section_seed(
         if record
     ]
     normalized_room_label = _clean_layout_room_label(room_label, section_label)
-    if section_kind == "room" and not normalized_room_label:
+    if section_kind == "room" and (not normalized_room_label or not _looks_like_plausible_room_label(normalized_room_label)):
         return None
     title_line = normalized_room_label or normalize_space(section_label)
     if not title_line:
@@ -2268,12 +2283,17 @@ def _imperial_clean_flooring_value(parts: list[str]) -> str:
             continue
         match = re.search(r"(?i)\b(tiled|tiles|tile|hybrid|carpet|laminate|timber|vinyl|stone)\b", part)
         if match:
-            value = match.group(1).lower()
-            if value in {"tile", "tiles"}:
-                value = "tiled"
-            cleaned_candidates.append(value)
+            cleaned = normalize_brand_casing_text(part).strip(" -;,")
+            if re.fullmatch(r"(?i)(tiled|tiles|tile|hybrid|carpet|laminate|timber|vinyl|stone)", cleaned):
+                value = match.group(1).lower()
+                if value in {"tile", "tiles"}:
+                    cleaned_candidates.append("Tiled")
+                else:
+                    cleaned_candidates.append(normalize_brand_casing_text(value))
+            else:
+                cleaned_candidates.append(cleaned)
     for preferred in cleaned_candidates:
-        if preferred != "stone":
+        if preferred.lower() != "stone":
             return preferred
     return cleaned_candidates[0] if cleaned_candidates else ""
 

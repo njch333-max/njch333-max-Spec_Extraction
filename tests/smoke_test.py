@@ -325,9 +325,9 @@ class SmokeTest(unittest.TestCase):
         )
         rooms = {row["room_key"]: row for row in snapshot["rooms"]}
         self.assertIn("robe", rooms)
-        self.assertIn("study", rooms)
+        self.assertIn("study_desk", rooms)
         self.assertNotIn("robe_sliding_type_standard_frame", rooms)
-        self.assertNotIn("study_desk", rooms)
+        self.assertEqual(rooms["study_desk"]["original_room_label"], "Study Desk")
 
     def test_imperial_tap_overlay_prefers_layout_rows_and_ignores_client_metadata(self) -> None:
         documents = [
@@ -538,6 +538,87 @@ class SmokeTest(unittest.TestCase):
         )
         rooms = {row["room_key"]: row for row in snapshot["rooms"]}
         self.assertEqual(set(rooms), {"kitchen"})
+
+    def test_structure_first_parse_rejects_sink_tap_room_blocks_that_are_not_real_rooms(self) -> None:
+        snapshot = parse_documents(
+            job_no="s2-bad-room",
+            builder_name="Simonds",
+            source_kind="spec",
+            documents=[
+                {
+                    "file_name": "simonds-layout.pdf",
+                    "role": "spec",
+                    "pages": [
+                        {
+                            "page_no": 0,
+                            "raw_text": "BATHROOM COLOUR SCHEDULE",
+                            "text": "BATHROOM COLOUR SCHEDULE",
+                            "needs_ocr": False,
+                            "page_layout": {
+                                "page_type": "joinery",
+                                "section_label": "BATHROOM COLOUR SCHEDULE",
+                                "room_label": "Bathroom",
+                                "room_blocks": [
+                                    {
+                                        "room_label": "Bathroom",
+                                        "rows": [
+                                            {
+                                                "row_label": "Base Cabinetry Colour",
+                                                "value_region_text": "Classic White Matt",
+                                                "supplier_region_text": "Laminex",
+                                                "notes_region_text": "",
+                                                "row_kind": "material",
+                                            }
+                                        ],
+                                    }
+                                ],
+                                "rows": [],
+                            },
+                        },
+                        {
+                            "page_no": 1,
+                            "raw_text": "SINKWARE & TAPWARE",
+                            "text": "SINKWARE & TAPWARE",
+                            "needs_ocr": False,
+                            "page_layout": {
+                                "page_type": "sinkware_tapware",
+                                "section_label": "SINKWARE & TAPWARE",
+                                "room_label": "",
+                                "room_blocks": [
+                                    {
+                                        "room_label": "2No Bath towel hooks + 1No Hand towel hook",
+                                        "rows": [
+                                            {
+                                                "row_label": "Toilet Roll Holder",
+                                                "value_region_text": "Matt Black",
+                                                "supplier_region_text": "",
+                                                "notes_region_text": "",
+                                                "row_kind": "accessory",
+                                            }
+                                        ],
+                                    },
+                                    {
+                                        "room_label": "Bathroom",
+                                        "rows": [
+                                            {
+                                                "row_label": "Basin Mixer",
+                                                "value_region_text": "Matt Black",
+                                                "supplier_region_text": "",
+                                                "notes_region_text": "",
+                                                "row_kind": "tap",
+                                            }
+                                        ],
+                                    },
+                                ],
+                                "rows": [],
+                            },
+                        }
+                    ],
+                }
+            ],
+        )
+        room_labels = [row["original_room_label"] for row in snapshot["rooms"]]
+        self.assertEqual(room_labels, ["Bathroom"])
 
     def test_structure_first_parse_trims_sinkware_suffixes_from_room_blocks(self) -> None:
         self.assertEqual(parsing_module._clean_layout_room_label("Master Ensuite Shower"), "Master Ensuite")
@@ -4043,7 +4124,7 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(kitchen["accessories"], ["Hettich - 450mm Pull-Out Bin"])
         self.assertEqual(kitchen["drawers_soft_close"], "Soft Close")
         self.assertEqual(kitchen["hinges_soft_close"], "Soft Close")
-        self.assertEqual(kitchen["flooring"], "tiled")
+        self.assertEqual(kitchen["flooring"], "Tiles with Floating TBC")
         self.assertEqual(
             kitchen["sink_info"],
             "Veronar, Forge Undermount Sink, Double Bowl, Satin Stainless Steel Part Number: SVF210SINK.SSS.FG UNDERMOUNT",
@@ -4486,7 +4567,7 @@ class SmokeTest(unittest.TestCase):
         laundry = rooms["laundry"]
         self.assertEqual(laundry["drawers_soft_close"], "Soft Close")
         self.assertEqual(laundry["hinges_soft_close"], "Soft Close")
-        self.assertEqual(laundry["flooring"], "tiled")
+        self.assertEqual(laundry["flooring"], "Tiled")
         self.assertEqual(
             laundry["handles"],
             [
@@ -4962,6 +5043,91 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("Manufacturer", sink_rows)
         self.assertIn("Range", sink_rows)
 
+    def test_build_generic_layout_blocks_keeps_material_properties_with_current_material_anchor(self) -> None:
+        rows = [
+            {"row_label": "Benchtops", "value_region_text": "", "supplier_region_text": "", "notes_region_text": "No shelf to cupboard underneath sink", "row_kind": "material"},
+            {"row_label": "Manufacturer", "value_region_text": "Quantum Quartz", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            {"row_label": "Colour", "value_region_text": "Champagne", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            {"row_label": "Edge Profile", "value_region_text": "20mm Arissed", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            {"row_label": "Underbench", "value_region_text": "including Island", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            {"row_label": "Manufacturer", "value_region_text": "Polytec", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+        ]
+        blocks = extraction_service._build_generic_layout_blocks(rows, page_type="joinery")
+        self.assertEqual([(block["anchor_kind"], block["anchor_label"]) for block in blocks], [("bench", "Benchtops"), ("base", "Underbench")])
+        bench_rows = [row["row_label"] for row in blocks[0]["rows"]]
+        base_rows = [row["row_label"] for row in blocks[1]["rows"]]
+        self.assertIn("Colour", bench_rows)
+        self.assertIn("Edge Profile", bench_rows)
+        self.assertNotIn("Colour", base_rows)
+
+    def test_build_generic_layout_blocks_keeps_sink_model_with_current_sink_anchor(self) -> None:
+        rows = [
+            {"row_label": "Sink", "value_region_text": "", "supplier_region_text": "", "notes_region_text": "", "row_kind": "sink"},
+            {"row_label": "Model", "value_region_text": "Burazzo 450mm Gun Metal Single Bowl Sink", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            {"row_label": "Type", "value_region_text": "Top Mount", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            {"row_label": "Sink Mixer", "value_region_text": "", "supplier_region_text": "", "notes_region_text": "", "row_kind": "tap"},
+            {"row_label": "Type", "value_region_text": "Zara Gun Metal Pull-Out", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            {"row_label": "Location", "value_region_text": "Centre of Sink", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+        ]
+        blocks = extraction_service._build_generic_layout_blocks(rows, page_type="sinkware_tapware")
+        self.assertEqual([(block["anchor_kind"], block["anchor_label"]) for block in blocks], [("sink", "Sink"), ("tap", "Sink Mixer")])
+        sink_rows = [row["row_label"] for row in blocks[0]["rows"]]
+        tap_rows = [row["row_label"] for row in blocks[1]["rows"]]
+        self.assertIn("Model", sink_rows)
+        self.assertIn("Type", sink_rows)
+        self.assertIn("Location", tap_rows)
+
+    def test_build_generic_layout_blocks_redirects_repeated_fixture_properties_to_future_anchor(self) -> None:
+        rows = [
+            {"row_label": "Kitchen Sink", "value_region_text": "", "supplier_region_text": "", "notes_region_text": "", "row_kind": "sink"},
+            {"row_label": "Manufacturer", "value_region_text": "Franke", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            {"row_label": "Range", "value_region_text": "Sirius", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            {"row_label": "Style", "value_region_text": "SID 110-34 - Undermount", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            {"row_label": "Finish", "value_region_text": "Carbon Black", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            {"row_label": "Manufacturer", "value_region_text": "Alder", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            {"row_label": "Range", "value_region_text": "Maxx", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            {"row_label": "Model", "value_region_text": "Rectangle Sink Mixer", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            {"row_label": "Finish", "value_region_text": "Matt Black", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            {"row_label": "Kitchen Tapware", "value_region_text": "+ ALDER SACHI", "supplier_region_text": "", "notes_region_text": "", "row_kind": "tap"},
+        ]
+        blocks = extraction_service._build_generic_layout_blocks(rows, page_type="joinery")
+        self.assertEqual([(block["anchor_kind"], block["anchor_label"]) for block in blocks], [("sink", "Kitchen Sink"), ("tap", "Kitchen Tapware")])
+        sink_rows = [row["row_label"] for row in blocks[0]["rows"]]
+        tap_rows = [row["row_label"] for row in blocks[1]["rows"]]
+        self.assertEqual(sink_rows.count("Manufacturer"), 1)
+        self.assertEqual(tap_rows.count("Manufacturer"), 1)
+        self.assertIn("Model", tap_rows)
+
+    def test_normalize_layout_rows_splits_embedded_waterfall_end_anchor(self) -> None:
+        rows = extraction_service._normalize_layout_rows(
+            [
+                {
+                    "row_label": "Colour",
+                    "value_region_text": "Organic White Waterfall End Panels",
+                    "supplier_region_text": "",
+                    "notes_region_text": "",
+                    "row_kind": "material",
+                },
+                {
+                    "row_label": "Manufacturer",
+                    "value_region_text": "Laminex",
+                    "supplier_region_text": "",
+                    "notes_region_text": "",
+                    "row_kind": "material",
+                },
+            ]
+        )
+        self.assertEqual(rows[0]["row_label"], "Colour")
+        self.assertEqual(rows[0]["value_region_text"], "Organic White")
+        self.assertEqual(rows[1]["row_label"], "Waterfall End Panels")
+
+    def test_invalid_room_heading_candidate_rejects_quantity_towel_hook_line(self) -> None:
+        self.assertTrue(
+            extraction_service._looks_like_invalid_room_heading_candidate(
+                "2No Bath towel hooks + 1No Hand towel hook"
+            )
+        )
+
     def test_shared_generic_polish_clears_placeholder_values_when_layout_block_is_present(self) -> None:
         row = {
             "room_key": "kitchen",
@@ -5004,6 +5170,25 @@ class SmokeTest(unittest.TestCase):
         )
         page_type = extraction_service._infer_page_type_from_text("Simonds", "spec", text)
         self.assertEqual(page_type, "sinkware_tapware")
+
+    def test_infer_page_type_prefers_joinery_when_joinery_signals_dominate_without_explicit_sinkware_heading(self) -> None:
+        text = (
+            "Kitchen\n"
+            "Wall Run Benchtop\n"
+            "Base Cabinet Panels\n"
+            "Kickboard\n"
+            "Cabinetry Handles\n"
+            "Kitchen Sink\n"
+            "Kitchen Tapware\n"
+        )
+        page_type = extraction_service._infer_page_type_from_text("Simonds", "spec", text)
+        self.assertEqual(page_type, "joinery")
+
+    def test_imperial_clean_flooring_value_preserves_extra_context(self) -> None:
+        self.assertEqual(
+            parsing_module._imperial_clean_flooring_value(["Tiles with Floating TBC"]),
+            "Tiles with Floating TBC",
+        )
 
     def test_heuristic_sink_tap_room_blocks_recovers_wet_area_location_room(self) -> None:
         lines = [

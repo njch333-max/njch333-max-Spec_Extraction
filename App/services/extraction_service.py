@@ -34,6 +34,7 @@ EXTRA_LAYOUT_ROW_LABELS: tuple[str, ...] = (
     "Underlay",
     "Edge Profile",
     "Island Edge Profile",
+    "Wall Run Benchtop",
     "Waterfall End to Island",
     "Underbench",
     "Contrasting Facings",
@@ -41,6 +42,7 @@ EXTRA_LAYOUT_ROW_LABELS: tuple[str, ...] = (
     "Shaving Cabinets",
     "Door Handle",
     "Drawer Handle",
+    "Base Cabinetry Handles",
     "Pantry Door Handle",
     "Bin & Pot Drawers Handle",
     "Standard",
@@ -147,6 +149,9 @@ INVALID_ROOM_HEADING_TOKENS: tuple[str, ...] = (
     "desk",
     "floating vanity",
     "floating shelf",
+    "bath towel",
+    "hand towel hook",
+    "towel hook",
     "cabinet panels",
     "cabinetry",
     "kickboard",
@@ -156,6 +161,8 @@ INVALID_ROOM_HEADING_TOKENS: tuple[str, ...] = (
     "frameless",
     "ref. number",
     "document ref",
+    "staircase",
+    "wet area",
 )
 
 
@@ -613,6 +620,8 @@ def _looks_like_invalid_room_heading_candidate(text: str) -> bool:
     normalized = parsing.normalize_space(text).strip(" -")
     lowered = normalized.lower()
     if not normalized:
+        return True
+    if re.search(r"\b\d+\s*no\b", lowered) and any(token in lowered for token in ("hook", "rail", "holder")):
         return True
     exact_room_aliases = {
         alias.lower()
@@ -1355,6 +1364,7 @@ def _infer_page_type_from_text(builder_name: str, source_kind: str, text: str) -
     upper = str(text or "").upper()
     if source_kind != "spec":
         return "unknown"
+    has_explicit_sinkware_heading = "SINKWARE & TAPWARE" in upper or "SINKWARE (" in upper or "TAPWARE (" in upper
     sink_table_score = sum(
         1
         for marker in (
@@ -1377,30 +1387,36 @@ def _infer_page_type_from_text(builder_name: str, source_kind: str, text: str) -
         )
         if marker in upper
     )
+    joinery_score = sum(
+        1
+        for token in (
+            "BENCHTOP",
+            "UNDERBENCH",
+            "BASE CABINET PANELS",
+            "CABINET PANELS",
+            "KICKBOARD",
+            "OVERHEAD",
+            "CABINETRY HANDLES",
+            "SHAVING CABINETS",
+            "WALL RUN",
+            "ISLAND/PENISULA",
+        )
+        if token in upper
+    )
+    if (
+        not has_explicit_sinkware_heading
+        and any(token in upper for token in ("KITCHEN", "PANTRY", "LAUNDRY", "BATHROOM", "ENSUITE", "POWDER", "ALFRESCO", "BUTLERS", "WIP", "STUDY"))
+        and joinery_score >= 2
+    ):
+        return "joinery"
     if sink_table_score >= 3:
         return "sinkware_tapware"
     if (
         any(token in upper for token in ("KITCHEN", "PANTRY", "LAUNDRY", "BATHROOM", "ENSUITE", "POWDER", "ALFRESCO", "BUTLERS", "WIP", "STUDY"))
-        and sum(
-            1
-            for token in (
-                "BENCHTOP",
-                "UNDERBENCH",
-                "BASE CABINET PANELS",
-                "CABINET PANELS",
-                "KICKBOARD",
-                "OVERHEAD",
-                "CABINETRY HANDLES",
-                "SHAVING CABINETS",
-                "WALL RUN",
-                "ISLAND/PENISULA",
-            )
-            if token in upper
-        )
-        >= 2
+        and joinery_score >= 2
     ):
         return "joinery"
-    if "SINKWARE & TAPWARE" in upper or "SINKWARE (" in upper or "TAPWARE (" in upper:
+    if has_explicit_sinkware_heading:
         return "sinkware_tapware"
     if "PLUMBING FIXTURES & TAPWARE" in upper or "VANITY BASIN TAPWARE" in upper or "KITCHEN TAPWARE" in upper:
         if any(
@@ -2091,6 +2107,10 @@ EMBEDDED_LAYOUT_ANCHOR_COMBINATIONS: tuple[tuple[str, tuple[str, ...], str], ...
 )
 
 EMBEDDED_LAYOUT_DIRECT_TAILS: tuple[tuple[str, str], ...] = (
+    ("Waterfall End Panels", "Waterfall End Panels"),
+    ("Base Cabinet Panels", "Base Cabinet Panels"),
+    ("Cabinet Panels", "Cabinet Panels"),
+    ("Kickboard", "Kickboard"),
     ("Pantry Doors", "Pantry Doors"),
     ("Overhead Cupboards", "Overhead Cupboards"),
     ("Overheads", "Overheads"),
@@ -3002,6 +3022,7 @@ GENERIC_LAYOUT_ANCHOR_LABELS: set[str] = {
     "wall run base cabinet panels",
     "island/penisula base cabinet panels",
     "island/penisula feature panels",
+    "waterfall end panels",
     "overhead cupboards",
     "overheads",
     "pantry doors",
@@ -3012,6 +3033,7 @@ GENERIC_LAYOUT_ANCHOR_LABELS: set[str] = {
     "wall run kickboard",
     "island/penisula kickboard",
     "handles",
+    "base cabinetry handles",
     "cabinetry handles",
     "overhead cabinetry handles",
     "shelving",
@@ -3062,6 +3084,15 @@ GENERIC_LAYOUT_ANCHOR_LABELS: set[str] = {
     "floor type & kick refacing required",
     "gpo's",
     "hamper",
+}
+
+
+GENERIC_LAYOUT_FUTURE_PREFIX_ANCHOR_KINDS: set[str] = {
+    "handles",
+    "accessories",
+    "other",
+    "soft_close",
+    "flooring",
 }
 
 GENERIC_LAYOUT_PREFIX_PROPERTY_LABELS: set[str] = {
@@ -3286,6 +3317,8 @@ def _classify_generic_anchor(row: dict[str, Any], page_type: str = "") -> str:
         return "flooring"
     if "benchtop" in raw_label:
         return "bench"
+    if "waterfall end" in raw_label:
+        return "other"
     if "feature panels" in raw_label:
         return "other"
     if any(token in raw_label for token in ("underbench", "base cabinet panels", "cabinet panels")):
@@ -3436,11 +3469,26 @@ def _upcoming_anchor_within(layout_rows: list[dict[str, Any]], start_index: int,
     return False
 
 
+def _generic_anchor_prefers_future_prefix(anchor_kind: str) -> bool:
+    return anchor_kind in GENERIC_LAYOUT_FUTURE_PREFIX_ANCHOR_KINDS
+
+
+def _current_block_has_property_label(block: dict[str, Any], label: str) -> bool:
+    normalized = _normalize_generic_row_label(label)
+    if not normalized:
+        return False
+    for existing in block.get("rows", []):
+        if _normalize_generic_row_label(str(existing.get("row_label", "") or "")) == normalized:
+            return True
+    return False
+
+
 def _build_generic_layout_blocks(layout_rows: list[dict[str, Any]], page_type: str = "") -> list[dict[str, Any]]:
     blocks: list[dict[str, Any]] = []
     pending: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
     prefix_mode = _generic_section_prefers_prefix_anchors(layout_rows)
+    redirect_prefix_to_pending = False
     for index, row in enumerate(layout_rows):
         if not isinstance(row, dict):
             continue
@@ -3453,6 +3501,7 @@ def _build_generic_layout_blocks(layout_rows: list[dict[str, Any]], page_type: s
                 "rows": [*pending, row] if (prefix_mode or pending) else [row],
             }
             pending = []
+            redirect_prefix_to_pending = False
             continue
         if prefix_mode:
             label = _normalize_generic_row_label(str(row.get("row_label", "") or ""))
@@ -3466,22 +3515,44 @@ def _build_generic_layout_blocks(layout_rows: list[dict[str, Any]], page_type: s
                 pending.append(row)
             elif current is not None and _row_should_attach_to_current_anchor(current, row, page_type):
                 current["rows"].append(row)
+                if label not in GENERIC_LAYOUT_PREFIX_PROPERTY_LABELS:
+                    redirect_prefix_to_pending = False
             else:
                 pending.append(row)
         else:
             label = _normalize_generic_row_label(str(row.get("row_label", "") or ""))
             if (
                 current is not None
+                and redirect_prefix_to_pending
+                and label in GENERIC_LAYOUT_PREFIX_PROPERTY_LABELS
+                and _upcoming_anchor_within(layout_rows, index)
+            ):
+                pending.append(row)
+            elif (
+                current is not None
                 and page_type != "sinkware_tapware"
+                and _generic_anchor_prefers_future_prefix(str(current.get("anchor_kind", "") or ""))
                 and label in GENERIC_LAYOUT_PREFIX_PROPERTY_LABELS
                 and _has_prefix_properties(current)
                 and _upcoming_anchor_within(layout_rows, index)
             ):
                 pending.append(row)
+                redirect_prefix_to_pending = True
+            elif (
+                current is not None
+                and label in GENERIC_LAYOUT_PREFIX_PROPERTY_LABELS
+                and _has_prefix_properties(current)
+                and _current_block_has_property_label(current, label)
+                and _upcoming_anchor_within(layout_rows, index)
+            ):
+                pending.append(row)
+                redirect_prefix_to_pending = True
             elif current is None:
                 pending.append(row)
             else:
                 current["rows"].append(row)
+                if label not in GENERIC_LAYOUT_PREFIX_PROPERTY_LABELS:
+                    redirect_prefix_to_pending = False
     if current:
         blocks.append(current)
     return blocks
@@ -3608,8 +3679,8 @@ def _format_generic_flooring_from_parts(parts: dict[str, list[str]]) -> str:
         return ""
     joined = " - ".join(values)
     lowered = joined.lower()
-    if "tile" in lowered:
-        return "tiled"
+    if lowered in {"tile", "tiles", "tiled"}:
+        return "Tiled"
     return parsing.normalize_brand_casing_text(joined)
 
 
@@ -3628,6 +3699,8 @@ def _format_generic_material_from_parts(parts: dict[str, list[str]]) -> str:
         "contrasting facings",
         "selection required",
         "island colour as above",
+        "no shelf to cupboard",
+        "washing machine taps located inside cupboards",
     )
     notes = [
         value
@@ -3821,6 +3894,7 @@ def _extract_generic_layout_overlay(section: dict[str, Any]) -> dict[str, Any]:
     overlay["source_file"] = str(section.get("file_name", "") or "")
     overlay["page_refs"] = ",".join(str(page_no) for page_no in section.get("page_nos", []) if page_no)
     overlay["evidence_snippet"] = parsing.normalize_space(str(section.get("text", "") or ""))[:240]
+    last_cabinetry_material = ""
     for block in _build_generic_layout_blocks(layout_rows, page_type=page_type):
         parts = _collect_generic_block_parts(block)
         kind = str(block.get("anchor_kind", "") or "")
@@ -3838,14 +3912,24 @@ def _extract_generic_layout_overlay(section: dict[str, Any]) -> dict[str, Any]:
         elif kind == "base":
             text = _format_generic_material_from_parts(parts)
             overlay["door_colours_base"] = parsing._merge_text(overlay["door_colours_base"], text)
+            if text:
+                last_cabinetry_material = text
         elif kind == "overheads":
             text = _format_generic_material_from_parts(parts)
             overlay["door_colours_overheads"] = parsing._merge_text(overlay["door_colours_overheads"], text)
+            if text:
+                last_cabinetry_material = text
         elif kind == "tall":
             text = _format_generic_material_from_parts(parts)
             overlay["door_colours_tall"] = parsing._merge_text(overlay["door_colours_tall"], text)
+            if text:
+                last_cabinetry_material = text
         elif kind == "toe_kick":
             text = _format_generic_material_from_parts(parts)
+            if last_cabinetry_material and text and text.lower() in {"laminate", "as doors", "floating vanity"}:
+                text = parsing.normalize_brand_casing_text(f"{last_cabinetry_material} - {text}")
+            elif last_cabinetry_material and not text:
+                text = last_cabinetry_material
             if text and text not in overlay["toe_kick"]:
                 overlay["toe_kick"].append(text)
         elif kind == "floating_shelf":
