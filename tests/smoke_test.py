@@ -5025,6 +5025,33 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("Alder", tap_values)
         self.assertIn("Wall Basin Mixer", tap_values)
 
+    def test_generic_fixture_formatter_keeps_real_tap_with_centre_of_sink_note(self) -> None:
+        formatted = extraction_service._format_generic_fixture_from_parts(
+            {"type": ["Zara Gun Metal Pull-Out (ZA120-GM)"], "location": ["Centre of Sink"]},
+            kind="tap",
+            anchor_label="Sink Mixer",
+        )
+        self.assertEqual(formatted, "Zara Gun Metal Pull-Out (ZA120-GM) - Centre of Sink")
+
+    def test_generic_overlay_reads_value_region_text_for_evoca_sink_and_tap(self) -> None:
+        section = {
+            "original_section_label": "Kitchen",
+            "page_type": "sinkware_tapware",
+            "file_name": "evoca.pdf",
+            "page_nos": [12],
+            "text": "Kitchen sink/tap page",
+            "layout_rows": [
+                {"row_label": "Sink", "value_region_text": "", "supplier_region_text": "", "notes_region_text": "", "row_kind": "sink"},
+                {"row_label": "Model", "value_region_text": "Burazzo 450mm Gun Metal Single Bowl Sink (BU454525S-GM) ($370)", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Sink Mixer", "value_region_text": "", "supplier_region_text": "", "notes_region_text": "", "row_kind": "tap"},
+                {"row_label": "Type", "value_region_text": "Zara Gun Metal Pull-Out (ZA120-GM)", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Location", "value_region_text": "Centre of Sink", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            ],
+        }
+        overlay = extraction_service._extract_generic_layout_overlay(section)
+        self.assertIn("Burazzo 450mm Gun Metal Single Bowl Sink", overlay["sink_info"])
+        self.assertEqual(overlay["tap_info"], "Zara Gun Metal Pull-Out (ZA120-GM) - Centre of Sink")
+
     def _mark_raw_spec_qa_passed(self, job_id: int) -> None:
         verification = store.get_job_snapshot_verification(job_id, "raw_spec")
         self.assertIsNotNone(verification)

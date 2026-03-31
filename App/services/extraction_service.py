@@ -3111,9 +3111,17 @@ def _normalize_generic_row_label(value: str) -> str:
     return parsing.normalize_space(str(value or "")).strip(" -").lower()
 
 
+def _row_region_text(row: dict[str, Any], *names: str) -> str:
+    for name in names:
+        value = parsing.normalize_space(str(row.get(name, "") or ""))
+        if value:
+            return value
+    return ""
+
+
 def _generic_anchor_signal(row: dict[str, Any]) -> str:
     label = _normalize_generic_row_label(str(row.get("row_label", "") or ""))
-    value = _normalize_generic_row_label(str(row.get("value_text", "") or ""))
+    value = _normalize_generic_row_label(_row_region_text(row, "value_text", "value_region_text"))
     return " ".join(part for part in (label, value) if part).strip()
 
 
@@ -3229,9 +3237,9 @@ def _row_fragment_text(row: dict[str, Any]) -> str:
         " ".join(
             part
             for part in (
-                str(row.get("value_text", "") or ""),
-                str(row.get("supplier_text", "") or ""),
-                str(row.get("notes_text", "") or ""),
+                _row_region_text(row, "value_text", "value_region_text"),
+                _row_region_text(row, "supplier_text", "supplier_region_text"),
+                _row_region_text(row, "notes_text", "notes_region_text"),
             )
             if parsing.normalize_space(part)
         )
@@ -3340,9 +3348,9 @@ def _collect_generic_block_parts(block: dict[str, Any]) -> dict[str, list[str]]:
         parts.setdefault("anchor", []).append(anchor_label)
     for row in block.get("rows", []):
         label = _normalize_generic_row_label(str(row.get("row_label", "") or ""))
-        value_text = parsing.normalize_space(str(row.get("value_text", "") or ""))
-        supplier_text = parsing.normalize_space(str(row.get("supplier_text", "") or ""))
-        notes_text = parsing.normalize_space(str(row.get("notes_text", "") or ""))
+        value_text = _row_region_text(row, "value_text", "value_region_text")
+        supplier_text = _row_region_text(row, "supplier_text", "supplier_region_text")
+        notes_text = _row_region_text(row, "notes_text", "notes_region_text")
         text = parsing.normalize_space(" ".join(part for part in (value_text, supplier_text, notes_text) if part))
         if not text:
             continue
@@ -3617,17 +3625,20 @@ def _looks_like_placeholder_fixture_text(value: str) -> bool:
     if _is_generic_placeholder_text(text):
         return True
     lowered = text.lower()
+    if lowered in {
+        "centre of sink",
+        "centre of basin",
+        "location outdoor shower model not applicable",
+        "shower rail / rose shower screen",
+        "shower screen colour",
+    }:
+        return True
     placeholder_tokens = (
         "model type",
         "type location",
         "type not applicable location",
         "not applicable model type",
         "not applicable type location",
-        "centre of sink",
-        "centre of basin",
-        "location outdoor shower model not applicable",
-        "shower rail / rose shower screen",
-        "shower screen colour",
     )
     return any(token in lowered for token in placeholder_tokens)
 
