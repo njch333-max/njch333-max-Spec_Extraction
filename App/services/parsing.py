@@ -86,6 +86,7 @@ ROOM_PREFIX_PATTERN_SPECS: tuple[tuple[str, str], ...] = (
     (r"make(?:\s+up|up)\s+desk", "Make Up Desk"),
     (r"dining banquette", "DINING BANQUETTE"),
     (r"laundry\s*&\s*mud room", "Laundry & Mud Room"),
+    (r"bulters?\s*/\s*wip", "Butlers/WIP"),
     (r"butlers?\s*/\s*wip", "Butlers/WIP"),
     (r"butlers?\s+pantry", "Butlers Pantry"),
     (r"walk[- ]in[- ]pantry", "WALK-IN-PANTRY"),

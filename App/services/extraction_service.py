@@ -47,6 +47,10 @@ EXTRA_LAYOUT_ROW_LABELS: tuple[str, ...] = (
     "Pot",
     "Bin",
     "Integrated Appliances",
+    "Range hood",
+    "Rangehood",
+    "Cooktop",
+    "Oven",
     "Wall Run Base Cabinet Panels",
     "Wall Run Kickboard",
     "Island/Penisula Benchtop",
@@ -839,6 +843,8 @@ def _build_layout_from_pdf_tables(
     fallback_labels = [str(block.get("room_label", "") or "") for block in fallback_room_blocks if str(block.get("room_label", "") or "")]
     room_blocks: list[dict[str, Any]] = []
     current_block: dict[str, Any] | None = None
+    leading_rows: list[dict[str, Any]] = []
+    first_explicit_room = ""
 
     def ensure_room(room_label: str) -> dict[str, Any]:
         nonlocal current_block
@@ -848,6 +854,14 @@ def _build_layout_from_pdf_tables(
         current_block = {"room_label": canonical, "rows": []}
         room_blocks.append(current_block)
         return current_block
+
+    def flush_leading_rows(target_room_label: str) -> None:
+        nonlocal leading_rows
+        if not leading_rows:
+            return
+        block = ensure_room(target_room_label)
+        block["rows"].extend(leading_rows)
+        leading_rows = []
 
     for table in tables:
         if page_type == "sinkware_tapware" and not _table_looks_like_sink_tap_table(table):
@@ -868,6 +882,18 @@ def _build_layout_from_pdf_tables(
                 continue
             room_label = _table_row_explicit_room_label(row)
             if room_label:
+                if not first_explicit_room:
+                    first_explicit_room = room_label
+                if leading_rows:
+                    if table_room_hint:
+                        flush_leading_rows(table_room_hint)
+                    elif len(fallback_labels) >= 2:
+                        preferred = fallback_labels[0]
+                        if parsing.source_room_key(preferred) == parsing.source_room_key(room_label) and len(fallback_labels) > 1:
+                            preferred = fallback_labels[1]
+                        flush_leading_rows(preferred)
+                    elif len(fallback_labels) == 1:
+                        flush_leading_rows(fallback_labels[0])
                 ensure_room(room_label)
                 row_index += 1
                 continue
@@ -900,6 +926,8 @@ def _build_layout_from_pdf_tables(
                             ensure_room(inferred)
                     if current_block is not None:
                         current_block["rows"].extend(rows)
+                    else:
+                        leading_rows.extend(rows)
                     row_index = look_ahead
                     continue
             pair_rows = _table_row_pairwise_rows(row, page_type)
@@ -910,7 +938,14 @@ def _build_layout_from_pdf_tables(
                         ensure_room(inferred)
                 if current_block is not None:
                     current_block["rows"].extend(pair_rows)
+                else:
+                    leading_rows.extend(pair_rows)
             row_index += 1
+        if leading_rows:
+            if table_room_hint:
+                flush_leading_rows(table_room_hint)
+            elif len(fallback_labels) == 1:
+                flush_leading_rows(fallback_labels[0])
     return [block for block in room_blocks if block.get("room_label") and block.get("rows")]
 
 
@@ -1132,6 +1167,28 @@ def _prepare_simonds_layout_text(text: str) -> str:
         marker_pattern = _flexible_layout_marker_pattern(marker)
         normalized = re.sub(rf"(?<!\n)(?={marker_pattern})", "\n", normalized, flags=re.IGNORECASE)
         normalized = re.sub(rf"(?i)\b({marker_pattern})(?=[A-Z0-9#(])", r"\1 ", normalized)
+    split_label_repairs: tuple[tuple[str, str], ...] = (
+        (r"(?im)^Wall Run\s*\n+\s*Benchtop\b", "Wall Run Benchtop"),
+        (r"(?im)^Wall Run\s*\n+\s*Base Cabinet Panels\b", "Wall Run Base Cabinet Panels"),
+        (r"(?im)^Wall Run\s*\n+\s*Base\s*\n+\s*Cabinet Panels\b", "Wall Run Base Cabinet Panels"),
+        (r"(?im)^Wall Run Base\s*\n+\s*Cabinet Panels\b", "Wall Run Base Cabinet Panels"),
+        (r"(?im)^Base\s*\n+\s*Cabinet Panels\b", "Base Cabinet Panels"),
+        (r"(?im)^Island/Penisula\s*\n+\s*Base Cabinet Panels\b", "Island/Penisula Base Cabinet Panels"),
+        (r"(?im)^Island/Peninsula\s*\n+\s*Base Cabinet Panels\b", "Island/Penisula Base Cabinet Panels"),
+        (r"(?im)^Island/Penisula\s*\n+\s*Feature Panels\b", "Island/Penisula Feature Panels"),
+        (r"(?im)^Island/Peninsula\s*\n+\s*Feature Panels\b", "Island/Penisula Feature Panels"),
+        (r"(?im)^Island/Penisula\s*\n+\s*Base\s*\n+\s*Cabinet Panels\b", "Island/Penisula Base Cabinet Panels"),
+        (r"(?im)^Island/Peninsula\s*\n+\s*Base\s*\n+\s*Cabinet Panels\b", "Island/Penisula Base Cabinet Panels"),
+        (r"(?im)^Island/Penisula\s*\n+\s*Kickboard\b", "Island/Penisula Kickboard"),
+        (r"(?im)^Island/Peninsula\s*\n+\s*Kickboard\b", "Island/Penisula Kickboard"),
+        (r"(?im)^Island/Penisula\s*\n+\s*Benchtop\b", "Island/Penisula Benchtop"),
+        (r"(?im)^Island/Peninsula\s*\n+\s*Benchtop\b", "Island/Penisula Benchtop"),
+        (r"(?im)^Overhead\s*\n+\s*Cabinetry Handles\b", "Overhead Cabinetry Handles"),
+        (r"(?im)^Base\s*\n+\s*Cabinetry Handles\b", "Base Cabinetry Handles"),
+        (r"(?im)^Wall Run\s*\n+\s*Kickboard\b", "Wall Run Kickboard"),
+    )
+    for pattern, replacement in split_label_repairs:
+        normalized = re.sub(pattern, replacement, normalized)
     continuation_headings = (
         ("Kitchen", ("Wall Run Benchtop", "Kitchen Sink", "Kitchen Tapware", "Island/Penisula Benchtop")),
         ("Pantry", ("Pantry Sink", "Pantry Tapware")),
@@ -1142,17 +1199,40 @@ def _prepare_simonds_layout_text(text: str) -> str:
         ("Guest Ensuite 2", ("Guest Ensuite 2", "Additional Bath/Ensuite/Powder", "Wet Area Location")),
     )
     for heading, markers in continuation_headings:
-        if re.search(rf"(?im)^{_flexible_layout_marker_pattern(heading)}\b", normalized):
+        exact_heading_re = re.compile(rf"(?im)^{re.escape(heading)}\s*$")
+        if exact_heading_re.search(normalized):
             continue
         earliest = None
         for marker in markers:
             match = re.search(_flexible_layout_marker_pattern(marker), normalized, flags=re.IGNORECASE)
             if match and (earliest is None or match.start() < earliest):
                 earliest = match.start()
-        if earliest:
-            prefix = normalized[max(0, earliest - 64) : earliest]
-            if "\n" not in prefix:
-                normalized = f"{normalized[:earliest]}{heading}\n{normalized[earliest:]}"
+        if earliest is not None:
+            normalized = f"{normalized[:earliest]}{heading}\n{normalized[earliest:]}"
+    continuation_room_targets = (
+        "Kitchen",
+        "Bulters/WIP",
+        "Butlers/WIP",
+        "Pantry",
+        "Laundry",
+        "Bathroom",
+        "Powder",
+        "Master Ensuite",
+        "Guest Ensuite 2",
+        "Ensuite 3",
+    )
+    continuation_stop = "|".join(re.escape(target) for target in continuation_room_targets)
+    internal_noise_patterns = (
+        r"Internal Paint Selctions",
+        r"Internal Paint Selections",
+        r"Internal Fittings Selections",
+    )
+    for pattern in internal_noise_patterns:
+        normalized = re.sub(
+            rf"(?is){pattern}.*?(?=\n(?:{continuation_stop})\b)",
+            "",
+            normalized,
+        )
     normalized = re.sub(r"(?i)\bClient Initials\b.*$", "", normalized)
     normalized = re.sub(r"\n{3,}", "\n\n", normalized)
     return normalized
@@ -2906,6 +2986,10 @@ GENERIC_LAYOUT_PROPERTY_MAP: dict[str, str] = {
     "pot": "note",
     "bin": "note",
     "integrated appliances": "note",
+    "range hood": "note",
+    "rangehood": "note",
+    "cooktop": "note",
+    "oven": "note",
 }
 
 GENERIC_LAYOUT_ANCHOR_LABELS: set[str] = {
@@ -2917,6 +3001,7 @@ GENERIC_LAYOUT_ANCHOR_LABELS: set[str] = {
     "base cabinet panels",
     "wall run base cabinet panels",
     "island/penisula base cabinet panels",
+    "island/penisula feature panels",
     "overhead cupboards",
     "overheads",
     "pantry doors",
@@ -2965,6 +3050,10 @@ GENERIC_LAYOUT_ANCHOR_LABELS: set[str] = {
     "towel rail",
     "floor waste",
     "mirror",
+    "range hood",
+    "rangehood",
+    "cooktop",
+    "oven",
     "selection required",
     "robe fitout",
     "robe hanging rail",
@@ -3197,6 +3286,8 @@ def _classify_generic_anchor(row: dict[str, Any], page_type: str = "") -> str:
         return "flooring"
     if "benchtop" in raw_label:
         return "bench"
+    if "feature panels" in raw_label:
+        return "other"
     if any(token in raw_label for token in ("underbench", "base cabinet panels", "cabinet panels")):
         return "base"
     if "overhead cupboards" in raw_label or raw_label == "overheads" or "shaving cabinets" in raw_label:
@@ -3207,6 +3298,8 @@ def _classify_generic_anchor(row: dict[str, Any], page_type: str = "") -> str:
         return "toe_kick"
     if "gpo" in raw_label or "hamper" in raw_label:
         return "accessories"
+    if raw_label in {"range hood", "rangehood", "cooktop", "oven"}:
+        return "other"
     if any(token in raw_label for token in ("drawers", "contrasting facings", "selection required", "robe fitout", "robe hanging rail")):
         return "other"
     if "handles" in raw_label or raw_label == "handle":
@@ -3357,7 +3450,7 @@ def _build_generic_layout_blocks(layout_rows: list[dict[str, Any]], page_type: s
             current = {
                 "anchor_kind": _classify_generic_anchor(row, page_type=page_type),
                 "anchor_label": str(row.get("row_label", "") or ""),
-                "rows": [*pending, row] if prefix_mode else [row],
+                "rows": [*pending, row] if (prefix_mode or pending) else [row],
             }
             pending = []
             continue
@@ -3376,7 +3469,16 @@ def _build_generic_layout_blocks(layout_rows: list[dict[str, Any]], page_type: s
             else:
                 pending.append(row)
         else:
-            if current is None:
+            label = _normalize_generic_row_label(str(row.get("row_label", "") or ""))
+            if (
+                current is not None
+                and page_type != "sinkware_tapware"
+                and label in GENERIC_LAYOUT_PREFIX_PROPERTY_LABELS
+                and _has_prefix_properties(current)
+                and _upcoming_anchor_within(layout_rows, index)
+            ):
+                pending.append(row)
+            elif current is None:
                 pending.append(row)
             else:
                 current["rows"].append(row)

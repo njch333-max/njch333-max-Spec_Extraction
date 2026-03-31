@@ -4896,6 +4896,72 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("ALDER SACHI", overlay["tap_info"])
         self.assertIn("Robe Hook - IN MATT BLACK", overlay["accessories"])
 
+    def test_prepare_simonds_layout_text_inserts_exact_continuation_heading_and_strips_internal_paint_noise(self) -> None:
+        raw_text = (
+            "Selection Level 1 "
+            "Study Manufacturer Laminex Profile S/Edge Range Natural Colour Blackended Legno Benchtop NOOK 1 AND NOOK 2 "
+            "Internal Paint Selctions Internal Paint (N/A) Manufacturer Haymes Finish Newlife Ceiling "
+            "Internal Fittings Selections Flooring Manufacturer Carpet Call "
+            "Manufacturer Caesarstone - Mineral Profile 40mm Arris Range Caesarstone Standard M1 Colour Organic White Wall Run Benchtop "
+            "Manufacturer Laminex Finish Natural Profile S/Edge Colour Blackened Legno Wall Run Base Cabinet Panels "
+            "Manufacturer Franke Range Sirius Style SID 110-34 - Undermount Finish Carbon Black Kitchen Sink "
+            "Bulters/WIP Manufacturer Caesarstone - Mineral Profile 40mm Arris Range Caesarstone Standard M1 Colour Organic White Benchtop"
+        )
+        prepared = extraction_service._prepare_simonds_layout_text(raw_text)
+        self.assertIn("\nKitchen\n", prepared)
+        self.assertNotIn("Internal Paint Selctions", prepared)
+        self.assertNotIn("Internal Fittings Selections", prepared)
+        self.assertIn("Bulters/WIP", prepared)
+
+    def test_build_layout_from_pdf_tables_assigns_leading_rows_to_first_fallback_room_before_explicit_second_room(self) -> None:
+        lines = [
+            "Kitchen",
+            "Benchtop",
+            "Kitchen Sink",
+            "Bulters/WIP",
+            "Benchtop",
+        ]
+        page = {
+            "table_rows": [
+                [
+                    ["Manufacturer", "Caesarstone - Mineral", "", ""],
+                    ["Profile", "40mm Arris", "", ""],
+                    ["Range", "Caesarstone Standard M1", "", ""],
+                    ["Colour", "Organic White", "", ""],
+                    ["Benchtop", "", "", ""],
+                    ["Kitchen Sink", "Franke Sirius", "", ""],
+                    ["Bulters/WIP", "", "", ""],
+                    ["Manufacturer", "Caesarstone - Mineral", "", ""],
+                    ["Profile", "40mm Arris", "", ""],
+                    ["Range", "Caesarstone Standard M1", "", ""],
+                    ["Colour", "Organic White", "", ""],
+                    ["Benchtop", "", "", ""],
+                ]
+            ]
+        }
+        blocks = extraction_service._build_layout_from_pdf_tables("Simonds", "joinery", lines, page)
+        labels = [block["room_label"] for block in blocks]
+        self.assertEqual(labels, ["Kitchen", "Butlers/WIP"])
+        self.assertTrue(any(row["row_label"] == "Kitchen Sink" for row in blocks[0]["rows"]))
+        self.assertGreater(len(blocks[1]["rows"]), 0)
+
+    def test_build_generic_layout_blocks_reassigns_prefix_properties_to_upcoming_anchor(self) -> None:
+        rows = [
+            {"row_label": "Cabinetry Handles", "value_region_text": "", "supplier_region_text": "", "notes_region_text": "", "row_kind": "handle"},
+            {"row_label": "Manufacturer", "value_region_text": "N/A", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            {"row_label": "Model", "value_region_text": "up to 20mm Drop Down - No Handle", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            {"row_label": "Manufacturer", "value_region_text": "Franke", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            {"row_label": "Range", "value_region_text": "Sirius", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            {"row_label": "Kitchen Sink", "value_region_text": "", "supplier_region_text": "", "notes_region_text": "", "row_kind": "sink"},
+        ]
+        blocks = extraction_service._build_generic_layout_blocks(rows, page_type="joinery")
+        self.assertEqual([(block["anchor_kind"], block["anchor_label"]) for block in blocks], [("handles", "Cabinetry Handles"), ("sink", "Kitchen Sink")])
+        handle_rows = [row["row_label"] for row in blocks[0]["rows"]]
+        sink_rows = [row["row_label"] for row in blocks[1]["rows"]]
+        self.assertNotIn("Range", handle_rows)
+        self.assertIn("Manufacturer", sink_rows)
+        self.assertIn("Range", sink_rows)
+
     def test_shared_generic_polish_clears_placeholder_values_when_layout_block_is_present(self) -> None:
         row = {
             "room_key": "kitchen",
