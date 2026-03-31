@@ -561,6 +561,9 @@ def _apply_layout_pipeline(
             applied_pages.append(page_no)
         except Exception as exc:
             page_notes.append(f"page {page_no}: {_truncate_note(exc)}")
+            if _is_openai_insufficient_quota_error(exc):
+                page_notes.append("OpenAI vision quota is exhausted; skipped remaining candidate pages.")
+                break
 
     mixed_pages, final_docling_pages, final_vision_pages = _apply_final_layout_pages(
         updated_documents,
@@ -2730,6 +2733,9 @@ def _apply_vision_fallback(
             applied_pages.append(page_no)
         except Exception as exc:
             page_notes.append(f"page {page_no}: {_truncate_note(exc)}")
+            if _is_openai_insufficient_quota_error(exc):
+                page_notes.append("OpenAI vision quota is exhausted; skipped remaining candidate pages.")
+                break
 
     if not applied_pages:
         vision_meta["vision_pages"] = attempted_pages
@@ -3399,7 +3405,13 @@ def _post_responses_api_content(content: list[dict[str, Any]], model: str = "") 
         except urllib.error.HTTPError as exc:
             last_error = exc
             _LAST_OPENAI_REQUEST_AT = time.monotonic()
+            error_body = _read_http_error_body(exc)
+            error_code, error_message = _parse_openai_error_details(error_body)
+            if error_code == "insufficient_quota":
+                raise RuntimeError(_format_openai_http_error(exc, error_code, error_message))
             if exc.code not in {408, 409, 429, 500, 502, 503, 504} or attempt >= runtime.OPENAI_REQUEST_MAX_RETRIES - 1:
+                if error_code or error_message:
+                    raise RuntimeError(_format_openai_http_error(exc, error_code, error_message))
                 raise
             retry_after = exc.headers.get("Retry-After", "") if exc.headers else ""
             reset_after = exc.headers.get("x-ratelimit-reset-requests", "") if exc.headers else ""
@@ -3442,6 +3454,43 @@ def _extract_output_text(payload: dict[str, Any]) -> str:
             if isinstance(text, str):
                 texts.append(text)
     return "\n".join(texts).strip()
+
+
+def _read_http_error_body(exc: urllib.error.HTTPError) -> str:
+    try:
+        body = exc.read()
+    except Exception:
+        return ""
+    if isinstance(body, bytes):
+        return body.decode("utf-8", errors="replace")
+    return str(body or "")
+
+
+def _parse_openai_error_details(body: str) -> tuple[str, str]:
+    if not body:
+        return "", ""
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return "", body.strip()[:240]
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        return "", ""
+    code = str(error.get("code", "") or "").strip()
+    message = str(error.get("message", "") or "").strip()
+    return code, message
+
+
+def _format_openai_http_error(exc: urllib.error.HTTPError, error_code: str, error_message: str) -> str:
+    detail = error_code or "http_error"
+    if error_message:
+        return f"OpenAI {detail}: {error_message}"
+    return f"OpenAI {detail}: HTTP {exc.code} {getattr(exc, 'reason', '')}".strip()
+
+
+def _is_openai_insufficient_quota_error(exc: Exception) -> bool:
+    text = str(exc or "").strip().lower()
+    return "insufficient_quota" in text or "exceeded your current quota" in text
 
 
 def _parse_openai_json_output(output_text: str) -> dict[str, Any]:

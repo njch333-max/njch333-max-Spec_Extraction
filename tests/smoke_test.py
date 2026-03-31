@@ -437,6 +437,33 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(payload, response_payload)
         self.assertEqual(mocked_urlopen.call_count, 2)
 
+    def test_openai_request_fails_fast_on_insufficient_quota(self) -> None:
+        quota_error = urllib.error.HTTPError(
+            url="https://api.openai.com/v1/responses",
+            code=429,
+            msg="Too Many Requests",
+            hdrs={},
+            fp=io.BytesIO(
+                b'{'
+                b'"error":{'
+                b'"message":"You exceeded your current quota, please check your plan and billing details.",'
+                b'"type":"insufficient_quota",'
+                b'"param":null,'
+                b'"code":"insufficient_quota"'
+                b"}}"
+            ),
+        )
+        with mock.patch.object(extraction_service.runtime, "OPENAI_REQUEST_MIN_INTERVAL_SECONDS", 0.0), mock.patch.object(
+            extraction_service.runtime, "OPENAI_REQUEST_MAX_RETRIES", 4
+        ), mock.patch(
+            "App.services.extraction_service.urllib.request.urlopen",
+            side_effect=[quota_error],
+        ) as mocked_urlopen:
+            extraction_service._LAST_OPENAI_REQUEST_AT = 0.0
+            with self.assertRaisesRegex(RuntimeError, "insufficient_quota"):
+                extraction_service._post_responses_api_content([{"type": "input_text", "text": "{}"}], model="gpt-test")
+        self.assertEqual(mocked_urlopen.call_count, 1)
+
     def test_extract_site_address_from_glued_simonds_header(self) -> None:
         raw_text = (
             "Colour Selections\n"
