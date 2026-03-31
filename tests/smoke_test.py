@@ -5135,6 +5135,17 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(overlay["toe_kick"], ["Laminex - Blackened Legno"])
         self.assertEqual(overlay["handles"], ["L Shaped Finger Pull"])
 
+    def test_generic_accessory_formatter_drops_bare_anchor_without_values(self) -> None:
+        formatted = extraction_service._format_generic_accessory_from_parts({}, anchor_label="Robe Hook")
+        self.assertEqual(formatted, "")
+
+    def test_placeholder_fixture_detection_catches_shower_label_only_string(self) -> None:
+        self.assertTrue(
+            extraction_service._looks_like_placeholder_fixture_text(
+                "Shower Rail / Rose Shower Screen Shower Screen Colour"
+            )
+        )
+
     def _mark_raw_spec_qa_passed(self, job_id: int) -> None:
         verification = store.get_job_snapshot_verification(job_id, "raw_spec")
         self.assertIsNotNone(verification)

@@ -3657,8 +3657,6 @@ def _format_generic_accessory_from_parts(parts: dict[str, list[str]], *, anchor_
     if not supplier and not description:
         if note and anchor_title and anchor_title.lower() not in {"accessories", "accessories & toilet suite"}:
             return parsing.normalize_brand_casing_text(f"{anchor_title} - {note}")
-        if anchor_title and anchor_title.lower() not in {"accessories", "accessories & toilet suite"} and not _is_generic_placeholder_text(anchor_title):
-            return parsing.normalize_brand_casing_text(anchor_title)
         return ""
     result = " - ".join(part for part in (supplier, description, note) if part)
     return parsing.normalize_brand_casing_text(result).strip(" -;,")
@@ -3684,6 +3682,10 @@ def _looks_like_placeholder_fixture_text(value: str) -> bool:
         "not applicable model type",
         "not applicable type location",
     )
+    label_words = {"shower", "rail", "rose", "screen", "colour", "location", "model", "type", "mixer"}
+    normalized_words = set(re.sub(r"[^a-z]+", " ", lowered).split())
+    if normalized_words and normalized_words <= label_words:
+        return True
     return any(token in lowered for token in placeholder_tokens)
 
 
