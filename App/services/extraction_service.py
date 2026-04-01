@@ -1710,6 +1710,7 @@ def _table_group_label_rows(
     page_type: str,
 ) -> list[dict[str, Any]]:
     labels = [parsing.normalize_space(line).strip("- ") for line in labels_cell.split("\n") if parsing.normalize_space(line).strip("- ")]
+    normalized_labels = [_normalize_generic_row_label(label) for label in labels]
     values: list[str] = []
     for cell in value_cells:
         if not cell:
@@ -1717,6 +1718,30 @@ def _table_group_label_rows(
         parts = [parsing.normalize_space(line) for line in cell.split("\n") if parsing.normalize_space(line)]
         if parts:
             values.extend(parts)
+    anchor_skip_budget = max(0, len(labels) - len(values))
+    leading_generic_anchor = bool(
+        page_type != "sinkware_tapware"
+        and normalized_labels
+        and _looks_like_grouped_generic_anchor_label(normalized_labels[0])
+        and any(_looks_like_grouped_generic_follower_label(label) for label in normalized_labels[1:])
+    )
+
+    def should_skip_value(label: str, index: int) -> bool:
+        nonlocal anchor_skip_budget
+        normalized = _normalize_generic_row_label(label)
+        if index == 0 and leading_generic_anchor:
+            return True
+        if anchor_skip_budget <= 0:
+            return False
+        if page_type == "sinkware_tapware":
+            return False
+        if index != 0 and normalized not in {"benchtops", "bench tops", "drawers"}:
+            return False
+        if normalized in GENERIC_LAYOUT_ANCHOR_LABELS:
+            anchor_skip_budget -= 1
+            return True
+        return False
+
     rows: list[dict[str, Any]] = []
     value_index = 0
     shift_accessory_placeholder = bool(
@@ -1726,9 +1751,11 @@ def _table_group_label_rows(
         and values
         and values[0].lower() in {"not applicable", "#n/a"}
     )
-    for label in labels:
+    for index, label in enumerate(labels):
         normalized_label = label
-        if shift_accessory_placeholder and normalized_label in {"Accessories", "Accessories & Toilet Suite"}:
+        if should_skip_value(normalized_label, index):
+            value_text = ""
+        elif shift_accessory_placeholder and normalized_label in {"Accessories", "Accessories & Toilet Suite"}:
             value_text = ""
         elif shift_accessory_placeholder and normalized_label not in {"Accessories", "Accessories & Toilet Suite"} and value_index == 0:
             value_text = values[value_index]
@@ -4044,18 +4071,22 @@ GENERIC_INLINE_PROPERTY_LABELS: tuple[str, ...] = tuple(
 
 GENERIC_LAYOUT_ANCHOR_LABELS: set[str] = {
     "benchtop",
+    "benchtops",
     "bench tops",
     "wall run benchtop",
     "island/penisula benchtop",
     "underbench",
+    "underbench including island",
     "base cabinet panels",
     "wall run base cabinet panels",
     "island/penisula base cabinet panels",
     "island/penisula feature panels",
     "waterfall end panels",
+    "contrasting facings",
     "overhead cupboards",
     "overheads",
     "pantry doors",
+    "integrated appliances",
     "tall panel",
     "cabinet panels",
     "shadowline",
@@ -4302,6 +4333,49 @@ def _merge_generic_layout_overlay(left: dict[str, Any], right: dict[str, Any]) -
 
 def _normalize_generic_row_label(value: str) -> str:
     return parsing.normalize_space(str(value or "")).strip(" -").lower()
+
+
+def _looks_like_grouped_generic_anchor_label(label: str) -> bool:
+    normalized = _normalize_generic_row_label(label)
+    if not normalized:
+        return False
+    if normalized in GENERIC_LAYOUT_ANCHOR_LABELS:
+        return True
+    return any(
+        token in normalized
+        for token in (
+            "benchtop",
+            "underbench",
+            "cabinet panels",
+            "overhead cupboards",
+            "overheads",
+            "pantry doors",
+            "drawers",
+            "contrasting facings",
+            "integrated appliances",
+            "kickboard",
+            "handles",
+            "floating shelf",
+            "shelving",
+        )
+    )
+
+
+def _looks_like_grouped_generic_follower_label(label: str) -> bool:
+    normalized = _normalize_generic_row_label(label)
+    if not normalized:
+        return False
+    if normalized in GENERIC_LAYOUT_PROPERTY_MAP:
+        return True
+    return normalized in {
+        "door handle",
+        "drawer handle",
+        "pantry door handle",
+        "bin & pot drawers handle",
+        "dishwasher",
+        "fridge",
+        "kickboard",
+    } or bool(_match_layout_row_label(label)[0])
 
 
 def _row_region_text(row: dict[str, Any], *names: str) -> str:
@@ -4741,6 +4815,8 @@ def _append_generic_part_value(parts: dict[str, list[str]], label: str, value: s
     if not bucket:
         return
     text = _strip_generic_property_prefix(value, normalized_label)
+    if normalized_label not in {"location"}:
+        text = _strip_generic_anchor_tail(text)
     if normalized_label in {"colour", "colour & finish"}:
         text = re.sub(r"(?i)\bIsland Colour As Above\b", "", text)
         text = parsing.normalize_space(text).strip(" -;,")
@@ -4749,6 +4825,16 @@ def _append_generic_part_value(parts: dict[str, list[str]], label: str, value: s
     if not text or text.upper() in {"N/A", "NOT APPLICABLE", "#N/A"}:
         return
     parts.setdefault(bucket, []).append(text)
+
+
+def _strip_generic_anchor_tail(text: str) -> str:
+    cleaned = _clean_generic_fragment(text)
+    if not cleaned:
+        return ""
+    for anchor_label in sorted(GENERIC_LAYOUT_ANCHOR_LABELS, key=len, reverse=True):
+        pattern = re.sub(r"\\ ", r"\\s*", re.escape(anchor_label))
+        cleaned = re.sub(rf"(?i)\s*{pattern}\s*$", "", cleaned).strip(" -;,")
+    return parsing.normalize_space(cleaned).strip(" -;,")
 
 
 def _clean_generic_fragment(value: str) -> str:
@@ -4950,6 +5036,15 @@ def _format_generic_fixture_from_parts(parts: dict[str, list[str]], *, kind: str
     supplier = _first_meaningful(parts.get("manufacturer", []))
     tap_tokens = ("mixer", "tap", "spout", "stop", "shower rail", "shower rose", "shower system")
     sink_excludes = tap_tokens if kind in {"sink", "basin"} else ()
+    fixture_note_excludes = {
+        "robe hook",
+        "hand towel rail",
+        "towel rail",
+        "toilet suite",
+        "toilet roll holder",
+        "accessories",
+        "selection required",
+    }
     description_parts = [
         _first_meaningful(parts.get("range", [])),
         _first_meaningful(parts.get("model", [])),
@@ -4966,7 +5061,9 @@ def _format_generic_fixture_from_parts(parts: dict[str, list[str]], *, kind: str
         *[
             value
             for value in _meaningful_generic_values(parts.get("note", []))
-            if "client name" not in value.lower() and "signed date" not in value.lower()
+            if "client name" not in value.lower()
+            and "signed date" not in value.lower()
+            and not any(token in value.lower() for token in fixture_note_excludes)
         ],
     ]
     note = " - ".join(part for part in note_parts if part)

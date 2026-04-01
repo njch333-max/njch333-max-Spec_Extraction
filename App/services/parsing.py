@@ -3697,6 +3697,11 @@ def _clean_imperial_layout_fragment(text: str) -> str:
     cleaned = re.sub(r"(?i)^#+\s*", "", cleaned)
     cleaned = re.sub(r"(?i)^.*?\bjoinery selection sheet\b", "", cleaned)
     cleaned = re.sub(r"(?i)^.*?\bcolour schedule\b", "", cleaned)
+    cleaned = re.sub(
+        r"(?i)^.*?\b(?:street|st|court|ct|road|rd|crescent|cres|terrace|tce|boulevard|blvd|drive|dr|avenue|ave|lane|ln)\b.*?\bprivate\b\s*-\s*[A-Z][A-Za-z]+(?:[-'][A-Za-z]+)?(?:\s+[A-Z][A-Za-z]+(?:[-'][A-Za-z]+)?){0,3}\s+\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b",
+        "",
+        cleaned,
+    )
     cleaned = re.sub(r"(?i)\b(?:ceiling height|cabinetry height|ref\.?\s*number|selection required)\b.*$", "", cleaned)
     cleaned = re.sub(r"(?i)\b(?:client|designer|signature|signed date|document ref|address|date)\b\s*:.*$", "", cleaned)
     cleaned = normalize_brand_casing_text(normalize_space(cleaned)).strip(" -;,")

@@ -5632,6 +5632,14 @@ class SmokeTest(unittest.TestCase):
             "Polytec - Classic White Matt",
         )
 
+    def test_clean_imperial_layout_fragment_strips_private_name_date_prefix(self) -> None:
+        self.assertEqual(
+            parsing_module._clean_imperial_layout_fragment(
+                "9 Greenland Court, Springfield PRIVATE - Yasantha Warawita 12/03/2026 Caesarstone"
+            ),
+            "Caesarstone",
+        )
+
     def test_imperial_room_row_dedupes_floating_shelf_fragments(self) -> None:
         row = parsing_module.RoomRow(
             room_key="kitchen",
@@ -5807,6 +5815,20 @@ class SmokeTest(unittest.TestCase):
         )
         self.assertEqual(formatted, "Zara Gun Metal Pull-Out (ZA120-GM) - Centre of Sink")
 
+    def test_generic_fixture_formatter_drops_accessory_tail_from_tap(self) -> None:
+        formatted = extraction_service._format_generic_fixture_from_parts(
+            {
+                "manufacturer": ["Alder"],
+                "range": ["Maxx"],
+                "model": ["Rectangle Sink Mixer"],
+                "finish": ["Matt Black"],
+                "note": ["ALDER SACHI ROBE HOOK IN MATT BLACK"],
+            },
+            kind="tap",
+            anchor_label="Kitchen Tapware",
+        )
+        self.assertEqual(formatted, "Alder - Maxx - Rectangle Sink Mixer - Matt Black")
+
     def test_generic_overlay_reads_value_region_text_for_evoca_sink_and_tap(self) -> None:
         section = {
             "original_section_label": "Kitchen",
@@ -5875,6 +5897,44 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(rows[1]["row_label"], "Robe Hook")
         self.assertEqual(rows[1]["value_region_text"], "Not Applicable")
         self.assertEqual(rows[2]["value_region_text"], "Guest Towel Rail")
+
+    def test_table_group_label_rows_skip_leading_generic_anchor_before_property_values(self) -> None:
+        rows = extraction_service._table_group_label_rows(
+            "Benchtops\nManufacturer\nColour\nEdge Profile",
+            ["Quantum Quartz\nChampagne\n20mm Arissed"],
+            "joinery",
+        )
+        self.assertEqual(rows[0]["row_label"], "Benchtops")
+        self.assertEqual(rows[0]["value_region_text"], "")
+        self.assertEqual(rows[1]["row_label"], "Manufacturer")
+        self.assertEqual(rows[1]["value_region_text"], "Quantum Quartz")
+        self.assertEqual(rows[2]["row_label"], "Colour")
+        self.assertEqual(rows[2]["value_region_text"], "Champagne")
+        self.assertEqual(rows[3]["row_label"], "Edge Profile")
+        self.assertEqual(rows[3]["value_region_text"], "20mm Arissed")
+
+    def test_table_group_label_rows_skip_leading_underbench_anchor_before_property_values(self) -> None:
+        rows = extraction_service._table_group_label_rows(
+            "Underbench including Island\nManufacturer\nColour & Finish\nKickboard\nHandles",
+            ["Polytec\nBelgian Oak Matt\nLaminate\n4062-128-TG"],
+            "joinery",
+        )
+        self.assertEqual(rows[0]["row_label"], "Underbench including Island")
+        self.assertEqual(rows[0]["value_region_text"], "")
+        self.assertEqual(rows[1]["value_region_text"], "Polytec")
+        self.assertEqual(rows[2]["value_region_text"], "Belgian Oak Matt")
+        self.assertEqual(rows[3]["value_region_text"], "Laminate")
+        self.assertEqual(rows[4]["value_region_text"], "4062-128-TG")
+
+    def test_strip_generic_anchor_tail_removes_trailing_cabinet_label_noise(self) -> None:
+        self.assertEqual(
+            extraction_service._strip_generic_anchor_tail("Chalk White Base Cabinet Panels"),
+            "Chalk White",
+        )
+        self.assertEqual(
+            extraction_service._strip_generic_anchor_tail("Blackened LegnoOverheads"),
+            "Blackened Legno",
+        )
 
     def test_sink_tap_blocks_split_shower_rail_and_screen_into_separate_anchors(self) -> None:
         rows = [
