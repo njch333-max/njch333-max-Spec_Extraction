@@ -1956,6 +1956,40 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(page["layout_mode"], "lightweight")
         self.assertEqual(page["page_layout"]["room_blocks"][0]["room_label"], "KITCHEN")
 
+    def test_layout_completeness_penalizes_joinery_header_noise(self) -> None:
+        clean_layout = {
+            "page_type": "joinery",
+            "section_label": "KITCHEN",
+            "room_label": "KITCHEN",
+            "rows": [
+                {
+                    "row_label": "Benchtops",
+                    "value_region_text": "20mm Arissed",
+                    "supplier_region_text": "Quantum Quartz",
+                    "notes_region_text": "Champagne",
+                    "row_kind": "material",
+                }
+            ],
+        }
+        noisy_layout = {
+            "page_type": "joinery",
+            "section_label": "KITCHEN",
+            "room_label": "KITCHEN",
+            "rows": [
+                {
+                    "row_label": "Benchtops",
+                    "value_region_text": "15 CABINETS All Cabinets include Soft Close Hinges & Runners, lined internally with White Melamine",
+                    "supplier_region_text": "",
+                    "notes_region_text": "Page 8 of 83 Client Initials",
+                    "row_kind": "material",
+                }
+            ],
+        }
+        self.assertGreater(
+            extraction_service._layout_completeness_score(clean_layout),
+            extraction_service._layout_completeness_score(noisy_layout),
+        )
+
     def test_generic_sanitizers_strip_property_noise_and_accessory_tails(self) -> None:
         self.assertEqual(
             extraction_service._sanitize_generic_material_field(
@@ -1972,11 +2006,33 @@ class SmokeTest(unittest.TestCase):
             "Alder - Maxx (WELS 6 stars) - Rectangle Sink Mixer - Matt Black",
         )
         self.assertEqual(
+            extraction_service._sanitize_generic_fixture_field(
+                "Alder - Milano - Vegie Mixer - Chrome - ALDER SACHI | Alder - Milano - Vegie Mixer - Chrome",
+                kind="tap",
+            ),
+            "Alder - Milano - Vegie Mixer - Chrome",
+        )
+        self.assertEqual(
+            extraction_service._sanitize_generic_material_entries(
+                ["Laminex - Blackened Legno", "Blackened Legno", "Laminex - Blackened Legno"],
+                field_name="toe_kick",
+                room_key="kitchen",
+            ),
+            ["Laminex - Blackened Legno"],
+        )
+        self.assertEqual(
             extraction_service._sanitize_generic_handle_entries(
                 ["N/A, Category 6, C137 Black 100m, Horizontal", "up to 20mm Drop Down - No Handle N/A Category 6, Horizontal, Soft Close"]
             ),
             ["C137 Black 100m, Horizontal", "up to 20mm Drop Down - No Handle, Horizontal"],
         )
+
+    def test_polish_generic_layout_room_sanitizes_toe_kick_before_material_cleanup(self) -> None:
+        polished = extraction_service._polish_generic_layout_room(
+            {"room_key": "kitchen", "original_room_label": "Kitchen"},
+            {"toe_kick": ["Laminex - Blackened Legno", "Blackened Legno"]},
+        )
+        self.assertEqual(polished["toe_kick"], ["Laminex - Blackened Legno"])
 
     def test_imperial_material_and_flooring_cleaners_strip_meta_noise(self) -> None:
         self.assertEqual(

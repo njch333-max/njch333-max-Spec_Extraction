@@ -1145,9 +1145,32 @@ def _layout_completeness_score(layout: dict[str, Any], raw_page_text: str = "") 
         joinery_penalty += 20000
     elif page_type == "joinery" and room_blocks and len(plausible_room_blocks) < len(room_blocks):
         joinery_penalty += 250 * (len(room_blocks) - len(plausible_room_blocks))
+    header_noise_penalty = 0
+    noisy_rows = sum(1 for row in rows if _layout_row_has_header_noise(row))
+    if noisy_rows:
+        header_noise_penalty = noisy_rows * (1500 if page_type == "joinery" else 500)
     if not rows and not raw_page_text.strip():
         return 0
-    return room_bonus + title_bonus + sum(_layout_row_score(row) for row in rows) - joinery_penalty
+    return room_bonus + title_bonus + sum(_layout_row_score(row) for row in rows) - joinery_penalty - header_noise_penalty
+
+
+def _layout_row_has_header_noise(row: dict[str, Any]) -> bool:
+    text = _row_fragment_text(row).lower()
+    if not text:
+        return False
+    return any(
+        token in text
+        for token in (
+            "all cabinets include soft close",
+            "benchtops over maximum length",
+            "colour selections framework",
+            "item selection level",
+            "supplier description design comments",
+            "client initials",
+            "page ",
+            "job number",
+        )
+    )
 
 
 def _merge_page_layouts(
@@ -3218,7 +3241,23 @@ def _normalize_layout_row_fragments(rows: list[dict[str, str]]) -> list[dict[str
                 value = implicit_value
                 notes = implicit_note
 
-        trailing_label, cleaned_value = _extract_embedded_layout_anchor_tail(value, next_label)
+        current_label = _normalize_generic_row_label(str(row.get("row_label", "") or ""))
+        trailing_label = ""
+        cleaned_value = value
+        if not current_label or current_label in GENERIC_LAYOUT_ANCHOR_LABELS or current_label in {
+            "manufacturer",
+            "range",
+            "model",
+            "colour",
+            "colour & finish",
+            "finish",
+            "profile",
+            "edge profile",
+            "island edge profile",
+            "style",
+            "type",
+        }:
+            trailing_label, cleaned_value = _extract_embedded_layout_anchor_tail(value, next_label)
         if trailing_label:
             row["value_region_text"] = cleaned_value
             normalized.append(row)
@@ -5163,12 +5202,24 @@ def _generic_material_fragment_is_noise(fragment: str, *, field_name: str = "") 
     return False
 
 
+def _generic_fragment_token_key(value: str) -> set[str]:
+    text = _clean_generic_fragment(value).lower()
+    return {
+        token
+        for token in re.split(r"[^a-z0-9]+", text)
+        if token
+        and token not in {"and", "the", "with", "mm", "n", "a", "na"}
+        and not token.isdigit()
+    }
+
+
 def _sanitize_generic_material_field(value: Any, *, field_name: str = "", room_key: str = "") -> str:
     fragments = [
         _clean_generic_fragment(fragment)
         for fragment in re.split(r"\s*\|\s*", parsing.normalize_space(str(value or "")))
     ]
     cleaned: list[str] = []
+    cleaned_keys: list[set[str]] = []
     for fragment in fragments:
         if not fragment:
             continue
@@ -5182,6 +5233,16 @@ def _sanitize_generic_material_field(value: Any, *, field_name: str = "", room_k
         normalized = parsing.normalize_brand_casing_text(fragment).strip(" -;,")
         if not normalized:
             continue
+        token_key = _generic_fragment_token_key(normalized)
+        if token_key and any(token_key <= existing_key for existing_key in cleaned_keys if existing_key):
+            continue
+        if token_key:
+            replacement_indexes = [
+                index for index, existing_key in enumerate(cleaned_keys) if existing_key and existing_key < token_key
+            ]
+            for index in reversed(replacement_indexes):
+                del cleaned[index]
+                del cleaned_keys[index]
         if any(
             normalized.lower() == existing.lower()
             or normalized.lower() in existing.lower()
@@ -5190,9 +5251,22 @@ def _sanitize_generic_material_field(value: Any, *, field_name: str = "", room_k
         ):
             continue
         cleaned.append(normalized)
+        cleaned_keys.append(token_key)
     if room_key == "kitchen" and field_name == "bench_tops_other" and cleaned:
         return " | ".join(cleaned)
     return " | ".join(cleaned)
+
+
+def _sanitize_generic_material_entries(values: Any, *, field_name: str = "", room_key: str = "") -> list[str]:
+    entries = parsing._coerce_string_list(values)
+    if not entries:
+        return []
+    cleaned_text = _sanitize_generic_material_field(" | ".join(entries), field_name=field_name, room_key=room_key)
+    return [
+        fragment
+        for fragment in re.split(r"\s*\|\s*", cleaned_text)
+        if parsing.normalize_space(fragment)
+    ]
 
 
 def _bench_field_is_combined_duplicate(other: str, wall_run: str, island: str) -> bool:
@@ -5264,31 +5338,49 @@ def _format_generic_fixture_from_parts(parts: dict[str, list[str]], *, kind: str
 
 
 def _sanitize_generic_fixture_field(value: Any, *, kind: str = "") -> str:
-    text = _clean_generic_fragment(str(value or ""))
-    if not text:
-        return ""
-    text = re.sub(
-        r"(?i)\s*\+\s*[^+]*(?:robe hook|towel rail|hand towel rail|toilet suite|toilet roll holder).*$",
-        "",
-        text,
-    )
-    text = re.sub(
-        r"(?i)\b(?:client name|designer|signature|signed date|document ref|category)\b.*$",
-        "",
-        text,
-    )
-    location_first = re.match(
-        r"(?i)^(?P<location>(?:centre|center|corner|left|right)(?:\s+of(?:\s+(?:sink|basin|tub))?)?)\s*-\s*(?P<rest>.+)$",
-        text,
-    )
-    if location_first and any(
-        token in location_first.group("rest").lower()
-        for token in ("mixer", "tap", "spout", "sink", "basin", "gooseneck", "pull-out")
-    ):
-        text = f"{location_first.group('rest')} - {location_first.group('location')}"
-    if kind == "tap":
-        text = re.sub(r"(?i)\b(?:by client|supplied by client)\b.*$", "", text).strip(" -;,")
-    return parsing.normalize_brand_casing_text(parsing.normalize_space(text)).strip(" -;,")
+    fragments = [
+        _clean_generic_fragment(fragment)
+        for fragment in re.split(r"\s*\|\s*", parsing.normalize_space(str(value or "")))
+    ]
+    cleaned: list[str] = []
+    for fragment in fragments:
+        text = fragment
+        if not text:
+            continue
+        text = re.sub(
+            r"(?i)\s*\+\s*[^+]*(?:robe hook|towel rail|hand towel rail|toilet suite|toilet roll holder).*$",
+            "",
+            text,
+        )
+        text = re.sub(
+            r"(?i)\b(?:client name|designer|signature|signed date|document ref|category)\b.*$",
+            "",
+            text,
+        )
+        location_first = re.match(
+            r"(?i)^(?P<location>(?:centre|center|corner|left|right)(?:\s+of(?:\s+(?:sink|basin|tub))?)?)\s*-\s*(?P<rest>.+)$",
+            text,
+        )
+        if location_first and any(
+            token in location_first.group("rest").lower()
+            for token in ("mixer", "tap", "spout", "sink", "basin", "gooseneck", "pull-out")
+        ):
+            text = f"{location_first.group('rest')} - {location_first.group('location')}"
+        if kind == "tap":
+            text = re.sub(r"(?i)\b(?:by client|supplied by client)\b.*$", "", text).strip(" -;,")
+            text = re.sub(r"(?i)\s*-\s*(?:alder\s+sachi|sachi|wish)\s*$", "", text).strip(" -;,")
+        text = parsing.normalize_brand_casing_text(parsing.normalize_space(text)).strip(" -;,")
+        if not text:
+            continue
+        if any(
+            text.lower() == existing.lower()
+            or text.lower() in existing.lower()
+            or existing.lower() in text.lower()
+            for existing in cleaned
+        ):
+            continue
+        cleaned.append(text)
+    return " | ".join(cleaned)
 
 
 def _format_generic_handles_from_parts(parts: dict[str, list[str]]) -> str:
@@ -5551,8 +5643,10 @@ def _polish_generic_layout_room(row: dict[str, Any], overlay: dict[str, Any]) ->
     if not overlay:
         return row
     polished = dict(row)
+    room_key = parsing.same_room_identity(str(polished.get("original_room_label", "")), str(polished.get("room_key", "")))
     if overlay.get("original_room_label"):
         polished["original_room_label"] = overlay["original_room_label"]
+        room_key = parsing.same_room_identity(str(polished.get("original_room_label", "")), str(polished.get("room_key", "")))
     existing_bench_fields = (
         str(polished.get("bench_tops_wall_run", "") or ""),
         str(polished.get("bench_tops_island", "") or ""),
@@ -5608,7 +5702,11 @@ def _polish_generic_layout_room(row: dict[str, Any], overlay: dict[str, Any]) ->
         if overlay.get(field_name):
             polished[field_name] = True
     if overlay.get("toe_kick"):
-        polished["toe_kick"] = [entry for entry in overlay["toe_kick"] if not _looks_like_placeholder_entry(entry)]
+        polished["toe_kick"] = _sanitize_generic_material_entries(
+            [entry for entry in overlay["toe_kick"] if not _looks_like_placeholder_entry(entry)],
+            field_name="toe_kick",
+            room_key=room_key,
+        )
     if any(overlay.get(field_name) for field_name in ("bench_tops_wall_run", "bench_tops_island", "bench_tops_other")):
         polished["bench_tops"] = [
             value
@@ -5667,7 +5765,6 @@ def _polish_generic_layout_room(row: dict[str, Any], overlay: dict[str, Any]) ->
         polished["handles"] = [entry for entry in polished.get("handles", []) if not _looks_like_placeholder_entry(entry)]
     if overlay.get("has_accessories_block"):
         polished["accessories"] = [entry for entry in polished.get("accessories", []) if not _looks_like_placeholder_entry(entry)]
-    room_key = parsing.same_room_identity(str(polished.get("original_room_label", "")), str(polished.get("room_key", "")))
     for field_name in (
         "bench_tops_wall_run",
         "bench_tops_island",
