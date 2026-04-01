@@ -5620,6 +5620,18 @@ class SmokeTest(unittest.TestCase):
             "Franke Eos Neo pull out tap copper TA9601CP",
         )
 
+    def test_imperial_layout_row_material_text_strips_heading_and_meta_noise(self) -> None:
+        self.assertEqual(
+            parsing_module._imperial_layout_row_material_text(
+                {
+                    "value_text": "## KITCHEN JOINERY SELECTION SHEET Polytec Classic White Matt",
+                    "supplier_text": "",
+                    "notes_text": "Cabinetry Height: 2400",
+                }
+            ),
+            "Polytec - Classic White Matt",
+        )
+
     def test_imperial_room_row_dedupes_floating_shelf_fragments(self) -> None:
         row = parsing_module.RoomRow(
             room_key="kitchen",
@@ -5813,6 +5825,44 @@ class SmokeTest(unittest.TestCase):
         overlay = extraction_service._extract_generic_layout_overlay(section)
         self.assertIn("Burazzo 450mm Gun Metal Single Bowl Sink", overlay["sink_info"])
         self.assertEqual(overlay["tap_info"], "Zara Gun Metal Pull-Out (ZA120-GM) - Centre of Sink")
+
+    def test_extract_generic_inline_property_pairs_splits_joined_property_text(self) -> None:
+        pairs = extraction_service._extract_generic_inline_property_pairs(
+            "Manufacturer Laminex Range Formwrap Profile Coastal Colour Chalk White"
+        )
+        self.assertEqual(
+            pairs,
+            [
+                ("manufacturer", "Laminex"),
+                ("range", "Formwrap"),
+                ("profile", "Coastal"),
+                ("colour", "Chalk White"),
+            ],
+        )
+
+    def test_generic_overlay_handles_joined_property_text_without_label_noise(self) -> None:
+        section = {
+            "original_section_label": "Kitchen",
+            "page_type": "joinery",
+            "file_name": "simonds.pdf",
+            "page_nos": [8],
+            "text": "Kitchen",
+            "layout_rows": [
+                {
+                    "row_label": "Base Cabinet Panels",
+                    "value_text": "Manufacturer Laminex Range Formwrap Profile Coastal Colour Chalk White",
+                    "row_kind": "material",
+                },
+                {
+                    "row_label": "Cabinetry Handles",
+                    "value_text": "Manufacturer Hettich Model Salemi 9113368 Finish Brushed Nickel",
+                    "row_kind": "handle",
+                },
+            ],
+        }
+        overlay = extraction_service._extract_generic_layout_overlay(section)
+        self.assertEqual(overlay["door_colours_base"], "Laminex - Chalk White - Coastal")
+        self.assertEqual(overlay["handles"], ["Hettich - Salemi 9113368 - Brushed Nickel"])
 
     def test_table_group_label_rows_shifts_not_applicable_from_accessories_anchor_to_first_child(self) -> None:
         rows = extraction_service._table_group_label_rows(

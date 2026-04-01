@@ -4038,6 +4038,10 @@ GENERIC_LAYOUT_PROPERTY_MAP: dict[str, str] = {
     "oven": "note",
 }
 
+GENERIC_INLINE_PROPERTY_LABELS: tuple[str, ...] = tuple(
+    sorted(GENERIC_LAYOUT_PROPERTY_MAP.keys(), key=len, reverse=True)
+)
+
 GENERIC_LAYOUT_ANCHOR_LABELS: set[str] = {
     "benchtop",
     "bench tops",
@@ -4639,6 +4643,11 @@ def _collect_generic_block_parts(block: dict[str, Any]) -> dict[str, list[str]]:
         text = parsing.normalize_space(" ".join(part for part in (value_text, supplier_text, notes_text) if part))
         if not text:
             continue
+        inline_pairs = _extract_generic_inline_property_pairs(text)
+        if inline_pairs and (not label or label in GENERIC_LAYOUT_PROPERTY_MAP or len(inline_pairs) > 1):
+            for inline_label, inline_value in inline_pairs:
+                _append_generic_part_value(parts, inline_label, inline_value)
+            continue
         if label in {"colour", "colour & finish"}:
             text = re.sub(r"(?i)\bIsland Colour As Above\b", "", text)
             text = parsing.normalize_space(text).strip(" -;,")
@@ -4655,7 +4664,7 @@ def _collect_generic_block_parts(block: dict[str, Any]) -> dict[str, list[str]]:
             continue
         bucket = GENERIC_LAYOUT_PROPERTY_MAP.get(label)
         if bucket:
-            parts.setdefault(bucket, []).append(text)
+            _append_generic_part_value(parts, label, text)
         elif not label:
             lower_text = text.lower()
             if "benchtop" in lower_text:
@@ -4688,6 +4697,58 @@ def _collect_generic_block_parts(block: dict[str, Any]) -> dict[str, list[str]]:
         elif label:
             parts.setdefault("note", []).append(text)
     return parts
+
+
+def _strip_generic_property_prefix(text: str, label: str) -> str:
+    cleaned = _clean_generic_fragment(text)
+    normalized_label = _normalize_generic_row_label(label)
+    if not cleaned or not normalized_label:
+        return cleaned
+    pattern = rf"(?i)^\s*{re.escape(normalized_label)}(?:\s*&\s*finish)?\s*:?\s*"
+    cleaned = re.sub(pattern, "", cleaned)
+    return parsing.normalize_space(cleaned).strip(" -;,")
+
+
+def _extract_generic_inline_property_pairs(text: str) -> list[tuple[str, str]]:
+    cleaned = _clean_generic_fragment(text)
+    if not cleaned:
+        return []
+    label_pattern = "|".join(re.escape(label) for label in GENERIC_INLINE_PROPERTY_LABELS)
+    matches = list(
+        re.finditer(
+            rf"(?i)(?<![A-Za-z0-9])(?:{label_pattern})(?=(?:\s*:|\s+|$))",
+            cleaned,
+        )
+    )
+    if not matches:
+        return []
+    if len(matches) == 1 and matches[0].start() > 0:
+        return []
+    pairs: list[tuple[str, str]] = []
+    for index, match in enumerate(matches):
+        label = _normalize_generic_row_label(match.group(0))
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(cleaned)
+        value = _strip_generic_property_prefix(cleaned[start:end], label)
+        if value:
+            pairs.append((label, value))
+    return pairs
+
+
+def _append_generic_part_value(parts: dict[str, list[str]], label: str, value: str) -> None:
+    normalized_label = _normalize_generic_row_label(label)
+    bucket = GENERIC_LAYOUT_PROPERTY_MAP.get(normalized_label)
+    if not bucket:
+        return
+    text = _strip_generic_property_prefix(value, normalized_label)
+    if normalized_label in {"colour", "colour & finish"}:
+        text = re.sub(r"(?i)\bIsland Colour As Above\b", "", text)
+        text = parsing.normalize_space(text).strip(" -;,")
+    if normalized_label in {"door handle", "drawer handle", "pantry door handle", "bin & pot drawers handle"}:
+        text = parsing.normalize_space(text.replace("**", "")).strip(" -;,")
+    if not text or text.upper() in {"N/A", "NOT APPLICABLE", "#N/A"}:
+        return
+    parts.setdefault(bucket, []).append(text)
 
 
 def _clean_generic_fragment(value: str) -> str:
@@ -4730,6 +4791,11 @@ def _looks_like_generic_field_noise(value: str, *, field: str = "") -> bool:
     if _is_generic_placeholder_text(text):
         return True
     lowered = text.lower()
+    if re.match(
+        rf"(?i)^\s*(?:{'|'.join(re.escape(label) for label in GENERIC_INLINE_PROPERTY_LABELS)})\b",
+        lowered,
+    ):
+        return True
     if any(
         token in lowered
         for token in (
@@ -4795,6 +4861,9 @@ def _meaningful_generic_values(values: list[str], *, exclude_tokens: tuple[str, 
     seen: set[str] = set()
     for raw_value in values:
         text = _clean_generic_fragment(raw_value)
+        inline_pairs = _extract_generic_inline_property_pairs(text)
+        if len(inline_pairs) == 1:
+            text = inline_pairs[0][1]
         if _is_generic_placeholder_text(text):
             continue
         lowered = text.lower()
@@ -4929,6 +4998,7 @@ def _format_generic_handles_from_parts(parts: dict[str, list[str]]) -> str:
     ]
     description = " - ".join(part for part in description_parts if part)
     note_parts = [
+        _first_meaningful(parts.get("finish", [])),
         _first_meaningful(parts.get("fixing", [])),
         *(_meaningful_generic_values(parts.get("mechanism", []), exclude_tokens=("soft close",))[:1]),
         _first_meaningful(parts.get("door handle", [])),

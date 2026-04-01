@@ -3690,23 +3690,36 @@ def _imperial_layout_row_text(row: dict[str, Any]) -> str:
     )
 
 
+def _clean_imperial_layout_fragment(text: str) -> str:
+    cleaned = normalize_brand_casing_text(normalize_space(text)).strip(" -;,")
+    if not cleaned:
+        return ""
+    cleaned = re.sub(r"(?i)^#+\s*", "", cleaned)
+    cleaned = re.sub(r"(?i)^.*?\bjoinery selection sheet\b", "", cleaned)
+    cleaned = re.sub(r"(?i)^.*?\bcolour schedule\b", "", cleaned)
+    cleaned = re.sub(r"(?i)\b(?:ceiling height|cabinetry height|ref\.?\s*number|selection required)\b.*$", "", cleaned)
+    cleaned = re.sub(r"(?i)\b(?:client|designer|signature|signed date|document ref|address|date)\b\s*:.*$", "", cleaned)
+    cleaned = normalize_brand_casing_text(normalize_space(cleaned)).strip(" -;,")
+    return cleaned
+
+
 def _imperial_layout_row_material_text(
     row: dict[str, Any],
     *,
     drop_value_patterns: tuple[str, ...] = (),
     extra_parts: list[str] | None = None,
 ) -> str:
-    supplier = normalize_brand_casing_text(str(row.get("supplier_text", "") or ""))
-    value = normalize_brand_casing_text(str(row.get("value_text", "") or ""))
-    notes = normalize_brand_casing_text(str(row.get("notes_text", "") or ""))
+    supplier = _clean_imperial_layout_fragment(str(row.get("supplier_text", "") or ""))
+    value = _clean_imperial_layout_fragment(str(row.get("value_text", "") or ""))
+    notes = _clean_imperial_layout_fragment(str(row.get("notes_text", "") or ""))
     parts: list[str] = []
     for fragment in (value, notes, *(extra_parts or [])):
-        cleaned = normalize_brand_casing_text(normalize_space(fragment)).strip(" -;,")
+        cleaned = _clean_imperial_layout_fragment(fragment)
         if not cleaned:
             continue
         if supplier:
             cleaned = re.sub(rf"(?i)\b{re.escape(supplier)}\b", "", cleaned)
-            cleaned = normalize_brand_casing_text(normalize_space(cleaned)).strip(" -;,")
+            cleaned = _clean_imperial_layout_fragment(cleaned)
             if not cleaned:
                 continue
         if any(re.search(pattern, cleaned) for pattern in drop_value_patterns):
@@ -3731,13 +3744,14 @@ def _split_material_profile_fragment(text: str) -> list[str]:
 
 
 def _imperial_layout_row_handle_entry(row: dict[str, Any]) -> str:
-    supplier = normalize_brand_casing_text(str(row.get("supplier_text", "") or "")).strip(" -;,")
-    description = normalize_brand_casing_text(str(row.get("value_text", "") or "")).strip(" -;,")
-    note = normalize_brand_casing_text(str(row.get("notes_text", "") or "")).strip(" -;,")
+    raw_supplier = normalize_brand_casing_text(str(row.get("supplier_text", "") or "")).strip(" -;,")
+    supplier = _clean_imperial_layout_fragment(raw_supplier)
+    description = _clean_imperial_layout_fragment(str(row.get("value_text", "") or ""))
+    note = _clean_imperial_layout_fragment(str(row.get("notes_text", "") or ""))
     supplier_note_parts: list[str] = []
-    if re.search(r"(?i)\bsupplied by client\b", supplier):
+    if re.search(r"(?i)\bsupplied by client\b", raw_supplier):
         supplier_note_parts.append("Supplied By Client")
-    if re.search(r"(?i)\binstalled by imperial\b", supplier):
+    if re.search(r"(?i)\binstalled by imperial\b", raw_supplier):
         supplier_note_parts.append("Installed By Imperial")
     supplier = re.sub(r"(?i)\b(?:supplied by client|installed by imperial|supplied by imperial|by client|by imperial)\b", "", supplier)
     supplier = normalize_brand_casing_text(normalize_space(supplier)).strip(" -;,")
@@ -3753,13 +3767,14 @@ def _imperial_layout_row_handle_entry(row: dict[str, Any]) -> str:
 def _imperial_layout_row_accessory_entry(row: dict[str, Any]) -> str:
     label = normalize_space(str(row.get("row_label", "") or ""))
     label_upper = label.upper()
-    supplier = normalize_brand_casing_text(str(row.get("supplier_text", "") or "")).strip(" -;,")
-    description = normalize_brand_casing_text(str(row.get("value_text", "") or "")).strip(" -;,")
-    note = normalize_brand_casing_text(str(row.get("notes_text", "") or "")).strip(" -;,")
+    raw_supplier = normalize_brand_casing_text(str(row.get("supplier_text", "") or "")).strip(" -;,")
+    supplier = _clean_imperial_layout_fragment(raw_supplier)
+    description = _clean_imperial_layout_fragment(str(row.get("value_text", "") or ""))
+    note = _clean_imperial_layout_fragment(str(row.get("notes_text", "") or ""))
     supplier_note_parts: list[str] = []
-    if re.search(r"(?i)\bsupplied by client\b", supplier):
+    if re.search(r"(?i)\bsupplied by client\b", raw_supplier):
         supplier_note_parts.append("Supplied By Client")
-    if re.search(r"(?i)\binstalled by imperial\b", supplier):
+    if re.search(r"(?i)\binstalled by imperial\b", raw_supplier):
         supplier_note_parts.append("Installed By Imperial")
     supplier = re.sub(r"(?i)\b(?:supplied by client|installed by imperial|supplied by imperial|by client|by imperial)\b", "", supplier)
     supplier = normalize_brand_casing_text(normalize_space(supplier)).strip(" -;,")
@@ -3780,9 +3795,9 @@ def _imperial_layout_row_accessory_entry(row: dict[str, Any]) -> str:
 
 def _imperial_layout_row_fixture_entry(row: dict[str, Any], kind: str) -> str:
     parts = [
-        normalize_brand_casing_text(str(row.get("value_text", "") or "")).strip(" -;,"),
-        normalize_brand_casing_text(str(row.get("supplier_text", "") or "")).strip(" -;,"),
-        normalize_brand_casing_text(str(row.get("notes_text", "") or "")).strip(" -;,"),
+        _clean_imperial_layout_fragment(str(row.get("value_text", "") or "")),
+        _clean_imperial_layout_fragment(str(row.get("supplier_text", "") or "")),
+        _clean_imperial_layout_fragment(str(row.get("notes_text", "") or "")),
     ]
     text = normalize_space(" ".join(part for part in parts if part)).strip(" -;,")
     text = re.sub(r"(?i)\b(?:by client|by builder|by imperial|supplied by client|installed by imperial)\b", "", text)
@@ -4112,7 +4127,13 @@ def _imperial_room_from_section(section: dict[str, Any]) -> RoomRow:
         if isinstance(value, str) and value:
             setattr(row, key, _collapse_repeated_token_sequence(value))
     if row.toe_kick:
-        row.toe_kick = [_collapse_repeated_token_sequence(item) for item in row.toe_kick if _collapse_repeated_token_sequence(item)]
+        row.toe_kick = _unique(
+            [
+                _collapse_repeated_token_sequence(item)
+                for item in row.toe_kick
+                if _collapse_repeated_token_sequence(item)
+            ]
+        )
     if bulkhead_text:
         row.bulkheads = [_imperial_clean_bulkhead_value(bulkhead_text)]
     row.led = fields.get("led", "")
