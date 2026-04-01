@@ -2151,6 +2151,55 @@ def _collapse_repeated_token_sequence(text: str) -> str:
     return " ".join(tokens).strip()
 
 
+def _dedupe_delimited_fragments(text: str, delimiter: str = "|") -> str:
+    normalized = normalize_space(str(text or ""))
+    if not normalized:
+        return ""
+    fragments = [normalize_space(part).strip(" -;,") for part in normalized.split(delimiter)]
+    deduped: list[str] = []
+    signatures: list[tuple[str, ...]] = []
+    for fragment in fragments:
+        if not fragment:
+            continue
+        lowered = fragment.lower()
+        signature_text = re.sub(r"(?i)\b(\d+\s*mm)\s+thick\b", r"\1thick", lowered)
+        signature_tokens = [
+            token
+            for token in re.findall(r"[a-z0-9]+(?:mmthick|mm)?", signature_text)
+            if token
+        ]
+        if "thick" in signature_tokens:
+            thick_index = signature_tokens.index("thick")
+            for idx, token in enumerate(signature_tokens):
+                if idx == thick_index:
+                    continue
+                if re.fullmatch(r"\d+mm", token):
+                    signature_tokens[idx] = f"{token}thick"
+                    del signature_tokens[thick_index]
+                    break
+        signature = tuple(sorted(signature_tokens))
+        if signature and signature in signatures:
+            continue
+        if any(
+            lowered == existing.lower()
+            or lowered in existing.lower()
+            or existing.lower() in lowered
+            for existing in deduped
+        ):
+            if not any(existing.lower() in lowered and existing.lower() != lowered for existing in deduped):
+                continue
+            filtered_pairs = [
+                (existing, existing_signature)
+                for existing, existing_signature in zip(deduped, signatures)
+                if existing.lower() not in lowered or existing.lower() == lowered
+            ]
+            deduped = [existing for existing, _ in filtered_pairs]
+            signatures = [existing_signature for _, existing_signature in filtered_pairs]
+        deduped.append(fragment)
+        signatures.append(signature)
+    return f" {delimiter} ".join(deduped)
+
+
 def _imperial_clean_field_value(field_key: str, parts: list[str]) -> str:
     if field_key in {"bench_tops", "splashback"}:
         return _imperial_clean_material_value(parts, drop_note_lines=True)
@@ -3741,6 +3790,16 @@ def _imperial_layout_row_fixture_entry(row: dict[str, Any], kind: str) -> str:
     text = normalize_space(text).strip(" -;,")
     if kind == "tap":
         text = re.sub(r"(?i)\b(?:client|private)\b.*$", "", text).strip(" -;,")
+        text = re.sub(
+            r"(?i)\b[A-Z][a-z]+(?:[-'][A-Z][a-z]+)?(?:\s+[A-Z][a-z]+(?:[-'][A-Z][a-z]+)?){1,3}\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b$",
+            "",
+            text,
+        ).strip(" -;,")
+        text = re.sub(
+            r"(?i)\b[A-Z][a-z]+(?:[-'][A-Z][a-z]+)?(?:\s+[A-Z][a-z]+(?:[-'][A-Z][a-z]+)?){1,3}\b$",
+            "",
+            text,
+        ).strip(" -;,")
     return text
 
 
@@ -4150,6 +4209,21 @@ def _imperial_room_from_section(section: dict[str, Any]) -> RoomRow:
     row.has_explicit_tall = row.has_explicit_tall or bool(layout_overlay.get("has_explicit_tall"))
     row.has_explicit_island = row.has_explicit_island or bool(layout_overlay.get("has_explicit_island"))
     row.has_explicit_bar_back = row.has_explicit_bar_back or bool(layout_overlay.get("has_explicit_bar_back"))
+    if row.floating_shelf:
+        row.floating_shelf = _dedupe_delimited_fragments(_collapse_repeated_token_sequence(row.floating_shelf))
+    if row.tap_info:
+        row.tap_info = _imperial_layout_row_fixture_entry(
+            {"value_text": row.tap_info, "supplier_text": "", "notes_text": ""},
+            "tap",
+        )
+    if row.sink_info:
+        row.sink_info = _collapse_repeated_token_sequence(row.sink_info)
+    if row.basin_info:
+        row.basin_info = _collapse_repeated_token_sequence(row.basin_info)
+    if row.bench_tops_wall_run:
+        row.bench_tops_wall_run = _collapse_repeated_token_sequence(row.bench_tops_wall_run)
+    if row.bench_tops_other:
+        row.bench_tops_other = _collapse_repeated_token_sequence(row.bench_tops_other)
     row.door_panel_colours = _rebuild_door_panel_colours(row.model_dump())
     return row
 

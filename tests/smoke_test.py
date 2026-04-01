@@ -5554,6 +5554,83 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(polished["basin_info"], "")
         self.assertEqual(polished["accessories"], [])
 
+    def test_shared_generic_polish_replaces_noisy_material_fields_when_explicit_layout_blocks_exist(self) -> None:
+        row = {
+            "room_key": "kitchen",
+            "original_room_label": "Kitchen",
+            "bench_tops": ["Manufacturer Laminex Range Natural Colour Blackened Legno Wall Run Benchtop"],
+            "bench_tops_wall_run": "Manufacturer Laminex Range Natural Colour Blackened Legno Wall Run Benchtop",
+            "bench_tops_island": "",
+            "bench_tops_other": "",
+            "door_colours_base": "Manufacturer Laminex Profile S/Edge Colour Blackened Legno Wall Run Base Cabinet Panels",
+            "door_colours_overheads": "Manufacturer Laminex Profile S/Edge Colour Blackened Legno Overhead Cupboards",
+            "door_colours_tall": "Manufacturer Laminex Profile S/Edge Colour Blackened Legno Pantry Doors",
+            "floating_shelf": "Manufacturer Laminex Profile S/Edge Colour Blackened Legno Floating Shelf",
+        }
+        overlay = {
+            "has_bench_block": True,
+            "bench_tops_wall_run": "40mm Caesarstone - Organic White - Arris",
+            "has_explicit_base": True,
+            "door_colours_base": "Laminex - Blackened Legno",
+            "has_explicit_overheads": True,
+            "door_colours_overheads": "Laminex - Blackened Legno",
+            "has_explicit_tall": True,
+            "door_colours_tall": "Laminex - Blackened Legno",
+            "has_floating_shelf_block": True,
+            "floating_shelf": "Laminex - Blackened Legno - Vertical Grain",
+        }
+        polished = extraction_service._polish_generic_layout_room(row, overlay)
+        self.assertEqual(polished["bench_tops_wall_run"], "40mm Caesarstone - Organic White - Arris")
+        self.assertEqual(polished["door_colours_base"], "Laminex - Blackened Legno")
+        self.assertEqual(polished["door_colours_overheads"], "Laminex - Blackened Legno")
+        self.assertEqual(polished["door_colours_tall"], "Laminex - Blackened Legno")
+        self.assertEqual(polished["floating_shelf"], "Laminex - Blackened Legno - Vertical Grain")
+
+    def test_shared_generic_polish_clears_noisy_fixture_fields_when_layout_blocks_exist(self) -> None:
+        row = {
+            "room_key": "kitchen",
+            "original_room_label": "Kitchen",
+            "sink_info": "Manufacturer Franke Range Sirius Model SID 110-34 Finish Carbon Black",
+            "tap_info": "Manufacturer Alder Range Maxx Model Rectangle Sink Mixer Finish Matt Black Client Name: Test",
+            "basin_info": "Manufacturer Caroma Range Liano II Model 400mm Round Above Counter Basin",
+        }
+        overlay = {
+            "has_sink_block": True,
+            "sink_info": "Franke - Sirius - SID 110-34 - Carbon Black",
+            "has_tap_block": True,
+            "tap_info": "Alder - Maxx - Rectangle Sink Mixer - Matt Black",
+            "has_basin_block": True,
+            "basin_info": "Caroma - Liano II - 400mm Round Above Counter Basin",
+        }
+        polished = extraction_service._polish_generic_layout_room(row, overlay)
+        self.assertEqual(polished["sink_info"], "Franke - Sirius - SID 110-34 - Carbon Black")
+        self.assertEqual(polished["tap_info"], "Alder - Maxx - Rectangle Sink Mixer - Matt Black")
+        self.assertEqual(polished["basin_info"], "Caroma - Liano II - 400mm Round Above Counter Basin")
+
+    def test_imperial_layout_row_fixture_entry_removes_client_name_tail(self) -> None:
+        self.assertEqual(
+            parsing_module._imperial_layout_row_fixture_entry(
+                {
+                    "value_text": "Franke Eos Neo pull out tap copper TA9601CP Eloise Cawcutt-Foxover 26-03-2026",
+                    "supplier_text": "",
+                    "notes_text": "BY CLIENT",
+                },
+                "tap",
+            ),
+            "Franke Eos Neo pull out tap copper TA9601CP",
+        )
+
+    def test_imperial_room_row_dedupes_floating_shelf_fragments(self) -> None:
+        row = parsing_module.RoomRow(
+            room_key="kitchen",
+            original_room_label="KITCHEN",
+            floating_shelf="Laminex - 51mmthick floating shelves Blackbutt Truescale Natural Finish 2618 | 51mm Laminex - thick floating shelves Blackbutt Truescale Natural Finish 2618",
+        )
+        row.floating_shelf = parsing_module._dedupe_delimited_fragments(
+            parsing_module._collapse_repeated_token_sequence(row.floating_shelf)
+        )
+        self.assertEqual(row.floating_shelf, "Laminex - 51mmthick floating shelves Blackbutt Truescale Natural Finish 2618")
+
     def test_infer_page_type_detects_generic_sinkware_tables_without_explicit_header(self) -> None:
         text = (
             "Vanity Basin Tapware Matt Black\n"

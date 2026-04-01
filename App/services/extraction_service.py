@@ -4209,6 +4209,7 @@ def _blank_generic_layout_overlay() -> dict[str, Any]:
         "bench_tops_wall_run": "",
         "bench_tops_island": "",
         "bench_tops_other": "",
+        "has_bench_block": False,
         "door_colours_base": "",
         "door_colours_overheads": "",
         "door_colours_tall": "",
@@ -4222,6 +4223,7 @@ def _blank_generic_layout_overlay() -> dict[str, Any]:
         "toe_kick": [],
         "handles": [],
         "floating_shelf": "",
+        "has_floating_shelf_block": False,
         "sink_info": "",
         "tap_info": "",
         "basin_info": "",
@@ -4230,6 +4232,7 @@ def _blank_generic_layout_overlay() -> dict[str, Any]:
         "has_basin_block": False,
         "has_handles_block": False,
         "has_accessories_block": False,
+        "has_flooring_block": False,
         "accessories": [],
         "other_items": [],
         "drawers_soft_close": "",
@@ -4243,39 +4246,46 @@ def _blank_generic_layout_overlay() -> dict[str, Any]:
 
 def _merge_generic_layout_overlay(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
     merged = dict(left)
-    for field_name in (
-        "original_room_label",
-        "bench_tops_wall_run",
-        "bench_tops_island",
-        "bench_tops_other",
-        "door_colours_base",
-        "door_colours_overheads",
-        "door_colours_tall",
-        "door_colours_island",
-        "door_colours_bar_back",
-        "floating_shelf",
-        "sink_info",
-        "tap_info",
-        "basin_info",
-        "drawers_soft_close",
-        "hinges_soft_close",
-        "flooring",
-        "source_file",
-        "page_refs",
-        "evidence_snippet",
-    ):
-        if not merged.get(field_name) and right.get(field_name):
-            merged[field_name] = right[field_name]
+    field_kinds = {
+        "original_room_label": "other",
+        "bench_tops_wall_run": "material",
+        "bench_tops_island": "material",
+        "bench_tops_other": "material",
+        "door_colours_base": "material",
+        "door_colours_overheads": "material",
+        "door_colours_tall": "material",
+        "door_colours_island": "material",
+        "door_colours_bar_back": "material",
+        "floating_shelf": "material",
+        "sink_info": "fixture",
+        "tap_info": "fixture",
+        "basin_info": "fixture",
+        "drawers_soft_close": "other",
+        "hinges_soft_close": "other",
+        "flooring": "other",
+        "source_file": "other",
+        "page_refs": "other",
+        "evidence_snippet": "other",
+    }
+    for field_name, field_kind in field_kinds.items():
+        merged[field_name] = _prefer_generic_overlay_value(
+            str(merged.get(field_name, "") or ""),
+            str(right.get(field_name, "") or ""),
+            field=field_kind,
+        )
     merged["toe_kick"] = _merge_list_field(merged.get("toe_kick", []), right.get("toe_kick", []))
     merged["handles"] = _merge_list_field(merged.get("handles", []), right.get("handles", []))
     merged["accessories"] = _merge_list_field(merged.get("accessories", []), right.get("accessories", []))
     merged["other_items"] = parsing._merge_other_items(merged.get("other_items", []), right.get("other_items", []))
     for field_name in (
+        "has_bench_block",
         "has_sink_block",
         "has_tap_block",
         "has_basin_block",
         "has_handles_block",
         "has_accessories_block",
+        "has_floating_shelf_block",
+        "has_flooring_block",
         "has_explicit_base",
         "has_explicit_overheads",
         "has_explicit_tall",
@@ -4687,12 +4697,82 @@ def _clean_generic_fragment(value: str) -> str:
     text = re.sub(r"(?i)printed:\s+.*$", "", text)
     text = re.sub(r"(?i)report:\s+.*$", "", text)
     text = re.sub(r"(?i)client initials.*$", "", text)
+    text = re.sub(r"(?i)\b(?:client name|designer|signature|signed date|document ref|job number|job address|colour consultant)\b.*$", "", text)
+    text = re.sub(r"(?i)\b(?:site address|address|client|date)\s*:.*$", "", text)
+    text = re.sub(r"(?i)\b(?:supplier description design comments|supplier description|area / item|image supplier notes)\b.*$", "", text)
     text = re.sub(r"(?i)page\s+\d+\s+of\s+\d+.*$", "", text)
     text = text.replace("**", " ")
     text = re.sub(r"\(\s*(?:#?\s*n\s*/?\s*a|not applicable)\s*\)", "", text, flags=re.IGNORECASE)
     text = re.sub(r"^\+\s*", "", text)
     text = parsing.normalize_space(text).strip(" -;,+")
     return text
+
+
+GENERIC_NOISE_LABEL_TOKENS: tuple[str, ...] = (
+    "manufacturer",
+    "range",
+    "profile",
+    "colour",
+    "colour & finish",
+    "finish",
+    "model",
+    "type",
+    "location",
+    "category",
+    "fixing",
+    "mechanism",
+    "style",
+)
+
+
+def _looks_like_generic_field_noise(value: str, *, field: str = "") -> bool:
+    text = _clean_generic_fragment(value)
+    if _is_generic_placeholder_text(text):
+        return True
+    lowered = text.lower()
+    if any(
+        token in lowered
+        for token in (
+            "joinery selection sheet",
+            "colour schedule",
+            "supplier description design comments",
+            "client name",
+            "signed date",
+            "document ref",
+            "address:",
+            "client:",
+            "date:",
+        )
+    ):
+        return True
+    if field == "fixture":
+        if any(token in lowered for token in ("client name", "signed date", "document ref", "designer:", "signature:")):
+            return True
+        if sum(token in lowered for token in ("manufacturer", "range", "model", "type", "location")) >= 2:
+            return True
+    if field == "material":
+        if sum(token in lowered for token in GENERIC_NOISE_LABEL_TOKENS) >= 2:
+            return True
+    if field == "handle":
+        if sum(token in lowered for token in ("manufacturer", "range", "model", "style", "finish", "fixing")) >= 2:
+            return True
+    return False
+
+
+def _prefer_generic_overlay_value(left: str, right: str, *, field: str = "") -> str:
+    left_clean = parsing.normalize_space(str(left or ""))
+    right_clean = parsing.normalize_space(str(right or ""))
+    if not left_clean:
+        return right_clean
+    if not right_clean:
+        return left_clean
+    left_noisy = _looks_like_generic_field_noise(left_clean, field=field)
+    right_noisy = _looks_like_generic_field_noise(right_clean, field=field)
+    if left_noisy and not right_noisy:
+        return right_clean
+    if right_noisy and not left_noisy:
+        return left_clean
+    return right_clean if len(right_clean) > len(left_clean) else left_clean
 
 
 def _is_generic_placeholder_text(value: str) -> bool:
@@ -4963,6 +5043,7 @@ def _extract_generic_layout_overlay(section: dict[str, Any]) -> dict[str, Any]:
         kind = str(block.get("anchor_kind", "") or "")
         anchor_label = _normalize_generic_row_label(str(block.get("anchor_label", "") or ""))
         if kind == "bench":
+            overlay["has_bench_block"] = True
             bench_text = _format_generic_material_from_parts(parts)
             if not bench_text:
                 continue
@@ -5005,6 +5086,7 @@ def _extract_generic_layout_overlay(section: dict[str, Any]) -> dict[str, Any]:
             if text and text not in overlay["toe_kick"]:
                 overlay["toe_kick"].append(text)
         elif kind == "floating_shelf":
+            overlay["has_floating_shelf_block"] = True
             text = _format_generic_material_from_parts(parts)
             overlay["floating_shelf"] = parsing._merge_text(overlay["floating_shelf"], text)
         elif kind == "handles":
@@ -5030,6 +5112,7 @@ def _extract_generic_layout_overlay(section: dict[str, Any]) -> dict[str, Any]:
                 overlay["drawers_soft_close"] = "Soft Close"
                 overlay["hinges_soft_close"] = "Soft Close"
         elif kind == "flooring":
+            overlay["has_flooring_block"] = True
             text = _format_generic_flooring_from_parts(parts)
             overlay["flooring"] = parsing._merge_text(overlay["flooring"], text)
         elif kind == "sink":
@@ -5069,28 +5152,36 @@ def _polish_generic_layout_room(row: dict[str, Any], overlay: dict[str, Any]) ->
     polished = dict(row)
     if overlay.get("original_room_label"):
         polished["original_room_label"] = overlay["original_room_label"]
-    if any(overlay.get(field_name) for field_name in ("bench_tops_wall_run", "bench_tops_island", "bench_tops_other")):
+    existing_bench_fields = (
+        str(polished.get("bench_tops_wall_run", "") or ""),
+        str(polished.get("bench_tops_island", "") or ""),
+        str(polished.get("bench_tops_other", "") or ""),
+        " | ".join(str(value or "") for value in polished.get("bench_tops", []) if parsing.normalize_space(str(value or ""))),
+    )
+    if (
+        any(overlay.get(field_name) for field_name in ("bench_tops_wall_run", "bench_tops_island", "bench_tops_other"))
+        or (
+            overlay.get("has_bench_block")
+            and any(_looks_like_generic_field_noise(value, field="material") for value in existing_bench_fields if value)
+        )
+    ):
         polished["bench_tops"] = []
         polished["bench_tops_wall_run"] = ""
         polished["bench_tops_island"] = ""
         polished["bench_tops_other"] = ""
-    if any(
-        overlay.get(field_name)
-        for field_name in (
-            "door_colours_base",
-            "door_colours_overheads",
-            "door_colours_tall",
-            "door_colours_island",
-            "door_colours_bar_back",
-            "floating_shelf",
-        )
-    ):
-        polished["door_colours_base"] = ""
-        polished["door_colours_overheads"] = ""
-        polished["door_colours_tall"] = ""
-        polished["door_colours_island"] = ""
-        polished["door_colours_bar_back"] = ""
-        polished["floating_shelf"] = ""
+    material_field_rules = (
+        ("door_colours_base", overlay.get("has_explicit_base"), "material"),
+        ("door_colours_overheads", overlay.get("has_explicit_overheads"), "material"),
+        ("door_colours_tall", overlay.get("has_explicit_tall"), "material"),
+        ("door_colours_island", overlay.get("has_explicit_island"), "material"),
+        ("door_colours_bar_back", overlay.get("has_explicit_bar_back"), "material"),
+        ("floating_shelf", overlay.get("has_floating_shelf_block"), "material"),
+    )
+    for field_name, explicit_flag, field_kind in material_field_rules:
+        existing_value = str(polished.get(field_name, "") or "")
+        overlay_value = str(overlay.get(field_name, "") or "")
+        if overlay_value or (explicit_flag and _looks_like_generic_field_noise(existing_value, field=field_kind)):
+            polished[field_name] = ""
     for field_name in (
         "bench_tops_wall_run",
         "bench_tops_island",
@@ -5129,7 +5220,10 @@ def _polish_generic_layout_room(row: dict[str, Any], overlay: dict[str, Any]) ->
         ]
     if overlay.get("has_handles_block") and overlay.get("handles"):
         polished["handles"] = list(overlay.get("handles", []))
-    elif overlay.get("has_handles_block") and any(_looks_like_placeholder_entry(entry) for entry in polished.get("handles", [])):
+    elif overlay.get("has_handles_block") and any(
+        _looks_like_placeholder_entry(entry) or _looks_like_generic_field_noise(entry, field="handle")
+        for entry in polished.get("handles", [])
+    ):
         polished["handles"] = []
     elif overlay.get("handles"):
         polished["handles"] = overlay["handles"]
@@ -5143,19 +5237,28 @@ def _polish_generic_layout_room(row: dict[str, Any], overlay: dict[str, Any]) ->
         polished["other_items"] = overlay["other_items"]
     if overlay.get("has_sink_block") and overlay.get("sink_info"):
         polished["sink_info"] = overlay.get("sink_info", "")
-    elif overlay.get("has_sink_block") and _looks_like_placeholder_fixture_text(polished.get("sink_info", "")):
+    elif overlay.get("has_sink_block") and (
+        _looks_like_placeholder_fixture_text(polished.get("sink_info", ""))
+        or _looks_like_generic_field_noise(str(polished.get("sink_info", "") or ""), field="fixture")
+    ):
         polished["sink_info"] = ""
     elif overlay.get("sink_info"):
         polished["sink_info"] = overlay["sink_info"]
     if overlay.get("has_tap_block") and overlay.get("tap_info"):
         polished["tap_info"] = overlay.get("tap_info", "")
-    elif overlay.get("has_tap_block") and _looks_like_placeholder_fixture_text(polished.get("tap_info", "")):
+    elif overlay.get("has_tap_block") and (
+        _looks_like_placeholder_fixture_text(polished.get("tap_info", ""))
+        or _looks_like_generic_field_noise(str(polished.get("tap_info", "") or ""), field="fixture")
+    ):
         polished["tap_info"] = ""
     elif overlay.get("tap_info"):
         polished["tap_info"] = overlay["tap_info"]
     if overlay.get("has_basin_block") and overlay.get("basin_info"):
         polished["basin_info"] = overlay.get("basin_info", "")
-    elif overlay.get("has_basin_block") and _looks_like_placeholder_fixture_text(polished.get("basin_info", "")):
+    elif overlay.get("has_basin_block") and (
+        _looks_like_placeholder_fixture_text(polished.get("basin_info", ""))
+        or _looks_like_generic_field_noise(str(polished.get("basin_info", "") or ""), field="fixture")
+    ):
         polished["basin_info"] = ""
     elif overlay.get("basin_info"):
         polished["basin_info"] = overlay["basin_info"]
