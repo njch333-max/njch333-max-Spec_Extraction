@@ -1886,6 +1886,76 @@ class SmokeTest(unittest.TestCase):
         self.assertFalse(snapshot["analysis"]["vision_succeeded"])
         self.assertIn("429 test failure", snapshot["analysis"]["vision_note"])
 
+    def test_apply_final_layout_pages_prefers_heuristic_when_docling_room_titles_are_noise(self) -> None:
+        documents = [
+            {
+                "file_name": "evoca.pdf",
+                "pages": [
+                    {
+                        "page_no": 8,
+                        "raw_text": "Kitchen colour schedule",
+                        "text": "Kitchen colour schedule",
+                        "page_layout": {
+                            "page_type": "joinery",
+                            "section_label": "KITCHEN",
+                            "room_label": "KITCHEN",
+                            "room_blocks": [
+                                {
+                                    "room_label": "KITCHEN",
+                                    "rows": [
+                                        {
+                                            "row_label": "Benchtops",
+                                            "value_region_text": "",
+                                            "supplier_region_text": "",
+                                            "notes_region_text": "",
+                                            "row_kind": "material",
+                                        },
+                                        {
+                                            "row_label": "Manufacturer",
+                                            "value_region_text": "Quantum Quartz",
+                                            "supplier_region_text": "",
+                                            "notes_region_text": "",
+                                            "row_kind": "material",
+                                        },
+                                        {
+                                            "row_label": "Colour",
+                                            "value_region_text": "Champagne",
+                                            "supplier_region_text": "",
+                                            "notes_region_text": "",
+                                            "row_kind": "material",
+                                        },
+                                    ],
+                                }
+                            ],
+                            "rows": [],
+                        },
+                    }
+                ],
+            }
+        ]
+        docling_layouts = {
+            (0, 0): {
+                "page_type": "joinery",
+                "section_label": "Client Initials: __________",
+                "room_label": "Initials",
+                "room_blocks": [{"room_label": "", "rows": [{"row_label": "Manufacturer", "value_region_text": "Quantum Quartz", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"}]}],
+                "rows": [],
+            }
+        }
+        mixed_pages, docling_pages, vision_pages = extraction_service._apply_final_layout_pages(
+            documents,
+            [(0, 0)],
+            docling_layouts=docling_layouts,
+            vision_layouts={},
+            builder_name="Evoca",
+        )
+        page = documents[0]["pages"][0]
+        self.assertEqual(mixed_pages, [])
+        self.assertEqual(docling_pages, [8])
+        self.assertEqual(vision_pages, [])
+        self.assertEqual(page["layout_mode"], "lightweight")
+        self.assertEqual(page["page_layout"]["room_blocks"][0]["room_label"], "KITCHEN")
+
     def test_vision_layout_to_text_preserves_row_boundaries(self) -> None:
         layout = {
             "page_type": "joinery",

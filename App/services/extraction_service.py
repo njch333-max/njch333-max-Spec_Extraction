@@ -415,7 +415,11 @@ def _apply_layout_pipeline(
 
     _report_progress(progress_callback, "layout_prepare", f"Building page layouts for {len(documents)} {source_kind} file(s)")
     for doc_index, document in enumerate(documents):
-        updated_document = {**document, "pages": [dict(page) for page in list(document.get("pages", []))]}
+        updated_document = {
+            **document,
+            "builder_name": builder_name,
+            "pages": [dict(page) for page in list(document.get("pages", []))],
+        }
         pages = list(updated_document.get("pages", []))
         for page_index, page in enumerate(pages):
             page_no = int(page.get("page_no", 0) or 0)
@@ -1024,6 +1028,7 @@ def _apply_final_layout_pages(
         page = pages[page_index]
         page_no = int(page.get("page_no", 0) or 0)
         raw_page_text = str(page.get("raw_text", page.get("text", "")) or "")
+        heuristic_layout = _normalize_page_layout(dict(page.get("page_layout") or {}))
         docling_layout = docling_layouts.get((doc_index, page_index))
         vision_layout = vision_layouts.get((doc_index, page_index))
         final_layout: dict[str, Any] | None = None
@@ -1035,22 +1040,38 @@ def _apply_final_layout_pages(
                 builder_name=builder_name,
                 raw_page_text=raw_page_text,
             )
-            if _layout_is_usable(merged_layout, raw_page_text=raw_page_text):
-                final_layout = merged_layout
-                layout_mode = "mixed"
-                mixed_pages.append(page_no)
-            else:
-                final_layout = _prefer_more_complete_layout(docling_layout, vision_layout, raw_page_text=raw_page_text)
-                layout_mode = "docling" if final_layout is docling_layout else "heavy_vision"
+            final_layout, layout_mode = _select_best_layout_candidate(
+                [
+                    ("mixed", merged_layout),
+                    ("docling", docling_layout),
+                    ("heavy_vision", vision_layout),
+                    ("lightweight", heuristic_layout),
+                ],
+                raw_page_text=raw_page_text,
+            )
         elif docling_layout:
-            final_layout = docling_layout
-            layout_mode = "docling"
+            final_layout, layout_mode = _select_best_layout_candidate(
+                [
+                    ("docling", docling_layout),
+                    ("lightweight", heuristic_layout),
+                ],
+                raw_page_text=raw_page_text,
+            )
         elif vision_layout:
-            final_layout = vision_layout
-            layout_mode = "heavy_vision"
+            final_layout, layout_mode = _select_best_layout_candidate(
+                [
+                    ("heavy_vision", vision_layout),
+                    ("lightweight", heuristic_layout),
+                ],
+                raw_page_text=raw_page_text,
+            )
+        elif _layout_is_usable(heuristic_layout, raw_page_text=raw_page_text):
+            final_layout = heuristic_layout
 
         if not final_layout:
             continue
+        if layout_mode == "mixed":
+            mixed_pages.append(page_no)
         page["page_layout"] = final_layout
         page["layout_mode"] = layout_mode
         page["docling_applied"] = bool(docling_layout)
@@ -1073,19 +1094,60 @@ def _prefer_more_complete_layout(
     return primary if primary_score >= secondary_score else secondary
 
 
+def _select_best_layout_candidate(
+    candidates: list[tuple[str, dict[str, Any]]],
+    *,
+    raw_page_text: str = "",
+) -> tuple[dict[str, Any] | None, str]:
+    best_layout: dict[str, Any] | None = None
+    best_mode = "lightweight"
+    best_score: int | None = None
+    for mode, layout in candidates:
+        normalized = _normalize_page_layout(layout)
+        if not _layout_is_usable(normalized, raw_page_text=raw_page_text):
+            continue
+        score = _layout_completeness_score(normalized, raw_page_text=raw_page_text)
+        if best_score is None or score > best_score:
+            best_layout = normalized
+            best_mode = mode
+            best_score = score
+    return best_layout, best_mode
+
+
 def _layout_completeness_score(layout: dict[str, Any], raw_page_text: str = "") -> int:
+    normalized_layout = _normalize_page_layout(layout)
     rows = [
         row
-        for row in parsing._page_layout_rows(_normalize_page_layout(layout))
+        for row in parsing._page_layout_rows(normalized_layout)
         if _layout_row_is_mergeable(row)
     ]
-    room_blocks = layout.get("room_blocks", []) or []
-    room_bonus = 50 if room_blocks else 0
-    room_label = _clean_merged_room_label(str(layout.get("room_label", "") or ""), str(layout.get("section_label", "") or ""))
-    title_bonus = 50 if _is_plausible_merged_room_label(room_label) else 0
+    room_blocks = normalized_layout.get("room_blocks", []) or []
+    plausible_room_blocks = [
+        block
+        for block in room_blocks
+        if _is_plausible_merged_room_label(
+            _clean_merged_room_label(str(block.get("room_label", "") or ""), str(normalized_layout.get("section_label", "") or ""))
+        )
+    ]
+    room_bonus = 120 * len(plausible_room_blocks)
+    room_label = _clean_merged_room_label(str(normalized_layout.get("room_label", "") or ""), str(normalized_layout.get("section_label", "") or ""))
+    title_bonus = 80 if _is_plausible_merged_room_label(room_label) else 0
+    page_type = parsing._effective_layout_page_type(
+        "",
+        parsing.normalize_space(str(normalized_layout.get("page_type", "") or "")).lower(),
+        raw_page_text,
+        normalized_layout,
+    )
+    joinery_penalty = 0
+    if page_type == "joinery" and not plausible_room_blocks and not title_bonus:
+        joinery_penalty = 500
+    if page_type == "joinery" and room_blocks and not plausible_room_blocks:
+        joinery_penalty += 20000
+    elif page_type == "joinery" and room_blocks and len(plausible_room_blocks) < len(room_blocks):
+        joinery_penalty += 250 * (len(room_blocks) - len(plausible_room_blocks))
     if not rows and not raw_page_text.strip():
         return 0
-    return room_bonus + title_bonus + sum(_layout_row_score(row) for row in rows)
+    return room_bonus + title_bonus + sum(_layout_row_score(row) for row in rows) - joinery_penalty
 
 
 def _merge_page_layouts(
