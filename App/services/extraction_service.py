@@ -183,7 +183,14 @@ def build_spec_snapshot(
 ) -> dict[str, Any]:
     rule_flags = cleaning_rules.global_rule_flags()
     parser_strategy = cleaning_rules.global_parser_strategy()
-    documents = _load_documents(files, role="spec")
+    raw_documents = _load_documents(files, role="spec")
+    documents = [
+        {
+            **document,
+            "pages": [dict(page) for page in list(document.get("pages", []))],
+        }
+        for document in raw_documents
+    ]
     documents, vision_meta = _apply_layout_pipeline(
         job,
         builder,
@@ -246,6 +253,15 @@ def build_spec_snapshot(
             progress_callback=progress_callback,
         )
         merged = _enrich_snapshot_appliances(merged, progress_callback, rule_flags=rule_flags)
+        if str(builder.get("name", "") or "").strip().lower() == "imperial":
+            raw_crosscheck = _build_raw_spec_crosscheck_snapshot(
+                job_no=str(job.get("job_no", "") or ""),
+                builder_name=str(builder.get("name", "") or ""),
+                documents=raw_documents,
+                parser_strategy=parser_strategy,
+                rule_flags=rule_flags,
+            )
+            merged = _crosscheck_imperial_snapshot_with_raw(merged, raw_crosscheck)
         merged["analysis"] = analysis
         return merged
     _report_progress(progress_callback, "room_enrichment", "Applying room fixture and door-colour overlays")
@@ -260,6 +276,15 @@ def build_spec_snapshot(
         progress_callback=progress_callback,
     )
     heuristic = _enrich_snapshot_appliances(heuristic, progress_callback, rule_flags=rule_flags)
+    if str(builder.get("name", "") or "").strip().lower() == "imperial":
+        raw_crosscheck = _build_raw_spec_crosscheck_snapshot(
+            job_no=str(job.get("job_no", "") or ""),
+            builder_name=str(builder.get("name", "") or ""),
+            documents=raw_documents,
+            parser_strategy=parser_strategy,
+            rule_flags=rule_flags,
+        )
+        heuristic = _crosscheck_imperial_snapshot_with_raw(heuristic, raw_crosscheck)
     heuristic["analysis"] = analysis
     return heuristic
 
@@ -3844,6 +3869,151 @@ def _merge_list_field(left: Any, right: Any) -> list[str]:
         if value and value not in deduped:
             deduped.append(value)
     return deduped
+
+
+def _build_raw_spec_crosscheck_snapshot(
+    *,
+    job_no: str,
+    builder_name: str,
+    documents: list[dict[str, Any]],
+    parser_strategy: str,
+    rule_flags: Any = None,
+) -> dict[str, Any]:
+    snapshot = parsing.parse_documents(
+        job_no=job_no,
+        builder_name=builder_name,
+        source_kind="spec",
+        documents=documents,
+        rule_flags=rule_flags,
+    )
+    snapshot = parsing.enrich_snapshot_rooms(snapshot, documents, rule_flags=rule_flags)
+    snapshot = _stabilize_snapshot_layout(snapshot, builder_name=builder_name, parser_strategy=parser_strategy)
+    snapshot = _apply_builder_specific_polish(
+        snapshot,
+        documents,
+        builder_name=builder_name,
+        parser_strategy=parser_strategy,
+        rule_flags=rule_flags,
+        progress_callback=None,
+    )
+    return snapshot
+
+
+IMPERIAL_RAW_SCALAR_FIELDS: tuple[str, ...] = (
+    "bench_tops_wall_run",
+    "bench_tops_island",
+    "bench_tops_other",
+    "door_colours_overheads",
+    "door_colours_base",
+    "door_colours_tall",
+    "door_colours_island",
+    "door_colours_bar_back",
+    "floating_shelf",
+    "sink_info",
+    "basin_info",
+    "tap_info",
+    "drawers_soft_close",
+    "hinges_soft_close",
+    "flooring",
+)
+
+IMPERIAL_RAW_LIST_FIELDS: tuple[str, ...] = (
+    "toe_kick",
+    "bulkheads",
+    "handles",
+    "accessories",
+)
+
+
+def _crosscheck_imperial_snapshot_with_raw(layout_snapshot: dict[str, Any], raw_snapshot: dict[str, Any]) -> dict[str, Any]:
+    if not raw_snapshot:
+        return layout_snapshot
+    merged = dict(layout_snapshot)
+    merged_rooms: list[dict[str, Any]] = []
+    raw_rooms = list(raw_snapshot.get("rooms", []))
+    used_raw: set[int] = set()
+    for layout_row in list(layout_snapshot.get("rooms", [])):
+        match_index = _find_best_room_match(layout_row, raw_rooms, used_raw)
+        if match_index is None:
+            merged_rooms.append(layout_row)
+            continue
+        used_raw.add(match_index)
+        raw_row = raw_rooms[match_index]
+        merged_row = dict(layout_row)
+        for field_name in IMPERIAL_RAW_SCALAR_FIELDS:
+            merged_row[field_name] = _prefer_imperial_raw_scalar(field_name, layout_row.get(field_name), raw_row.get(field_name))
+        for field_name in IMPERIAL_RAW_LIST_FIELDS:
+            merged_row[field_name] = _prefer_imperial_raw_list(field_name, layout_row.get(field_name), raw_row.get(field_name))
+        merged_rooms.append(merged_row)
+    merged["rooms"] = merged_rooms
+    return merged
+
+
+def _prefer_imperial_raw_scalar(field_name: str, layout_value: Any, raw_value: Any) -> Any:
+    layout_text = parsing.normalize_space(str(layout_value or ""))
+    raw_text = parsing.normalize_space(str(raw_value or ""))
+    if not raw_text:
+        return layout_value
+    if not layout_text:
+        return raw_value
+    if _imperial_field_quality(raw_text, field_name) > _imperial_field_quality(layout_text, field_name):
+        return raw_value
+    return layout_value
+
+
+def _prefer_imperial_raw_list(field_name: str, layout_value: Any, raw_value: Any) -> list[str]:
+    layout_items = parsing._coerce_string_list(layout_value)
+    raw_items = parsing._coerce_string_list(raw_value)
+    if not raw_items:
+        return layout_items
+    if not layout_items:
+        return raw_items
+    layout_score = max((_imperial_field_quality(value, field_name) for value in layout_items), default=-999)
+    raw_score = max((_imperial_field_quality(value, field_name) for value in raw_items), default=-999)
+    if raw_score > layout_score:
+        return raw_items
+    return layout_items
+
+
+def _imperial_field_quality(text: str, field_name: str) -> int:
+    cleaned = parsing.normalize_space(str(text or ""))
+    if not cleaned:
+        return -1000
+    lowered = cleaned.lower()
+    score = min(len(cleaned), 180)
+    for token in (
+        "client",
+        "date",
+        "signature",
+        "designer",
+        "document ref",
+        "private",
+        "ceiling height",
+        "cabinetry height",
+        "joinery selection sheet",
+        "all colours shown",
+        "product availability",
+        "signed date",
+    ):
+        if token in lowered:
+            score -= 70
+    if field_name.startswith("door_colours_") and any(token in lowered for token in ("handle", "knob", "pull", "part number", "so-")):
+        score -= 140
+    if field_name.startswith("bench_tops_") and any(token in lowered for token in ("base cabinetry", "upper cabinetry", "kickboard", "handle")):
+        score -= 140
+    if field_name in {"sink_info", "tap_info", "basin_info"} and any(token in lowered for token in ("client", "date", "signature", "designer", "document ref", "private")):
+        score -= 160
+    if field_name in {"toe_kick", "bulkheads"} and any(token in lowered for token in ("soft close", "floor type", "handle", "benchtop")):
+        score -= 140
+    if field_name == "handles" and any(token in lowered for token in ("base cabinetry colour", "upper cabinetry colour", "benchtop", "kickboard")):
+        score -= 140
+    if field_name == "flooring" and any(token in lowered for token in ("polytec", "laminex", "caesarstone", "ceiling height", "cabinetry height")):
+        score -= 120
+    if "part number" in lowered or "so-" in lowered:
+        score += 15
+    if re.search(r"\b\d{2,4}mm\b", cleaned, re.I):
+        score += 10
+    return score
 
 
 def _merge_soft_close_field(left: Any, right: Any, keyword: str) -> str:
