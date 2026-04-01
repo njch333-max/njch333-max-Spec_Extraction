@@ -5605,6 +5605,54 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("Edge Profile", bench_rows)
         self.assertNotIn("Colour", base_rows)
 
+    def test_extract_generic_layout_overlay_rebuilds_docling_like_evoca_grouped_rows(self) -> None:
+        section = {
+            "original_section_label": "Kitchen",
+            "section_key": "kitchen",
+            "layout_rows": [
+                {
+                    "row_label": "15 CABINETS All Cabinets include Soft Close Hinges &Runners, lined internally with White Melamine &includes ABS edging. Benchtops over maximum length",
+                    "value_region_text": "15 CABINETS All Cabinets include Soft Close Hinges &Runners, lined internally with White Melamine &includes ABS edging. Benchtops over maximum length",
+                    "supplier_region_text": "",
+                    "notes_region_text": "",
+                    "row_kind": "material",
+                },
+                {
+                    "row_label": "***One stone colour included, additional $350 charge for each additional stone colour used***",
+                    "value_region_text": "***One stone colour included, additional $350 charge for each additional stone colour used***",
+                    "supplier_region_text": "",
+                    "notes_region_text": "",
+                    "row_kind": "material",
+                },
+                {"row_label": "-", "value_region_text": "Benchtops", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Manufacturer", "value_region_text": "Manufacturer", "supplier_region_text": "Quantum Quartz", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Colour", "value_region_text": "Colour", "supplier_region_text": "Champagne", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Edge Profile", "value_region_text": "Edge Profile", "supplier_region_text": "20mm Arissed", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Underbench", "value_region_text": "including Island Underbench including Island", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Manufacturer", "value_region_text": "Manufacturer", "supplier_region_text": "Polytec", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Colour", "value_region_text": "&Finish Colour &Finish", "supplier_region_text": "Belgian Oak Matt", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Kickboard", "value_region_text": "Kickboard", "supplier_region_text": "Laminate", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Handles", "value_region_text": "Handles", "supplier_region_text": "4062-128-TG", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Door Handle", "value_region_text": "Door Handle", "supplier_region_text": "", "notes_region_text": "Vertical", "row_kind": "handle"},
+                {"row_label": "Drawer Handle", "value_region_text": "Drawer Handle", "supplier_region_text": "", "notes_region_text": "Horizontal", "row_kind": "handle"},
+                {"row_label": "Pantry Door Handle", "value_region_text": "** Pantry Door Handle**", "supplier_region_text": "#N/A", "notes_region_text": "", "row_kind": "handle"},
+                {"row_label": "Overhead Cupboards", "value_region_text": "Overhead Cupboards", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Manufacturer", "value_region_text": "Manufacturer", "supplier_region_text": "Polytec", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Colour", "value_region_text": "&Finish Colour &Finish", "supplier_region_text": "Belgian Oak Matt", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Handles", "value_region_text": "Handles", "supplier_region_text": "Finger Grip", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "-", "value_region_text": "Pantry Doors", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Manufacturer", "value_region_text": "Manufacturer", "supplier_region_text": "Polytec", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Colour", "value_region_text": "&Finish Colour &Finish", "supplier_region_text": "Belgian Oak Matt", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Kickboard", "value_region_text": "Kickboard", "supplier_region_text": "Laminate", "notes_region_text": "", "row_kind": "material"},
+            ],
+        }
+        overlay = extraction_service._extract_generic_layout_overlay(section)
+        self.assertEqual(overlay["bench_tops_wall_run"], "20mm Quantum Quartz - Champagne - Arissed")
+        self.assertEqual(overlay["door_colours_base"], "Polytec - Belgian Oak Matt")
+        self.assertEqual(overlay["door_colours_overheads"], "Polytec - Belgian Oak Matt")
+        self.assertEqual(overlay["door_colours_tall"], "Polytec - Belgian Oak Matt")
+        self.assertEqual(overlay["handles"], ["4062-128-TG - Vertical - Horizontal", "Finger Grip"])
+
     def test_build_generic_layout_blocks_keeps_sink_model_with_current_sink_anchor(self) -> None:
         rows = [
             {"row_label": "Sink", "value_region_text": "", "supplier_region_text": "", "notes_region_text": "", "row_kind": "sink"},

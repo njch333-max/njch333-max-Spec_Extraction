@@ -4281,6 +4281,24 @@ GENERIC_LAYOUT_PREFIX_PROPERTY_LABELS: set[str] = {
 }
 
 GENERIC_LAYOUT_CURRENT_ATTACHMENT_LABELS: dict[str, set[str]] = {
+    "bench": {
+        "manufacturer",
+        "range",
+        "colour",
+        "colour & finish",
+        "finish",
+        "profile",
+        "edge profile",
+        "island edge profile",
+        "style",
+        "type",
+        "waterfall end to island",
+    },
+    "base": {"manufacturer", "range", "colour", "colour & finish", "finish", "style", "type"},
+    "overheads": {"manufacturer", "range", "colour", "colour & finish", "finish", "style", "type"},
+    "tall": {"manufacturer", "range", "colour", "colour & finish", "finish", "style", "type"},
+    "toe_kick": {"manufacturer", "range", "colour", "colour & finish", "finish", "style", "type"},
+    "floating_shelf": {"manufacturer", "range", "colour", "colour & finish", "finish", "profile", "style", "type"},
     "handles": {"manufacturer", "range", "model", "style", "profile", "fixing", "category", "mechanism", "type", "finish"},
     "accessories": {"manufacturer", "range", "model", "style", "profile", "fixing", "category", "mechanism", "type", "finish", "location"},
     "sink": {"manufacturer", "range", "model", "style", "profile", "type", "finish", "location", "accessories"},
@@ -4497,7 +4515,7 @@ def _is_generic_anchor_row(row: dict[str, Any]) -> bool:
     raw_label = _normalize_generic_row_label(str(row.get("row_label", "") or ""))
     label = _generic_anchor_signal(row)
     row_kind = parsing.normalize_space(str(row.get("row_kind", "") or "")).lower().replace(" ", "_")
-    if row_kind in {"sink", "tap", "basin"}:
+    if row_kind in {"sink", "tap", "basin"} and raw_label not in GENERIC_LAYOUT_PROPERTY_MAP:
         return True
     if not label:
         return False
@@ -4515,6 +4533,9 @@ def _is_generic_anchor_row(row: dict[str, Any]) -> bool:
             "cabinet panels",
             "overhead cupboards",
             "overheads",
+            "pantry doors",
+            "integrated appliances",
+            "drawers",
             "tall",
             "kickboard",
             "handles",
@@ -4539,6 +4560,58 @@ def _is_generic_anchor_row(row: dict[str, Any]) -> bool:
             "hanging rail",
         )
     )
+
+
+def _is_generic_empty_property_row(row: dict[str, Any]) -> bool:
+    label = _normalize_generic_row_label(str(row.get("row_label", "") or ""))
+    if label not in GENERIC_LAYOUT_PROPERTY_MAP:
+        return False
+    value_text = _clean_generic_fragment(_row_region_text(row, "value_text", "value_region_text"))
+    supplier_text = _clean_generic_fragment(_row_region_text(row, "supplier_text", "supplier_region_text"))
+    notes_text = _clean_generic_fragment(_row_region_text(row, "notes_text", "notes_region_text"))
+    if supplier_text or notes_text:
+        return False
+    stripped = _strip_generic_property_prefix(value_text, label)
+    stripped = re.sub(r"(?i)^&\s*finish\b", "", stripped)
+    stripped = parsing.normalize_space(stripped).strip(" -;,")
+    return not stripped or stripped in {"&", "finish", "& finish"}
+
+
+def _is_generic_layout_noise_row(row: dict[str, Any]) -> bool:
+    label = _normalize_generic_row_label(str(row.get("row_label", "") or ""))
+    text = _row_fragment_text(row).lower()
+    if _is_generic_anchor_row(row):
+        return False
+    if not text:
+        return True
+    if _is_generic_empty_property_row(row):
+        return True
+    if _layout_row_has_header_noise(row):
+        return True
+    if any(
+        token in text
+        for token in (
+            "all cabinets include soft close",
+            "benchtops over maximum length",
+            "additional $350 charge",
+            "one stone colour included",
+            "client initials",
+            "supplier description design comments",
+            "colour selections framework",
+            "item selection level",
+        )
+    ):
+        return True
+    if label in {"", "-"} and any(
+        token in text
+        for token in (
+            "all cabinets include",
+            "benchtops over maximum length",
+            "additional $350 charge",
+        )
+    ):
+        return True
+    return False
 
 
 def _classify_generic_anchor(row: dict[str, Any], page_type: str = "") -> str:
@@ -4625,7 +4698,25 @@ def _classify_generic_anchor(row: dict[str, Any], page_type: str = "") -> str:
         if "mirror" in raw_label:
             return "other"
         return "other"
-    if row_kind in {"sink", "tap", "basin"}:
+    if "benchtop" in label:
+        return "bench"
+    if ("island" in label or "penisula" in label or "peninsula" in label) and any(
+        token in label for token in ("base cabinet panels", "cabinet panels")
+    ):
+        return "island"
+    if any(token in label for token in ("underbench", "base cabinet panels", "cabinet panels")):
+        return "base"
+    if "overhead cupboards" in label or "overheads" in label or "shaving cabinets" in label:
+        return "overheads"
+    if "tall" in label or "pantry doors" in label:
+        return "tall"
+    if "kickboard" in label:
+        return "toe_kick"
+    if "handles" in label or label == "handle":
+        return "handles"
+    if any(token in label for token in ("shelving", "floating shelf")):
+        return "floating_shelf"
+    if row_kind in {"sink", "tap", "basin"} and raw_label not in GENERIC_LAYOUT_PROPERTY_MAP:
         return row_kind
     if "tapware" in label or "mixer" in label or "spout" in label:
         return "tap"
@@ -4730,6 +4821,8 @@ def _build_generic_layout_blocks(layout_rows: list[dict[str, Any]], page_type: s
     for index, row in enumerate(layout_rows):
         if not isinstance(row, dict):
             continue
+        if _is_generic_layout_noise_row(row):
+            continue
         if _is_generic_anchor_row(row):
             if current:
                 blocks.append(current)
@@ -4815,7 +4908,7 @@ def _collect_generic_block_parts(block: dict[str, Any]) -> dict[str, list[str]]:
         value_text = _row_region_text(row, "value_text", "value_region_text")
         supplier_text = _row_region_text(row, "supplier_text", "supplier_region_text")
         notes_text = _row_region_text(row, "notes_text", "notes_region_text")
-        text = parsing.normalize_space(" ".join(part for part in (value_text, supplier_text, notes_text) if part))
+        text = _generic_property_row_text(label, value_text, supplier_text, notes_text)
         if not text:
             continue
         inline_pairs = _extract_generic_inline_property_pairs(text)
@@ -4870,8 +4963,41 @@ def _collect_generic_block_parts(block: dict[str, Any]) -> dict[str, list[str]]:
         elif label and label != _normalize_generic_row_label(anchor_label):
             parts.setdefault("note", []).append(f"{parsing.normalize_space(str(row.get('row_label', '') or ''))} {text}".strip())
         elif label:
+            if _normalize_generic_row_label(text) == label:
+                continue
             parts.setdefault("note", []).append(text)
     return parts
+
+
+def _generic_property_row_text(label: str, value_text: str, supplier_text: str, notes_text: str) -> str:
+    normalized_label = _normalize_generic_row_label(label)
+    value_clean = _clean_generic_fragment(value_text)
+    supplier_clean = _clean_generic_fragment(supplier_text)
+    notes_clean = _clean_generic_fragment(notes_text)
+    if normalized_label in GENERIC_LAYOUT_PROPERTY_MAP and supplier_clean:
+        stripped = _strip_generic_property_prefix(value_clean, normalized_label)
+        stripped = re.sub(r"(?i)^&\s*finish\b", "", stripped)
+        stripped = parsing.normalize_space(stripped).strip(" -;,")
+        if (
+            not stripped
+            or stripped in {"&", "finish", "& finish"}
+            or _normalize_generic_row_label(stripped)
+            in {
+                normalized_label,
+                normalized_label.replace(" & ", " "),
+                "colour",
+                "colour & finish",
+                "finish",
+                "manufacturer",
+                "range",
+                "model",
+                "profile",
+                "type",
+                "location",
+            }
+        ):
+            return parsing.normalize_space(" ".join(part for part in (supplier_clean, notes_clean) if part))
+    return parsing.normalize_space(" ".join(part for part in (value_clean, supplier_clean, notes_clean) if part))
 
 
 def _strip_generic_property_prefix(text: str, label: str) -> str:
@@ -5054,6 +5180,8 @@ def _meaningful_generic_values(values: list[str], *, exclude_tokens: tuple[str, 
         if _is_generic_placeholder_text(text):
             continue
         lowered = text.lower()
+        if lowered in {"&", "finish", "& finish"}:
+            continue
         if exclude_tokens and any(token in lowered for token in exclude_tokens):
             continue
         if text not in seen:
@@ -5329,6 +5457,7 @@ def _format_generic_fixture_from_parts(parts: dict[str, list[str]], *, kind: str
         return ""
     if kind == "tap":
         normalized = re.sub(r"(?i)\bby client\b.*$", "", normalized).strip(" -;,")
+        normalized = re.sub(r"(?i)\s*-\s*(?:alder\s+sachi|sachi|wish)\b.*$", "", normalized).strip(" -;,")
     if kind in {"sink", "basin"} and any(token in normalized.lower() for token in tap_tokens):
         normalized = " - ".join(
             part for part in [supplier, _first_meaningful(parts.get("range", [])), _first_meaningful(parts.get("model", [])), _first_meaningful(parts.get("type", []))]
@@ -5394,6 +5523,14 @@ def _format_generic_handles_from_parts(parts: dict[str, list[str]]) -> str:
         *(_meaningful_generic_values(parts.get("handles", []), exclude_tokens=handle_excludes)[:1]),
     ]
     description = " - ".join(part for part in description_parts if part)
+    filtered_notes: list[str] = []
+    for value in _meaningful_generic_values(parts.get("note", []), exclude_tokens=("soft close", "hanging rail", "not applicable", "#n/a")):
+        cleaned = re.sub(r"(?i)^(?:door|drawers?|pantry door|bin\s*&\s*pot drawers?)\s*handle\s*", "", value).strip(" -;,")
+        cleaned = re.sub(r"(?i)\b#n/?a\b", "", cleaned).strip(" -;,")
+        cleaned = parsing.normalize_space(cleaned).strip(" -;,")
+        if not cleaned or cleaned.lower() in {"bin&", "bin", "pot", "drawers handle", "handle"} or cleaned.lower().startswith("bin"):
+            continue
+        filtered_notes.append(cleaned)
     note_parts = [
         _first_meaningful(parts.get("finish", [])),
         _first_meaningful(parts.get("fixing", [])),
@@ -5402,10 +5539,7 @@ def _format_generic_handles_from_parts(parts: dict[str, list[str]]) -> str:
         _first_meaningful(parts.get("drawer handle", [])),
         _first_meaningful(parts.get("pantry door handle", [])),
         _first_meaningful(parts.get("bin & pot drawers handle", [])),
-        *[
-            value
-            for value in _meaningful_generic_values(parts.get("note", []), exclude_tokens=("soft close", "hanging rail"))
-        ],
+        *filtered_notes,
     ]
     note = " - ".join(part for part in note_parts if part)
     normalized_description = _clean_generic_fragment(description)
