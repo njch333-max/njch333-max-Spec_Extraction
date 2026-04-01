@@ -2327,6 +2327,13 @@ def _imperial_clean_flooring_value(parts: list[str]) -> str:
         part = normalize_space(raw_part)
         if not part:
             continue
+        part = re.sub(r"(?i)\bsoft close\b.*$", "", part)
+        part = re.sub(r"(?i)\bnotes?\b.*$", "", part)
+        part = re.sub(r"(?i)\bsupplier\b.*$", "", part)
+        part = re.sub(r"(?i)\bwaterfall ends?\b.*$", "", part)
+        part = normalize_space(part).strip(" -;,:")
+        if not part:
+            continue
         if re.search(r"(?i)\bN\s*/?\s*A\b", part):
             cleaned_candidates.append("NA")
             continue
@@ -2365,6 +2372,8 @@ def _imperial_clean_toe_kick_value(parts: list[str]) -> str:
     for raw_part in parts:
         part = normalize_space(raw_part)
         if not part:
+            continue
+        if re.search(r"(?i)\b(?:soft close|shadowline|builders bulkhead|cabinetry height|ceiling height)\b", part):
             continue
         if re.match(r"(?i)^pic\s+\d+\b", part):
             continue
@@ -3698,14 +3707,41 @@ def _clean_imperial_layout_fragment(text: str) -> str:
     cleaned = re.sub(r"(?i)^.*?\bjoinery selection sheet\b", "", cleaned)
     cleaned = re.sub(r"(?i)^.*?\bcolour schedule\b", "", cleaned)
     cleaned = re.sub(
+        r"(?i)^\d+\s+[A-Za-z0-9' .,-]+?(?:street|st|court|ct|road|rd|crescent|cres|terrace|tce|boulevard|blvd|drive|dr|avenue|ave|lane|ln)\b(?:,\s*[A-Za-z][A-Za-z' -]+)?\s*",
+        "",
+        cleaned,
+    )
+    cleaned = re.sub(
+        r"(?i)\bprivate\b\s*-\s*[A-Z][A-Za-z]+(?:[-'][A-Za-z]+)?(?:\s+[A-Z][A-Za-z]+(?:[-'][A-Za-z]+)?){0,3}\s+\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b",
+        "",
+        cleaned,
+    )
+    cleaned = re.sub(
         r"(?i)^.*?\b(?:street|st|court|ct|road|rd|crescent|cres|terrace|tce|boulevard|blvd|drive|dr|avenue|ave|lane|ln)\b.*?\bprivate\b\s*-\s*[A-Z][A-Za-z]+(?:[-'][A-Za-z]+)?(?:\s+[A-Z][A-Za-z]+(?:[-'][A-Za-z]+)?){0,3}\s+\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b",
         "",
         cleaned,
     )
+    cleaned = re.sub(r"(?i)\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b", "", cleaned)
     cleaned = re.sub(r"(?i)\b(?:ceiling height|cabinetry height|ref\.?\s*number|selection required)\b.*$", "", cleaned)
     cleaned = re.sub(r"(?i)\b(?:client|designer|signature|signed date|document ref|address|date)\b\s*:.*$", "", cleaned)
     cleaned = normalize_brand_casing_text(normalize_space(cleaned)).strip(" -;,")
     return cleaned
+
+
+def _imperial_material_fragment_is_noise(text: str) -> bool:
+    cleaned = _clean_imperial_layout_fragment(text)
+    if not cleaned:
+        return True
+    return bool(
+        re.search(
+            r"(?i)\b(?:client|designer|signature|signed date|document ref|private|supplied by client|installed by imperial|notes?\s+supplier|taphole location)\b",
+            cleaned,
+        )
+        or re.search(r"(?i)\bsoft close\b", cleaned)
+        or re.search(r"(?i)\bshadowline\b", cleaned)
+        or re.search(r"(?i)\bbulkhead\b", cleaned)
+        or re.search(r"(?i)\b(?:sinkware|tapware)\b", cleaned)
+    )
 
 
 def _imperial_layout_row_material_text(
@@ -3721,6 +3757,8 @@ def _imperial_layout_row_material_text(
     for fragment in (value, notes, *(extra_parts or [])):
         cleaned = _clean_imperial_layout_fragment(fragment)
         if not cleaned:
+            continue
+        if _imperial_material_fragment_is_noise(cleaned):
             continue
         if supplier:
             cleaned = re.sub(rf"(?i)\b{re.escape(supplier)}\b", "", cleaned)

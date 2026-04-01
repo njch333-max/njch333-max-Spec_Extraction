@@ -1956,6 +1956,46 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(page["layout_mode"], "lightweight")
         self.assertEqual(page["page_layout"]["room_blocks"][0]["room_label"], "KITCHEN")
 
+    def test_generic_sanitizers_strip_property_noise_and_accessory_tails(self) -> None:
+        self.assertEqual(
+            extraction_service._sanitize_generic_material_field(
+                "Polytec | Belgian Oak Matt | Laminate | 4062-128-TG",
+                field_name="door_colours_base",
+            ),
+            "Polytec | Belgian Oak Matt",
+        )
+        self.assertEqual(
+            extraction_service._sanitize_generic_fixture_field(
+                "Alder - Maxx (WELS 6 stars) - Rectangle Sink Mixer - Matt Black + ALDER SACHI ROBE HOOK IN MATT BLACK",
+                kind="tap",
+            ),
+            "Alder - Maxx (WELS 6 stars) - Rectangle Sink Mixer - Matt Black",
+        )
+        self.assertEqual(
+            extraction_service._sanitize_generic_handle_entries(
+                ["N/A, Category 6, C137 Black 100m, Horizontal", "up to 20mm Drop Down - No Handle N/A Category 6, Horizontal, Soft Close"]
+            ),
+            ["C137 Black 100m, Horizontal", "up to 20mm Drop Down - No Handle, Horizontal"],
+        )
+
+    def test_imperial_material_and_flooring_cleaners_strip_meta_noise(self) -> None:
+        self.assertEqual(
+            parsing_module._imperial_clean_flooring_value(
+                [": Tiles with Floating TBC Soft close Caesarstone NOTES SUPPLIER 1 x Waterfall End 20mm Stone"]
+            ),
+            "Tiles with Floating TBC",
+        )
+        self.assertEqual(
+            parsing_module._imperial_layout_row_material_text(
+                {
+                    "value_text": "9 Greenland Court, Springfield PRIVATE - Yasantha Warawita 12/03/2026",
+                    "supplier_text": "Caesarstone",
+                    "notes_text": "20mm Stone",
+                }
+            ),
+            "20mm Caesarstone - Stone",
+        )
+
     def test_vision_layout_to_text_preserves_row_boundaries(self) -> None:
         layout = {
             "page_type": "joinery",

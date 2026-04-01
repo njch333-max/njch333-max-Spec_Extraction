@@ -5094,6 +5094,124 @@ def _format_generic_material_from_parts(parts: dict[str, list[str]]) -> str:
     return re.sub(r"\s+-\s+-\s+", " - ", formatted).strip(" -")
 
 
+def _generic_material_fragment_is_noise(fragment: str, *, field_name: str = "") -> bool:
+    text = _clean_generic_fragment(fragment)
+    if not text or _looks_like_generic_field_noise(text, field="material"):
+        return True
+    lowered = text.lower()
+    if any(
+        token in lowered
+        for token in (
+            "supplier description",
+            "joinery selection sheet",
+            "colour schedule",
+            "document ref",
+            "client initials",
+        )
+    ):
+        return True
+    if field_name in {
+        "door_colours_base",
+        "door_colours_overheads",
+        "door_colours_tall",
+        "door_colours_island",
+        "door_colours_bar_back",
+    }:
+        if any(
+            token in lowered
+            for token in (
+                "handle",
+                "finger grip",
+                "soft close",
+                "cutlery tray",
+                "robe hook",
+                "towel rail",
+                "toilet suite",
+                "toilet roll holder",
+                "sink",
+                "tap",
+                "basin",
+            )
+        ):
+            return True
+        if field_name != "door_colours_tall" and any(token in lowered for token in ("drawers", "pot drawers", "bin & pot")):
+            return True
+        if lowered in {"laminate", "as above", "not applicable"}:
+            return True
+    if field_name in {"bench_tops_wall_run", "bench_tops_island", "bench_tops_other"}:
+        if any(
+            token in lowered
+            for token in (
+                "underbench",
+                "cabinet panels",
+                "overhead cupboards",
+                "pantry doors",
+                "kickboard",
+                "handle",
+                "drawer handle",
+                "door handle",
+                "pantry door handle",
+                "bin & pot drawers handle",
+            )
+        ):
+            return True
+    if field_name == "floating_shelf":
+        if any(token in lowered for token in ("handle", "soft close", "client", "date")):
+            return True
+    if re.fullmatch(r"[A-Z0-9-]{4,}", text) and field_name.startswith("door_colours_"):
+        return True
+    return False
+
+
+def _sanitize_generic_material_field(value: Any, *, field_name: str = "", room_key: str = "") -> str:
+    fragments = [
+        _clean_generic_fragment(fragment)
+        for fragment in re.split(r"\s*\|\s*", parsing.normalize_space(str(value or "")))
+    ]
+    cleaned: list[str] = []
+    for fragment in fragments:
+        if not fragment:
+            continue
+        fragment = re.sub(
+            r"(?i)^(?:underbench|overhead cupboards|pantry doors|drawers|handles?|kickboard|shaving cabinets|benchtops?)\s*-\s*",
+            "",
+            fragment,
+        ).strip(" -;,")
+        if _generic_material_fragment_is_noise(fragment, field_name=field_name):
+            continue
+        normalized = parsing.normalize_brand_casing_text(fragment).strip(" -;,")
+        if not normalized:
+            continue
+        if any(
+            normalized.lower() == existing.lower()
+            or normalized.lower() in existing.lower()
+            or existing.lower() in normalized.lower()
+            for existing in cleaned
+        ):
+            continue
+        cleaned.append(normalized)
+    if room_key == "kitchen" and field_name == "bench_tops_other" and cleaned:
+        return " | ".join(cleaned)
+    return " | ".join(cleaned)
+
+
+def _bench_field_is_combined_duplicate(other: str, wall_run: str, island: str) -> bool:
+    other_fragments = {
+        _clean_generic_fragment(fragment).lower()
+        for fragment in re.split(r"\s*\|\s*", parsing.normalize_space(other))
+        if _clean_generic_fragment(fragment)
+    }
+    if not other_fragments:
+        return False
+    reference_fragments = {
+        _clean_generic_fragment(fragment).lower()
+        for source in (wall_run, island)
+        for fragment in re.split(r"\s*\|\s*", parsing.normalize_space(source))
+        if _clean_generic_fragment(fragment)
+    }
+    return bool(reference_fragments) and other_fragments.issubset(reference_fragments)
+
+
 def _format_generic_fixture_from_parts(parts: dict[str, list[str]], *, kind: str = "", anchor_label: str = "") -> str:
     supplier = _first_meaningful(parts.get("manufacturer", []))
     tap_tokens = ("mixer", "tap", "spout", "stop", "shower rail", "shower rose", "shower system")
@@ -5145,6 +5263,34 @@ def _format_generic_fixture_from_parts(parts: dict[str, list[str]], *, kind: str
     return normalized
 
 
+def _sanitize_generic_fixture_field(value: Any, *, kind: str = "") -> str:
+    text = _clean_generic_fragment(str(value or ""))
+    if not text:
+        return ""
+    text = re.sub(
+        r"(?i)\s*\+\s*[^+]*(?:robe hook|towel rail|hand towel rail|toilet suite|toilet roll holder).*$",
+        "",
+        text,
+    )
+    text = re.sub(
+        r"(?i)\b(?:client name|designer|signature|signed date|document ref|category)\b.*$",
+        "",
+        text,
+    )
+    location_first = re.match(
+        r"(?i)^(?P<location>(?:centre|center|corner|left|right)(?:\s+of(?:\s+(?:sink|basin|tub))?)?)\s*-\s*(?P<rest>.+)$",
+        text,
+    )
+    if location_first and any(
+        token in location_first.group("rest").lower()
+        for token in ("mixer", "tap", "spout", "sink", "basin", "gooseneck", "pull-out")
+    ):
+        text = f"{location_first.group('rest')} - {location_first.group('location')}"
+    if kind == "tap":
+        text = re.sub(r"(?i)\b(?:by client|supplied by client)\b.*$", "", text).strip(" -;,")
+    return parsing.normalize_brand_casing_text(parsing.normalize_space(text)).strip(" -;,")
+
+
 def _format_generic_handles_from_parts(parts: dict[str, list[str]]) -> str:
     supplier = _first_meaningful(parts.get("manufacturer", []))
     handle_excludes = ("soft close", "hanging rail", "robe hook", "towel rail", "mirror")
@@ -5177,6 +5323,32 @@ def _format_generic_handles_from_parts(parts: dict[str, list[str]]) -> str:
     result = re.sub(r"(?i)\bContrasting Facings\b.*$", "", result).strip(" -;,")
     result = re.sub(r"\s+-\s+-\s+", " - ", result)
     return result.strip(" -;,")
+
+
+def _sanitize_generic_handle_entries(values: list[str]) -> list[str]:
+    cleaned: list[str] = []
+    for value in values:
+        text = parsing.normalize_brand_casing_text(_clean_generic_fragment(str(value or ""))).strip(" -;,")
+        if not text:
+            continue
+        text = re.sub(r"(?i)\bN/?A\b", "", text)
+        text = re.sub(r"(?i)\bCategory\s*\d+\b", "", text)
+        text = re.sub(r"(?i)\bSoft Close\b", "", text)
+        text = text.replace("**", " ")
+        text = parsing.normalize_space(text)
+        text = re.sub(r"\s+,", ",", text)
+        text = parsing.normalize_space(text).strip(" -;,")
+        if not text or _looks_like_placeholder_entry(text):
+            continue
+        if any(
+            text.lower() == existing.lower()
+            or text.lower() in existing.lower()
+            or existing.lower() in text.lower()
+            for existing in cleaned
+        ):
+            continue
+        cleaned.append(text)
+    return cleaned
 
 
 def _format_generic_accessory_from_parts(parts: dict[str, list[str]], *, anchor_label: str = "") -> str:
@@ -5495,6 +5667,43 @@ def _polish_generic_layout_room(row: dict[str, Any], overlay: dict[str, Any]) ->
         polished["handles"] = [entry for entry in polished.get("handles", []) if not _looks_like_placeholder_entry(entry)]
     if overlay.get("has_accessories_block"):
         polished["accessories"] = [entry for entry in polished.get("accessories", []) if not _looks_like_placeholder_entry(entry)]
+    room_key = parsing.same_room_identity(str(polished.get("original_room_label", "")), str(polished.get("room_key", "")))
+    for field_name in (
+        "bench_tops_wall_run",
+        "bench_tops_island",
+        "bench_tops_other",
+        "door_colours_base",
+        "door_colours_overheads",
+        "door_colours_tall",
+        "door_colours_island",
+        "door_colours_bar_back",
+        "floating_shelf",
+    ):
+        polished[field_name] = _sanitize_generic_material_field(
+            polished.get(field_name, ""),
+            field_name=field_name,
+            room_key=room_key,
+        )
+    if room_key == "kitchen" and (
+        polished.get("bench_tops_wall_run") or polished.get("bench_tops_island")
+    ) and _bench_field_is_combined_duplicate(
+        str(polished.get("bench_tops_other", "") or ""),
+        str(polished.get("bench_tops_wall_run", "") or ""),
+        str(polished.get("bench_tops_island", "") or ""),
+    ):
+        polished["bench_tops_other"] = ""
+    polished["bench_tops"] = [
+        value
+        for value in (
+            polished.get("bench_tops_wall_run", ""),
+            polished.get("bench_tops_island", ""),
+            polished.get("bench_tops_other", ""),
+        )
+        if parsing.normalize_space(str(value or ""))
+    ]
+    polished["handles"] = _sanitize_generic_handle_entries(polished.get("handles", []))
+    for field_name, fixture_kind in (("sink_info", "sink"), ("tap_info", "tap"), ("basin_info", "basin")):
+        polished[field_name] = _sanitize_generic_fixture_field(polished.get(field_name, ""), kind=fixture_kind)
     return polished
 
 
