@@ -4093,11 +4093,38 @@ def _prefer_imperial_raw_list(field_name: str, layout_value: Any, raw_value: Any
         return layout_items
     if not layout_items:
         return raw_items
+    if field_name == "handles":
+        if any(_imperial_handle_entry_looks_compound(item) for item in layout_items) and raw_items:
+            return raw_items
+    if field_name == "toe_kick":
+        if any(
+            any(token in str(item or "").lower() for token in ("cabinetry colour", "mirrored shaving cabinet", "external panels only"))
+            for item in layout_items
+        ):
+            return raw_items
     layout_score = max((_imperial_field_quality(value, field_name) for value in layout_items), default=-999)
     raw_score = max((_imperial_field_quality(value, field_name) for value in raw_items), default=-999)
-    if raw_score > layout_score:
+    layout_total = sum(_imperial_field_quality(value, field_name) for value in layout_items)
+    raw_total = sum(_imperial_field_quality(value, field_name) for value in raw_items)
+    if raw_score > layout_score or raw_total > layout_total + 25:
         return raw_items
     return layout_items
+
+
+def _imperial_handle_entry_looks_compound(value: Any) -> bool:
+    lowered = parsing.normalize_space(str(value or "")).lower()
+    if not lowered:
+        return False
+    role_markers = (
+        "base-",
+        "base -",
+        "upper -",
+        "upper-",
+        "tall -",
+        "tall-",
+        "pto",
+    )
+    return sum(marker in lowered for marker in role_markers) >= 2
 
 
 def _imperial_field_quality(text: str, field_name: str) -> int:
@@ -4124,14 +4151,29 @@ def _imperial_field_quality(text: str, field_name: str) -> int:
             score -= 70
     if field_name.startswith("door_colours_") and any(token in lowered for token in ("handle", "knob", "pull", "part number", "so-")):
         score -= 140
+    if field_name.startswith("door_colours_") and any(
+        token in lowered
+        for token in (
+            "floating shelving colour",
+            "mirrored shaving cabinet",
+            "external panels only",
+            "kickboard",
+            "as doors",
+        )
+    ):
+        score -= 120
     if field_name.startswith("bench_tops_") and any(token in lowered for token in ("base cabinetry", "upper cabinetry", "kickboard", "handle")):
         score -= 140
     if field_name in {"sink_info", "tap_info", "basin_info"} and any(token in lowered for token in ("client", "date", "signature", "designer", "document ref", "private")):
         score -= 160
     if field_name in {"toe_kick", "bulkheads"} and any(token in lowered for token in ("soft close", "floor type", "handle", "benchtop")):
         score -= 140
+    if field_name == "toe_kick" and any(token in lowered for token in ("cabinetry colour", "mirrored shaving cabinet", "external panels only")):
+        score -= 160
     if field_name == "handles" and any(token in lowered for token in ("base cabinetry colour", "upper cabinetry colour", "benchtop", "kickboard")):
         score -= 140
+    if field_name == "handles" and _imperial_handle_entry_looks_compound(cleaned):
+        score -= 180
     if field_name == "flooring" and any(token in lowered for token in ("polytec", "laminex", "caesarstone", "ceiling height", "cabinetry height")):
         score -= 120
     if "part number" in lowered or "so-" in lowered:
@@ -5450,6 +5492,10 @@ def _strip_generic_anchor_tail(text: str) -> str:
 def _clean_generic_fragment(value: str) -> str:
     text = parsing.normalize_space(str(value or ""))
     text = re.sub(r"(?i)^\d+\s+cabinets?\b", "", text)
+    text = re.sub(r"(?i)\badditional(?:\s+wet\s+area|\s+bath/ensuite/powder|\s+kitchen/butlers/kitchenette)\b", "", text)
+    text = re.sub(r"(?i)\bdwarf wall capping finish\b", "", text)
+    text = re.sub(r"(?i)\bto\s+rumpus\s+feature\s+battens\b", "", text)
+    text = re.sub(r"(?i)\blocation\s+[A-Za-z0-9 /&'()_-]+?\s+location\b", "", text)
     text = re.sub(r"(?i)simonds queensland construction pty ltd.*$", "", text)
     text = re.sub(r"(?i)page:\s*\d+\s+of\s+\d+.*$", "", text)
     text = re.sub(r"(?i)printed:\s+.*$", "", text)
@@ -5733,6 +5779,8 @@ def _generic_material_fragment_is_noise(fragment: str, *, field_name: str = "") 
             "colour schedule",
             "document ref",
             "client initials",
+            "dwarf wall capping",
+            "feature battens",
         )
     ):
         return True
@@ -6675,7 +6723,7 @@ def _polish_generic_layout_room(row: dict[str, Any], overlay: dict[str, Any]) ->
     wall_run_bench = parsing.normalize_space(str(polished.get("bench_tops_wall_run", "") or ""))
     if room_key == "kitchen" and island_bench and wall_run_bench and re.fullmatch(r"(?i)(?:as|same)\s+above", island_bench):
         polished["bench_tops_island"] = wall_run_bench
-    if room_key == "kitchen" and (
+    if (
         polished.get("bench_tops_wall_run") or polished.get("bench_tops_island")
     ) and _bench_field_is_combined_duplicate(
         str(polished.get("bench_tops_other", "") or ""),

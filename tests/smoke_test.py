@@ -6759,6 +6759,77 @@ class SmokeTest(unittest.TestCase):
             "",
         )
 
+    def test_prefer_imperial_raw_list_uses_split_raw_handles_over_compound_layout_entry(self) -> None:
+        selected = extraction_service._prefer_imperial_raw_list(
+            "handles",
+            [
+                "BASE - Kethy | UPPER - S225-480-MBK | TALL - S225-280-MBK | PTO designer",
+            ],
+            [
+                "BASE - Kethy",
+                "UPPER - S225-480-MBK",
+                "TALL - S225-280-MBK",
+            ],
+        )
+        self.assertEqual(
+            selected,
+            [
+                "BASE - Kethy",
+                "UPPER - S225-480-MBK",
+                "TALL - S225-280-MBK",
+            ],
+        )
+
+    def test_prefer_imperial_raw_list_uses_raw_toe_kick_when_layout_is_contaminated(self) -> None:
+        selected = extraction_service._prefer_imperial_raw_list(
+            "toe_kick",
+            ["AS DOORS Polytec | MIRRORED SHAVING CABINET | External panels only"],
+            ["AS DOORS Polytec"],
+        )
+        self.assertEqual(selected, ["AS DOORS Polytec"])
+
+    def test_clean_generic_fragment_strips_additional_section_and_feature_batten_noise(self) -> None:
+        self.assertEqual(
+            extraction_service._clean_generic_fragment(
+                "Additional Kitchen/Butlers/Kitchenette Dwarf Wall Capping finish to Rumpus Feature Battens"
+            ),
+            "",
+        )
+
+    def test_clean_generic_fragment_strips_duplicate_location_pattern(self) -> None:
+        self.assertEqual(
+            extraction_service._clean_generic_fragment("Location Centre of Sink Location"),
+            "",
+        )
+
+    def test_polish_generic_layout_room_clears_duplicate_other_bench_for_non_kitchen_room(self) -> None:
+        row = {
+            "room_key": "study",
+            "original_room_label": "Study",
+            "bench_tops_wall_run": "40mm stone - Arissed - By Builder",
+            "bench_tops_island": "33mm laminate - Square Edge",
+            "bench_tops_other": "40mm stone - Arissed - By Builder | 33mm laminate - Square Edge",
+            "bench_tops": [],
+            "door_colours_base": "",
+            "door_colours_overheads": "",
+            "door_colours_tall": "",
+            "door_colours_island": "",
+            "door_colours_bar_back": "",
+            "floating_shelf": "",
+            "toe_kick": [],
+            "bulkheads": [],
+            "handles": [],
+            "accessories": [],
+            "other_items": [],
+            "sink_info": "",
+            "tap_info": "",
+            "basin_info": "",
+            "flooring": "",
+        }
+        overlay = {}
+        polished = extraction_service._polish_generic_layout_room(row, overlay)
+        self.assertEqual(polished["bench_tops_other"], "")
+
     def test_sanitize_generic_fixture_field_strips_accessory_tail_from_tap(self) -> None:
         self.assertEqual(
             extraction_service._sanitize_generic_fixture_field(
