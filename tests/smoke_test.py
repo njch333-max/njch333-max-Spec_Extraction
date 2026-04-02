@@ -257,6 +257,192 @@ class SmokeTest(unittest.TestCase):
         self.assertNotIn("kitchen_wall_run_base_cabinet_panels_manufacturer_laminex", rooms)
         self.assertEqual(rooms["kitchen"]["original_room_label"], "KITCHEN")
 
+    def test_coerce_layout_room_blocks_keeps_default_room_when_property_row_mentions_other_room(self) -> None:
+        layout = {
+            "page_type": "joinery",
+            "section_label": "",
+            "room_label": "",
+            "room_blocks": [
+                {
+                    "room_label": "",
+                    "rows": [
+                        {
+                            "row_label": "Underbench including Island",
+                            "value_region_text": "",
+                            "supplier_region_text": "",
+                            "notes_region_text": "",
+                            "row_kind": "material",
+                        },
+                        {
+                            "row_label": "Manufacturer",
+                            "value_region_text": "Polytec",
+                            "supplier_region_text": "",
+                            "notes_region_text": "",
+                            "row_kind": "material",
+                        },
+                        {
+                            "row_label": "Pantry Door Handle",
+                            "value_region_text": "** Pantry Door Handle**",
+                            "supplier_region_text": "#N/A",
+                            "notes_region_text": "",
+                            "row_kind": "handle",
+                        },
+                    ],
+                }
+            ],
+            "rows": [],
+        }
+        blocks = parsing_module._coerce_layout_room_blocks(
+            layout,
+            section_label="",
+            room_label="",
+            raw_page_text="Kitchen\nUnderbench including Island",
+            page_type="joinery",
+        )
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(blocks[0]["room_label"], "Kitchen")
+
+    def test_coerce_layout_room_blocks_splits_inline_room_heading_after_default_room(self) -> None:
+        layout = {
+            "page_type": "joinery",
+            "section_label": "",
+            "room_label": "",
+            "room_blocks": [
+                {
+                    "room_label": "",
+                    "rows": [
+                        {
+                            "row_label": "Benchtops",
+                            "value_region_text": "",
+                            "supplier_region_text": "",
+                            "notes_region_text": "",
+                            "row_kind": "material",
+                        },
+                        {
+                            "row_label": "Manufacturer",
+                            "value_region_text": "Quantum Quartz",
+                            "supplier_region_text": "",
+                            "notes_region_text": "",
+                            "row_kind": "material",
+                        },
+                        {
+                            "row_label": "Bulters/WIP",
+                            "value_region_text": "",
+                            "supplier_region_text": "",
+                            "notes_region_text": "",
+                            "row_kind": "other",
+                        },
+                        {
+                            "row_label": "Benchtops",
+                            "value_region_text": "",
+                            "supplier_region_text": "",
+                            "notes_region_text": "",
+                            "row_kind": "material",
+                        },
+                        {
+                            "row_label": "Manufacturer",
+                            "value_region_text": "Caesarstone",
+                            "supplier_region_text": "",
+                            "notes_region_text": "",
+                            "row_kind": "material",
+                        },
+                    ],
+                }
+            ],
+            "rows": [],
+        }
+        blocks = parsing_module._coerce_layout_room_blocks(
+            layout,
+            section_label="",
+            room_label="",
+            raw_page_text="Kitchen\nBulters/WIP",
+            page_type="joinery",
+        )
+        self.assertEqual([block["room_label"] for block in blocks], ["Kitchen", "Butlers/WIP"])
+        self.assertEqual(blocks[0]["rows"][0]["row_label"], "Benchtops")
+        self.assertEqual(blocks[1]["rows"][0]["row_label"], "Benchtops")
+
+    def test_coerce_layout_room_blocks_ignores_metadata_block_when_explicit_room_blocks_exist(self) -> None:
+        layout = {
+            "page_type": "joinery",
+            "section_label": "Client Initials: ______",
+            "room_label": "Initials",
+            "room_blocks": [
+                {
+                    "room_label": "Initials",
+                    "rows": [
+                        {
+                            "row_label": "Manufacturer",
+                            "value_region_text": "Noise",
+                            "supplier_region_text": "",
+                            "notes_region_text": "",
+                            "row_kind": "material",
+                        }
+                    ],
+                },
+                {
+                    "room_label": "Butlers",
+                    "rows": [
+                        {
+                            "row_label": "Benchtops Manufacturer",
+                            "value_region_text": "Not Applicable",
+                            "supplier_region_text": "",
+                            "notes_region_text": "",
+                            "row_kind": "material",
+                        }
+                    ],
+                },
+                {
+                    "room_label": "Laundry",
+                    "rows": [
+                        {
+                            "row_label": "Benchtops Manufacturer",
+                            "value_region_text": "Quantum Quartz",
+                            "supplier_region_text": "",
+                            "notes_region_text": "",
+                            "row_kind": "material",
+                        }
+                    ],
+                },
+            ],
+            "rows": [],
+        }
+        blocks = parsing_module._coerce_layout_room_blocks(
+            layout,
+            section_label="Client Initials: ______",
+            room_label="Initials",
+            raw_page_text="Client Initials\nButlers\nLaundry",
+            page_type="joinery",
+        )
+        self.assertEqual([block["room_label"] for block in blocks], ["Butlers", "Laundry"])
+        self.assertTrue(all(block["room_label"] != "Initials" for block in blocks))
+        self.assertIn("Benchtops Manufacturer", [row["row_label"] for row in blocks[0]["rows"]])
+
+    def test_infer_default_layout_room_label_ignores_accessory_value_room_words(self) -> None:
+        inferred = parsing_module._infer_default_layout_room_label(
+            room_label="",
+            section_label="",
+            raw_page_text="",
+            rows=[
+                {
+                    "row_label": "Accessories",
+                    "value_region_text": "ALDER SACHI ROBE HOOK IN MATT BLACK",
+                    "supplier_region_text": "",
+                    "notes_region_text": "",
+                    "row_kind": "accessory",
+                },
+                {
+                    "row_label": "Kitchen Sink",
+                    "value_region_text": "",
+                    "supplier_region_text": "",
+                    "notes_region_text": "",
+                    "row_kind": "sink",
+                },
+            ],
+            page_type="joinery",
+        )
+        self.assertEqual(inferred, "Kitchen")
+
     def test_structure_first_parse_trims_builder_noise_from_room_titles(self) -> None:
         snapshot = parse_documents(
             job_no="e2",
@@ -5651,7 +5837,36 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(overlay["door_colours_base"], "Polytec - Belgian Oak Matt")
         self.assertEqual(overlay["door_colours_overheads"], "Polytec - Belgian Oak Matt")
         self.assertEqual(overlay["door_colours_tall"], "Polytec - Belgian Oak Matt")
+        self.assertEqual(overlay["toe_kick"], ["Polytec - Belgian Oak Matt - Laminate"])
         self.assertEqual(overlay["handles"], ["4062-128-TG - Vertical - Horizontal", "Finger Grip"])
+
+    def test_format_generic_material_from_parts_excludes_builder_surcharge_note(self) -> None:
+        formatted = extraction_service._format_generic_material_from_parts(
+            {
+                "manufacturer": ["Quantum Quartz"],
+                "colour": ["Champagne"],
+                "profile": ["20mm Arissed"],
+                "note": ["One stone colour included, additional $350 charge for each additional stone colour used"],
+            }
+        )
+        self.assertEqual(formatted, "20mm Quantum Quartz - Champagne - Arissed")
+
+    def test_extract_generic_layout_overlay_ignores_unrelated_study_paint_rows(self) -> None:
+        section = {
+            "original_section_label": "Study",
+            "section_key": "study",
+            "page_type": "joinery",
+            "layout_rows": [
+                {"row_label": "Benchtop", "value_region_text": "", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Manufacturer", "value_region_text": "Laminex", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Profile", "value_region_text": "S/Edge", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Colour", "value_region_text": "Blackended Legno", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Internal Paint", "value_region_text": "Haymes", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Skirtings/Architraves", "value_region_text": "Greyology 1", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            ],
+        }
+        overlay = extraction_service._extract_generic_layout_overlay(section)
+        self.assertEqual(overlay["bench_tops_other"], "Laminex - Blackended Legno - S/Edge")
 
     def test_build_generic_layout_blocks_keeps_sink_model_with_current_sink_anchor(self) -> None:
         rows = [
@@ -5800,6 +6015,38 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(polished["door_colours_tall"], "Laminex - Blackened Legno")
         self.assertEqual(polished["floating_shelf"], "Laminex - Blackened Legno - Vertical Grain")
 
+    def test_shared_generic_polish_clears_existing_materials_when_explicit_not_applicable_blocks_exist(self) -> None:
+        row = {
+            "room_key": "butlers",
+            "original_room_label": "Butlers",
+            "bench_tops": ["15 CABINETS | 20mm Quantum Quartz - Champagne - Arissed"],
+            "bench_tops_wall_run": "15 CABINETS | 20mm Quantum Quartz - Champagne - Arissed",
+            "bench_tops_island": "",
+            "bench_tops_other": "",
+            "door_colours_base": "Polytec - Belgian Oak Matt",
+            "door_colours_overheads": "Polytec - Belgian Oak Matt",
+            "door_colours_tall": "",
+            "handles": ["4062-128-TG - Vertical"],
+        }
+        overlay = {
+            "has_bench_block": True,
+            "bench_tops_wall_run": "",
+            "bench_tops_island": "",
+            "bench_tops_other": "",
+            "has_explicit_base": True,
+            "door_colours_base": "",
+            "has_explicit_overheads": True,
+            "door_colours_overheads": "",
+            "has_handles_block": True,
+            "handles": [],
+        }
+        polished = extraction_service._polish_generic_layout_room(row, overlay)
+        self.assertEqual(polished["bench_tops"], [])
+        self.assertEqual(polished["bench_tops_wall_run"], "")
+        self.assertEqual(polished["door_colours_base"], "")
+        self.assertEqual(polished["door_colours_overheads"], "")
+        self.assertEqual(polished["handles"], [])
+
     def test_shared_generic_polish_clears_noisy_fixture_fields_when_layout_blocks_exist(self) -> None:
         row = {
             "room_key": "kitchen",
@@ -5821,6 +6068,15 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(polished["tap_info"], "Alder - Maxx - Rectangle Sink Mixer - Matt Black")
         self.assertEqual(polished["basin_info"], "Caroma - Liano II - 400mm Round Above Counter Basin")
 
+    def test_polish_generic_layout_room_clears_noisy_flooring_without_explicit_floor_block(self) -> None:
+        row = {
+            "room_key": "study",
+            "original_room_label": "Study",
+            "flooring": "Carpet Manufacturer Carpet Call Range Category 4 - Grand Escape Colour Kerella #78 Underlay Luxury Plus Underlay Timber Manufactuer Carpet Call",
+        }
+        polished = extraction_service._polish_generic_layout_room(row, {})
+        self.assertEqual(polished["flooring"], "")
+
     def test_imperial_layout_row_fixture_entry_removes_client_name_tail(self) -> None:
         self.assertEqual(
             parsing_module._imperial_layout_row_fixture_entry(
@@ -5832,6 +6088,19 @@ class SmokeTest(unittest.TestCase):
                 "tap",
             ),
             "Franke Eos Neo pull out tap copper TA9601CP",
+        )
+
+    def test_imperial_layout_row_fixture_entry_removes_sink_tail_metadata(self) -> None:
+        self.assertEqual(
+            parsing_module._imperial_layout_row_fixture_entry(
+                {
+                    "value_text": "ABEY Schock horizontal double bowl sink bronze N200BZ TOP MOUNT Taphole location: Tap Landing Centred to back",
+                    "supplier_text": "",
+                    "notes_text": "Sink Pre-punched Hole Centre of Sink",
+                },
+                "sink",
+            ),
+            "ABEY Schock horizontal double bowl sink bronze N200BZ TOP MOUNT",
         )
 
     def test_imperial_layout_row_material_text_strips_heading_and_meta_noise(self) -> None:
@@ -6043,6 +6312,13 @@ class SmokeTest(unittest.TestCase):
         )
         self.assertEqual(formatted, "Alder - Maxx - Rectangle Sink Mixer - Matt Black")
 
+    def test_sanitize_generic_fixture_field_removes_washing_machine_taps_noise_from_tap(self) -> None:
+        cleaned = extraction_service._sanitize_generic_fixture_field(
+            "Spin Gun Metal Gooseneck (SP120-GM) - Washing Machine Taps Chrome Washing Machine Stops, Located inside of cupboard - Corner of Tub",
+            kind="tap",
+        )
+        self.assertEqual(cleaned, "Spin Gun Metal Gooseneck (SP120-GM)")
+
     def test_generic_overlay_reads_value_region_text_for_evoca_sink_and_tap(self) -> None:
         section = {
             "original_section_label": "Kitchen",
@@ -6139,6 +6415,45 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(rows[2]["value_region_text"], "Belgian Oak Matt")
         self.assertEqual(rows[3]["value_region_text"], "Laminate")
         self.assertEqual(rows[4]["value_region_text"], "4062-128-TG")
+
+    def test_table_group_label_rows_keeps_drawers_value_before_handles_on_evoca_style_rows(self) -> None:
+        rows = extraction_service._table_group_label_rows(
+            "Underbench\nManufacturer\nColour & Finish\nDrawers\nHandles\nDoor Handle\nDrawer Handle**",
+            ["Polytec\nBelgian Oak Matt\nNot Included\n4062-128-TG\nVertical\nHorizontal"],
+            "joinery",
+        )
+        self.assertEqual(rows[0]["row_label"], "Underbench")
+        self.assertEqual(rows[0]["value_region_text"], "")
+        self.assertEqual(rows[1]["value_region_text"], "Polytec")
+        self.assertEqual(rows[2]["value_region_text"], "Belgian Oak Matt")
+        self.assertEqual(rows[3]["row_label"], "Drawers")
+        self.assertEqual(rows[3]["value_region_text"], "Not Included")
+        self.assertEqual(rows[4]["row_label"], "Handles")
+        self.assertEqual(rows[4]["value_region_text"], "4062-128-TG")
+        self.assertEqual(rows[5]["value_region_text"], "Vertical")
+        self.assertEqual(rows[6]["value_region_text"], "Horizontal")
+
+    def test_extract_generic_layout_overlay_groups_compound_prefixed_rows(self) -> None:
+        section = {
+            "original_section_label": "Laundry",
+            "page_type": "joinery",
+            "file_name": "evoca.pdf",
+            "page_nos": [9],
+            "text": "Laundry",
+            "layout_rows": [
+                {"row_label": "Benchtops Manufacturer", "value_region_text": "Quantum Quartz", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Benchtops Colour", "value_region_text": "Champagne", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Benchtops Edge Profile", "value_region_text": "20mm Arissed", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Underbench Manufacturer", "value_region_text": "Polytec", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Underbench Colour & Finish", "value_region_text": "Belgian Oak Matt", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Underbench Handles", "value_region_text": "4062-128-TG", "supplier_region_text": "", "notes_region_text": "", "row_kind": "handle"},
+                {"row_label": "Underbench Door Handle", "value_region_text": "Vertical", "supplier_region_text": "", "notes_region_text": "", "row_kind": "handle"},
+                {"row_label": "Underbench Drawer Handle", "value_region_text": "Horizontal", "supplier_region_text": "", "notes_region_text": "", "row_kind": "handle"},
+            ],
+        }
+        overlay = extraction_service._extract_generic_layout_overlay(section)
+        self.assertEqual(overlay["bench_tops_wall_run"], "20mm Quantum Quartz - Champagne - Arissed")
+        self.assertEqual(overlay["door_colours_base"], "Polytec - Belgian Oak Matt")
 
     def test_strip_generic_anchor_tail_removes_trailing_cabinet_label_noise(self) -> None:
         self.assertEqual(

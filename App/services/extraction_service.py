@@ -1828,13 +1828,17 @@ def _table_group_label_rows(
         parts = [parsing.normalize_space(line) for line in cell.split("\n") if parsing.normalize_space(line)]
         if parts:
             values.extend(parts)
-    anchor_skip_budget = max(0, len(labels) - len(values))
+    # When the first label is a grouped anchor like "Underbench" or "Benchtops",
+    # that anchor usually has no direct value cell. Discount it from the skip
+    # budget so later property rows (for example Drawers -> Not Included) don't
+    # get shifted into the next field.
     leading_generic_anchor = bool(
         page_type != "sinkware_tapware"
         and normalized_labels
         and _looks_like_grouped_generic_anchor_label(normalized_labels[0])
         and any(_looks_like_grouped_generic_follower_label(label) for label in normalized_labels[1:])
     )
+    anchor_skip_budget = max(0, len(labels) - len(values) - (1 if leading_generic_anchor else 0))
 
     def should_skip_value(label: str, index: int) -> bool:
         nonlocal anchor_skip_budget
@@ -4322,10 +4326,10 @@ GENERIC_LAYOUT_PROPERTY_MAP: dict[str, str] = {
     "handles": "model",
     "cabinetry handles": "model",
     "overhead cabinetry handles": "model",
-    "door handle": "note",
-    "drawer handle": "note",
-    "pantry door handle": "note",
-    "bin & pot drawers handle": "note",
+    "door handle": "door handle",
+    "drawer handle": "drawer handle",
+    "pantry door handle": "pantry door handle",
+    "bin & pot drawers handle": "bin & pot drawers handle",
     "standard": "note",
     "pot": "note",
     "bin": "note",
@@ -4448,6 +4452,11 @@ GENERIC_LAYOUT_PREFIX_PROPERTY_LABELS: set[str] = {
     "mechanism",
     "underlay",
     "waterfall end to island",
+}
+
+GENERIC_COMPOUND_PROPERTY_LABELS: set[str] = set(GENERIC_LAYOUT_PROPERTY_MAP) | {
+    "drawers",
+    "shaving cabinets",
 }
 
 GENERIC_LAYOUT_CURRENT_ATTACHMENT_LABELS: dict[str, set[str]] = {
@@ -4624,6 +4633,25 @@ def _normalize_generic_row_label(value: str) -> str:
     return parsing.normalize_space(str(value or "")).strip(" -").lower()
 
 
+def _split_compound_generic_row_label(label: str) -> tuple[str, str]:
+    normalized = _normalize_generic_row_label(label)
+    if not normalized or normalized in GENERIC_LAYOUT_PROPERTY_MAP or normalized in GENERIC_LAYOUT_ANCHOR_LABELS:
+        return "", ""
+    for anchor_label in sorted(GENERIC_LAYOUT_ANCHOR_LABELS, key=len, reverse=True):
+        anchor_normalized = _normalize_generic_row_label(anchor_label)
+        if not anchor_normalized or normalized == anchor_normalized:
+            continue
+        remainder = ""
+        for separator in (" - ", " "):
+            prefix = f"{anchor_normalized}{separator}"
+            if normalized.startswith(prefix):
+                remainder = normalized[len(prefix) :].strip(" -")
+                break
+        if remainder and remainder in GENERIC_COMPOUND_PROPERTY_LABELS:
+            return parsing.normalize_space(anchor_label).title(), remainder
+    return "", ""
+
+
 def _looks_like_grouped_generic_anchor_label(label: str) -> bool:
     normalized = _normalize_generic_row_label(label)
     if not normalized:
@@ -4689,11 +4717,15 @@ def _is_generic_anchor_row(row: dict[str, Any]) -> bool:
         return True
     if not label:
         return False
+    if _layout_row_has_header_noise(row):
+        return False
     if raw_label in GENERIC_LAYOUT_ANCHOR_LABELS:
         return True
     if raw_label in GENERIC_LAYOUT_PROPERTY_MAP:
         return False
     if label in GENERIC_LAYOUT_PROPERTY_MAP:
+        return False
+    if len(label.split()) > 10:
         return False
     return any(
         token in label
@@ -4993,6 +5025,22 @@ def _build_generic_layout_blocks(layout_rows: list[dict[str, Any]], page_type: s
             continue
         if _is_generic_layout_noise_row(row):
             continue
+        compound_anchor, compound_property = _split_compound_generic_row_label(str(row.get("row_label", "") or ""))
+        if compound_anchor and compound_property:
+            normalized_anchor = _normalize_generic_row_label(compound_anchor)
+            compound_row = dict(row)
+            compound_row["row_label"] = compound_property
+            if current is None or _normalize_generic_row_label(str(current.get("anchor_label", "") or "")) != normalized_anchor:
+                if current:
+                    blocks.append(current)
+                current = {
+                    "anchor_kind": _classify_generic_anchor({"row_label": compound_anchor, "row_kind": row.get("row_kind", "")}, page_type=page_type),
+                    "anchor_label": compound_anchor,
+                    "rows": [compound_row],
+                }
+            else:
+                current["rows"].append(compound_row)
+            continue
         if _is_generic_anchor_row(row):
             if current:
                 blocks.append(current)
@@ -5071,10 +5119,27 @@ def _build_generic_layout_blocks(layout_rows: list[dict[str, Any]], page_type: s
 def _collect_generic_block_parts(block: dict[str, Any]) -> dict[str, list[str]]:
     parts: dict[str, list[str]] = {"note": []}
     anchor_label = parsing.normalize_space(str(block.get("anchor_label", "") or ""))
+    unrelated_label_tokens = (
+        "internal paint",
+        "internal ceiling",
+        "cornice",
+        "skirtings",
+        "architraves",
+        "internal doors",
+        "internal walls",
+        "feature room/walls",
+        "internal fittings selections",
+        "flooring",
+        "carpet",
+        "timber",
+        "client initials",
+    )
     if anchor_label:
         parts.setdefault("anchor", []).append(anchor_label)
     for row in block.get("rows", []):
         label = _normalize_generic_row_label(str(row.get("row_label", "") or ""))
+        if label and any(token in label for token in unrelated_label_tokens):
+            continue
         value_text = _row_region_text(row, "value_text", "value_region_text")
         supplier_text = _row_region_text(row, "supplier_text", "supplier_region_text")
         notes_text = _row_region_text(row, "notes_text", "notes_region_text")
@@ -5236,6 +5301,7 @@ def _strip_generic_anchor_tail(text: str) -> str:
 
 def _clean_generic_fragment(value: str) -> str:
     text = parsing.normalize_space(str(value or ""))
+    text = re.sub(r"(?i)^\d+\s+cabinets?\b", "", text)
     text = re.sub(r"(?i)simonds queensland construction pty ltd.*$", "", text)
     text = re.sub(r"(?i)page:\s*\d+\s+of\s+\d+.*$", "", text)
     text = re.sub(r"(?i)printed:\s+.*$", "", text)
@@ -5301,6 +5367,26 @@ def _looks_like_generic_field_noise(value: str, *, field: str = "") -> bool:
             return True
     if field == "material":
         if sum(token in lowered for token in GENERIC_NOISE_LABEL_TOKENS) >= 2:
+            return True
+        if any(token in lowered for token in ("all cabinets include soft close", "benchtops over maximum length")):
+            return True
+        if any(
+            token in lowered
+            for token in (
+                "electrical / alarm system / cctv / solar pv system",
+                "switch plates / gpo",
+                "tv antenna",
+                "home automation",
+                "alarm system",
+                "solar pv system",
+                "air-conditioning",
+                "air conditioning",
+                "hot water unit",
+                "outlets & zones",
+                "controller type",
+                "vent type",
+            )
+        ):
             return True
     if field == "handle":
         if sum(token in lowered for token in ("manufacturer", "range", "model", "style", "finish", "fixing")) >= 2:
@@ -5393,11 +5479,16 @@ def _format_generic_material_from_parts(parts: dict[str, list[str]]) -> str:
         "island colour as above",
         "no shelf to cupboard",
         "washing machine taps located inside cupboards",
+        "one stone colour included",
+        "additional $350 charge",
+        "location",
     )
     notes = [
         value
         for value in _meaningful_generic_values(parts.get("note", []))
-        if not any(token in value.lower() for token in note_excludes) and not value.lower().startswith("including")
+        if not any(token in value.lower() for token in note_excludes)
+        and not value.lower().startswith("including")
+        and not re.match(r"(?i)^nook\b", value)
     ]
     composed: list[str] = []
     if profile:
@@ -5668,6 +5759,9 @@ def _sanitize_generic_fixture_field(value: Any, *, kind: str = "") -> str:
         if kind == "tap":
             text = re.sub(r"(?i)\b(?:by client|supplied by client)\b.*$", "", text).strip(" -;,")
             text = re.sub(r"(?i)\s*-\s*(?:alder\s+sachi|sachi|wish)\s*$", "", text).strip(" -;,")
+            text = re.sub(r"(?i)\s*-\s*washing machine taps\b.*$", "", text).strip(" -;,")
+            text = re.sub(r"(?i)\bwashing machine taps\b.*$", "", text).strip(" -;,")
+            text = re.sub(r"(?i)\s*-\s*(?:corner|centre|center)\s+of\s*$", "", text).strip(" -;,")
         text = parsing.normalize_brand_casing_text(parsing.normalize_space(text)).strip(" -;,")
         if not text:
             continue
@@ -5839,6 +5933,19 @@ def _extract_generic_layout_overlay(section: dict[str, Any]) -> dict[str, Any]:
         parts = _collect_generic_block_parts(block)
         kind = str(block.get("anchor_kind", "") or "")
         anchor_label = _normalize_generic_row_label(str(block.get("anchor_label", "") or ""))
+        embedded_handle_text = ""
+        if any(
+            parts.get(key)
+            for key in (
+                "model",
+                "handles",
+                "door handle",
+                "drawer handle",
+                "pantry door handle",
+                "bin & pot drawers handle",
+            )
+        ):
+            embedded_handle_text = _format_generic_handles_from_parts(parts)
         if kind == "bench":
             overlay["has_bench_block"] = True
             bench_text = _format_generic_material_from_parts(parts)
@@ -5856,26 +5963,39 @@ def _extract_generic_layout_overlay(section: dict[str, Any]) -> dict[str, Any]:
             overlay["door_colours_base"] = parsing._merge_text(overlay["door_colours_base"], text)
             if text:
                 last_cabinetry_material = text
+            if embedded_handle_text and embedded_handle_text not in overlay["handles"]:
+                overlay["has_handles_block"] = True
+                overlay["handles"].append(embedded_handle_text)
         elif kind == "island":
             text = _format_generic_material_from_parts(parts)
             overlay["has_explicit_island"] = True
             overlay["door_colours_island"] = parsing._merge_text(overlay["door_colours_island"], text)
             if text:
                 last_cabinetry_material = text
+            if embedded_handle_text and embedded_handle_text not in overlay["handles"]:
+                overlay["has_handles_block"] = True
+                overlay["handles"].append(embedded_handle_text)
         elif kind == "overheads":
             text = _format_generic_material_from_parts(parts)
             overlay["has_explicit_overheads"] = True
             overlay["door_colours_overheads"] = parsing._merge_text(overlay["door_colours_overheads"], text)
             if text:
                 last_cabinetry_material = text
+            if embedded_handle_text and embedded_handle_text not in overlay["handles"]:
+                overlay["has_handles_block"] = True
+                overlay["handles"].append(embedded_handle_text)
         elif kind == "tall":
             text = _format_generic_material_from_parts(parts)
             overlay["has_explicit_tall"] = True
             overlay["door_colours_tall"] = parsing._merge_text(overlay["door_colours_tall"], text)
             if text:
                 last_cabinetry_material = text
+            if embedded_handle_text and embedded_handle_text not in overlay["handles"]:
+                overlay["has_handles_block"] = True
+                overlay["handles"].append(embedded_handle_text)
         elif kind == "toe_kick":
             text = _format_generic_material_from_parts(parts)
+            text = re.sub(r"(?i)^kickboard\s+", "", text).strip(" -;,")
             if last_cabinetry_material and text and text.lower() in {"laminate", "as doors", "floating vanity"}:
                 text = parsing.normalize_brand_casing_text(f"{last_cabinetry_material} - {text}")
             elif last_cabinetry_material and not text:
@@ -5944,8 +6064,7 @@ def _extract_generic_layout_overlay(section: dict[str, Any]) -> dict[str, Any]:
 
 
 def _polish_generic_layout_room(row: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    if not overlay:
-        return row
+    overlay = overlay or {}
     polished = dict(row)
     room_key = parsing.same_room_identity(str(polished.get("original_room_label", "")), str(polished.get("room_key", "")))
     if overlay.get("original_room_label"):
@@ -5957,12 +6076,8 @@ def _polish_generic_layout_room(row: dict[str, Any], overlay: dict[str, Any]) ->
         str(polished.get("bench_tops_other", "") or ""),
         " | ".join(str(value or "") for value in polished.get("bench_tops", []) if parsing.normalize_space(str(value or ""))),
     )
-    if (
-        any(overlay.get(field_name) for field_name in ("bench_tops_wall_run", "bench_tops_island", "bench_tops_other"))
-        or (
-            overlay.get("has_bench_block")
-            and any(_looks_like_generic_field_noise(value, field="material") for value in existing_bench_fields if value)
-        )
+    if overlay.get("has_bench_block") or any(
+        overlay.get(field_name) for field_name in ("bench_tops_wall_run", "bench_tops_island", "bench_tops_other")
     ):
         polished["bench_tops"] = []
         polished["bench_tops_wall_run"] = ""
@@ -5979,7 +6094,7 @@ def _polish_generic_layout_room(row: dict[str, Any], overlay: dict[str, Any]) ->
     for field_name, explicit_flag, field_kind in material_field_rules:
         existing_value = str(polished.get(field_name, "") or "")
         overlay_value = str(overlay.get(field_name, "") or "")
-        if overlay_value or (explicit_flag and _looks_like_generic_field_noise(existing_value, field=field_kind)):
+        if explicit_flag or overlay_value or (explicit_flag and _looks_like_generic_field_noise(existing_value, field=field_kind)):
             polished[field_name] = ""
     for field_name in (
         "bench_tops_wall_run",
@@ -6023,16 +6138,13 @@ def _polish_generic_layout_room(row: dict[str, Any], overlay: dict[str, Any]) ->
         ]
     if overlay.get("has_handles_block") and overlay.get("handles"):
         polished["handles"] = list(overlay.get("handles", []))
-    elif overlay.get("has_handles_block") and any(
-        _looks_like_placeholder_entry(entry) or _looks_like_generic_field_noise(entry, field="handle")
-        for entry in polished.get("handles", [])
-    ):
+    elif overlay.get("has_handles_block"):
         polished["handles"] = []
     elif overlay.get("handles"):
         polished["handles"] = overlay["handles"]
     if overlay.get("has_accessories_block") and overlay.get("accessories"):
         polished["accessories"] = list(overlay.get("accessories", []))
-    elif overlay.get("has_accessories_block") and any(_looks_like_placeholder_entry(entry) for entry in polished.get("accessories", [])):
+    elif overlay.get("has_accessories_block"):
         polished["accessories"] = []
     elif overlay.get("accessories"):
         polished["accessories"] = overlay["accessories"]
@@ -6065,6 +6177,31 @@ def _polish_generic_layout_room(row: dict[str, Any], overlay: dict[str, Any]) ->
         polished["basin_info"] = ""
     elif overlay.get("basin_info"):
         polished["basin_info"] = overlay["basin_info"]
+    if overlay.get("has_flooring_block"):
+        polished["flooring"] = overlay.get("flooring", "")
+    else:
+        flooring_value = parsing.normalize_space(str(polished.get("flooring", "") or ""))
+        if flooring_value and (
+            _looks_like_generic_field_noise(flooring_value, field="material")
+            or any(
+                token in flooring_value.lower()
+                for token in (
+                    "internal paint",
+                    "internal ceiling",
+                    "cornice",
+                    "skirtings",
+                    "architraves",
+                    "internal walls",
+                    "carpet",
+                    "timber",
+                    "client initials",
+                    "manufacturer",
+                    "range",
+                    "underlay",
+                )
+            )
+        ):
+            polished["flooring"] = ""
     if overlay.get("has_handles_block"):
         polished["handles"] = [entry for entry in polished.get("handles", []) if not _looks_like_placeholder_entry(entry)]
     if overlay.get("has_accessories_block"):

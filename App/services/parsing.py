@@ -158,6 +158,67 @@ ROOM_PREFIX_FIELD_HINTS: tuple[str, ...] = (
     "waste",
 )
 
+ROOM_PREFIX_SPLIT_JOINERY_TAILS: tuple[str, ...] = (
+    "benchtop",
+    "bench tops",
+    "wall run benchtop",
+    "island/penisula benchtop",
+    "underbench",
+    "underbench including island",
+    "base cabinet panels",
+    "wall run base cabinet panels",
+    "island/penisula base cabinet panels",
+    "overhead cupboards",
+    "overheads",
+    "kickboard",
+    "wall run kickboard",
+    "island/penisula kickboard",
+    "cabinet panels",
+    "floating shelf",
+    "floating shelves",
+    "shelving",
+    "shadowline",
+)
+
+ROOM_PREFIX_SPLIT_FIXTURE_TAILS: tuple[str, ...] = (
+    "sink",
+    "sinkware",
+    "tap",
+    "tapware",
+    "trough",
+    "basin",
+    "basin mixer",
+    "vanity basin",
+    "vanity basin tapware",
+    "bath",
+    "bath/spa bath",
+    "bath tapware",
+    "feature waste",
+    "toilet suite",
+    "toilet roll holder",
+    "shower mixer",
+    "shower rose",
+    "shower frame",
+    "shower screen",
+    "floor waste",
+    "mirror",
+    "accessories",
+)
+
+ROOM_PREFIX_SPLIT_EXCLUDED_TAILS: tuple[str, ...] = (
+    "door handle",
+    "drawer handle",
+    "pantry door handle",
+    "bin & pot drawers handle",
+    "base cabinetry handles",
+    "cabinetry handles",
+    "overhead cabinetry handles",
+    "handles",
+    "pantry doors",
+    "door colour",
+    "door colours",
+)
+
 APPLIANCE_TYPES = ["sink", "cooktop", "oven", "rangehood", "dishwasher", "microwave", "fridge", "refrigerator"]
 
 APPLIANCE_LABEL_SPECS: list[tuple[str, list[str]]] = [
@@ -810,6 +871,12 @@ def _schedule_room_key(line: str) -> str:
 
 STRUCTURE_ROOM_NOISE_PATTERNS: tuple[str, ...] = (
     r"(?i)\baddress\b",
+    r"(?i)\bclient initials?\b",
+    r"(?i)\binitials?\b",
+    r"(?i)\bclient\b",
+    r"(?i)\bdate\b",
+    r"(?i)\bsignature\b",
+    r"(?i)\bdesigner\b",
     r"(?i)\bjob number\b",
     r"(?i)\bmanufacturer\b",
     r"(?i)\bsupplier\b",
@@ -1013,16 +1080,146 @@ def _clone_layout_row(raw_row: dict[str, Any], row_label: str = "") -> dict[str,
     }
 
 
-def _split_layout_rows_by_room_prefix(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _layout_row_has_meaningful_content(raw_row: dict[str, Any]) -> bool:
+    return any(
+        normalize_space(str(raw_row.get(field_name, "") or ""))
+        for field_name in ("row_label", "value_region_text", "supplier_region_text", "notes_region_text")
+    )
+
+
+def _search_room_reference(text: str) -> str:
+    normalized = normalize_space(text)
+    if not normalized:
+        return ""
+    cleaned = _clean_layout_room_label(normalized)
+    if cleaned and _looks_like_plausible_room_label(cleaned):
+        return cleaned
+    for pattern, label in ROOM_PREFIX_PATTERN_SPECS:
+        if re.search(rf"(?i)\b(?:room\s+)?{pattern}\b", normalized):
+            candidate = _clean_layout_room_label(label)
+            if candidate and _looks_like_plausible_room_label(candidate):
+                return candidate
+    return ""
+
+
+def _room_prefix_tail_allows_room_split(tail: str, *, page_type: str, row_kind: str = "") -> bool:
+    normalized_tail = normalize_space(tail).strip(" -:/,;()").lower()
+    if not normalized_tail:
+        return True
+    if normalized_tail in ROOM_PREFIX_SPLIT_EXCLUDED_TAILS:
+        return False
+    if page_type == "sinkware_tapware":
+        return (
+            normalized_tail in ROOM_PREFIX_SPLIT_FIXTURE_TAILS
+            or row_kind in {"sink", "tap", "basin", "accessory"}
+            or _looks_like_room_field_tail(normalized_tail)
+        )
+    if page_type == "joinery":
+        return normalized_tail in ROOM_PREFIX_SPLIT_JOINERY_TAILS or normalized_tail in ROOM_PREFIX_SPLIT_FIXTURE_TAILS
+    return _looks_like_room_field_tail(normalized_tail)
+
+
+def _infer_default_layout_room_label(
+    *,
+    room_label: str,
+    section_label: str,
+    raw_page_text: str,
+    rows: list[dict[str, Any]],
+    page_type: str,
+) -> str:
+    explicit = _clean_layout_room_label(room_label, section_label)
+    if explicit and _looks_like_plausible_room_label(explicit):
+        return explicit
+    lines = [normalize_space(line) for line in str(raw_page_text or "").replace("\r", "\n").split("\n") if normalize_space(line)]
+    for line in lines[:24]:
+        if len(line.split()) > 8:
+            continue
+        candidate = _search_room_reference(line)
+        if candidate:
+            return candidate
+    for raw_row in rows[:18]:
+        if not isinstance(raw_row, dict):
+            continue
+        row_label = normalize_space(str(raw_row.get("row_label", "") or ""))
+        row_kind = normalize_space(str(raw_row.get("row_kind", "") or "")).lower().replace(" ", "_")
+        if row_label:
+            prefix_label, remainder = _extract_room_prefix_parts(row_label)
+            if prefix_label and _room_prefix_tail_allows_room_split(remainder, page_type=page_type, row_kind=row_kind):
+                candidate = _clean_layout_room_label(prefix_label)
+                if candidate and _looks_like_plausible_room_label(candidate):
+                    return candidate
+            # Property rows like "Pantry Door Handle" should never steal the page's
+            # default room identity just because they contain a known room token.
+            if not (prefix_label and remainder):
+                candidate = _search_room_reference(row_label)
+                if candidate:
+                    return candidate
+    return ""
+
+
+def _looks_like_inline_room_heading_row(raw_row: dict[str, Any]) -> bool:
+    label = normalize_space(str(raw_row.get("row_label", "") or ""))
+    if not label:
+        return False
+    cleaned = _clean_layout_room_label(label)
+    if not cleaned or not _looks_like_plausible_room_label(cleaned):
+        return False
+    prefix_label, remainder = _extract_room_prefix_parts(label)
+    if prefix_label and remainder:
+        return False
+    value_text = normalize_space(str(raw_row.get("value_region_text", "") or ""))
+    supplier_text = normalize_space(str(raw_row.get("supplier_region_text", "") or ""))
+    notes_text = normalize_space(str(raw_row.get("notes_region_text", "") or ""))
+    if supplier_text or notes_text:
+        return False
+    return not value_text or value_text.lower() in {label.lower(), cleaned.lower()}
+
+
+def _split_layout_rows_by_inline_room_headings(
+    rows: list[dict[str, Any]],
+    *,
+    default_room_label: str = "",
+) -> list[dict[str, Any]]:
     grouped: list[dict[str, Any]] = []
-    current_room = ""
+    current_room = _clean_layout_room_label(default_room_label)
+    if current_room:
+        grouped.append({"room_label": current_room, "rows": []})
+    for raw_row in rows:
+        if not isinstance(raw_row, dict):
+            continue
+        if _looks_like_inline_room_heading_row(raw_row):
+            current_room = _clean_layout_room_label(str(raw_row.get("row_label", "") or ""))
+            if not current_room:
+                continue
+            if not grouped or grouped[-1].get("room_label") != current_room:
+                grouped.append({"room_label": current_room, "rows": []})
+            continue
+        if current_room and grouped:
+            grouped[-1]["rows"].append(_clone_layout_row(raw_row))
+    return [block for block in grouped if block.get("room_label") and block.get("rows")]
+
+
+def _split_layout_rows_by_room_prefix(
+    rows: list[dict[str, Any]],
+    *,
+    page_type: str = "",
+    default_room_label: str = "",
+) -> list[dict[str, Any]]:
+    grouped: list[dict[str, Any]] = []
+    current_room = _clean_layout_room_label(default_room_label)
+    if current_room:
+        grouped.append({"room_label": current_room, "rows": []})
     for raw_row in rows:
         label = normalize_space(str(raw_row.get("row_label", "") or ""))
         prefix_label, remainder = _extract_room_prefix_parts(label)
-        if prefix_label and (not remainder or _looks_like_room_field_tail(remainder) or re.match(r"^(?:-|/)", remainder)):
+        row_kind = normalize_space(str(raw_row.get("row_kind", "") or "")).lower().replace(" ", "_")
+        if prefix_label and _room_prefix_tail_allows_room_split(remainder, page_type=page_type, row_kind=row_kind):
             current_room = source_room_label(prefix_label, fallback_key=source_room_key(prefix_label))
-            grouped.append({"room_label": current_room, "rows": []})
-            grouped[-1]["rows"].append(_clone_layout_row(raw_row, row_label=remainder or label))
+            if not grouped or grouped[-1].get("room_label") != current_room:
+                grouped.append({"room_label": current_room, "rows": []})
+            adjusted_row = _clone_layout_row(raw_row, row_label=remainder)
+            if _layout_row_has_meaningful_content(adjusted_row):
+                grouped[-1]["rows"].append(adjusted_row)
             continue
         if current_room and grouped:
             grouped[-1]["rows"].append(_clone_layout_row(raw_row))
@@ -1062,10 +1259,23 @@ def _coerce_layout_room_blocks(
     layout: dict[str, Any],
     section_label: str,
     room_label: str,
+    *,
+    raw_page_text: str = "",
+    page_type: str = "",
 ) -> list[dict[str, Any]]:
     room_blocks = layout.get("room_blocks", [])
     if not isinstance(room_blocks, list) or not room_blocks:
         room_blocks = [{"room_label": room_label, "rows": layout.get("rows", [])}]
+    explicit_plausible_blocks_exist = any(
+        isinstance(block, dict)
+        and _looks_like_plausible_room_label(
+            _clean_layout_room_label(
+                normalize_space(str(block.get("room_label", "") or "")),
+                section_label,
+            )
+        )
+        for block in room_blocks
+    )
     derived_blocks: list[dict[str, Any]] = []
     for block in room_blocks:
         if not isinstance(block, dict):
@@ -1076,13 +1286,60 @@ def _coerce_layout_room_blocks(
         if cleaned_label and _looks_like_plausible_room_label(cleaned_label):
             derived_blocks.append({"room_label": cleaned_label, "rows": [_clone_layout_row(row) for row in block_rows]})
             continue
-        prefixed_blocks = _split_layout_rows_by_room_prefix(block_rows)
+        if (
+            explicit_plausible_blocks_exist
+            and block_label
+            and (not cleaned_label or _looks_like_structured_room_noise(cleaned_label or block_label))
+        ):
+            # When the merged layout already carries explicit room blocks, ignore
+            # extra metadata/header blocks such as "Client Initials" or "Ref. Number"
+            # instead of trying to re-split them into duplicate noisy room sections.
+            continue
+        default_room_label = _infer_default_layout_room_label(
+            room_label=room_label,
+            section_label=section_label,
+            raw_page_text=raw_page_text,
+            rows=block_rows,
+            page_type=page_type,
+        )
+        prefixed_blocks = _split_layout_rows_by_room_prefix(
+            block_rows,
+            page_type=page_type,
+            default_room_label=default_room_label,
+        )
+        inline_blocks = _split_layout_rows_by_inline_room_headings(block_rows, default_room_label=default_room_label)
+        prefixed_row_count = sum(len(block.get("rows", [])) for block in prefixed_blocks)
+        inline_row_count = sum(len(block.get("rows", [])) for block in inline_blocks)
+        if inline_blocks and (
+            not prefixed_blocks
+            or len(inline_blocks) > len(prefixed_blocks)
+            or (len(inline_blocks) == len(prefixed_blocks) and inline_row_count < prefixed_row_count)
+        ):
+            derived_blocks.extend(inline_blocks)
+            continue
         if prefixed_blocks:
             derived_blocks.extend(prefixed_blocks)
             continue
+        if inline_blocks:
+            derived_blocks.extend(inline_blocks)
+            continue
         if not block_label and room_label and _looks_like_plausible_room_label(room_label):
             derived_blocks.append({"room_label": _clean_layout_room_label(room_label, section_label), "rows": [_clone_layout_row(row) for row in block_rows]})
-    return [block for block in derived_blocks if block.get("room_label") and block.get("rows")]
+            continue
+        if default_room_label and block_rows:
+            derived_blocks.append({"room_label": default_room_label, "rows": [_clone_layout_row(row) for row in block_rows]})
+    merged_blocks: list[dict[str, Any]] = []
+    for block in derived_blocks:
+        room_name = normalize_space(str(block.get("room_label", "") or ""))
+        block_rows = [row for row in block.get("rows", []) if isinstance(row, dict)]
+        if not room_name or not block_rows:
+            continue
+        existing = next((item for item in merged_blocks if item.get("room_label") == room_name), None)
+        if existing is None:
+            merged_blocks.append({"room_label": room_name, "rows": [_clone_layout_row(row) for row in block_rows]})
+            continue
+        existing["rows"].extend(_clone_layout_row(row) for row in block_rows)
+    return [block for block in merged_blocks if block.get("room_label") and block.get("rows")]
 
 
 def _extract_layout_room_alias(text: str) -> str:
@@ -1192,7 +1449,13 @@ def _collect_layout_sections_for_document(document: dict[str, object]) -> list[d
             room_label = extracted_room_label
         if page_type not in {"joinery", "sinkware_tapware", "special"}:
             continue
-        room_blocks = _coerce_layout_room_blocks(layout, section_label=section_label, room_label=room_label)
+        room_blocks = _coerce_layout_room_blocks(
+            layout,
+            section_label=section_label,
+            room_label=room_label,
+            raw_page_text=raw_page_text,
+            page_type=page_type,
+        )
         if page_type == "special":
             special_rows = [row for row in layout.get("rows", []) if isinstance(row, dict)]
             section = _layout_section_seed(
@@ -3858,6 +4121,11 @@ def _imperial_layout_row_fixture_entry(row: dict[str, Any], kind: str) -> str:
             "",
             text,
         ).strip(" -;,")
+    if kind in {"sink", "basin"}:
+        text = re.sub(r"(?i)\b(?:tap ?hole|taphole)\s+location\b.*$", "", text).strip(" -;,")
+        text = re.sub(r"(?i)\b(?:tapware|mixer|tap)\s+location\b.*$", "", text).strip(" -;,")
+        text = re.sub(r"(?i)\bsink\s+pre-?punched\s+hole\b.*$", "", text).strip(" -;,")
+        text = re.sub(r"(?i)\b(?:centre|center|corner)\s+of\s+(?:sink|basin|tub)\b.*$", "", text).strip(" -;,")
     return text
 
 
