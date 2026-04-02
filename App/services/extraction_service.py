@@ -7177,14 +7177,32 @@ def _extract_clarendon_fixture_overlays(text: str) -> dict[str, dict[str, Any]]:
     if laundry_segment:
         overlay = overlays.setdefault("laundry", _blank_clarendon_overlay())
         sink = _extract_clarendon_value_after_label(laundry_segment, r"Drop in Tub")
-        sink_detail = _extract_first_pattern(laundry_segment, r"EVERHARD INDUSTRIES.+?\([A-Z0-9.-]+\)")
+        sink_detail = (
+            _extract_first_pattern(laundry_segment, r"EVERHARD INDUSTRIES.+?\([A-Z0-9.-]+\)")
+            or _extract_first_pattern(laundry_segment, r"PRISM LARGE SINGLE BOWL UNDERMOUNT\s+[A-Z0-9.-]+")
+            or _extract_first_pattern(laundry_segment, r"[A-Z0-9 /-]+UTILITY SINK\s*\([A-Z0-9.-]+\)")
+        )
         tap_detail = _extract_first_pattern(laundry_segment, r"PINA SINK MIXER.+?\([A-Z0-9.-]+\)")
+        if not tap_detail:
+            tap_detail = _extract_first_pattern(laundry_segment, r"GASTON PULL DOWN MIXER[ A-Z0-9/-]*\([A-Z0-9.-]+\)")
         washing_tap = _extract_first_pattern(laundry_segment, r"\d+MM CP QUARTER TURN WASHING MACHINE COCK\s*\([A-Z0-9.-]+\)")
         if sink_detail:
-            overlay["sink_info"] = parsing._merge_text(overlay["sink_info"], _clarendon_clean_sink_text(f"{sink_detail} drop-in tub"))
+            sink_text = sink_detail
+            if sink and sink.lower() not in sink_detail.lower():
+                sink_text = f"{sink} - {sink_detail}"
+            overlay["sink_info"] = parsing._merge_text(overlay["sink_info"], _clarendon_clean_sink_text(sink_text))
         elif sink:
             overlay["sink_info"] = parsing._merge_text(overlay["sink_info"], _clarendon_clean_sink_text(sink))
         if tap_detail:
+            tap_label = _extract_clarendon_value_after_label(laundry_segment, r"Tap Style")
+            tap_label_clean = parsing.normalize_space(str(tap_label or ""))
+            if (
+                tap_label_clean
+                and len(tap_label_clean) <= 40
+                and "description details" not in tap_label_clean.lower()
+                and tap_label_clean.lower() not in tap_detail.lower()
+            ):
+                tap_detail = f"{tap_label} - {tap_detail}"
             cleaned_tap = _clarendon_clean_tap_text(tap_detail)
             if washing_tap:
                 cleaned_tap = f"{cleaned_tap}; {_clarendon_clean_tap_text(washing_tap)}"

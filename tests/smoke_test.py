@@ -6594,6 +6594,23 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(room["toe_kick"], ["Matching Melamine finish"])
         self.assertEqual(len(room["handles"]), 2)
 
+    def test_extract_clarendon_fixture_overlays_recovers_laundry_supplier_and_detail(self) -> None:
+        text = (
+            "LAUNDRY SUPPLIER DESCRIPTION DESIGN COMMENTS "
+            "Drop in Tub: EVERHARD "
+            "Tap Style: METHVEN "
+            "DESCRIPTION DETAILS "
+            "PRISM LARGE SINGLE BOWL UNDERMOUNT PPR10LGB "
+            "GASTON PULL DOWN MIXER BLACK / CHROME (02-1055) "
+            "15MM CP QUARTER TURN WASHING MACHINE COCK (60822)"
+        )
+        overlays = extraction_service._extract_clarendon_fixture_overlays(text)
+        laundry = overlays["laundry"]
+        self.assertIn("Everhard", laundry["sink_info"])
+        self.assertIn("Prism Large Single Bowl Undermount PPR10LGB", laundry["sink_info"])
+        self.assertIn("gaston pull down mixer black / chrome (02-1055)", laundry["tap_info"].lower())
+        self.assertIn("15mm cp quarter turn washing machine cock (60822)", laundry["tap_info"].lower())
+
     def test_select_clarendon_room_overlay_maps_butlers_pantry_to_walk_in_pantry(self) -> None:
         overlay = extraction_service._select_clarendon_room_overlay(
             {"room_key": "walk_in_pantry", "original_room_label": "WALK IN PANTRY"},
