@@ -2779,14 +2779,15 @@ class SmokeTest(unittest.TestCase):
         rooms = {row["room_key"]: row for row in snapshot["rooms"]}
         analysis = snapshot["analysis"]
         warning_text = " | ".join(snapshot["warnings"])
-        self.assertEqual(set(rooms.keys()), {"kitchen", "vanities"})
+        self.assertEqual(set(rooms.keys()), {"kitchen", "vanities", "main_bathroom"})
         self.assertEqual(analysis["room_master_file"], "drawings-and-colours.pdf")
         self.assertIn("drawings-and-colours.pdf selected as room master", analysis["room_master_reason"])
         self.assertEqual(analysis["supplement_files"], ["colours-afc.pdf"])
         self.assertGreaterEqual(analysis["ignored_room_like_lines_count"], 1)
-        self.assertTrue(str(rooms["vanities"]["basin_info"]).startswith("Johnson Suisse Emilia"))
+        self.assertTrue(str(rooms["main_bathroom"]["basin_info"]).startswith("Johnson Suisse Emilia"))
         self.assertIn("Ignored room-like section", warning_text)
         self.assertNotIn("Laundry Door", " ".join(rooms.keys()))
+        self.assertNotIn("powder_room_3", rooms)
 
     def test_parse_documents_prefers_colour_schedule_file_as_room_master_for_multifile_clarendon(self) -> None:
         snapshot = parse_documents(
@@ -2834,6 +2835,61 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(analysis["room_master_file"], "49906613 COLOURS AFC AMENDED .pdf")
         self.assertEqual(vanities["source_file"], "49906613 COLOURS AFC AMENDED .pdf")
         self.assertEqual(vanities["page_refs"], "6")
+
+    def test_parse_documents_keeps_clarendon_wet_area_rooms_from_afc_supplement(self) -> None:
+        snapshot = parse_documents(
+            job_no="49906622",
+            builder_name="Clarendon",
+            source_kind="spec",
+            documents=[
+                {
+                    "file_name": "49906622 AMENDED Signed Drawings and Colours REV B 20-10-25.pdf",
+                    "role": "spec",
+                    "pages": [
+                        {
+                            "page_no": 1,
+                            "text": (
+                                "KITCHEN COLOUR SCHEDULE\n"
+                                "VANITIES COLOUR SCHEDULE\n"
+                                "Forstan Pty Ltd. T/A YourHome Kitchens P.O. Box 8248 Baulkham HillsBCNSW 2153 Phone : 02 8824 7771\n"
+                            ),
+                            "needs_ocr": False,
+                        }
+                    ],
+                },
+                {
+                    "file_name": "49906622 - COLOURS - AFC.pdf",
+                    "role": "spec",
+                    "pages": [
+                        {
+                            "page_no": 1,
+                            "text": (
+                                "Main Bathroom\n"
+                                "Vanity Inset Basin JOHNSON SUISSE Emilia Basin (JBSE250.PW6)\n"
+                                "WC\n"
+                                "Toilet Suite JOHNSON SUISSE Venezia Comfort\n"
+                                "Ensuite\n"
+                                "Vanity Tap Style PHOENIX PINA WALL BASIN/BATH MIXER SET 180MM\n"
+                            ),
+                            "needs_ocr": False,
+                        }
+                    ],
+                },
+            ],
+        )
+        room_keys = {row["room_key"] for row in snapshot["rooms"]}
+        self.assertIn("kitchen", room_keys)
+        self.assertIn("main_bathroom", room_keys)
+        self.assertIn("ensuite", room_keys)
+        self.assertNotIn("forstan_pty_ltd_t_a_yourhome_kitchens_p_o_box_8248_baulkham_hillsbcnsw_2153_phone", room_keys)
+
+    def test_spec_room_label_noise_filters_clarendon_company_heading(self) -> None:
+        self.assertTrue(
+            parsing_module._looks_like_spec_room_label_noise(
+                "Forstan Pty Ltd. T/A YourHome Kitchens P.O. Box 8248 Baulkham HillsBCNSW 2153 Phone"
+            )
+        )
+        self.assertFalse(parsing_module._looks_like_spec_room_label_noise("KITCHEN"))
 
     def test_parse_documents_defaults_grouped_vanities_door_colours_to_base_without_explicit_overheads(self) -> None:
         snapshot = parse_documents(
@@ -3101,11 +3157,11 @@ class SmokeTest(unittest.TestCase):
         rooms = {row["room_key"]: row for row in snapshot["rooms"]}
         analysis = snapshot["analysis"]
         warning_text = " | ".join(snapshot["warnings"])
-        self.assertEqual(set(rooms.keys()), {"kitchen", "butlers_pantry", "vanities", "laundry"})
+        self.assertEqual(set(rooms.keys()), {"kitchen", "butlers_pantry", "vanities", "laundry", "main_bathroom"})
         self.assertEqual(analysis["room_master_file"], "drawings-and-colours.pdf")
         self.assertEqual(analysis["supplement_files"], ["colours-afc.pdf"])
         self.assertGreaterEqual(analysis["ignored_room_like_lines_count"], 1)
-        self.assertTrue(str(rooms["vanities"]["basin_info"]).startswith("Johnson Suisse Emilia"))
+        self.assertTrue(str(rooms["main_bathroom"]["basin_info"]).startswith("Johnson Suisse Emilia"))
         self.assertIn("Study", warning_text)
         self.assertNotIn("KITCHEN COLOUR SCHEDULEBENCHTOP", " ".join(room["original_room_label"] for room in snapshot["rooms"]))
 
@@ -3154,11 +3210,11 @@ class SmokeTest(unittest.TestCase):
         rooms = {row["room_key"]: row for row in snapshot["rooms"]}
         analysis = snapshot["analysis"]
         warning_text = " | ".join(snapshot["warnings"])
-        self.assertEqual(set(rooms.keys()), {"kitchen", "butlers_pantry", "vanities", "laundry"})
+        self.assertEqual(set(rooms.keys()), {"kitchen", "butlers_pantry", "vanities", "laundry", "main_bathroom"})
         self.assertEqual(analysis["room_master_file"], "drawings-and-colours.pdf")
         self.assertEqual(analysis["supplement_files"], ["colours-afc.pdf"])
         self.assertGreaterEqual(analysis["ignored_room_like_lines_count"], 1)
-        self.assertTrue(str(rooms["vanities"]["basin_info"]).startswith("Johnson Suisse Emilia"))
+        self.assertTrue(str(rooms["main_bathroom"]["basin_info"]).startswith("Johnson Suisse Emilia"))
         self.assertEqual(rooms["vanities"]["original_room_label"], "VANITIES")
         self.assertTrue(bool(warning_text))
         self.assertIn("Theatre", warning_text)

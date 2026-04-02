@@ -1628,6 +1628,10 @@ def _document_room_master_score(document: dict[str, object]) -> dict[str, Any]:
         "reason": reason,
         "schedule_sections": schedule_sections,
         "generic_sections": generic_sections,
+        "schedule_pages": schedule_pages,
+        "colour_schedule_hits": colour_schedule_hits,
+        "cabinetry_field_hits": cabinetry_field_hits,
+        "room_heading_hits": room_heading_hits,
     }
 
 
@@ -1668,6 +1672,63 @@ def _resolve_room_target(
     if _looks_like_non_joinery_room_label(original_room_label):
         return "", "non-joinery/non-fixture noise"
     return "", "not in room master"
+
+
+def _looks_like_spec_room_label_noise(label: str) -> bool:
+    text = normalize_space(label)
+    lowered = text.lower()
+    if not text:
+        return True
+    if any(
+        token in lowered
+        for token in (
+            "phone",
+            "fax",
+            "abn",
+            "job no",
+            "sheet ",
+            "scale:",
+            "forstan pty ltd",
+            "customer service coordinator",
+            "product:",
+            "client signature",
+            "date of signed dwgs",
+            "frame wall to ctr",
+        )
+    ):
+        return True
+    if re.search(r"\d{7,}", text):
+        return True
+    digit_count = sum(char.isdigit() for char in text)
+    if digit_count >= 8 and len(text) >= 24:
+        return True
+    return False
+
+
+def _clarendon_supplement_fixture_section_is_standalone_candidate(section_text: str) -> bool:
+    lowered = normalize_space(section_text).lower()
+    if not lowered:
+        return False
+    return any(
+        token in lowered
+        for token in (
+            "vanity inset basin",
+            "vanity basin",
+            "vanity tap style",
+            "basin mixer",
+            "basin tap",
+            "bath combination tap",
+            "bath mixer",
+            "bath type",
+            "shower tap style",
+            "shower outlet style",
+            "shower type",
+            "toilet suite",
+            "toilet roll holder",
+            "mirror:",
+            "vanity waste colour",
+        )
+    )
 
 
 def _is_imperial_builder(builder_name: str) -> bool:
@@ -4665,6 +4726,23 @@ def _documents_have_layout_schema(documents: list[dict[str, object]]) -> bool:
 def _select_spec_room_master_document(builder_name: str, documents: list[dict[str, object]]) -> tuple[dict[str, object] | None, str]:
     if _is_imperial_builder(builder_name):
         return _select_imperial_room_master_document(documents)
+    if builder_name.strip().lower() == "clarendon" and len(documents) > 1:
+        best_document: dict[str, object] | None = None
+        best_reason = ""
+        best_score = -1
+        for document in documents:
+            metrics = _document_room_master_score(document)
+            if metrics["schedule_pages"] <= 0 and metrics["cabinetry_field_hits"] <= 0:
+                continue
+            if metrics["score"] > best_score:
+                best_document = document
+                best_score = int(metrics["score"])
+                best_reason = (
+                    f"{document['file_name']} selected as room master by Clarendon schedule density "
+                    f"({metrics['reason']})."
+                )
+        if best_document is not None:
+            return best_document, best_reason
     return select_room_master_document(documents, "spec")
 
 
@@ -4711,6 +4789,8 @@ def _parse_spec_documents_structure_first(
                 str(section.get("original_section_label", "")),
                 fallback_key=str(section.get("section_key", "")),
             )[:80]
+            if not imperial_builder and _looks_like_spec_room_label_noise(original_room_label):
+                continue
             room_key = source_room_key(original_room_label, fallback_key=str(section.get("section_key", "")))
             if room_key:
                 room_master_keys.add(room_key)
@@ -4753,8 +4833,22 @@ def _parse_spec_documents_structure_first(
                 str(section.get("original_section_label", "")),
                 fallback_key=str(section.get("section_key", "")),
             )[:80]
+            if not imperial_builder and _looks_like_spec_room_label_noise(original_room_label):
+                ignored_room_like_lines_count += 1
+                warnings.append(f"Ignored room-like section '{original_room_label}' from {file_name}: room-label metadata noise.")
+                continue
+            chunk = str(section.get("text", "") or "")
             room_key = source_room_key(original_room_label, fallback_key=str(section.get("section_key", "")))
             target_room_key, ignore_reason = _resolve_room_target(room_key, original_room_label, room_master_keys, is_room_master)
+            if (
+                builder_name.strip().lower() == "clarendon"
+                and not is_room_master
+                and target_room_key == "vanities"
+                and room_key != "vanities"
+                and any(token in room_key for token in ("bathroom", "ensuite", "powder", "wc"))
+                and _clarendon_supplement_fixture_section_is_standalone_candidate(chunk)
+            ):
+                target_room_key, ignore_reason = room_key, ""
             if ignore_reason:
                 ignored_room_like_lines_count += 1
                 warnings.append(f"Ignored room-like section '{original_room_label}' from {file_name}: {ignore_reason}.")
@@ -4771,7 +4865,6 @@ def _parse_spec_documents_structure_first(
                 rooms[target_room_key] = row
                 continue
 
-            chunk = str(section.get("text", "") or "")
             lines = _section_lines(section)
             row = rooms.get(target_room_key) or RoomRow(
                 room_key=target_room_key,
