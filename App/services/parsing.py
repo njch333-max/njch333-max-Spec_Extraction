@@ -6965,6 +6965,7 @@ def _clean_fixture_text(value: Any) -> str:
         text = normalize_brand_casing_text(text)
         text = re.sub(r"(?i)\bSINKWARE\s*&\s*TAPWARE\b", "", text).strip(" -;,")
         text = re.sub(r"(?i)\b(?:client name|designer|signature|signed date|document ref)\b.*$", "", text).strip(" -;,")
+        text = re.sub(r"(?i)^tap\s+", "", text).strip(" -;,")
         return text
     parsed: Any
     try:

@@ -4431,11 +4431,12 @@ GENERIC_LAYOUT_PROPERTY_MAP: dict[str, str] = {
     "range": "range",
     "model": "model",
     "colour": "colour",
+    "island colour": "island_colour",
     "colour & finish": "colour",
     "finish": "finish",
     "profile": "profile",
     "edge profile": "profile",
-    "island edge profile": "profile",
+    "island edge profile": "island_profile",
     "style": "style",
     "type": "type",
     "location": "location",
@@ -4585,6 +4586,7 @@ GENERIC_LAYOUT_CURRENT_ATTACHMENT_LABELS: dict[str, set[str]] = {
         "manufacturer",
         "range",
         "colour",
+        "island colour",
         "colour & finish",
         "finish",
         "profile",
@@ -5675,6 +5677,29 @@ def _format_generic_material_from_parts(parts: dict[str, list[str]]) -> str:
     return re.sub(r"\s+-\s+-\s+", " - ", formatted).strip(" -")
 
 
+def _format_generic_island_bench_from_parts(parts: dict[str, list[str]], wall_run_text: str = "") -> str:
+    island_colour_values = _meaningful_generic_values(parts.get("island_colour", []))
+    island_profile = _first_meaningful(parts.get("island_profile", []))
+    if not island_colour_values and not island_profile:
+        return ""
+    island_colour = island_colour_values[0] if island_colour_values else ""
+    if island_colour.lower() in {"as above", "same as above"}:
+        island_colour = _first_meaningful(parts.get("colour", [])) or ""
+    island_parts = {key: list(values) for key, values in parts.items()}
+    if island_colour:
+        island_parts["colour"] = [island_colour]
+    if island_profile:
+        island_parts["profile"] = [island_profile]
+    island_text = _format_generic_material_from_parts(island_parts)
+    if island_text:
+        return island_text
+    if wall_run_text and island_profile:
+        material_only = re.sub(r"(?i)\s*-\s*\d+\s*mm\b.*$", "", wall_run_text).strip(" -;,")
+        if material_only:
+            return parsing.normalize_brand_casing_text(f"{material_only} - {island_profile}")
+    return ""
+
+
 def _trim_bench_noise_from_cabinetry_fragment(fragment: str) -> str:
     cleaned = _clean_generic_fragment(fragment)
     lowered = cleaned.lower()
@@ -6189,12 +6214,15 @@ def _extract_generic_layout_overlay(section: dict[str, Any], *, documents: list[
             bench_text = _format_generic_material_from_parts(parts)
             if not bench_text:
                 continue
+            island_bench_text = _format_generic_island_bench_from_parts(parts, wall_run_text=bench_text)
             if "island" in anchor_label or "penisula" in anchor_label or "peninsula" in anchor_label:
                 overlay["bench_tops_island"] = parsing._merge_text(overlay["bench_tops_island"], bench_text)
             elif "study" in overlay["original_room_label"].lower():
                 overlay["bench_tops_other"] = parsing._merge_text(overlay["bench_tops_other"], bench_text)
             else:
                 overlay["bench_tops_wall_run"] = parsing._merge_text(overlay["bench_tops_wall_run"], bench_text)
+                if island_bench_text:
+                    overlay["bench_tops_island"] = parsing._merge_text(overlay["bench_tops_island"], island_bench_text)
         elif kind == "base":
             text = _format_generic_material_from_parts(parts)
             overlay["has_explicit_base"] = True
@@ -6726,13 +6754,30 @@ def _apply_imperial_row_polish(
 
 def _select_clarendon_room_overlay(room: dict[str, Any], overlays: dict[str, dict[str, Any]]) -> dict[str, Any]:
     room_key = str(room.get("room_key", ""))
+    original_room_label = str(room.get("original_room_label", ""))
     overlay = _blank_clarendon_overlay()
     if room_key in overlays:
         _merge_clarendon_overlay(overlay, overlays[room_key])
-    if room_key in {"vanity", "vanities"}:
-        for fallback_key in ("vanities", "vanity"):
-            if fallback_key != room_key and fallback_key in overlays:
-                _merge_clarendon_fixture_overlay(overlay, overlays[fallback_key])
+    fallback_keys: list[tuple[str, str]] = []
+    if room_key == "walk_in_pantry":
+        fallback_keys.append(("butlers_pantry", "full"))
+    elif room_key == "butlers_pantry":
+        fallback_keys.append(("walk_in_pantry", "full"))
+    if _clarendon_is_vanity_room(room_key, original_room_label):
+        if room_key in {"vanities", "vanity"}:
+            counterpart = "vanity" if room_key == "vanities" else "vanities"
+            fallback_keys.append((counterpart, "fixtures"))
+        else:
+            if not _clarendon_overlay_has_material_content(overlay):
+                fallback_keys.append(("vanities", "full"))
+            fallback_keys.append(("vanity", "fixtures"))
+    for fallback_key, merge_mode in fallback_keys:
+        if fallback_key == room_key or fallback_key not in overlays:
+            continue
+        if merge_mode == "fixtures":
+            _merge_clarendon_fixture_overlay(overlay, overlays[fallback_key])
+        else:
+            _merge_clarendon_overlay(overlay, overlays[fallback_key])
     return overlay if _clarendon_overlay_has_content(overlay) else {}
 
 
@@ -6829,6 +6874,11 @@ def _merge_clarendon_overlay(target: dict[str, Any], candidate: dict[str, Any]) 
         candidate.get("hinges_soft_close", ""),
         keyword="hinge",
     )
+
+
+def _merge_clarendon_fixture_overlay(target: dict[str, Any], candidate: dict[str, Any]) -> None:
+    for key in ("sink_info", "basin_info", "tap_info"):
+        target[key] = parsing._merge_text(target.get(key, ""), candidate.get(key, ""))
 
 
 def _merge_clarendon_fixture_overlay(target: dict[str, Any], candidate: dict[str, Any]) -> None:
@@ -7514,6 +7564,38 @@ def _clarendon_overlay_has_content(overlay: dict[str, Any]) -> bool:
         if isinstance(value, list) and any(parsing.normalize_space(str(item or "")) for item in value):
             return True
         if not isinstance(value, list) and parsing.normalize_space(str(value or "")):
+            return True
+    return False
+
+
+def _clarendon_overlay_has_material_content(overlay: dict[str, Any]) -> bool:
+    material_keys = (
+        "bench_tops_wall_run",
+        "bench_tops_island",
+        "bench_tops_other",
+        "bench_tops",
+        "floating_shelf",
+        "door_panel_colours",
+        "door_colours_overheads",
+        "door_colours_base",
+        "door_colours_island",
+        "door_colours_bar_back",
+        "toe_kick",
+        "bulkheads",
+        "handles",
+        "led",
+        "accessories",
+        "other_items",
+        "splashback",
+        "drawers_soft_close",
+        "hinges_soft_close",
+    )
+    for key in material_keys:
+        value = overlay.get(key, "")
+        if isinstance(value, list):
+            if any(parsing.normalize_space(str(item or "")) for item in value):
+                return True
+        elif parsing.normalize_space(str(value or "")):
             return True
     return False
 

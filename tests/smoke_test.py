@@ -6469,6 +6469,26 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(overlay["door_colours_base"], "Polytec - Belgian Oak Matt")
         self.assertEqual(overlay["handles"], ["4062-128-TG - Vertical - Horizontal"])
 
+    def test_extract_generic_layout_overlay_builds_island_bench_from_as_above_properties(self) -> None:
+        section = {
+            "original_section_label": "Kitchen",
+            "page_type": "joinery",
+            "file_name": "evoca.pdf",
+            "page_nos": [8],
+            "text": "Kitchen",
+            "layout_rows": [
+                {"row_label": "Benchtops", "value_region_text": "", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Manufacturer", "value_region_text": "Quantum Quartz", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Colour", "value_region_text": "Champagne", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Island Colour", "value_region_text": "As Above", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Edge Profile", "value_region_text": "20mm Arissed", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Island Edge Profile", "value_region_text": "40mm Arissed", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            ],
+        }
+        overlay = extraction_service._extract_generic_layout_overlay(section)
+        self.assertEqual(overlay["bench_tops_wall_run"], "20mm Quantum Quartz - Champagne - Arissed")
+        self.assertEqual(overlay["bench_tops_island"], "40mm Quantum Quartz - Champagne - Arissed")
+
     def test_sanitize_generic_fixture_field_dedupes_short_subset_duplicate(self) -> None:
         value = (
             "Alder - Samm - Wall Basin/Bath Mixer Set Backplate - 220mm - Matt Black"
@@ -6515,6 +6535,38 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(room["door_colours_base"], "Polytec Aston White Smooth Finish Thermolaminate - Hampton EM9 Profile")
         self.assertEqual(room["toe_kick"], ["Matching Melamine finish"])
         self.assertEqual(len(room["handles"]), 2)
+
+    def test_select_clarendon_room_overlay_maps_butlers_pantry_to_walk_in_pantry(self) -> None:
+        overlay = extraction_service._select_clarendon_room_overlay(
+            {"room_key": "walk_in_pantry", "original_room_label": "WALK IN PANTRY"},
+            {
+                "butlers_pantry": {
+                    **extraction_service._blank_clarendon_overlay(),
+                    "door_colours_base": "Polytec Aston White Smooth Finish Thermolaminate - Hampton EM9 Profile",
+                    "handles": ["Hettich - Belluno 9995772 200MM Long Brushed Stainless Steel Look"],
+                }
+            },
+        )
+        self.assertEqual(overlay["door_colours_base"], "Polytec Aston White Smooth Finish Thermolaminate - Hampton EM9 Profile")
+        self.assertEqual(overlay["handles"], ["Hettich - Belluno 9995772 200MM Long Brushed Stainless Steel Look"])
+
+    def test_select_clarendon_room_overlay_applies_vanities_overlay_to_ensuite(self) -> None:
+        overlay = extraction_service._select_clarendon_room_overlay(
+            {"room_key": "ensuite", "original_room_label": "Ensuite"},
+            {
+                "vanities": {
+                    **extraction_service._blank_clarendon_overlay(),
+                    "door_colours_base": "Polytec Aston White Smooth Finish Thermolaminate - Hampton EM9 Profile",
+                    "handles": ["Hettich - Salemi 9113368 30MM Brushed Stainless Steel Look"],
+                    "basin_info": "Eden Bench Mount Gloss White",
+                    "tap_info": "Spin Gun Metal Tall Basin Mixer",
+                }
+            },
+        )
+        self.assertEqual(overlay["door_colours_base"], "Polytec Aston White Smooth Finish Thermolaminate - Hampton EM9 Profile")
+        self.assertEqual(overlay["handles"], ["Hettich - Salemi 9113368 30MM Brushed Stainless Steel Look"])
+        self.assertEqual(overlay["basin_info"], "Eden Bench Mount Gloss White")
+        self.assertEqual(overlay["tap_info"], "Spin Gun Metal Tall Basin Mixer")
 
     def test_extract_generic_layout_overlay_uses_additional_section_location_as_room_label(self) -> None:
         section = {
@@ -6665,6 +6717,12 @@ class SmokeTest(unittest.TestCase):
                 kind="tap",
             ),
             "Alder - Samm - Wall Basin/Bath Mixer Set Backplate - 220mm - Matt Black",
+        )
+
+    def test_clean_fixture_text_strips_leading_tap_prefix(self) -> None:
+        self.assertEqual(
+            parsing_module._clean_fixture_text("Tap Franke Eos Neo pull out tap copper TA9601CP"),
+            "Franke Eos Neo pull out tap copper TA9601CP",
         )
 
     def test_sanitize_generic_handle_entries_drops_electrical_section_pollution(self) -> None:
