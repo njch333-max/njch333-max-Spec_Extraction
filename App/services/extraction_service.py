@@ -5559,6 +5559,13 @@ def _generic_material_fragment_is_noise(fragment: str, *, field_name: str = "") 
                 "sink",
                 "tap",
                 "basin",
+                "shower",
+                "bath",
+                "feature waste",
+                "towel hook",
+                "hand towel",
+                "mirror",
+                "installed above inclusion",
             )
         ):
             return True
@@ -5733,6 +5740,7 @@ def _sanitize_generic_fixture_field(value: Any, *, kind: str = "") -> str:
         for fragment in re.split(r"\s*\|\s*", parsing.normalize_space(str(value or "")))
     ]
     cleaned: list[str] = []
+    cleaned_keys: list[set[str]] = []
     for fragment in fragments:
         text = fragment
         if not text:
@@ -5765,6 +5773,16 @@ def _sanitize_generic_fixture_field(value: Any, *, kind: str = "") -> str:
         text = parsing.normalize_brand_casing_text(parsing.normalize_space(text)).strip(" -;,")
         if not text:
             continue
+        token_key = _generic_fragment_token_key(text)
+        if token_key and any(token_key <= existing_key for existing_key in cleaned_keys if existing_key):
+            continue
+        if token_key:
+            replacement_indexes = [
+                index for index, existing_key in enumerate(cleaned_keys) if existing_key and existing_key < token_key
+            ]
+            for index in reversed(replacement_indexes):
+                del cleaned[index]
+                del cleaned_keys[index]
         if any(
             text.lower() == existing.lower()
             or text.lower() in existing.lower()
@@ -5773,6 +5791,7 @@ def _sanitize_generic_fixture_field(value: Any, *, kind: str = "") -> str:
         ):
             continue
         cleaned.append(text)
+        cleaned_keys.append(token_key)
     return " | ".join(cleaned)
 
 
@@ -5945,7 +5964,10 @@ def _extract_generic_layout_overlay(section: dict[str, Any]) -> dict[str, Any]:
                 "bin & pot drawers handle",
             )
         ):
-            embedded_handle_text = _format_generic_handles_from_parts(parts)
+            embedded_handle_parts = {key: list(values) for key, values in parts.items()}
+            if kind in {"base", "island", "overheads", "tall"} and "handle" not in anchor_label:
+                embedded_handle_parts.pop("manufacturer", None)
+            embedded_handle_text = _format_generic_handles_from_parts(embedded_handle_parts)
         if kind == "bench":
             overlay["has_bench_block"] = True
             bench_text = _format_generic_material_from_parts(parts)
@@ -6222,6 +6244,10 @@ def _polish_generic_layout_room(row: dict[str, Any], overlay: dict[str, Any]) ->
             field_name=field_name,
             room_key=room_key,
         )
+    island_bench = parsing.normalize_space(str(polished.get("bench_tops_island", "") or ""))
+    wall_run_bench = parsing.normalize_space(str(polished.get("bench_tops_wall_run", "") or ""))
+    if room_key == "kitchen" and island_bench and wall_run_bench and re.fullmatch(r"(?i)(?:as|same)\s+above", island_bench):
+        polished["bench_tops_island"] = wall_run_bench
     if room_key == "kitchen" and (
         polished.get("bench_tops_wall_run") or polished.get("bench_tops_island")
     ) and _bench_field_is_combined_duplicate(

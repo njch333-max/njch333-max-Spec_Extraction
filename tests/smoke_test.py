@@ -6454,6 +6454,39 @@ class SmokeTest(unittest.TestCase):
         overlay = extraction_service._extract_generic_layout_overlay(section)
         self.assertEqual(overlay["bench_tops_wall_run"], "20mm Quantum Quartz - Champagne - Arissed")
         self.assertEqual(overlay["door_colours_base"], "Polytec - Belgian Oak Matt")
+        self.assertEqual(overlay["handles"], ["4062-128-TG - Vertical - Horizontal"])
+
+    def test_sanitize_generic_fixture_field_dedupes_short_subset_duplicate(self) -> None:
+        value = (
+            "Alder - Samm - Wall Basin/Bath Mixer Set Backplate - 220mm - Matt Black"
+            " | Alder - Samm - Mixer - Matt Black"
+        )
+        self.assertEqual(
+            extraction_service._sanitize_generic_fixture_field(value, kind="tap"),
+            "Alder - Samm - Wall Basin/Bath Mixer Set Backplate - 220mm - Matt Black",
+        )
+
+    def test_polish_generic_layout_room_expands_island_bench_as_above(self) -> None:
+        room = {
+            "original_room_label": "Kitchen",
+            "room_key": "kitchen",
+            "bench_tops_wall_run": "",
+            "bench_tops_island": "",
+            "bench_tops_other": "",
+            "bench_tops": [],
+            "toe_kick": [],
+            "handles": [],
+            "accessories": [],
+        }
+        overlay = {
+            "bench_tops_wall_run": "20mm Quantum Quartz - Champagne - Arissed",
+            "bench_tops_island": "As Above",
+            "bench_tops_other": "",
+            "has_bench_block": True,
+        }
+        polished = extraction_service._polish_generic_layout_room(room, overlay)
+        self.assertEqual(polished["bench_tops_wall_run"], "20mm Quantum Quartz - Champagne - Arissed")
+        self.assertEqual(polished["bench_tops_island"], "20mm Quantum Quartz - Champagne - Arissed")
 
     def test_strip_generic_anchor_tail_removes_trailing_cabinet_label_noise(self) -> None:
         self.assertEqual(
