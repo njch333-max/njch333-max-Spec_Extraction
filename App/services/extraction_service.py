@@ -125,6 +125,36 @@ LAYOUT_ROW_LABELS: tuple[str, ...] = tuple(
 
 _LAST_OPENAI_REQUEST_AT = 0.0
 
+
+def _normalized_builder_key(builder_name: str) -> str:
+    return parsing.normalize_space(builder_name).lower()
+
+
+def _job_matches_runtime_override(job_no: str, overrides: set[str]) -> bool:
+    return parsing.normalize_space(job_no).lower() in overrides
+
+
+def _spec_docling_enabled(builder_name: str, source_kind: str) -> bool:
+    if source_kind != "spec":
+        return False
+    return _normalized_builder_key(builder_name) in runtime.SPEC_DOCLING_BUILDERS
+
+
+def _spec_heavy_vision_enabled(job_no: str, source_kind: str) -> bool:
+    if source_kind != "spec":
+        return runtime.OPENAI_VISION_ENABLED
+    if runtime.SPEC_HEAVY_VISION_ENABLED:
+        return True
+    return _job_matches_runtime_override(job_no, runtime.FORCE_SPEC_HEAVY_VISION_JOBS)
+
+
+def _spec_openai_merge_enabled(job_no: str, source_kind: str) -> bool:
+    if source_kind != "spec":
+        return runtime.OPENAI_ENABLED
+    if runtime.SPEC_OPENAI_MERGE_ENABLED:
+        return True
+    return _job_matches_runtime_override(job_no, runtime.FORCE_SPEC_OPENAI_MERGE_JOBS)
+
 INVALID_ROOM_HEADING_TOKENS: tuple[str, ...] = (
     "manufacturer",
     "range",
@@ -452,6 +482,7 @@ def _apply_layout_pipeline(
         return documents, layout_meta
 
     builder_name = str(builder.get("name", "") or "")
+    job_no = str(job.get("job_no", "") or "")
     updated_documents: list[dict[str, object]] = []
     layout_pages: list[int] = []
     heavy_candidates: list[tuple[int, int]] = []
@@ -494,9 +525,21 @@ def _apply_layout_pipeline(
     layout_meta["layout_provider"] = "heuristic"
     layout_meta["layout_note"] = f"Lightweight structure analysis applied to {len(layout_meta['layout_pages'])} page(s)."
 
+    docling_enabled = _spec_docling_enabled(builder_name, source_kind)
+    heavy_vision_enabled = _spec_heavy_vision_enabled(job_no, source_kind)
+
     if not heavy_candidates:
-        layout_meta["docling_note"] = "No pages matched the Docling layout rules."
-        layout_meta["vision_note"] = "No pages matched the heavy vision layout rules."
+        if source_kind == "spec" and not docling_enabled:
+            layout_meta["docling_note"] = f"Docling is disabled by builder policy for {builder_name or 'this builder'}."
+        else:
+            layout_meta["docling_note"] = "No pages matched the Docling layout rules."
+        if source_kind == "spec" and not heavy_vision_enabled:
+            layout_meta["vision_note"] = (
+                "Heavy vision is disabled by default for spec runs. "
+                "Use SPEC_EXTRACTION_FORCE_SPEC_HEAVY_VISION_JOBS to override a specific job."
+            )
+        else:
+            layout_meta["vision_note"] = "No pages matched the heavy vision layout rules."
         return updated_documents, layout_meta
 
     max_pages = max(1, runtime.OPENAI_VISION_MAX_PAGES)
@@ -505,7 +548,7 @@ def _apply_layout_pipeline(
     docling_applied_pages: list[int] = []
     docling_notes: list[str] = []
     docling_layouts: dict[tuple[int, int], dict[str, Any]] = {}
-    if source_kind == "spec" and _docling_available():
+    if source_kind == "spec" and docling_enabled and _docling_available():
         layout_meta["docling_attempted"] = True
         for doc_index, page_index in candidate_pages:
             document = updated_documents[doc_index]
@@ -531,6 +574,8 @@ def _apply_layout_pipeline(
                 docling_applied_pages.append(page_no)
             except Exception as exc:
                 docling_notes.append(f"page {page_no}: {_truncate_note(exc)}")
+    elif source_kind == "spec" and not docling_enabled:
+        layout_meta["docling_note"] = f"Docling is disabled by builder policy for {builder_name or 'this builder'}."
     elif source_kind == "spec":
         layout_meta["docling_note"] = "Docling is not installed or unavailable in the runtime environment."
     else:
@@ -551,10 +596,16 @@ def _apply_layout_pipeline(
                 "; ".join(docling_notes)[:400] if docling_notes else "Docling layout attempted but no usable page layout was applied."
             )
 
-    if not runtime.OPENAI_VISION_ENABLED:
+    if not heavy_vision_enabled:
         if docling_applied_pages:
             _apply_docling_layout_meta(layout_meta, docling_applied_pages)
-        layout_meta["vision_note"] = "OpenAI vision structure cross-check is disabled in runtime settings."
+        if source_kind == "spec":
+            layout_meta["vision_note"] = (
+                "Heavy vision is disabled by default for spec runs. "
+                "Use SPEC_EXTRACTION_FORCE_SPEC_HEAVY_VISION_JOBS to override a specific job."
+            )
+        else:
+            layout_meta["vision_note"] = "OpenAI vision structure cross-check is disabled in runtime settings."
         _apply_final_layout_pages(updated_documents, candidate_pages, docling_layouts=docling_layouts, vision_layouts={})
         return updated_documents, layout_meta
     if not runtime.OPENAI_ENABLED:
@@ -3444,6 +3495,13 @@ def _try_openai(
         "vision_note": "",
         "note": "",
     }
+    if source_kind == "spec" and not _spec_openai_merge_enabled(str(job.get("job_no", "") or ""), source_kind):
+        analysis["note"] = (
+            "OpenAI merge is disabled by default for spec runs. "
+            "Use SPEC_EXTRACTION_FORCE_SPEC_OPENAI_MERGE_JOBS to override a specific job."
+        )
+        _report_progress(progress_callback, "openai_skipped", analysis["note"])
+        return None, analysis
     if parser_strategy == "heuristic_only":
         analysis["note"] = "Parser strategy is set to Heuristic Only."
         _report_progress(progress_callback, "openai_skipped", analysis["note"])

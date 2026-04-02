@@ -1587,6 +1587,7 @@ class SmokeTest(unittest.TestCase):
     def test_build_spec_snapshot_marks_openai_fallback_when_request_fails(self) -> None:
         with (
             mock.patch.object(extraction_service.runtime, "OPENAI_ENABLED", True),
+            mock.patch.object(extraction_service.runtime, "SPEC_OPENAI_MERGE_ENABLED", True),
             mock.patch.object(extraction_service.runtime, "OPENAI_API_KEY", "test-key"),
             mock.patch.object(extraction_service.runtime, "OPENAI_MODEL", "gpt-4.1-mini"),
             mock.patch("App.services.extraction_service._post_responses_api", side_effect=RuntimeError("boom")),
@@ -1611,6 +1612,7 @@ class SmokeTest(unittest.TestCase):
         }
         with (
             mock.patch.object(extraction_service.runtime, "OPENAI_ENABLED", True),
+            mock.patch.object(extraction_service.runtime, "SPEC_OPENAI_MERGE_ENABLED", True),
             mock.patch.object(extraction_service.runtime, "OPENAI_API_KEY", "test-key"),
             mock.patch.object(extraction_service.runtime, "OPENAI_MODEL", "gpt-4.1-mini"),
             mock.patch("App.services.extraction_service._post_responses_api", return_value=openai_payload),
@@ -1632,6 +1634,7 @@ class SmokeTest(unittest.TestCase):
         }
         with (
             mock.patch.object(extraction_service.runtime, "OPENAI_ENABLED", True),
+            mock.patch.object(extraction_service.runtime, "SPEC_OPENAI_MERGE_ENABLED", True),
             mock.patch.object(extraction_service.runtime, "OPENAI_API_KEY", "test-key"),
             mock.patch.object(extraction_service.runtime, "OPENAI_MODEL", "gpt-4.1-mini"),
             mock.patch("App.services.extraction_service._post_responses_api", return_value=openai_payload),
@@ -1646,6 +1649,163 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(snapshot["others"]["flooring_notes"], "")
         self.assertEqual(snapshot["others"]["splashback_notes"], "")
         self.assertEqual(snapshot["warnings"], [])
+
+    def test_build_spec_snapshot_skips_openai_merge_by_default_for_spec_runs(self) -> None:
+        with (
+            mock.patch.object(extraction_service.runtime, "OPENAI_ENABLED", True),
+            mock.patch.object(extraction_service.runtime, "OPENAI_API_KEY", "test-key"),
+            mock.patch.object(extraction_service.runtime, "SPEC_OPENAI_MERGE_ENABLED", False),
+            mock.patch("App.services.extraction_service._post_responses_api") as post_responses_api,
+        ):
+            snapshot = extraction_service.build_spec_snapshot(
+                job={"job_no": "37529"},
+                builder={"name": "Clarendon"},
+                files=[],
+                template_files=[],
+            )
+        self.assertEqual(snapshot["analysis"]["mode"], "heuristic_only")
+        self.assertFalse(snapshot["analysis"]["openai_attempted"])
+        self.assertIn("disabled by default for spec runs", snapshot["analysis"]["note"])
+        post_responses_api.assert_not_called()
+
+    def test_build_spec_snapshot_limits_docling_to_policy_builders_by_default(self) -> None:
+        documents = [
+            {
+                "file_name": "clarendon.pdf",
+                "path": "clarendon.pdf",
+                "role": "spec",
+                "pages": [
+                    {
+                        "page_no": 1,
+                        "text": "KITCHEN COLOUR SCHEDULE",
+                        "raw_text": "KITCHEN COLOUR SCHEDULE",
+                        "needs_ocr": True,
+                    }
+                ],
+            }
+        ]
+        heuristic_snapshot = {
+            "job_no": "37529",
+            "builder_name": "Clarendon",
+            "source_kind": "spec",
+            "generated_at": "2026-03-29T10:00:00+00:00",
+            "site_address": "",
+            "rooms": [{"room_key": "kitchen", "original_room_label": "KITCHEN"}],
+            "special_sections": [],
+            "appliances": [],
+            "others": {"flooring_notes": "", "splashback_notes": "", "manual_notes": ""},
+            "warnings": [],
+            "source_documents": [],
+            "analysis": {"mode": "heuristic_only"},
+        }
+        with (
+            mock.patch.object(extraction_service.runtime, "OPENAI_ENABLED", True),
+            mock.patch.object(extraction_service.runtime, "OPENAI_API_KEY", "test-key"),
+            mock.patch.object(extraction_service.runtime, "OPENAI_VISION_ENABLED", True),
+            mock.patch.object(extraction_service.runtime, "SPEC_HEAVY_VISION_ENABLED", False),
+            mock.patch.object(extraction_service.runtime, "SPEC_DOCLING_BUILDERS", {"imperial", "simonds", "evoca"}),
+            mock.patch("App.services.extraction_service._load_documents", return_value=documents),
+            mock.patch("App.services.extraction_service._page_requires_vision", return_value=True),
+            mock.patch("App.services.extraction_service._docling_available", return_value=True),
+            mock.patch("App.services.extraction_service._request_docling_page_layout") as request_docling_page_layout,
+            mock.patch("App.services.extraction_service.parsing.parse_documents", return_value=heuristic_snapshot),
+            mock.patch(
+                "App.services.extraction_service.parsing.enrich_snapshot_rooms",
+                side_effect=lambda payload, _documents, rule_flags=None: payload,
+            ),
+            mock.patch("App.services.extraction_service._stabilize_snapshot_layout", side_effect=lambda payload, **_: payload),
+            mock.patch("App.services.extraction_service._apply_builder_specific_polish", side_effect=lambda payload, *_args, **_kwargs: payload),
+            mock.patch("App.services.extraction_service._enrich_snapshot_appliances", side_effect=lambda payload, *_args, **_kwargs: payload),
+        ):
+            snapshot = extraction_service.build_spec_snapshot(
+                job={"job_no": "37529"},
+                builder={"name": "Clarendon"},
+                files=[{"path": "clarendon.pdf", "original_name": "clarendon.pdf"}],
+                template_files=[],
+            )
+        self.assertEqual(snapshot["analysis"]["layout_provider"], "heuristic")
+        self.assertFalse(snapshot["analysis"]["docling_attempted"])
+        self.assertFalse(snapshot["analysis"]["vision_attempted"])
+        self.assertIn("Docling is disabled by builder policy", snapshot["analysis"]["docling_note"])
+        request_docling_page_layout.assert_not_called()
+
+    def test_build_spec_snapshot_uses_docling_without_heavy_vision_by_default_for_imperial(self) -> None:
+        documents = [
+            {
+                "file_name": "imperial.pdf",
+                "path": "imperial.pdf",
+                "role": "spec",
+                "pages": [
+                    {
+                        "page_no": 1,
+                        "text": "BASE CABINETRY COLOURClassic White Matt Polytec",
+                        "raw_text": "BASE CABINETRY COLOURClassic White Matt Polytec",
+                        "needs_ocr": True,
+                    }
+                ],
+            }
+        ]
+        heuristic_after_docling = {
+            "job_no": "38211",
+            "builder_name": "Imperial",
+            "source_kind": "spec",
+            "generated_at": "2026-03-29T10:00:00+00:00",
+            "site_address": "",
+            "rooms": [{"room_key": "kitchen", "original_room_label": "KITCHEN", "door_colours_base": "Polytec - Classic White Matt"}],
+            "special_sections": [],
+            "appliances": [],
+            "others": {"flooring_notes": "", "splashback_notes": "", "manual_notes": ""},
+            "warnings": [],
+            "source_documents": [],
+            "analysis": {"mode": "heuristic_only", "room_master_file": "imperial.pdf"},
+        }
+        with (
+            mock.patch.object(extraction_service.runtime, "OPENAI_ENABLED", True),
+            mock.patch.object(extraction_service.runtime, "OPENAI_API_KEY", "test-key"),
+            mock.patch.object(extraction_service.runtime, "OPENAI_VISION_ENABLED", True),
+            mock.patch.object(extraction_service.runtime, "SPEC_HEAVY_VISION_ENABLED", False),
+            mock.patch.object(extraction_service.runtime, "SPEC_DOCLING_BUILDERS", {"imperial", "simonds", "evoca"}),
+            mock.patch("App.services.extraction_service._load_documents", return_value=documents),
+            mock.patch("App.services.extraction_service._page_requires_vision", return_value=True),
+            mock.patch("App.services.extraction_service._docling_available", return_value=True),
+            mock.patch(
+                "App.services.extraction_service._request_docling_page_layout",
+                return_value={
+                    "page_type": "joinery",
+                    "section_label": "KITCHEN JOINERY SELECTION SHEET",
+                    "room_label": "KITCHEN",
+                    "rows": [
+                        {
+                            "row_label": "BASE CABINETRY COLOUR",
+                            "value_region_text": "Classic White Matt",
+                            "supplier_region_text": "Polytec",
+                            "notes_region_text": "",
+                            "row_kind": "material",
+                        }
+                    ],
+                },
+            ),
+            mock.patch("App.services.extraction_service.parsing.parse_documents", return_value=heuristic_after_docling),
+            mock.patch(
+                "App.services.extraction_service.parsing.enrich_snapshot_rooms",
+                side_effect=lambda payload, _documents, rule_flags=None: payload,
+            ),
+            mock.patch("App.services.extraction_service._stabilize_snapshot_layout", side_effect=lambda payload, **_: payload),
+            mock.patch("App.services.extraction_service._apply_builder_specific_polish", side_effect=lambda payload, *_args, **_kwargs: payload),
+            mock.patch("App.services.extraction_service._enrich_snapshot_appliances", side_effect=lambda payload, *_args, **_kwargs: payload),
+        ):
+            snapshot = extraction_service.build_spec_snapshot(
+                job={"job_no": "38211"},
+                builder={"name": "Imperial"},
+                files=[{"path": "imperial.pdf", "original_name": "imperial.pdf"}],
+                template_files=[],
+            )
+        self.assertEqual(snapshot["analysis"]["layout_mode"], "docling")
+        self.assertEqual(snapshot["analysis"]["layout_provider"], "docling")
+        self.assertTrue(snapshot["analysis"]["docling_attempted"])
+        self.assertTrue(snapshot["analysis"]["docling_succeeded"])
+        self.assertFalse(snapshot["analysis"]["vision_attempted"])
+        self.assertIn("disabled by default for spec runs", snapshot["analysis"]["vision_note"])
 
     def test_build_spec_snapshot_applies_vision_layout_before_final_snapshot(self) -> None:
         documents = [
@@ -1686,6 +1846,7 @@ class SmokeTest(unittest.TestCase):
             mock.patch.object(extraction_service.runtime, "OPENAI_ENABLED", True),
             mock.patch.object(extraction_service.runtime, "OPENAI_API_KEY", "test-key"),
             mock.patch.object(extraction_service.runtime, "OPENAI_VISION_ENABLED", True),
+            mock.patch.object(extraction_service.runtime, "SPEC_HEAVY_VISION_ENABLED", True),
             mock.patch.object(extraction_service.runtime, "OPENAI_VISION_MAX_PAGES", 4),
             mock.patch("App.services.extraction_service._load_documents", return_value=documents),
             mock.patch("App.services.extraction_service._page_requires_vision", return_value=True),
@@ -1792,6 +1953,7 @@ class SmokeTest(unittest.TestCase):
             mock.patch.object(extraction_service.runtime, "OPENAI_ENABLED", True),
             mock.patch.object(extraction_service.runtime, "OPENAI_API_KEY", "test-key"),
             mock.patch.object(extraction_service.runtime, "OPENAI_VISION_ENABLED", True),
+            mock.patch.object(extraction_service.runtime, "SPEC_HEAVY_VISION_ENABLED", True),
             mock.patch.object(extraction_service.runtime, "OPENAI_VISION_MAX_PAGES", 4),
             mock.patch("App.services.extraction_service._load_documents", return_value=documents),
             mock.patch("App.services.extraction_service._page_requires_vision", return_value=True),
@@ -2004,6 +2166,7 @@ class SmokeTest(unittest.TestCase):
             mock.patch.object(extraction_service.runtime, "OPENAI_ENABLED", True),
             mock.patch.object(extraction_service.runtime, "OPENAI_API_KEY", "test-key"),
             mock.patch.object(extraction_service.runtime, "OPENAI_VISION_ENABLED", True),
+            mock.patch.object(extraction_service.runtime, "SPEC_HEAVY_VISION_ENABLED", True),
             mock.patch.object(extraction_service.runtime, "OPENAI_VISION_MAX_PAGES", 4),
             mock.patch("App.services.extraction_service._load_documents", return_value=documents),
             mock.patch("App.services.extraction_service._page_requires_vision", return_value=True),

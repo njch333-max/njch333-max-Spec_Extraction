@@ -53,10 +53,28 @@ ADMIN_PASSWORD_HASH = os.getenv("SPEC_EXTRACTION_ADMIN_PASSWORD_HASH", "")
 SESSION_DOMAIN = os.getenv("SPEC_EXTRACTION_SESSION_DOMAIN", "").strip()
 HOST_DOMAIN = os.getenv("SPEC_EXTRACTION_HOST_DOMAIN", "").strip()
 HTTPS_ONLY = os.getenv("SPEC_EXTRACTION_HTTPS_ONLY", "0").strip().lower() in {"1", "true", "yes", "on"}
-OPENAI_ENABLED = os.getenv("SPEC_EXTRACTION_ENABLE_OPENAI", "0").strip().lower() in {"1", "true", "yes", "on"}
+def _env_flag(name: str, default: str = "0") -> bool:
+    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_csv_set(name: str, default: str = "") -> set[str]:
+    values = set()
+    for part in os.getenv(name, default).split(","):
+        item = part.strip()
+        if item:
+            values.add(item.lower())
+    return values
+
+
+OPENAI_ENABLED = _env_flag("SPEC_EXTRACTION_ENABLE_OPENAI", "0")
 OPENAI_MODEL = os.getenv("SPEC_EXTRACTION_OPENAI_MODEL", "gpt-4.1-mini")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
-OPENAI_VISION_ENABLED = os.getenv("SPEC_EXTRACTION_ENABLE_OPENAI_VISION", "1").strip().lower() in {"1", "true", "yes", "on"}
+OPENAI_VISION_ENABLED = _env_flag("SPEC_EXTRACTION_ENABLE_OPENAI_VISION", "0")
+SPEC_OPENAI_MERGE_ENABLED = _env_flag("SPEC_EXTRACTION_ENABLE_SPEC_OPENAI_MERGE", "0")
+SPEC_HEAVY_VISION_ENABLED = _env_flag("SPEC_EXTRACTION_ENABLE_SPEC_HEAVY_VISION", "0")
+SPEC_DOCLING_BUILDERS = _env_csv_set("SPEC_EXTRACTION_DOCLING_BUILDERS", "imperial,simonds,evoca")
+FORCE_SPEC_OPENAI_MERGE_JOBS = _env_csv_set("SPEC_EXTRACTION_FORCE_SPEC_OPENAI_MERGE_JOBS")
+FORCE_SPEC_HEAVY_VISION_JOBS = _env_csv_set("SPEC_EXTRACTION_FORCE_SPEC_HEAVY_VISION_JOBS")
 OPENAI_VISION_MAX_PAGES = int(os.getenv("SPEC_EXTRACTION_OPENAI_VISION_MAX_PAGES", "24"))
 OPENAI_VISION_DPI = int(os.getenv("SPEC_EXTRACTION_OPENAI_VISION_DPI", "110"))
 OPENAI_REQUEST_MIN_INTERVAL_SECONDS = float(os.getenv("SPEC_EXTRACTION_OPENAI_REQUEST_MIN_INTERVAL_SECONDS", "3.5"))

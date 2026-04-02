@@ -156,8 +156,8 @@
       <li><strong>Source kind:</strong> {{ raw_snapshot.source_kind }}</li>
       <li><strong>Extraction mode:</strong> {{ raw_analysis.label }}</li>
       <li><strong>Parser strategy:</strong> {{ raw_analysis.parser_strategy_label }}</li>
-      <li><strong>OpenAI attempted:</strong> {{ "Yes" if raw_analysis.openai_attempted else "No" }}</li>
-      <li><strong>OpenAI succeeded:</strong> {{ "Yes" if raw_analysis.openai_succeeded else "No" }}</li>
+      <li><strong>OpenAI merge attempted:</strong> {{ "Yes" if raw_analysis.openai_attempted else "No" }}</li>
+      <li><strong>OpenAI merge succeeded:</strong> {{ "Yes" if raw_analysis.openai_succeeded else "No" }}</li>
       <li><strong>Model:</strong> {{ raw_analysis.openai_model or "Not used" }}</li>
       <li><strong>Layout attempted:</strong> {{ "Yes" if raw_analysis.layout_attempted else "No" }}</li>
       <li><strong>Layout succeeded:</strong> {{ "Yes" if raw_analysis.layout_succeeded else "No" }}</li>
