@@ -4840,13 +4840,23 @@ def _parse_spec_documents_structure_first(
             chunk = str(section.get("text", "") or "")
             room_key = source_room_key(original_room_label, fallback_key=str(section.get("section_key", "")))
             target_room_key, ignore_reason = _resolve_room_target(room_key, original_room_label, room_master_keys, is_room_master)
-            if (
+            keep_clarendon_wet_area_standalone = (
                 builder_name.strip().lower() == "clarendon"
                 and not is_room_master
                 and target_room_key == "vanities"
                 and room_key != "vanities"
-                and any(token in room_key for token in ("bathroom", "ensuite", "powder", "wc"))
-                and _clarendon_supplement_fixture_section_is_standalone_candidate(chunk)
+                and any(token in room_key for token in ("bathroom", "ensuite"))
+            )
+            if (
+                keep_clarendon_wet_area_standalone
+                or (
+                    builder_name.strip().lower() == "clarendon"
+                    and not is_room_master
+                    and target_room_key == "vanities"
+                    and room_key != "vanities"
+                    and any(token in room_key for token in ("powder", "wc"))
+                    and _clarendon_supplement_fixture_section_is_standalone_candidate(chunk)
+                )
             ):
                 target_room_key, ignore_reason = room_key, ""
             if ignore_reason:
