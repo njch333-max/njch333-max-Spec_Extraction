@@ -2889,6 +2889,8 @@ class SmokeTest(unittest.TestCase):
                 "Forstan Pty Ltd. T/A YourHome Kitchens P.O. Box 8248 Baulkham HillsBCNSW 2153 Phone"
             )
         )
+        self.assertTrue(parsing_module._looks_like_spec_room_label_noise("Location"))
+        self.assertTrue(parsing_module._looks_like_spec_room_label_noise("Additional Wet Area"))
         self.assertFalse(parsing_module._looks_like_spec_room_label_noise("KITCHEN"))
 
     def test_parse_documents_defaults_grouped_vanities_door_colours_to_base_without_explicit_overheads(self) -> None:

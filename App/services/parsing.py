@@ -1679,6 +1679,10 @@ def _looks_like_spec_room_label_noise(label: str) -> bool:
     lowered = text.lower()
     if not text:
         return True
+    if lowered in {"location", "manufacturer", "range", "model", "profile", "colour", "color", "type"}:
+        return True
+    if lowered.startswith("additional "):
+        return True
     if any(
         token in lowered
         for token in (
@@ -4911,6 +4915,17 @@ def _parse_spec_documents_structure_first(
             flooring_notes.append(flooring_text)
         if splashback_text:
             splashback_notes.append(splashback_text)
+
+    if not imperial_builder:
+        filtered_rooms: dict[str, RoomRow] = {}
+        for room_key, row in rooms.items():
+            room_label = normalize_space(row.original_room_label or room_key)
+            if _looks_like_spec_room_label_noise(room_label):
+                ignored_room_like_lines_count += 1
+                warnings.append(f"Ignored room-like section '{room_label[:80]}' from final snapshot: room-label metadata noise.")
+                continue
+            filtered_rooms[room_key] = row
+        rooms = filtered_rooms
 
     payload = SnapshotPayload(
         job_no=job_no,

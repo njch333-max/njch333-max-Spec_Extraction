@@ -4638,6 +4638,9 @@ def _apply_shared_layout_row_polish(
             for room_key in room_keys:
                 if not room_key:
                     continue
+                candidate_label = str(overlay.get("original_room_label", section.get("original_section_label", "")) or room_key.replace("_", " "))
+                if parsing._looks_like_spec_room_label_noise(candidate_label):
+                    continue
                 if room_key not in overlays:
                     overlays[room_key] = overlay
                 else:
@@ -4658,9 +4661,12 @@ def _apply_shared_layout_row_polish(
     for room_key, overlay in overlays.items():
         if room_key in seen_keys:
             continue
+        overlay_label = str(overlay.get("original_room_label", room_key.replace("_", " ").title()) or room_key)
+        if parsing._looks_like_spec_room_label_noise(overlay_label):
+            continue
         missing_room = {
             "room_key": room_key,
-            "original_room_label": str(overlay.get("original_room_label", room_key.replace("_", " ").title())),
+            "original_room_label": overlay_label,
         }
         polished_rooms.append(_polish_generic_layout_room(missing_room, overlay))
     resolved_rooms: list[dict[str, Any]] = []
@@ -4670,6 +4676,8 @@ def _apply_shared_layout_row_polish(
         if resolved_label:
             current["original_room_label"] = resolved_label
             current["room_key"] = parsing.same_room_identity(resolved_label, str(current.get("room_key", "")))
+        if parsing._looks_like_spec_room_label_noise(str(current.get("original_room_label", "") or current.get("room_key", ""))):
+            continue
         resolved_rooms.append(current)
     polished = dict(snapshot)
     polished["rooms"] = _merge_rooms_by_source_identity(resolved_rooms)
