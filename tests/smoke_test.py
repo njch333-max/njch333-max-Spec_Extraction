@@ -6090,6 +6090,19 @@ class SmokeTest(unittest.TestCase):
             "Franke Eos Neo pull out tap copper TA9601CP",
         )
 
+    def test_imperial_layout_row_fixture_entry_strips_leading_tap_label(self) -> None:
+        self.assertEqual(
+            parsing_module._imperial_layout_row_fixture_entry(
+                {
+                    "value_text": "Tap Franke Eos Neo pull out tap copper TA9601CP",
+                    "supplier_text": "",
+                    "notes_text": "",
+                },
+                "tap",
+            ),
+            "Franke Eos Neo pull out tap copper TA9601CP",
+        )
+
     def test_imperial_layout_row_fixture_entry_removes_sink_tail_metadata(self) -> None:
         self.assertEqual(
             parsing_module._imperial_layout_row_fixture_entry(
@@ -6464,6 +6477,205 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(
             extraction_service._sanitize_generic_fixture_field(value, kind="tap"),
             "Alder - Samm - Wall Basin/Bath Mixer Set Backplate - 220mm - Matt Black",
+        )
+
+    def test_crosscheck_clarendon_snapshot_with_raw_restores_missing_cabinetry_fields(self) -> None:
+        layout_snapshot = {
+            "site_address": "Lot 8 (#25) Lake Serenity Boulevard Helensvale",
+            "rooms": [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "sink_info": "Abey Abey Large Single Bowl Undermount CUA720 Undermount Sink",
+                    "tap_info": "Caroma Liano Ii Flag Pull Out Sink 96381BN56A Brushed Nickel",
+                }
+            ],
+        }
+        raw_snapshot = {
+            "site_address": "Lot 8 (#25) Lake Serenity Boulevard Helensvale",
+            "rooms": [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "bench_tops_wall_run": "Quantum Zero White Swirl - 20MM Pencil Round Edge",
+                    "bench_tops_island": "Quantum Zero White Swirl - 40MM Mitred Apron Edge",
+                    "door_colours_base": "Polytec Aston White Smooth Finish Thermolaminate - Hampton EM9 Profile",
+                    "toe_kick": ["Matching Melamine finish"],
+                    "bulkheads": ["Bulkhead shadowline as matching Melamine finish"],
+                    "handles": [
+                        "Hettich - Belluno 9995772 200MM Long Brushed Stainless Steel Look",
+                        "Hettich - Salemi 9113368 30MM Brushed Stainless Steel Look",
+                    ],
+                }
+            ],
+        }
+        merged = extraction_service._crosscheck_clarendon_snapshot_with_raw(layout_snapshot, raw_snapshot)
+        room = merged["rooms"][0]
+        self.assertEqual(room["bench_tops_wall_run"], "Quantum Zero White Swirl - 20MM Pencil Round Edge")
+        self.assertEqual(room["door_colours_base"], "Polytec Aston White Smooth Finish Thermolaminate - Hampton EM9 Profile")
+        self.assertEqual(room["toe_kick"], ["Matching Melamine finish"])
+        self.assertEqual(len(room["handles"]), 2)
+
+    def test_extract_generic_layout_overlay_uses_additional_section_location_as_room_label(self) -> None:
+        section = {
+            "original_section_label": "Additional Kitchen/Butlers/Kitchenette",
+            "page_type": "joinery",
+            "file_name": "simonds.pdf",
+            "page_nos": [15],
+            "text": "Additional Kitchen/Butlers/Kitchenette",
+            "layout_rows": [
+                {"row_label": "Location", "value_region_text": "Rumpus", "supplier_region_text": "", "notes_region_text": "", "row_kind": "other"},
+                {"row_label": "Benchtop", "value_region_text": "", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Manufacturer", "value_region_text": "Caesarstone - Mineral", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Colour", "value_region_text": "Raven", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            ],
+        }
+        overlay = extraction_service._extract_generic_layout_overlay(section)
+        self.assertEqual(overlay["original_room_label"], "Rumpus")
+
+    def test_extract_generic_layout_overlay_uses_document_location_for_additional_section(self) -> None:
+        section = {
+            "original_section_label": "Additional Bath/Ensuite/Powder",
+            "page_type": "joinery",
+            "file_name": "simonds.pdf",
+            "page_nos": [13],
+            "text": "Additional Bath/Ensuite/Powder",
+            "layout_rows": [
+                {"row_label": "Benchtop", "value_region_text": "", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+                {"row_label": "Manufacturer", "value_region_text": "Caesarstone - Mineral", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            ],
+        }
+        documents = [
+            {
+                "file_name": "simonds.pdf",
+                "pages": [
+                    {
+                        "page_no": 13,
+                        "raw_text": (
+                            "Additional Bath/Ensuite/Powder Additional Bath/Ensuite/Powder"
+                            "LocationGuest Ensuite 2LocationManufacturerCaesarstone - Mineral"
+                        ),
+                    }
+                ],
+            }
+        ]
+        overlay = extraction_service._extract_generic_layout_overlay(section, documents=documents)
+        self.assertEqual(overlay["original_room_label"], "Guest Ensuite 2")
+
+    def test_extract_generic_layout_overlay_uses_document_location_for_additional_wet_area_section(self) -> None:
+        section = {
+            "original_section_label": "Additional Wet Area",
+            "page_type": "joinery",
+            "file_name": "simonds.pdf",
+            "page_nos": [12],
+            "text": "Additional Wet Area",
+            "layout_rows": [
+                {"row_label": "Benchtop", "value_region_text": "", "supplier_region_text": "", "notes_region_text": "", "row_kind": "material"},
+            ],
+        }
+        documents = [
+            {
+                "file_name": "simonds.pdf",
+                "pages": [
+                    {
+                        "page_no": 12,
+                        "raw_text": (
+                            "Additional Wet AreaLocationEnsuite 3Wet Area Location"
+                            "ManufacturerCaesarstone - Mineral"
+                        ),
+                    }
+                ],
+            }
+        ]
+        overlay = extraction_service._extract_generic_layout_overlay(section, documents=documents)
+        self.assertEqual(overlay["original_room_label"], "Ensuite 3")
+
+    def test_resolve_generic_room_label_from_documents_handles_vanity_proxy_room(self) -> None:
+        row = {
+            "original_room_label": "Vanity",
+            "source_file": "simonds.pdf",
+            "page_refs": "12",
+        }
+        documents = [
+            {
+                "file_name": "simonds.pdf",
+                "pages": [
+                    {
+                        "page_no": 12,
+                        "raw_text": "Additional Wet AreaLocationEnsuite 3Wet Area LocationManufacturerCaesarstone - Mineral",
+                    }
+                ],
+            }
+        ]
+        self.assertEqual(
+            extraction_service._resolve_generic_room_label_from_documents(row, documents),
+            "Ensuite 3",
+        )
+
+    def test_sanitize_generic_material_field_trims_bench_prefix_from_tall_colour(self) -> None:
+        self.assertEqual(
+            extraction_service._sanitize_generic_material_field(
+                "40mm Caesarstone - Mineral - Organic White - Arris - Laminex Natural Blackened Legno",
+                field_name="door_colours_tall",
+                room_key="kitchen",
+            ),
+            "Laminex Natural Blackened Legno",
+        )
+
+    def test_sanitize_generic_material_field_drops_not_applicable_prefix_before_real_material(self) -> None:
+        self.assertEqual(
+            extraction_service._sanitize_generic_material_field(
+                "Not Applicable Polytec - Belgian Oak Matt",
+                field_name="door_colours_overheads",
+                room_key="kitchen",
+            ),
+            "Polytec - Belgian Oak Matt",
+        )
+
+    def test_sanitize_generic_handle_entries_drops_not_included_noise_and_has_placeholder(self) -> None:
+        self.assertEqual(
+            extraction_service._sanitize_generic_handle_entries(
+                [
+                    "4062-128-TG - Vertical - Horizontal - shaving cabinets Not Included",
+                    "has",
+                ]
+            ),
+            ["4062-128-TG - Vertical - Horizontal"],
+        )
+
+    def test_sanitize_generic_fixture_field_drops_label_only_tap_fragments(self) -> None:
+        self.assertEqual(
+            extraction_service._sanitize_generic_fixture_field("Type Location Centre of", kind="tap"),
+            "",
+        )
+
+    def test_sanitize_generic_fixture_field_strips_accessory_tail_from_tap(self) -> None:
+        self.assertEqual(
+            extraction_service._sanitize_generic_fixture_field(
+                "Alder - Maxx - Rectangle Sink Mixer - Matt Black + ALDER SACHI ROBE HOOK IN MATT BLACK",
+                kind="tap",
+            ),
+            "Alder - Maxx - Rectangle Sink Mixer - Matt Black",
+        )
+
+    def test_sanitize_generic_fixture_field_drops_non_tap_secondary_fragment(self) -> None:
+        self.assertEqual(
+            extraction_service._sanitize_generic_fixture_field(
+                "Alder - Samm - Wall Basin/Bath Mixer Set Backplate - 220mm - Matt Black | Alder - Fresco (WELS 6 stars)",
+                kind="tap",
+            ),
+            "Alder - Samm - Wall Basin/Bath Mixer Set Backplate - 220mm - Matt Black",
+        )
+
+    def test_sanitize_generic_handle_entries_drops_electrical_section_pollution(self) -> None:
+        self.assertEqual(
+            extraction_service._sanitize_generic_handle_entries(
+                [
+                    "Switch Plates / GPO's Clipsal Iconic - White - TV Antenna Included",
+                    "4062-128-TG - Vertical - Horizontal",
+                ]
+            ),
+            ["4062-128-TG - Vertical - Horizontal"],
         )
 
     def test_polish_generic_layout_room_expands_island_bench_as_above(self) -> None:

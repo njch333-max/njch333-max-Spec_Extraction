@@ -262,6 +262,15 @@ def build_spec_snapshot(
                 rule_flags=rule_flags,
             )
             merged = _crosscheck_imperial_snapshot_with_raw(merged, raw_crosscheck)
+        elif str(builder.get("name", "") or "").strip().lower() == "clarendon":
+            raw_crosscheck = _build_raw_spec_crosscheck_snapshot(
+                job_no=str(job.get("job_no", "") or ""),
+                builder_name=str(builder.get("name", "") or ""),
+                documents=raw_documents,
+                parser_strategy=parser_strategy,
+                rule_flags=rule_flags,
+            )
+            merged = _crosscheck_clarendon_snapshot_with_raw(merged, raw_crosscheck)
         merged["analysis"] = analysis
         return merged
     _report_progress(progress_callback, "room_enrichment", "Applying room fixture and door-colour overlays")
@@ -285,6 +294,15 @@ def build_spec_snapshot(
             rule_flags=rule_flags,
         )
         heuristic = _crosscheck_imperial_snapshot_with_raw(heuristic, raw_crosscheck)
+    elif str(builder.get("name", "") or "").strip().lower() == "clarendon":
+        raw_crosscheck = _build_raw_spec_crosscheck_snapshot(
+            job_no=str(job.get("job_no", "") or ""),
+            builder_name=str(builder.get("name", "") or ""),
+            documents=raw_documents,
+            parser_strategy=parser_strategy,
+            rule_flags=rule_flags,
+        )
+        heuristic = _crosscheck_clarendon_snapshot_with_raw(heuristic, raw_crosscheck)
     heuristic["analysis"] = analysis
     return heuristic
 
@@ -3903,6 +3921,109 @@ def _build_raw_spec_crosscheck_snapshot(
     return snapshot
 
 
+CLARENDON_RAW_SCALAR_FIELDS: tuple[str, ...] = (
+    "bench_tops_wall_run",
+    "bench_tops_island",
+    "bench_tops_other",
+    "door_colours_overheads",
+    "door_colours_base",
+    "door_colours_tall",
+    "door_colours_island",
+    "door_colours_bar_back",
+    "floating_shelf",
+    "sink_info",
+    "basin_info",
+    "tap_info",
+    "drawers_soft_close",
+    "hinges_soft_close",
+)
+
+CLARENDON_RAW_LIST_FIELDS: tuple[str, ...] = (
+    "toe_kick",
+    "bulkheads",
+    "handles",
+    "accessories",
+)
+
+
+def _crosscheck_clarendon_snapshot_with_raw(layout_snapshot: dict[str, Any], raw_snapshot: dict[str, Any]) -> dict[str, Any]:
+    if not raw_snapshot:
+        return layout_snapshot
+    merged = dict(layout_snapshot)
+    merged_rooms: list[dict[str, Any]] = []
+    raw_rooms = list(raw_snapshot.get("rooms", []))
+    used_raw: set[int] = set()
+    for layout_row in list(layout_snapshot.get("rooms", [])):
+        match_index = _find_best_room_match(layout_row, raw_rooms, used_raw)
+        if match_index is None:
+            merged_rooms.append(layout_row)
+            continue
+        used_raw.add(match_index)
+        raw_row = raw_rooms[match_index]
+        merged_row = dict(layout_row)
+        for field_name in CLARENDON_RAW_SCALAR_FIELDS:
+            merged_row[field_name] = _prefer_clarendon_raw_scalar(field_name, layout_row.get(field_name), raw_row.get(field_name))
+        for field_name in CLARENDON_RAW_LIST_FIELDS:
+            merged_row[field_name] = _prefer_clarendon_raw_list(field_name, layout_row.get(field_name), raw_row.get(field_name))
+        merged_rooms.append(merged_row)
+    merged["rooms"] = merged_rooms
+    if raw_snapshot.get("site_address") and not merged.get("site_address"):
+        merged["site_address"] = raw_snapshot["site_address"]
+    return merged
+
+
+def _prefer_clarendon_raw_scalar(field_name: str, layout_value: Any, raw_value: Any) -> Any:
+    layout_text = parsing.normalize_space(str(layout_value or ""))
+    raw_text = parsing.normalize_space(str(raw_value or ""))
+    if not raw_text:
+        return layout_value
+    if not layout_text:
+        return raw_value
+    if _clarendon_field_quality(raw_text, field_name) > _clarendon_field_quality(layout_text, field_name):
+        return raw_value
+    return layout_value
+
+
+def _prefer_clarendon_raw_list(field_name: str, layout_value: Any, raw_value: Any) -> list[str]:
+    layout_items = parsing._coerce_string_list(layout_value)
+    raw_items = parsing._coerce_string_list(raw_value)
+    if not raw_items:
+        return layout_items
+    if not layout_items:
+        return raw_items
+    layout_score = max((_clarendon_field_quality(value, field_name) for value in layout_items), default=-999)
+    raw_score = max((_clarendon_field_quality(value, field_name) for value in raw_items), default=-999)
+    if raw_score > layout_score:
+        return raw_items
+    return layout_items
+
+
+def _clarendon_field_quality(text: str, field_name: str) -> int:
+    cleaned = parsing.normalize_space(str(text or ""))
+    if not cleaned:
+        return -1000
+    lowered = cleaned.lower()
+    score = min(len(cleaned), 180)
+    for token in (
+        "client",
+        "date",
+        "signature",
+        "designer",
+        "document ref",
+        "colour schedule",
+        "thermolaminate notes",
+    ):
+        if token in lowered:
+            score -= 60
+    if field_name.startswith("door_colours_") and "display cabinet" in lowered:
+        score -= 70
+    if field_name == "handles" and not any(token in lowered for token in ("belluno", "salemi", "hettich")):
+        score -= 40
+    if "profile" in lowered or re.search(r"\b\d+\s*mm\b", cleaned, re.I):
+        score += 10
+    return score
+
+
 IMPERIAL_RAW_SCALAR_FIELDS: tuple[str, ...] = (
     "bench_tops_wall_run",
     "bench_tops_island",
@@ -4505,14 +4626,20 @@ def _apply_shared_layout_row_polish(
         for section in parsing._collect_room_sections_for_document(document):
             if not section.get("layout_rows"):
                 continue
-            overlay = _extract_generic_layout_overlay(section)
+            overlay = _extract_generic_layout_overlay(section, documents=documents)
             if not overlay:
                 continue
-            room_key = parsing.same_room_identity(str(section.get("original_section_label", "")), str(section.get("section_key", "")))
-            if room_key not in overlays:
-                overlays[room_key] = overlay
-            else:
-                overlays[room_key] = _merge_generic_layout_overlay(overlays[room_key], overlay)
+            room_keys = {
+                parsing.same_room_identity(str(section.get("original_section_label", "")), str(section.get("section_key", ""))),
+                parsing.same_room_identity(str(overlay.get("original_room_label", "")), str(section.get("section_key", ""))),
+            }
+            for room_key in room_keys:
+                if not room_key:
+                    continue
+                if room_key not in overlays:
+                    overlays[room_key] = overlay
+                else:
+                    overlays[room_key] = _merge_generic_layout_overlay(overlays[room_key], overlay)
     if not overlays:
         return snapshot
     polished_rooms: list[dict[str, Any]] = []
@@ -4521,8 +4648,11 @@ def _apply_shared_layout_row_polish(
         if not isinstance(room, dict):
             continue
         room_key = parsing.same_room_identity(str(room.get("original_room_label", "")), str(room.get("room_key", "")))
+        overlay = overlays.get(room_key, {})
         seen_keys.add(room_key)
-        polished_rooms.append(_polish_generic_layout_room(dict(room), overlays.get(room_key, {})))
+        if overlay.get("original_room_label"):
+            seen_keys.add(parsing.same_room_identity(str(overlay.get("original_room_label", "")), room_key))
+        polished_rooms.append(_polish_generic_layout_room(dict(room), overlay))
     for room_key, overlay in overlays.items():
         if room_key in seen_keys:
             continue
@@ -4531,8 +4661,16 @@ def _apply_shared_layout_row_polish(
             "original_room_label": str(overlay.get("original_room_label", room_key.replace("_", " ").title())),
         }
         polished_rooms.append(_polish_generic_layout_room(missing_room, overlay))
+    resolved_rooms: list[dict[str, Any]] = []
+    for room in polished_rooms:
+        current = dict(room)
+        resolved_label = _resolve_generic_room_label_from_documents(current, documents)
+        if resolved_label:
+            current["original_room_label"] = resolved_label
+            current["room_key"] = parsing.same_room_identity(resolved_label, str(current.get("room_key", "")))
+        resolved_rooms.append(current)
     polished = dict(snapshot)
-    polished["rooms"] = polished_rooms
+    polished["rooms"] = _merge_rooms_by_source_identity(resolved_rooms)
     return parsing.apply_snapshot_cleaning_rules(polished, rule_flags=rule_flags)
 
 
@@ -5310,6 +5448,7 @@ def _clean_generic_fragment(value: str) -> str:
     text = re.sub(r"(?i)\b(?:client name|designer|signature|signed date|document ref|job number|job address|colour consultant)\b.*$", "", text)
     text = re.sub(r"(?i)\b(?:site address|address|client|date)\s*:.*$", "", text)
     text = re.sub(r"(?i)\b(?:supplier description design comments|supplier description|area / item|image supplier notes)\b.*$", "", text)
+    text = re.sub(r"(?i)\b(?:forstan pty ltd|phone\s*:|fax\s*:|abn\s*:|job no\s*:|sheet\s+\d+|scale\s*:)\b.*$", "", text)
     text = re.sub(r"(?i)page\s+\d+\s+of\s+\d+.*$", "", text)
     text = text.replace("**", " ")
     text = re.sub(r"\(\s*(?:#?\s*n\s*/?\s*a|not applicable)\s*\)", "", text, flags=re.IGNORECASE)
@@ -5390,6 +5529,20 @@ def _looks_like_generic_field_noise(value: str, *, field: str = "") -> bool:
             return True
     if field == "handle":
         if sum(token in lowered for token in ("manufacturer", "range", "model", "style", "finish", "fixing")) >= 2:
+            return True
+        if any(
+            token in lowered
+            for token in (
+                "switch plates",
+                "gpo",
+                "tv antenna",
+                "home automation",
+                "alarm system",
+                "cctv",
+                "solar pv system",
+                "freestanding cooker",
+            )
+        ):
             return True
     return False
 
@@ -5522,6 +5675,18 @@ def _format_generic_material_from_parts(parts: dict[str, list[str]]) -> str:
     return re.sub(r"\s+-\s+-\s+", " - ", formatted).strip(" -")
 
 
+def _trim_bench_noise_from_cabinetry_fragment(fragment: str) -> str:
+    cleaned = _clean_generic_fragment(fragment)
+    lowered = cleaned.lower()
+    if not any(token in lowered for token in ("caesarstone", "quantum quartz", "mitred", "arris", "benchtop", "waterfall")):
+        return cleaned
+    cabinetry_match = re.search(r"(?i)\b(polytec|laminex|colourboard|formica)\b", cleaned)
+    if cabinetry_match:
+        trimmed = parsing.normalize_space(cleaned[cabinetry_match.start() :]).strip(" -;,")
+        return trimmed or cleaned
+    return cleaned
+
+
 def _generic_material_fragment_is_noise(fragment: str, *, field_name: str = "") -> bool:
     text = _clean_generic_fragment(fragment)
     if not text or _looks_like_generic_field_noise(text, field="material"):
@@ -5545,6 +5710,8 @@ def _generic_material_fragment_is_noise(fragment: str, *, field_name: str = "") 
         "door_colours_island",
         "door_colours_bar_back",
     }:
+        if any(token in lowered for token in ("caesarstone", "quantum quartz", "mitred", "arris", "waterfall", "benchtop")):
+            return True
         if any(
             token in lowered
             for token in (
@@ -5590,6 +5757,9 @@ def _generic_material_fragment_is_noise(fragment: str, *, field_name: str = "") 
             )
         ):
             return True
+    if field_name == "toe_kick":
+        if any(token in lowered for token in ("caesarstone", "quantum quartz", "mitred", "arris", "waterfall")):
+            return True
     if field_name == "floating_shelf":
         if any(token in lowered for token in ("handle", "soft close", "client", "date")):
             return True
@@ -5624,9 +5794,16 @@ def _sanitize_generic_material_field(value: Any, *, field_name: str = "", room_k
             "",
             fragment,
         ).strip(" -;,")
+        if field_name.startswith("door_colours_") or field_name == "toe_kick":
+            fragment = _trim_bench_noise_from_cabinetry_fragment(fragment)
         if _generic_material_fragment_is_noise(fragment, field_name=field_name):
             continue
         normalized = parsing.normalize_brand_casing_text(fragment).strip(" -;,")
+        normalized = re.sub(
+            r"(?i)^(?:not applicable|n/?a|#n/?a)\s+(?=(?:polytec|laminex|colourboard|formica|caesarstone|quantum quartz|quantum zero|stone ambassador|smartstone|essastone|dekton)\b)",
+            "",
+            normalized,
+        ).strip(" -;,")
         if not normalized:
             continue
         token_key = _generic_fragment_token_key(normalized)
@@ -5739,6 +5916,8 @@ def _sanitize_generic_fixture_field(value: Any, *, kind: str = "") -> str:
         _clean_generic_fragment(fragment)
         for fragment in re.split(r"\s*\|\s*", parsing.normalize_space(str(value or "")))
     ]
+    non_empty_fragments = [fragment for fragment in fragments if fragment]
+    multiple_fragments = len(non_empty_fragments) > 1
     cleaned: list[str] = []
     cleaned_keys: list[set[str]] = []
     for fragment in fragments:
@@ -5755,6 +5934,8 @@ def _sanitize_generic_fixture_field(value: Any, *, kind: str = "") -> str:
             "",
             text,
         )
+        text = re.sub(r"(?i)\b(?:type|model|location)\b\s*:?(\s+|$)", " ", text)
+        text = re.sub(r"(?i)\b(?:image|supplier|notes)\b\s*:?(\s+|$)", " ", text)
         location_first = re.match(
             r"(?i)^(?P<location>(?:centre|center|corner|left|right)(?:\s+of(?:\s+(?:sink|basin|tub))?)?)\s*-\s*(?P<rest>.+)$",
             text,
@@ -5769,8 +5950,37 @@ def _sanitize_generic_fixture_field(value: Any, *, kind: str = "") -> str:
             text = re.sub(r"(?i)\s*-\s*(?:alder\s+sachi|sachi|wish)\s*$", "", text).strip(" -;,")
             text = re.sub(r"(?i)\s*-\s*washing machine taps\b.*$", "", text).strip(" -;,")
             text = re.sub(r"(?i)\bwashing machine taps\b.*$", "", text).strip(" -;,")
+            text = re.sub(r"(?i)\b(?:robe hook|towel rail|hand towel rail|toilet suite|toilet roll holder|switch plates?|gpo'?s?|tv antenna|home automation|alarm system|cctv|solar pv system|freestanding cooker)\b.*$", "", text).strip(" -;,")
+            text = re.sub(r"(?i)\b(?:shower rose|rail hs\d+)\b.*$", "", text).strip(" -;,")
             text = re.sub(r"(?i)\s*-\s*(?:corner|centre|center)\s+of\s*$", "", text).strip(" -;,")
+            text = re.sub(r"(?i)\b(?:not included|not applicable|#n/?a)\b", "", text).strip(" -;,")
         text = parsing.normalize_brand_casing_text(parsing.normalize_space(text)).strip(" -;,")
+        if kind == "tap":
+            text = re.sub(r"(?i)^tap\s+", "", text).strip(" -;,")
+            if multiple_fragments:
+                tap_signal = any(
+                    token in text.lower()
+                    for token in (
+                        "mixer",
+                        "tap",
+                        "spout",
+                        "gooseneck",
+                        "pull-out",
+                        "pull down",
+                        "vegie",
+                        "basin",
+                        "sink",
+                        "wall basin",
+                        "bath mixer",
+                    )
+                )
+                location_signal = bool(re.search(r"(?i)\b(?:centre|center|corner)\s+of\b", text))
+                if not tap_signal and not location_signal:
+                    continue
+        if kind == "tap" and text.lower() in {"type", "location", "centre of", "center of", "corner of", "type location"}:
+            continue
+        if kind in {"sink", "basin"} and text.lower() in {"type", "model", "type overmount", "model type", "model type overmount"}:
+            continue
         if not text:
             continue
         token_key = _generic_fragment_token_key(text)
@@ -5810,8 +6020,10 @@ def _format_generic_handles_from_parts(parts: dict[str, list[str]]) -> str:
     for value in _meaningful_generic_values(parts.get("note", []), exclude_tokens=("soft close", "hanging rail", "not applicable", "#n/a")):
         cleaned = re.sub(r"(?i)^(?:door|drawers?|pantry door|bin\s*&\s*pot drawers?)\s*handle\s*", "", value).strip(" -;,")
         cleaned = re.sub(r"(?i)\b#n/?a\b", "", cleaned).strip(" -;,")
+        cleaned = re.sub(r"(?i)\b(?:shaving cabinets?|drawers?)\s+not included\b", "", cleaned).strip(" -;,")
+        cleaned = re.sub(r"(?i)\bpink text\b", "", cleaned).strip(" -;,")
         cleaned = parsing.normalize_space(cleaned).strip(" -;,")
-        if not cleaned or cleaned.lower() in {"bin&", "bin", "pot", "drawers handle", "handle"} or cleaned.lower().startswith("bin"):
+        if not cleaned or cleaned.lower() in {"bin&", "bin", "pot", "drawers handle", "handle", "has", "not included"} or cleaned.lower().startswith("bin"):
             continue
         filtered_notes.append(cleaned)
     note_parts = [
@@ -5843,11 +6055,15 @@ def _sanitize_generic_handle_entries(values: list[str]) -> list[str]:
         text = re.sub(r"(?i)\bN/?A\b", "", text)
         text = re.sub(r"(?i)\bCategory\s*\d+\b", "", text)
         text = re.sub(r"(?i)\bSoft Close\b", "", text)
+        text = re.sub(r"(?i)\b(?:shaving cabinets?|drawers?)\s+not included\b", "", text)
+        text = re.sub(r"(?i)\bnot included\b", "", text)
+        text = re.sub(r"(?i)\bpink text\b", "", text)
+        text = re.sub(r"(?i)\b(?:switch plates?|gpo'?s?|tv antenna|home automation|alarm system|cctv|solar pv system|freestanding cooker)\b.*$", "", text)
         text = text.replace("**", " ")
         text = parsing.normalize_space(text)
         text = re.sub(r"\s+,", ",", text)
         text = parsing.normalize_space(text).strip(" -;,")
-        if not text or _looks_like_placeholder_entry(text):
+        if not text or text.lower() in {"has", "n/a", "na"} or _looks_like_placeholder_entry(text):
             continue
         if any(
             text.lower() == existing.lower()
@@ -5937,13 +6153,13 @@ def _room_label_is_wet_area(room_label: str) -> bool:
     return any(token in lowered for token in ("bathroom", "ensuite", "powder", "wc", "toilet"))
 
 
-def _extract_generic_layout_overlay(section: dict[str, Any]) -> dict[str, Any]:
+def _extract_generic_layout_overlay(section: dict[str, Any], *, documents: list[dict[str, object]] | None = None) -> dict[str, Any]:
     layout_rows = [row for row in section.get("layout_rows", []) if isinstance(row, dict)]
     if not layout_rows:
         return {}
     page_type = parsing.normalize_space(str(section.get("page_type", "") or "")).lower().replace(" ", "_")
     overlay = _blank_generic_layout_overlay()
-    overlay["original_room_label"] = str(section.get("original_section_label", "") or "")
+    overlay["original_room_label"] = _generic_overlay_room_label(section, layout_rows, documents=documents)
     overlay["source_file"] = str(section.get("file_name", "") or "")
     overlay["page_refs"] = ",".join(str(page_no) for page_no in section.get("page_nos", []) if page_no)
     overlay["evidence_snippet"] = parsing.normalize_space(str(section.get("text", "") or ""))[:240]
@@ -6083,6 +6299,181 @@ def _extract_generic_layout_overlay(section: dict[str, Any]) -> dict[str, Any]:
             if text:
                 overlay["other_items"].append({"label": parsing.normalize_space(str(block.get("anchor_label", "") or "")), "value": text})
     return overlay
+
+
+def _generic_overlay_room_label(
+    section: dict[str, Any],
+    layout_rows: list[dict[str, Any]],
+    *,
+    documents: list[dict[str, object]] | None = None,
+) -> str:
+    original_label = parsing.normalize_space(str(section.get("original_section_label", "") or ""))
+    if not re.match(r"(?i)^additional\b", original_label):
+        return original_label
+    for row in layout_rows:
+        label = _normalize_generic_row_label(str(row.get("row_label", "") or ""))
+        value = _clean_generic_fragment(_row_region_text(row, "value_text", "value_region_text", "notes_text", "notes_region_text"))
+        if not value:
+            continue
+        if label == "location":
+            value = re.sub(r"(?i)\bwet area location\b", "", value)
+            value = parsing.normalize_space(value).strip(" -;,")
+            if value and not _is_generic_placeholder_text(value) and "additional" not in value.lower():
+                return parsing.normalize_space(value).title()
+    document_location = _extract_additional_room_location_from_documents(section, documents or [])
+    if document_location:
+        return document_location
+    return original_label
+
+
+def _extract_additional_room_location_from_documents(section: dict[str, Any], documents: list[dict[str, object]]) -> str:
+    original_label = parsing.normalize_space(str(section.get("original_section_label", "") or ""))
+    if not re.match(r"(?i)^additional\b", original_label):
+        return ""
+    file_name = parsing.normalize_space(str(section.get("file_name", "") or ""))
+    page_nos = [int(page_no) for page_no in section.get("page_nos", []) if str(page_no).isdigit() or isinstance(page_no, int)]
+    if not file_name or not page_nos:
+        return ""
+    label_pattern = re.escape(original_label)
+    location_patterns = (
+        rf"(?is){label_pattern}.*?Location\s*([A-Za-z0-9 /&'()-]+?)\s*(?:Wet Area Location|Location|Manufacturer|Benchtop|Kitchen Sink|Kitchen Tapware|$)",
+        rf"(?is){label_pattern}.*?Wet Area Location\s*([A-Za-z0-9 /&'()-]+?)\s*(?:Location|Manufacturer|Benchtop|$)",
+        r"(?is)\bAdditional(?:\s+Wet\s+Area|\s+Bath/Ensuite/Powder|\s+Kitchen/Butlers/Kitchenette)?\b.{0,320}?\b(?:Wet Area )?Location\s*([A-Za-z0-9 /&'()-]+?)\s*(?:Location|Manufacturer|Benchtop|Kitchen Sink|Kitchen Tapware|Basin|Shower|Sink|$)",
+    )
+    for document in documents:
+        if parsing.normalize_space(str(document.get("file_name", "") or "")) != file_name:
+            continue
+        pages = [page for page in document.get("pages", []) if isinstance(page, dict)]
+        for page_no in page_nos:
+            page = next((item for item in pages if int(item.get("page_no", 0) or 0) == page_no), None)
+            if not page:
+                continue
+            raw_text = str(page.get("raw_text", "") or page.get("text", "") or "")
+            searchable_text = _normalize_generic_document_search_text(raw_text)
+            text = parsing.normalize_space(searchable_text)
+            if not text:
+                continue
+            for pattern in location_patterns:
+                match = re.search(pattern, text)
+                if not match:
+                    continue
+                candidate = parsing.normalize_space(match.group(1)).strip(" -;,")
+                candidate = re.sub(r"(?i)\b(?:wet area )?location\b", "", candidate).strip(" -;,")
+                if candidate and not _is_generic_placeholder_text(candidate) and "additional" not in candidate.lower():
+                    return parsing.source_room_label(candidate)
+            additional_index = raw_text.lower().find("additional")
+            if additional_index >= 0:
+                focused = parsing.normalize_space(
+                    _normalize_generic_document_search_text(raw_text[additional_index : additional_index + 420])
+                )
+                for match in re.finditer(
+                    r"(?is)\b(?:wet area )?location\s*([A-Za-z0-9 /&'()-]+?)\s*(?:location|manufacturer|benchtop|kitchen sink|kitchen tapware|basin|shower|sink|$)",
+                    focused,
+                ):
+                    candidate = parsing.normalize_space(match.group(1)).strip(" -;,")
+                    candidate = re.sub(r"(?i)\b(?:wet area )?location\b", "", candidate).strip(" -;,")
+                    if not candidate:
+                        continue
+                    lowered = candidate.lower()
+                    if _is_generic_placeholder_text(candidate):
+                        continue
+                    if "additional" in lowered:
+                        continue
+                    if lowered in {"centre of sink", "center of sink", "corner of sink", "centre of basin", "center of basin", "corner of tub"}:
+                        continue
+                    return parsing.source_room_label(candidate)
+    return ""
+
+
+def _resolve_generic_room_label_from_documents(row: dict[str, Any], documents: list[dict[str, object]]) -> str:
+    original_label = parsing.normalize_space(str(row.get("original_room_label", "") or ""))
+    source_file = parsing.normalize_space(str(row.get("source_file", "") or ""))
+    page_refs = parsing.normalize_space(str(row.get("page_refs", "") or ""))
+    if not original_label or not source_file or not page_refs:
+        return ""
+    if not (re.match(r"(?i)^additional\b", original_label) or original_label.lower() in {"vanity", "wet area"}):
+        return ""
+    page_nos = [int(part) for part in re.split(r"\s*,\s*", page_refs) if part.isdigit()]
+    if not page_nos:
+        return ""
+    if re.match(r"(?i)^additional\b", original_label):
+        resolved = _extract_additional_room_location_from_documents(
+            {
+                "original_section_label": original_label,
+                "file_name": source_file,
+                "page_nos": page_nos,
+            },
+            documents,
+        )
+        if resolved:
+            return resolved
+    location_pattern = re.compile(
+        r"(?is)\b(?:wet area )?location\s*([A-Za-z0-9 /&'()-]+?)\s*(?:location|manufacturer|benchtop|kitchen sink|kitchen tapware|basin|shower|sink|$)"
+    )
+    room_candidate_pattern = re.compile(
+        r"(?i)\b(?:Guest\s+Ensuite\s*\d*|Master Ensuite|Ensuite\s*\d*|Bathroom|Powder|Laundry|Kitchen|Pantry|Butlers/?WIP|Rumpus|Study|Study Desk|Make Up Desk)\b"
+    )
+    for document in documents:
+        if parsing.normalize_space(str(document.get("file_name", "") or "")) != source_file:
+            continue
+        pages = [page for page in document.get("pages", []) if isinstance(page, dict)]
+        for page_no in page_nos:
+            page = next((item for item in pages if int(item.get("page_no", 0) or 0) == page_no), None)
+            if not page:
+                continue
+            raw_text = str(page.get("raw_text", "") or page.get("text", "") or "")
+            if not raw_text:
+                continue
+            focused = parsing.normalize_space(_normalize_generic_document_search_text(raw_text[:1200]))
+            for match in location_pattern.finditer(focused):
+                candidate = parsing.normalize_space(match.group(1)).strip(" -;,")
+                candidate = re.sub(r"(?i)\b(?:wet area )?location\b", "", candidate).strip(" -;,")
+                if not candidate or _is_generic_placeholder_text(candidate):
+                    continue
+                if "additional" in candidate.lower():
+                    continue
+                room_match = room_candidate_pattern.search(candidate)
+                if room_match:
+                    return parsing.source_room_label(room_match.group(0))
+            room_match = room_candidate_pattern.search(focused)
+            if room_match:
+                return parsing.source_room_label(room_match.group(0))
+    return ""
+
+
+def _normalize_generic_document_search_text(raw_text: str) -> str:
+    text = str(raw_text or "")
+    if not text:
+        return ""
+    text = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", text)
+    text = re.sub(r"(?<=\d)(?=[A-Z])", " ", text)
+    for marker in (
+        "Wet Area Location",
+        "Location",
+        "Manufacturer",
+        "Range",
+        "Model",
+        "Colour & Finish",
+        "Colour",
+        "Finish",
+        "Profile",
+        "Kitchen Sink",
+        "Kitchen Tapware",
+        "Pantry Sink",
+        "Pantry Tapware",
+        "Laundry Trough",
+        "Laundry Tapware",
+        "Vanity Basin",
+        "Vanity Basin Tapware",
+        "Benchtop",
+        "Sink",
+        "Tapware",
+        "Basin",
+        "Shower",
+    ):
+        marker_pattern = re.escape(marker)
+        text = re.sub(rf"(?i)\b({marker_pattern})(?=[A-Z0-9])", r"\1 ", text)
+    return text
 
 
 def _polish_generic_layout_room(row: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:

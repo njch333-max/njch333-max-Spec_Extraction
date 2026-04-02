@@ -4110,6 +4110,7 @@ def _imperial_layout_row_fixture_entry(row: dict[str, Any], kind: str) -> str:
     text = re.sub(r"(?i)\b(?:client name|signature|signed date|designer|document ref|address|date)\b.*$", "", text)
     text = normalize_space(text).strip(" -;,")
     if kind == "tap":
+        text = re.sub(r"(?i)^tap\s+", "", text).strip(" -;,")
         text = re.sub(r"(?i)\b(?:client|private)\b.*$", "", text).strip(" -;,")
         text = re.sub(
             r"(?i)\b[A-Z][a-z]+(?:[-'][A-Z][a-z]+)?(?:\s+[A-Z][a-z]+(?:[-'][A-Z][a-z]+)?){1,3}\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b$",
