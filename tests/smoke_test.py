@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import tempfile
+import types
 import unittest
 import urllib.error
 from datetime import datetime
@@ -1011,6 +1012,37 @@ class SmokeTest(unittest.TestCase):
             "Lot 1038, Oyster St, Worongary QLD 4213",
         )
 
+    def test_site_address_extraction_falls_back_to_pdf_path_when_loaded_text_is_sparse(self) -> None:
+        class _FakePage:
+            def extract_text(self) -> str:
+                return "Site Address : LOT 12 No. (#22) GEORGIA CLOSE, BIRKDALE Job No: 49906613"
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            fake_pdf_path = Path(tmp_dir) / "clarendon-afc.pdf"
+            fake_pdf_path.write_bytes(b"%PDF-1.4\n%test\n")
+            documents = [
+                {
+                    "file_name": "clarendon-afc.pdf",
+                    "path": str(fake_pdf_path),
+                    "pages": [
+                        {
+                            "page_no": 1,
+                            "raw_text": "Site Address :\nJob No:\nHome:",
+                            "text": "Site Address :\nJob No:\nHome:",
+                        }
+                    ],
+                }
+            ]
+            with (
+                mock.patch.object(parsing_module, "pdfplumber") as mock_pdfplumber,
+                mock.patch.object(parsing_module, "PdfReader", return_value=types.SimpleNamespace(pages=[_FakePage()])),
+            ):
+                mock_pdfplumber.open.side_effect = RuntimeError("force reader fallback")
+                self.assertEqual(
+                    parsing_module._extract_site_address_from_documents(documents),
+                    "LOT 12 No. (#22) GEORGIA CLOSE, BIRKDALE",
+                )
+
     def test_clarendon_job25_polish_prefers_raw_text_and_preserves_summary_detail(self) -> None:
         afc_raw = "LOT 8 No. (#25) Lake Serenity Boulevard, HELENSVALE"
         kitchen_raw = (
@@ -1993,6 +2025,97 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("Docling is disabled by builder policy", snapshot["analysis"]["docling_note"])
         request_docling_page_layout.assert_not_called()
 
+    def test_build_spec_snapshot_uses_docling_without_heavy_vision_by_default_for_yellowwood(self) -> None:
+        documents = [
+            {
+                "file_name": "yellowwood.pdf",
+                "path": "yellowwood.pdf",
+                "role": "spec",
+                "pages": [
+                    {
+                        "page_no": 17,
+                        "text": "KITCHEN\nBASE CUPBOARDS & DRAWERS\nOVERHEAD CUPBOARDS\nPANTRY DOOR HANDLES",
+                        "raw_text": "KITCHEN\nBASE CUPBOARDS & DRAWERS\nOVERHEAD CUPBOARDS\nPANTRY DOOR HANDLES",
+                        "needs_ocr": False,
+                    }
+                ],
+            }
+        ]
+        heuristic_snapshot = {
+            "job_no": "38095",
+            "builder_name": "Yellowwood",
+            "source_kind": "spec",
+            "generated_at": "2026-03-29T10:00:00+00:00",
+            "site_address": "",
+            "rooms": [{"room_key": "kitchen", "original_room_label": "KITCHEN", "room_name": "KITCHEN"}],
+            "special_sections": [],
+            "appliances": [],
+            "others": {"flooring_notes": "", "splashback_notes": "", "manual_notes": ""},
+            "warnings": [],
+            "source_documents": [],
+            "analysis": {"mode": "heuristic_only"},
+        }
+        docling_layout = {
+            "page_type": "joinery",
+            "section_label": "KITCHEN",
+            "room_label": "KITCHEN",
+            "room_blocks": [
+                {
+                    "room_label": "KITCHEN",
+                    "rows": [
+                        {
+                            "row_label": "Base Cupboards & Drawers",
+                            "value_region_text": "White Melamine",
+                            "supplier_region_text": "",
+                            "notes_region_text": "",
+                            "row_kind": "material",
+                        }
+                    ],
+                }
+            ],
+        }
+        with (
+            mock.patch.object(extraction_service.runtime, "OPENAI_ENABLED", False),
+            mock.patch.object(extraction_service.runtime, "SPEC_HEAVY_VISION_ENABLED", False),
+            mock.patch("App.services.extraction_service._load_documents", return_value=documents),
+            mock.patch("App.services.extraction_service._docling_available", return_value=True),
+            mock.patch("App.services.extraction_service._request_docling_page_layout", return_value=docling_layout),
+            mock.patch("App.services.extraction_service.parsing.parse_documents", return_value=heuristic_snapshot),
+            mock.patch(
+                "App.services.extraction_service.parsing.enrich_snapshot_rooms",
+                side_effect=lambda payload, _documents, rule_flags=None: payload,
+            ),
+            mock.patch("App.services.extraction_service._stabilize_snapshot_layout", side_effect=lambda payload, **_: payload),
+            mock.patch("App.services.extraction_service._apply_builder_specific_polish", side_effect=lambda payload, *_args, **_kwargs: payload),
+            mock.patch("App.services.extraction_service._enrich_snapshot_appliances", side_effect=lambda payload, *_args, **_kwargs: payload),
+        ):
+            snapshot = extraction_service.build_spec_snapshot(
+                job={"job_no": "38095"},
+                builder={"name": "Yellowwood"},
+                files=[{"path": "yellowwood.pdf", "original_name": "yellowwood.pdf"}],
+                template_files=[],
+            )
+        self.assertEqual(snapshot["analysis"]["layout_provider"], "docling")
+        self.assertTrue(snapshot["analysis"]["docling_attempted"])
+        self.assertFalse(snapshot["analysis"]["vision_attempted"])
+
+    def test_page_requires_vision_for_yellowwood_schedule_pages(self) -> None:
+        page = {
+            "page_no": 17,
+            "text": "KITCHEN\nBASE CUPBOARDS & DRAWERS\nOVERHEAD CUPBOARDS\nPANTRY DOOR HANDLES\nISLAND BAR BACK",
+            "raw_text": "KITCHEN\nBASE CUPBOARDS & DRAWERS\nOVERHEAD CUPBOARDS\nPANTRY DOOR HANDLES\nISLAND BAR BACK",
+            "needs_ocr": False,
+        }
+        self.assertTrue(
+            extraction_service._page_requires_vision(
+                builder_name="Yellowwood",
+                source_kind="spec",
+                file_name="yellowwood.pdf",
+                page=page,
+                heuristic={},
+            )
+        )
+
     def test_build_spec_snapshot_uses_docling_without_heavy_vision_by_default_for_imperial(self) -> None:
         documents = [
             {
@@ -2903,6 +3026,86 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(rooms["bathroom"]["door_colours_base"], "Polytec Nouveau Grey Matt")
         self.assertNotIn("Painted Titanium White", rooms["bathroom"]["door_panel_colours"])
 
+    def test_collect_layout_sections_for_yellowwood_inherits_previous_room_for_continuation_pages(self) -> None:
+        document = {
+            "file_name": "yellowwood.pdf",
+            "builder_name": "Yellowwood",
+            "pages": [
+                {
+                    "page_no": 16,
+                    "text": "KITCHEN\nBack Benchtops 20mm\nOverhead Cupboards",
+                    "raw_text": "KITCHEN\nBack Benchtops 20mm\nOverhead Cupboards",
+                    "page_layout": {
+                        "page_type": "joinery",
+                        "section_label": "KITCHEN",
+                        "room_label": "KITCHEN",
+                        "room_blocks": [
+                            {
+                                "room_label": "KITCHEN",
+                                "rows": [
+                                    {
+                                        "row_label": "Back Benchtops",
+                                        "value_region_text": "20mm",
+                                        "supplier_region_text": "",
+                                        "notes_region_text": "",
+                                        "row_kind": "material",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                },
+                {
+                    "page_no": 17,
+                    "text": "Base Cupboards & Drawers\nPantry X4 Shelves White Melamine\nexcluding Pantry)",
+                    "raw_text": "Base Cupboards & Drawers\nPantry X4 Shelves White Melamine\nexcluding Pantry)",
+                    "page_layout": {
+                        "page_type": "joinery",
+                        "section_label": "Pantry X4 Shelves White Melamine",
+                        "room_label": "Pantry X4 Shelves White Melamine",
+                        "room_blocks": [
+                            {
+                                "room_label": "Pantry X4 Shelves White Melamine",
+                                "rows": [
+                                    {
+                                        "row_label": "Base Cupboards & Drawers",
+                                        "value_region_text": "Polytec Classic White Matt",
+                                        "supplier_region_text": "",
+                                        "notes_region_text": "",
+                                        "row_kind": "material",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                },
+            ],
+        }
+        sections = parsing_module._collect_layout_sections_for_document(document)
+        labels = [section["original_section_label"] for section in sections]
+        self.assertEqual(labels, ["KITCHEN", "KITCHEN"])
+        self.assertEqual([section["page_nos"] for section in sections], [[16], [17]])
+
+    def test_collect_spec_sections_for_yellowwood_uses_builder_name_without_document_builder_field(self) -> None:
+        document = {
+            "file_name": "yellowwood.pdf",
+            "pages": [
+                {
+                    "page_no": 16,
+                    "text": "KITCHEN\nBack Benchtops 20mm\nYDL Classic White Polished",
+                    "raw_text": "KITCHEN\nBack Benchtops 20mm\nYDL Classic White Polished",
+                },
+                {
+                    "page_no": 17,
+                    "text": "Base Cupboards & Drawers\nPolytec Classic White Matt\nKickboard Polytec Classic White Matt",
+                    "raw_text": "Base Cupboards & Drawers\nPolytec Classic White Matt\nKickboard Polytec Classic White Matt",
+                },
+            ],
+        }
+        sections = parsing_module._collect_spec_sections_for_document("Yellowwood Homes", document)
+        kitchen_sections = [section for section in sections if section["section_key"] == "kitchen"]
+        self.assertEqual([section["page_nos"] for section in kitchen_sections], [[16], [17]])
+
     def test_flatten_rooms_only_shows_split_benchtops_for_kitchen(self) -> None:
         rows = _flatten_rooms(
             {
@@ -3224,6 +3427,107 @@ class SmokeTest(unittest.TestCase):
         self.assertNotIn("Laundry Door", " ".join(rooms.keys()))
         self.assertNotIn("powder_room_3", rooms)
 
+    def test_parse_documents_clarendon_drawings_master_recovers_glued_room_titles(self) -> None:
+        snapshot = parse_documents(
+            job_no="37031",
+            builder_name="Clarendon",
+            source_kind="spec",
+            documents=[
+                {
+                    "file_name": "49906511 AMENDED Drawings and Colours REV B 02-09-25.pdf",
+                    "role": "spec",
+                    "pages": [
+                        {
+                            "page_no": 1,
+                            "text": (
+                                "KITCHEN COLOUR SCHEDULE\n"
+                                "BUTLERS PANTRY COLOUR SCHEDULE\n"
+                                "VanitiesDate: 02-09-25 VANITIES COLOUR SCHEDULE\n"
+                                "LaundryDate: 02-09-25 LAUNDRY COLOUR SCHEDULE\n"
+                                "TheatreDate: 02-09-25 THEATRE ROOM COLOUR SCHEDULE\n"
+                            ),
+                            "needs_ocr": False,
+                        }
+                    ],
+                },
+                {
+                    "file_name": "49906511 COLOURS AFC .pdf",
+                    "role": "spec",
+                    "pages": [
+                        {
+                            "page_no": 1,
+                            "text": (
+                                "Main Bathroom\n"
+                                "Vanity Basin Johnson Suisse Emilia Basin\n"
+                                "Ensuite\n"
+                                "Vanity Tap Phoenix Mixer\n"
+                                "Powder Room 3\n"
+                                "Door/Panel Colour Blossom White\n"
+                            ),
+                            "needs_ocr": False,
+                        }
+                    ],
+                },
+            ],
+        )
+        rooms = {row["room_key"]: row for row in snapshot["rooms"]}
+        labels = {row["original_room_label"] for row in snapshot["rooms"]}
+        self.assertEqual(
+            set(rooms.keys()),
+            {"kitchen", "butlers_pantry", "vanities", "laundry", "theatre"},
+        )
+        self.assertIn("VANITIES", labels)
+        self.assertIn("LAUNDRY", labels)
+        self.assertTrue(any("THEATRE" in label for label in labels))
+        self.assertNotIn("main_bathroom", rooms)
+        self.assertNotIn("ensuite", rooms)
+        self.assertNotIn("powder_room_3", rooms)
+
+    def test_collect_spec_sections_for_clarendon_prefers_raw_titles_over_layout_schema(self) -> None:
+        document = {
+            "file_name": "49906511 AMENDED Drawings and Colours REV B 02-09-25.pdf",
+            "builder_name": "Clarendon",
+            "pages": [
+                {
+                    "page_no": 1,
+                    "text": (
+                        "KITCHEN COLOUR SCHEDULE\n"
+                        "VanitiesDate: 02-09-25 VANITIES COLOUR SCHEDULE\n"
+                        "LaundryDate: 02-09-25 LAUNDRY COLOUR SCHEDULE\n"
+                    ),
+                    "raw_text": (
+                        "KITCHEN COLOUR SCHEDULE\n"
+                        "VanitiesDate: 02-09-25 VANITIES COLOUR SCHEDULE\n"
+                        "LaundryDate: 02-09-25 LAUNDRY COLOUR SCHEDULE\n"
+                    ),
+                    "page_layout": {
+                        "page_type": "joinery",
+                        "section_label": "KITCHEN COLOUR SCHEDULE",
+                        "room_label": "KITCHEN",
+                        "room_blocks": [
+                            {
+                                "room_label": "KITCHEN",
+                                "rows": [
+                                    {
+                                        "row_label": "Bench Tops",
+                                        "value_region_text": "Quantum Zero Bella Carrara",
+                                        "supplier_region_text": "",
+                                        "notes_region_text": "",
+                                        "row_kind": "material",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                }
+            ],
+        }
+        sections = parsing_module._collect_spec_sections_for_document("Clarendon", document)
+        labels = {section["original_section_label"] for section in sections}
+        self.assertIn("KITCHEN", labels)
+        self.assertIn("VANITIES", labels)
+        self.assertIn("LAUNDRY", labels)
+
     def test_parse_documents_prefers_colour_schedule_file_as_room_master_for_multifile_clarendon(self) -> None:
         snapshot = parse_documents(
             job_no="49906613",
@@ -3321,6 +3625,291 @@ class SmokeTest(unittest.TestCase):
         self.assertNotIn("main_bathroom", room_keys)
         self.assertNotIn("ensuite", room_keys)
         self.assertNotIn("forstan_pty_ltd_t_a_yourhome_kitchens_p_o_box_8248_baulkham_hillsbcnsw_2153_phone", room_keys)
+
+    def test_source_room_label_recovers_glued_clarendon_schedule_headers(self) -> None:
+        self.assertEqual(parsing_module.source_room_label("VanitiesDate: 02-09-25 VANITIES COLOUR SCHEDULE"), "VANITIES")
+        self.assertEqual(parsing_module.source_room_label("LaundryDate: 02-09-25 LAUNDRY COLOUR SCHEDULE"), "LAUNDRY")
+        self.assertEqual(parsing_module.source_room_key("TheatreDate: 02-09-25 THEATRE ROOM COLOUR SCHEDULE"), "theatre")
+        self.assertEqual(parsing_module.source_room_label("KITCHEN SPLASHBACK"), "KITCHEN")
+        self.assertEqual(parsing_module.source_room_label("BATHOOM VANITY").lower(), "bathroom vanity")
+        self.assertEqual(parsing_module.source_room_key("BATHOOM VANITY"), "bathroom")
+        self.assertEqual(parsing_module.source_room_key("BED 1 WALK IN ROBE FIT OUT"), "bed_1_wir")
+        self.assertEqual(parsing_module.source_room_key("BED 3 ROBE FIT OUT"), "bed_3_robe")
+
+    def test_yellowwood_page_room_hint_ignores_fake_room_labels_and_keeps_real_titles(self) -> None:
+        self.assertEqual(
+            parsing_module._yellowwood_page_room_hint(
+                "BASE CUPBOARDS & DRAWERS\nPANTRY X4 SHELVES WHITE MELAMINE\nexcluding Pantry)"
+            ),
+            "",
+        )
+        self.assertEqual(
+            parsing_module._yellowwood_page_room_hint(
+                "BED 1 ENSUITE VANITY\nFLOOR MOUNTED VANITY\nDRAWERS"
+            ),
+            "BED 1 ENSUITE VANITY",
+        )
+        self.assertEqual(
+            parsing_module._yellowwood_page_room_hint(
+                "KITCHEN SPLASHBACK\nSUBWAY TILE"
+            ),
+            "KITCHEN",
+        )
+
+    def test_collect_spec_sections_for_yellowwood_uses_raw_text_split_for_multi_room_pages(self) -> None:
+        document = {
+            "file_name": "yellowwood.pdf",
+            "builder_name": "Yellowwood",
+            "pages": [
+                {
+                    "page_no": 18,
+                    "text": (
+                        "Pantry Door Handles  C137 Caloundra Lip Pull\n"
+                        "Matt Black 200mm\n"
+                        "Handle House\n"
+                        "LAUNDRY\n"
+                        "Freestanding Laundry Cabinet\n"
+                        "WC\n"
+                        "Wall Hung Basin Only Refer to Plumbing section below N/A\n"
+                        "BED 1 ENSUITE VANITY\n"
+                        "Benchtop 20mm\n"
+                        "YDL Classic White Polished\n"
+                    ),
+                    "raw_text": (
+                        "Pantry Door Handles  C137 Caloundra Lip Pull\n"
+                        "Matt Black 200mm\n"
+                        "Handle House\n"
+                        "LAUNDRY\n"
+                        "Freestanding Laundry Cabinet\n"
+                        "WC\n"
+                        "Wall Hung Basin Only Refer to Plumbing section below N/A\n"
+                        "BED 1 ENSUITE VANITY\n"
+                        "Benchtop 20mm\n"
+                        "YDL Classic White Polished\n"
+                    ),
+                    "page_layout": {
+                        "page_type": "joinery",
+                        "section_label": "Pantry Door Handles",
+                        "room_label": "Pantry Door Handles",
+                        "room_blocks": [
+                            {
+                                "room_label": "Pantry Door Handles",
+                                "rows": [
+                                    {
+                                        "row_label": "Pantry Door Handles",
+                                        "value_region_text": "C137 Caloundra Lip Pull",
+                                        "supplier_region_text": "Handle House",
+                                        "notes_region_text": "",
+                                        "row_kind": "handle",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                }
+            ],
+        }
+        sections = parsing_module._collect_spec_sections_for_document("Yellowwood", document)
+        labels = {section["original_section_label"] for section in sections}
+        self.assertIn("Pantry", labels)
+        self.assertIn("Laundry", labels)
+        self.assertIn("WC", labels)
+        self.assertIn("BED 1 ENSUITE VANITY", labels)
+
+    def test_yellowwood_section_filter_drops_material_name_rooms_but_keeps_material_driven_rooms(self) -> None:
+        fake_material = {
+            "section_key": "revival_hoya_powder_matt_200x200mm",
+            "original_section_label": "Revival Hoya Powder Matt 200x200mm",
+            "text": "Revival Hoya Powder Matt 200x200mm\nNational Tiles",
+        }
+        robe_room = {
+            "section_key": "bed_1_wir",
+            "original_section_label": "BED 1 + WIR",
+            "text": "BED 1 + WIR\nCarpet Mapelton Falls\nColour: Elanus Grey Cut Pile\nFlooring Xtra",
+        }
+        media_room = {
+            "section_key": "media_room",
+            "original_section_label": "MEDIA ROOM",
+            "text": "MEDIA ROOM\nCarpet Mapelton Falls\nColour: Elanus Grey Cut Pile\nFlooring Xtra",
+        }
+        wir_room = {
+            "section_key": "bed_1_wir",
+            "original_section_label": "BED 1 WALK IN ROBE",
+            "text": "BED 1 WALK IN ROBE\nFIT OUT\nBoard Colour: Standard White\nAs supplied by builder",
+        }
+        self.assertFalse(parsing_module._yellowwood_should_keep_section(fake_material))
+        self.assertTrue(parsing_module._yellowwood_should_keep_section(robe_room))
+        self.assertTrue(parsing_module._yellowwood_should_keep_section(media_room))
+        self.assertTrue(parsing_module._yellowwood_should_keep_section(wir_room))
+
+    def test_yellowwood_section_filter_drops_contents_page_noise(self) -> None:
+        contents_like = {
+            "section_key": "ensuite",
+            "original_section_label": "Ensuite",
+            "text": (
+                "ENSUITE\nOTHER THAN TILING TO WET AREAS 15-16 "
+                "JOINERY - REFER TO CABINETRY PLANS 16-20 "
+                "TILING SCHEDULE 21-25 EXTERNAL PAINTING REFERENCE 26 "
+                "BATHWARE & FIXTURES 27-32 APPLIANCES 32-33"
+            ),
+        }
+        self.assertFalse(parsing_module._yellowwood_should_keep_section(contents_like))
+
+    def test_collect_yellowwood_text_room_sections_inherits_previous_room_on_continuation_page(self) -> None:
+        document = {
+            "file_name": "yellowwood.pdf",
+            "pages": [
+                {
+                    "page_no": 16,
+                    "raw_text": (
+                        "INTERNAL FINISHES\nJOINERY - REFER TO CABINETRY PLANS FOR ALL FURTHER DETAIL\n"
+                        "KITCHEN  Back Benchtops 20mm\nYDL Classic White Polished\nYellowwood supplier\n"
+                    ),
+                    "text": (
+                        "INTERNAL FINISHES\nJOINERY - REFER TO CABINETRY PLANS FOR ALL FURTHER DETAIL\n"
+                        "KITCHEN  Back Benchtops 20mm\nYDL Classic White Polished\nYellowwood supplier\n"
+                    ),
+                },
+                {
+                    "page_no": 17,
+                    "raw_text": (
+                        "Base Cupboards & Drawers\nPolytec Classic White Matt\nAs supplied by cabinetmaker\n"
+                        "Kickboard Polytec Classic White Matt\nAs supplied by cabinetmaker\n"
+                    ),
+                    "text": (
+                        "Base Cupboards & Drawers\nPolytec Classic White Matt\nAs supplied by cabinetmaker\n"
+                        "Kickboard Polytec Classic White Matt\nAs supplied by cabinetmaker\n"
+                    ),
+                },
+            ],
+        }
+        sections = parsing_module._collect_yellowwood_text_room_sections_for_document(document)
+        kitchen_sections = [section for section in sections if section["section_key"] == "kitchen"]
+        self.assertEqual([section["page_nos"] for section in kitchen_sections], [[16], [17]])
+        self.assertIn("Base Cupboards & Drawers", kitchen_sections[1]["text"])
+
+    def test_clean_handle_entries_drops_orphan_handle_house_fragment(self) -> None:
+        self.assertEqual(
+            parsing_module._clean_handle_entries(
+                [
+                    "C137 Caloundra Lip Pull Matt Black 200mm (Laid Vertical)",
+                    "House",
+                ]
+            ),
+            ["C137 Caloundra Lip Pull Matt Black 200mm (Laid Vertical)"],
+        )
+
+    def test_merge_yellowwood_layout_and_text_sections_filters_fake_material_rooms(self) -> None:
+        layout_sections = [
+            {
+                "section_key": "kitchen",
+                "original_section_label": "KITCHEN",
+                "section_kind": "room",
+                "page_nos": [17],
+                "text": "KITCHEN\nBase Cupboards & Drawers\nPolytec Blossom White Matt",
+            },
+            {
+                "section_key": "revival_hoya_powder_matt_200x200mm",
+                "original_section_label": "Revival Hoya Powder Matt 200x200mm",
+                "section_kind": "room",
+                "page_nos": [28],
+                "text": "Revival Hoya Powder Matt 200x200mm\nNational Tiles",
+            },
+        ]
+        merged = parsing_module._merge_yellowwood_layout_and_text_sections(layout_sections, [])
+        labels = {section["original_section_label"] for section in merged}
+        self.assertIn("KITCHEN", labels)
+        self.assertNotIn("Revival Hoya Powder Matt 200x200mm", labels)
+
+    def test_merge_yellowwood_layout_and_text_sections_trims_override_pages_from_merged_layout_room(self) -> None:
+        layout_sections = [
+            {
+                "section_key": "bathroom",
+                "original_section_label": "Bathroom",
+                "section_kind": "room",
+                "page_nos": [25, 28],
+                "page_texts": [
+                    {"page_no": 25, "text": "BATHROOM VANITY\nHandles\nHandle House\nBED 1 WALK IN ROBE FIT OUT"},
+                    {"page_no": 28, "text": "BATHROOM\nFloor Tile Regina Grey Matt 450x450mm"},
+                ],
+                "raw_page_texts": [
+                    {"page_no": 25, "text": "BATHROOM VANITY\nHandles\nHandle House\nBED 1 WALK IN ROBE FIT OUT"},
+                    {"page_no": 28, "text": "BATHROOM\nFloor Tile Regina Grey Matt 450x450mm"},
+                ],
+                "layout_rows": [
+                    {"page_no": 25, "row_label": "Handles", "value_text": "C185", "supplier_text": "Handle House", "notes_text": ""},
+                    {"page_no": 28, "row_label": "Floor Tile", "value_text": "Regina Grey Matt 450x450mm", "supplier_text": "National Tiles", "notes_text": ""},
+                ],
+                "text_parts": [
+                    "BATHROOM VANITY\nHandles\nHandle House\nBED 1 WALK IN ROBE FIT OUT",
+                    "BATHROOM\nFloor Tile Regina Grey Matt 450x450mm",
+                ],
+                "text": "BATHROOM VANITY\nHandles\nHandle House\nBED 1 WALK IN ROBE FIT OUT\nBATHROOM\nFloor Tile Regina Grey Matt 450x450mm",
+            }
+        ]
+        text_sections = [
+            {
+                "section_key": "bathroom",
+                "original_section_label": "Bathroom",
+                "section_kind": "room",
+                "page_nos": [25],
+                "page_texts": [{"page_no": 25, "text": "BATHROOM VANITY\nHandles\nC185 Esperance Pulls Satin Nickel"}],
+                "raw_page_texts": [{"page_no": 25, "text": "BATHROOM VANITY\nHandles\nC185 Esperance Pulls Satin Nickel"}],
+                "layout_rows": [],
+                "text_parts": ["BATHROOM VANITY\nHandles\nC185 Esperance Pulls Satin Nickel"],
+                "text": "BATHROOM VANITY\nHandles\nC185 Esperance Pulls Satin Nickel",
+            },
+            {
+                "section_key": "bed_1_wir",
+                "original_section_label": "BED 1 WALK IN ROBE",
+                "section_kind": "room",
+                "page_nos": [25],
+                "page_texts": [{"page_no": 25, "text": "BED 1 WALK IN ROBE\nBoard Colour: Standard White"}],
+                "raw_page_texts": [{"page_no": 25, "text": "BED 1 WALK IN ROBE\nBoard Colour: Standard White"}],
+                "layout_rows": [],
+                "text_parts": ["BED 1 WALK IN ROBE\nBoard Colour: Standard White"],
+                "text": "BED 1 WALK IN ROBE\nBoard Colour: Standard White",
+            },
+        ]
+        merged = parsing_module._merge_yellowwood_layout_and_text_sections(layout_sections, text_sections)
+        bathroom = next(section for section in merged if section["section_key"] == "bathroom")
+        self.assertEqual(bathroom["page_nos"], [28, 25])
+        self.assertNotIn("BED 1 WALK IN ROBE FIT OUT", bathroom["text"])
+        self.assertIn("Floor Tile Regina Grey Matt 450x450mm", bathroom["text"])
+
+    def test_collect_room_sections_for_yellowwood_ignores_fake_material_layout_rooms(self) -> None:
+        document = {
+            "file_name": "yellowwood.pdf",
+            "builder_name": "Yellowwood",
+            "pages": [
+                {
+                    "page_no": 28,
+                    "text": "Revival Hoya Powder Matt 200x200mm\nNational Tiles",
+                    "raw_text": "Revival Hoya Powder Matt 200x200mm\nNational Tiles",
+                    "page_layout": {
+                        "page_type": "joinery",
+                        "section_label": "Revival Hoya Powder Matt 200x200mm",
+                        "room_label": "Revival Hoya Powder Matt 200x200mm",
+                        "room_blocks": [
+                            {
+                                "room_label": "Revival Hoya Powder Matt 200x200mm",
+                                "rows": [
+                                    {
+                                        "row_label": "Wall Tile",
+                                        "value_region_text": "Revival Hoya Powder Matt 200x200mm",
+                                        "supplier_region_text": "National Tiles",
+                                        "notes_region_text": "",
+                                        "row_kind": "material",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                }
+            ],
+        }
+        sections = parsing_module._collect_room_sections_for_document(document)
+        self.assertEqual(sections, [])
 
     def test_spec_room_label_noise_filters_clarendon_company_heading(self) -> None:
         self.assertTrue(

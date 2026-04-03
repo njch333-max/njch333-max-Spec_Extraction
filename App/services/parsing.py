@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
 
+import pdfplumber
 from pypdf import PdfReader
 
 from App.models import AnalysisMeta, ApplianceRow, RoomRow, SnapshotPayload, SpecialSectionRow
@@ -59,6 +60,7 @@ ROOM_HEADING_PREFIX_NOISE_PATTERNS = (
 ROOM_HEADING_TRIM_MARKERS = (
     r"(?i)\bbench tops?\b.*$",
     r"(?i)\bbenchtop\b.*$",
+    r"(?i)\bsplashback\b.*$",
     r"(?i)\bdoor(?:/panel)? colours?\b.*$",
     r"(?i)\bglazing\b.*$",
     r"(?i)\bdoor\b.*$",
@@ -381,6 +383,7 @@ FIELD_LABELS = [
     "Thermolaminate Notes",
     "Base Cabinet Handles",
     "Overhead Handles",
+    "Pantry Door Handles",
     "Handles to Overheads",
     "Handles Base Cabs",
     "Custom Handles",
@@ -689,6 +692,7 @@ def source_room_label(label: str, fallback_key: str = "") -> str:
         text = fallback_key.replace("_", " ")
     if not text:
         return "Room"
+    text = re.sub(r"(?i)\bbathoom\b", "bathroom", text)
     for pattern in ROOM_HEADING_PREFIX_NOISE_PATTERNS:
         previous = None
         while text and previous != text:
@@ -698,6 +702,9 @@ def source_room_label(label: str, fallback_key: str = "") -> str:
     text = re.sub(r"(?i)\b(WALK[- ]IN[- ]PANTRY)\b\s+PANTRY$", r"\1", text)
     for pattern in ROOM_HEADING_CLEANUP_PATTERNS:
         text = re.sub(pattern, "", text)
+    embedded_schedule_heading = _extract_embedded_schedule_room_heading(text)
+    if embedded_schedule_heading:
+        return embedded_schedule_heading
     exact_specific_match = _extract_specific_room_heading(text)
     if exact_specific_match:
         return exact_specific_match
@@ -718,6 +725,43 @@ def source_room_label(label: str, fallback_key: str = "") -> str:
     if not text and fallback_key:
         return fallback_key.replace("_", " ").title()
     return text or "Room"
+
+
+def _extract_embedded_schedule_room_heading(text: str) -> str:
+    normalized = normalize_space(text)
+    if not normalized:
+        return ""
+    has_schedule_context = bool(
+        re.search(r"(?i)\b(?:colour schedule|joinery selection sheet|supplier description design comments)\b", normalized)
+    )
+    has_glued_header_context = bool(re.search(r"(?i)[A-Za-z](?:Date|DWG)\b", normalized))
+    if not has_schedule_context and not has_glued_header_context:
+        return ""
+    candidates = [
+        normalized,
+        re.sub(r"(?<=[a-z])(?=[A-Z])", " ", normalized),
+        re.sub(r"(?i)([A-Za-z])(?=(?:Date|DWG)\b)", r"\1 ", normalized),
+    ]
+    marker_match = re.search(r"(?i)\b(?:colour schedule|joinery selection sheet|supplier description design comments)\b", normalized)
+    if marker_match:
+        prefix = normalize_space(normalized[: marker_match.start()])
+        if prefix:
+            candidates.insert(0, prefix)
+    best_match = ""
+    for candidate in candidates:
+        candidate = normalize_space(candidate)
+        if not candidate:
+            continue
+        for pattern in ROOM_HEADING_MATCH_PATTERNS:
+            for match in re.finditer(rf"(?i)\b{pattern}\b", candidate):
+                value = normalize_space(match.group(0))
+                if len(value) >= len(best_match):
+                    best_match = value
+    if not best_match:
+        return ""
+    if best_match.lower() == "wip":
+        return "WIP"
+    return best_match
 
 
 def _extract_specific_room_heading(text: str) -> str:
@@ -750,6 +794,12 @@ def source_room_key(label: str, fallback_key: str = "") -> str:
     bed_ensuite_match = re.search(r"\bbed\s*(\d+)\s+ensuite\b", lowered)
     if bed_ensuite_match:
         return f"ensuite_{bed_ensuite_match.group(1)}"
+    bed_wir_match = re.search(r"\bbed\s*(\d+)\b.*\b(?:walk in robe|wir)\b", lowered)
+    if bed_wir_match:
+        return f"bed_{bed_wir_match.group(1)}_wir"
+    bed_robe_match = re.search(r"\bbed\s*(\d+)\b.*\brobe\b", lowered)
+    if bed_robe_match:
+        return f"bed_{bed_robe_match.group(1)}_robe"
     ensuite_match = re.search(r"\bensuite\s*(\d+)\b", lowered)
     if ensuite_match:
         return f"ensuite_{ensuite_match.group(1)}"
@@ -855,6 +905,12 @@ def _should_stop_field_continuation(prefix: str, next_line: str) -> bool:
     if _is_schedule_room_heading(text):
         return True
     if _looks_like_strict_appliance_label(text):
+        return True
+    if prefix in {"Toe Kick", "Kickboard", "Island Bench Kickboard"} and re.match(r"(?i)^Pantry\b.*\bshelves\b", text):
+        return True
+    if prefix in {"Bulkheads", "Bulkhead", "Overhead Cupboards"} and re.match(r"(?i)^Island Bench(?:\b| )", text):
+        return True
+    if prefix in {"Handles", "Handle", "Base Cabinet Handles", "Overhead Handles"} and re.match(r"(?i)^Pantry Door Handles?\b", text):
         return True
     if not _looks_like_field_label(text):
         return False
@@ -1399,6 +1455,7 @@ def _layout_section_seed(
     page_type: str,
     raw_page_text: str = "",
     section_kind: str = "room",
+    merge_across_pages: bool = True,
 ) -> dict[str, Any] | None:
     rendered_rows = [line for raw_row in rows for line in [_layout_row_to_text(raw_row)] if line]
     layout_rows = [
@@ -1433,6 +1490,7 @@ def _layout_section_seed(
         "text_parts": [section_text],
         "text": section_text,
         "page_type": page_type,
+        "merge_across_pages": merge_across_pages,
     }
 
 
@@ -1443,6 +1501,8 @@ def _append_section(sections: list[dict[str, Any]], section: dict[str, Any]) -> 
             and existing.get("section_kind") == section.get("section_kind")
             and existing.get("file_name") == section.get("file_name")
             and existing.get("page_type") == section.get("page_type")
+            and bool(existing.get("merge_across_pages", True))
+            and bool(section.get("merge_across_pages", True))
         ):
             existing["page_nos"] = _unique([*existing.get("page_nos", []), *section.get("page_nos", [])])
             existing.setdefault("page_texts", []).extend(section.get("page_texts", []))
@@ -1456,10 +1516,376 @@ def _append_section(sections: list[dict[str, Any]], section: dict[str, Any]) -> 
     sections.append(section)
 
 
+def _yellowwood_page_room_hint(raw_page_text: str) -> str:
+    for raw_line in str(raw_page_text or "").splitlines():
+        line = normalize_space(raw_line)
+        if not line:
+            continue
+        lowered = line.lower()
+        if lowered.startswith(("lot ", "page ", "tone interior")):
+            continue
+        if not re.fullmatch(r"[A-Z0-9 &'()/.-]{2,}", line):
+            continue
+        explicit_heading = _extract_embedded_schedule_room_heading(line) or _extract_specific_room_heading(line)
+        if explicit_heading and not _looks_like_structured_room_noise(explicit_heading):
+            return explicit_heading
+        prefix_heading = _extract_room_prefix_label(line)
+        if prefix_heading:
+            candidate = _clean_layout_room_label(prefix_heading, prefix_heading)
+            if candidate and not _looks_like_structured_room_noise(candidate):
+                return candidate
+        candidate = source_room_label(line)
+        if not candidate or candidate == "Room":
+            continue
+        if _looks_like_structured_room_noise(candidate):
+            continue
+        if re.search(r"(?i)\b(?:excluding|x\d+\b|shelves?|melamine|cupboards?|drawers?|handles?)\b", line):
+            continue
+        if len(candidate.split()) > 4:
+            continue
+        return candidate
+    return ""
+
+
+def _yellowwood_should_inherit_previous_room(label: str) -> bool:
+    lowered = normalize_space(label).lower()
+    if not lowered:
+        return True
+    return any(
+        token in lowered
+        for token in (
+            "x4 shelves",
+            "excluding pantry",
+            "white melamine",
+            "melamine",
+            "shelves",
+            "cupboards",
+            "drawers",
+            "handless lip pull",
+            "matt black",
+        )
+    )
+
+
+def _normalize_yellowwood_layout_room_label(candidate: str, raw_page_text: str, previous_room_label: str) -> str:
+    cleaned = _clean_layout_room_label(candidate, candidate)
+    page_hint = _yellowwood_page_room_hint(raw_page_text)
+    if _yellowwood_should_inherit_previous_room(cleaned or candidate):
+        if page_hint:
+            return page_hint
+        if previous_room_label:
+            return previous_room_label
+    if cleaned:
+        return cleaned
+    if page_hint:
+        return page_hint
+    return normalize_space(previous_room_label)
+
+
+def _yellowwood_room_heading_label(line: str) -> str:
+    text = normalize_space(line)
+    if not text or _skip_continuation_line(text):
+        return ""
+    lowered = text.lower()
+    if lowered.startswith(("lot ", "page ", "tone interior")):
+        return ""
+    if re.search(r"(?i)\b(?:yellowwood supplier|as supplied by cabinetmaker|handle house|national tiles)\b", text):
+        return ""
+    prefix_heading = _extract_room_prefix_label(text)
+    if prefix_heading:
+        candidate = _clean_layout_room_label(prefix_heading, prefix_heading)
+        if candidate and _looks_like_plausible_room_label(candidate) and not _looks_like_structured_room_noise(candidate):
+            return candidate
+    if not re.fullmatch(r"[A-Z0-9 &'()/.-]{2,}", text):
+        return ""
+    candidate = _extract_embedded_schedule_room_heading(text) or _extract_specific_room_heading(text) or source_room_label(text)
+    if not candidate or candidate == "Room":
+        return ""
+    candidate = _clean_layout_room_label(candidate, candidate) or candidate
+    if not _yellowwood_is_supported_room_label(candidate):
+        return ""
+    if not _looks_like_plausible_room_label(candidate) or _looks_like_structured_room_noise(candidate):
+        return ""
+    if re.search(r"(?i)\b(?:excluding|x\d+\b|shelves?|melamine|cupboards?|drawers?)\b", text):
+        return ""
+    return candidate
+
+
+def _yellowwood_is_supported_room_label(label: str) -> bool:
+    cleaned = _clean_layout_room_label(label, label) or normalize_space(label)
+    room_key = source_room_key(cleaned)
+    if room_key in {
+        "kitchen",
+        "pantry",
+        "butlers_pantry",
+        "walk_in_pantry",
+        "laundry",
+        "wc",
+        "powder",
+        "bathroom",
+        "main_bathroom",
+        "theatre",
+        "media_room",
+        "study",
+        "office",
+        "robe",
+        "wir",
+        "rumpus",
+        "master_ensuite",
+        "ensuite",
+    }:
+        return True
+    if room_key.startswith(("ensuite_", "powder_room_")):
+        return True
+    return bool(re.fullmatch(r"(?:bed_\d+_(?:wir|robe)|robe_fit_out(?:_to_bed_\d+)?)", room_key))
+
+
+def _yellowwood_has_material_evidence(text: str) -> bool:
+    normalized = normalize_space(text)
+    if not normalized:
+        return False
+    return bool(
+        re.search(
+            r"(?i)\b(?:polytec|laminex|ydl|caesarstone|smartstone|wk stone|national tiles|flooring xtra|highgrove|handle house|"
+            r"woodmatt|thermolaminate|thermolaminated|melamine|laminate|vinyl|hybrid flooring|carpet|stone|polished|matt|gloss|"
+            r"natural finish|profile|board colour|standard white|colour:)\b",
+            normalized,
+        )
+    )
+
+
+def _yellowwood_has_room_content_evidence(text: str) -> bool:
+    normalized = normalize_space(text)
+    if not normalized:
+        return False
+    if _yellowwood_has_material_evidence(normalized):
+        return True
+    return bool(
+        re.search(
+            r"(?i)\b(?:benchtop|cupboards?|drawers?|handles?|vanity|mirror|screen|tile|tiles|skirting|sink|basin|tap|"
+            r"shower|splashback|cabinet(?:ry)?|robe fit out|linen cupboard|bar back|island)\b",
+            normalized,
+        )
+    )
+
+
+def _yellowwood_looks_like_contents_noise(text: str) -> bool:
+    normalized = normalize_space(text)
+    if not normalized:
+        return False
+    lowered = normalized.lower()
+    page_range_count = len(re.findall(r"\b\d+\s*-\s*\d+\b", normalized))
+    contents_markers = sum(
+        1
+        for marker in (
+            "joinery - refer to cabinetry plans",
+            "tiling schedule",
+            "external painting refe",
+            "bathware & fixtures",
+            "appliances",
+            "other than tiling to wet areas",
+        )
+        if marker in lowered
+    )
+    if page_range_count >= 3 and contents_markers >= 2:
+        return True
+    if "page 2/" in lowered and contents_markers >= 2:
+        return True
+    return False
+
+
+def _yellowwood_is_material_driven_room_label(label: str) -> bool:
+    lowered = normalize_space(label).lower()
+    if not lowered:
+        return False
+    return any(
+        token in lowered
+        for token in (
+            "robe",
+            "wir",
+            "walk in robe",
+            "media room",
+            "theatre",
+            "study",
+            "office",
+            "rumpus",
+        )
+    )
+
+
+def _yellowwood_should_keep_section(section: dict[str, Any]) -> bool:
+    original_label = source_room_label(
+        str(section.get("original_section_label", "")),
+        fallback_key=str(section.get("section_key", "")),
+    )
+    original_label = _clean_layout_room_label(original_label, original_label) or original_label
+    if not original_label or original_label == "Room":
+        return False
+    if _looks_like_spec_room_label_noise(original_label):
+        return False
+    if not _yellowwood_is_supported_room_label(original_label):
+        return False
+    if not _looks_like_plausible_room_label(original_label):
+        return False
+    text = normalize_space(str(section.get("text", "") or ""))
+    if not text:
+        return False
+    if _yellowwood_looks_like_contents_noise(text):
+        return False
+    if _yellowwood_is_material_driven_room_label(original_label):
+        return _yellowwood_has_material_evidence(text)
+    return _yellowwood_has_room_content_evidence(text)
+
+
+def _collect_yellowwood_text_room_sections_for_document(document: dict[str, object]) -> list[dict[str, Any]]:
+    raw_document = _clone_document_for_raw_room_detection(document)
+    file_name = str(raw_document.get("file_name", "") or "")
+    sections: list[dict[str, Any]] = []
+    previous_page_room_label = ""
+    previous_page_room_key = ""
+    for page in raw_document.get("pages", []):
+        if not isinstance(page, dict):
+            continue
+        raw_page_text = str(page.get("text") or "")
+        if not raw_page_text.strip():
+            continue
+        upper = raw_page_text.upper()
+        page_lines = _preprocess_chunk(raw_page_text)
+        if not (
+            _looks_like_joinery_schedule_page(raw_page_text)
+            or "TILING SCHEDULE" in upper
+            or "INTERNAL FINISHES" in upper
+            or sum(1 for line in page_lines if _yellowwood_room_heading_label(line)) >= 2
+        ):
+            continue
+        page_no = int(page.get("page_no", 0) or 0)
+        current_label = ""
+        current_key = ""
+        current_lines: list[str] = []
+        headings_in_page = [label for line in page_lines if (label := _yellowwood_room_heading_label(line))]
+        inherited_page_room = bool(
+            previous_page_room_key
+            and not headings_in_page
+            and _looks_like_joinery_schedule_page(raw_page_text)
+        )
+        if inherited_page_room:
+            current_label = previous_page_room_label
+            current_key = previous_page_room_key
+            current_lines = [previous_page_room_label]
+        page_last_room_label = previous_page_room_label
+        page_last_room_key = previous_page_room_key
+
+        def flush() -> None:
+            nonlocal current_label, current_key, current_lines
+            nonlocal page_last_room_label, page_last_room_key
+            if current_key and current_lines:
+                chunk = normalize_space("\n".join(current_lines))
+                sections.append(
+                    {
+                        "section_key": current_key,
+                        "original_section_label": current_label,
+                        "section_kind": "room",
+                        "file_name": file_name,
+                        "page_nos": [page_no] if page_no else [],
+                        "page_texts": [{"page_no": page_no, "text": chunk}] if page_no else [],
+                        "text_parts": [chunk],
+                        "text": chunk,
+                        "page_type": "joinery",
+                        "merge_across_pages": False,
+                    }
+                )
+                page_last_room_label = current_label
+                page_last_room_key = current_key
+            current_label = ""
+            current_key = ""
+            current_lines = []
+
+        for line in page_lines:
+            heading_label = _yellowwood_room_heading_label(line)
+            if heading_label:
+                flush()
+                current_label = _clean_layout_room_label(heading_label, heading_label) or heading_label
+                current_key = source_room_key(current_label)
+                current_lines = [line]
+                continue
+            if current_key:
+                current_lines.append(line)
+        flush()
+        previous_page_room_label = page_last_room_label
+        previous_page_room_key = page_last_room_key
+    return sections
+
+
+def _yellowwood_trim_section_override_pages(section: dict[str, Any], override_pages: set[int]) -> dict[str, Any] | None:
+    page_nos = [int(page_no or 0) for page_no in section.get("page_nos", [])]
+    if not page_nos or not set(page_nos).intersection(override_pages):
+        return dict(section)
+    kept_page_nos = [page_no for page_no in page_nos if page_no not in override_pages]
+    if not kept_page_nos:
+        return None
+    trimmed = dict(section)
+    trimmed["page_nos"] = kept_page_nos
+    kept_page_texts = [
+        dict(page_entry)
+        for page_entry in section.get("page_texts", [])
+        if isinstance(page_entry, dict) and int(page_entry.get("page_no", 0) or 0) not in override_pages
+    ]
+    kept_raw_page_texts = [
+        dict(page_entry)
+        for page_entry in section.get("raw_page_texts", [])
+        if isinstance(page_entry, dict) and int(page_entry.get("page_no", 0) or 0) not in override_pages
+    ]
+    kept_layout_rows = [
+        dict(row)
+        for row in section.get("layout_rows", [])
+        if isinstance(row, dict) and int(row.get("page_no", 0) or 0) not in override_pages
+    ]
+    trimmed["page_texts"] = kept_page_texts
+    trimmed["raw_page_texts"] = kept_raw_page_texts
+    trimmed["layout_rows"] = kept_layout_rows
+    kept_text_parts = [str(page_entry.get("text", "") or "") for page_entry in kept_page_texts if str(page_entry.get("text", "") or "").strip()]
+    trimmed["text_parts"] = kept_text_parts
+    trimmed["text"] = normalize_space("\n".join(kept_text_parts))
+    if not trimmed["text"] and not kept_layout_rows:
+        return None
+    return trimmed
+
+
+def _merge_yellowwood_layout_and_text_sections(
+    layout_sections: list[dict[str, Any]],
+    text_sections: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    layout_sections = [section for section in layout_sections if _yellowwood_should_keep_section(section)]
+    text_sections = [section for section in text_sections if _yellowwood_should_keep_section(section)]
+    override_pages = {
+        int(section.get("page_nos", [0])[0] or 0)
+        for section in text_sections
+        if section.get("section_kind") == "room" and len(section.get("page_nos", [])) == 1
+    }
+    text_page_counts: dict[int, int] = {}
+    for section in text_sections:
+        if section.get("section_kind") != "room" or len(section.get("page_nos", [])) != 1:
+            continue
+        page_no = int(section.get("page_nos", [0])[0] or 0)
+        text_page_counts[page_no] = text_page_counts.get(page_no, 0) + 1
+    override_pages = {page_no for page_no, count in text_page_counts.items() if page_no and count >= 2}
+    merged: list[dict[str, Any]] = []
+    for section in layout_sections:
+        current = dict(section)
+        if section.get("section_kind") == "room" and override_pages:
+            current = _yellowwood_trim_section_override_pages(section, override_pages) or {}
+        if current:
+            _append_section(merged, current)
+    for section in text_sections:
+        _append_section(merged, section)
+    return merged
+
+
 def _collect_layout_sections_for_document(document: dict[str, object]) -> list[dict[str, Any]]:
     sections: list[dict[str, Any]] = []
     file_name = str(document.get("file_name", "") or "")
     builder_name = str(document.get("builder_name", "") or "")
+    previous_room_label = ""
     for page in document.get("pages", []):
         if not _page_has_layout_schema(page):
             continue
@@ -1512,6 +1938,8 @@ def _collect_layout_sections_for_document(document: dict[str, object]) -> list[d
             block_label = normalize_space(str(block.get("room_label", "") or ""))
             if extracted_room_label:
                 block_label = extracted_room_label
+            elif _is_yellowwood_builder(builder_name):
+                block_label = _normalize_yellowwood_layout_room_label(block_label or room_label or section_label, raw_page_text, previous_room_label)
             block_rows = [row for row in block.get("rows", []) if isinstance(row, dict)]
             section = _layout_section_seed(
                 file_name=file_name,
@@ -1521,21 +1949,34 @@ def _collect_layout_sections_for_document(document: dict[str, object]) -> list[d
                 rows=block_rows,
                 page_type=page_type,
                 raw_page_text=raw_page_text,
+                merge_across_pages=not _is_yellowwood_builder(builder_name),
             )
             if section:
                 _append_section(sections, section)
+                if _is_yellowwood_builder(builder_name) and section.get("section_kind") == "room":
+                    previous_room_label = normalize_space(str(section.get("original_section_label", "") or previous_room_label))
     return sections
 
 
-def _collect_room_sections_for_document(document: dict[str, object]) -> list[dict[str, Any]]:
-    layout_sections = _collect_layout_sections_for_document(document)
-    if layout_sections:
-        return [section for section in layout_sections if section.get("section_kind") == "room"]
-    full_text = _document_full_text(document)
-    text_sections = _collect_schedule_room_sections([document]) or _find_room_sections(full_text)
+def _clone_document_for_raw_room_detection(document: dict[str, object]) -> dict[str, object]:
+    cloned_pages: list[dict[str, object]] = []
+    for page in document.get("pages", []):
+        if not isinstance(page, dict):
+            continue
+        cloned = dict(page)
+        preferred_text = str(page.get("raw_text") or page.get("text") or "")
+        cloned["text"] = preferred_text
+        cloned_pages.append(cloned)
+    return {**document, "pages": cloned_pages}
+
+
+def _collect_text_room_sections_for_document(document: dict[str, object]) -> list[dict[str, Any]]:
+    raw_document = _clone_document_for_raw_room_detection(document)
+    full_text = _document_full_text(raw_document)
+    text_sections = _collect_schedule_room_sections([raw_document]) or _find_room_sections(full_text)
     sections: list[dict[str, Any]] = []
-    file_name = str(document.get("file_name", "") or "")
-    pages = list(document.get("pages", []))
+    file_name = str(raw_document.get("file_name", "") or "")
+    pages = list(raw_document.get("pages", []))
     for detected_room_key, chunk in text_sections:
         room_label = source_room_label(chunk.split("\n", 1)[0], fallback_key=detected_room_key)
         section = {
@@ -1551,6 +1992,24 @@ def _collect_room_sections_for_document(document: dict[str, object]) -> list[dic
         }
         sections.append(section)
     return sections
+
+
+def _collect_room_sections_for_document(document: dict[str, object], builder_name_override: str = "") -> list[dict[str, Any]]:
+    builder_name = normalize_space(builder_name_override or str(document.get("builder_name", "") or "")).lower()
+    if _is_yellowwood_builder(builder_name):
+        layout_sections = _collect_layout_sections_for_document({**document, "builder_name": "Yellowwood"})
+        text_sections = _collect_yellowwood_text_room_sections_for_document(document)
+        if text_sections:
+            layout_sections = _merge_yellowwood_layout_and_text_sections(layout_sections, text_sections)
+        else:
+            layout_sections = [section for section in layout_sections if _yellowwood_should_keep_section(section)]
+        if layout_sections:
+            return [section for section in layout_sections if section.get("section_kind") == "room"]
+        return [section for section in text_sections if section.get("section_kind") == "room"]
+    layout_sections = _collect_layout_sections_for_document(document)
+    if layout_sections:
+        return [section for section in layout_sections if section.get("section_kind") == "room"]
+    return _collect_text_room_sections_for_document(document)
 
 
 def _collect_schedule_room_sections(documents: list[dict[str, object]]) -> list[tuple[str, str]]:
@@ -1614,7 +2073,14 @@ def _document_room_master_score(document: dict[str, object]) -> dict[str, Any]:
     pages = list(document.get("pages", []))
     full_text = _document_full_text(document)
     file_name = normalize_space(str(document.get("file_name", ""))).lower()
-    if _document_has_layout_schema(document):
+    builder_name = str(document.get("builder_name", "") or "").strip().lower()
+    if builder_name == "clarendon":
+        schedule_sections = [
+            (str(section.get("section_key", "")), str(section.get("text", "")))
+            for section in _collect_text_room_sections_for_document(document)
+            if section.get("section_kind") == "room"
+        ]
+    elif _document_has_layout_schema(document):
         schedule_sections = [
             (str(section.get("section_key", "")), str(section.get("text", "")))
             for section in _collect_layout_sections_for_document(document)
@@ -1778,6 +2244,10 @@ def _clarendon_supplement_fixture_section_is_standalone_candidate(section_text: 
 
 def _is_imperial_builder(builder_name: str) -> bool:
     return "imperial" in normalize_space(builder_name).lower()
+
+
+def _is_yellowwood_builder(builder_name: str) -> bool:
+    return "yellowwood" in normalize_space(builder_name).lower()
 
 
 def _select_imperial_room_master_document(documents: list[dict[str, object]]) -> tuple[dict[str, object] | None, str]:
@@ -2067,6 +2537,29 @@ def _extract_site_address_from_documents(documents: list[dict[str, object]]) -> 
                 address = _extract_site_address_from_text(str(candidate_text or ""))
                 if address:
                     return address
+    for document in ordered_documents:
+        document_path = Path(str(document.get("path", "") or ""))
+        if not document_path.exists() or document_path.suffix.lower() != ".pdf":
+            continue
+        try:
+            with pdfplumber.open(str(document_path)) as pdf:
+                for page in pdf.pages[:3]:
+                    address = _extract_site_address_from_text(page.extract_text() or "")
+                    if address:
+                        return address
+        except Exception:
+            pass
+        try:
+            reader = PdfReader(str(document_path))
+        except Exception:
+            continue
+        for page in reader.pages[:3]:
+            try:
+                address = _extract_site_address_from_text(page.extract_text() or "")
+            except Exception:
+                address = ""
+            if address:
+                return address
     return ""
 
 
@@ -4822,15 +5315,27 @@ def _select_spec_room_master_document(builder_name: str, documents: list[dict[st
 
 
 def _collect_spec_sections_for_document(builder_name: str, document: dict[str, object]) -> list[dict[str, Any]]:
+    normalized_builder = builder_name.strip().lower()
     if _is_imperial_builder(builder_name):
         imperial_sections = _collect_imperial_sections_for_document(document)
         if imperial_sections:
             return imperial_sections
+    if normalized_builder == "clarendon":
+        return _collect_text_room_sections_for_document({**document, "pages": [dict(page) for page in list(document.get("pages", []))]})
     if _document_has_layout_schema(document):
         layout_sections = _collect_layout_sections_for_document({**document, "builder_name": builder_name})
+        if _is_yellowwood_builder(builder_name):
+            text_sections = _collect_yellowwood_text_room_sections_for_document(document)
+            if text_sections:
+                layout_sections = _merge_yellowwood_layout_and_text_sections(layout_sections, text_sections)
+            else:
+                layout_sections = [section for section in layout_sections if _yellowwood_should_keep_section(section)]
+            if layout_sections:
+                return layout_sections
+            return text_sections
         if layout_sections:
             return layout_sections
-    return _collect_room_sections_for_document(document)
+    return _collect_room_sections_for_document(document, builder_name_override=builder_name)
 
 
 def _parse_spec_documents_structure_first(
@@ -4840,6 +5345,7 @@ def _parse_spec_documents_structure_first(
     rule_flags: Any = None,
 ) -> dict[str, Any]:
     imperial_builder = _is_imperial_builder(builder_name)
+    normalized_builder = normalize_space(builder_name).lower()
     rooms: dict[str, RoomRow] = {}
     appliances: list[ApplianceRow] = []
     special_sections: list[SpecialSectionRow] = []
@@ -4932,7 +5438,7 @@ def _parse_spec_documents_structure_first(
                 rooms[target_room_key] = row
                 continue
 
-            lines = _section_lines(section)
+            lines = _preprocess_chunk(chunk) if _is_yellowwood_builder(builder_name) else _section_lines(section)
             row = rooms.get(target_room_key) or RoomRow(
                 room_key=target_room_key,
                 original_room_label=original_room_label,
@@ -4977,8 +5483,12 @@ def _parse_spec_documents_structure_first(
                 ignored_room_like_lines_count += 1
                 warnings.append(f"Ignored room-like section '{room_label[:80]}' from final snapshot: room-label metadata noise.")
                 continue
+            row.room_name = normalize_space(row.original_room_label or room_key.replace("_", " "))
             filtered_rooms[room_key] = row
         rooms = filtered_rooms
+    else:
+        for room_key, row in rooms.items():
+            row.room_name = normalize_space(row.original_room_label or room_key.replace("_", " "))
 
     payload = SnapshotPayload(
         job_no=job_no,
@@ -5290,7 +5800,7 @@ def _merge_broken_schedule_lines(lines: list[str]) -> list[str]:
                     merged.append(triple)
                     index += 3
                     continue
-                if re.fullmatch(r"(?i)\(to all lower doors? & drawers?\).*", triple):
+                if re.fullmatch(r"(?i)\(to all lower doors? & drawers?.*", triple):
                     merged.append(triple)
                     index += 3
                     continue
@@ -5944,7 +6454,7 @@ def enrich_snapshot_rooms(snapshot: dict[str, Any], documents: list[dict[str, ob
     overlays = (
         _collect_imperial_room_overlays(documents)
         if imperial_builder
-        else _collect_room_overlays(documents, room_master_file=room_master_file)
+        else _collect_room_overlays(documents, room_master_file=room_master_file, builder_name=str(snapshot.get("builder_name", "")))
     )
     for row in rooms:
         overlay = _match_room_overlay(row, overlays)
@@ -5991,7 +6501,11 @@ def enrich_snapshot_rooms(snapshot: dict[str, Any], documents: list[dict[str, ob
             )
         )
         row["door_panel_colours"] = _rebuild_door_panel_colours(row)
-        row["handles"] = _clean_handle_entries(_coerce_string_list(row.get("handles", [])))
+        row["toe_kick"] = _coerce_string_list(overlay.get("toe_kick", [])) or _coerce_string_list(row.get("toe_kick", []))
+        row["bulkheads"] = _coerce_string_list(overlay.get("bulkheads", [])) or _coerce_string_list(row.get("bulkheads", []))
+        row["handles"] = _clean_handle_entries(
+            _coerce_string_list(overlay.get("handles", [])) or _coerce_string_list(row.get("handles", []))
+        )
         row["floating_shelf"] = _merge_text(_string_value(row.get("floating_shelf", "")), overlay.get("floating_shelf", ""))
         row["led"] = "Yes" if (overlay.get("led") or row.get("led")) else ""
         row["accessories"] = _merge_lists(_coerce_string_list(row.get("accessories", [])), _coerce_string_list(overlay.get("accessories", [])))
@@ -6415,7 +6929,11 @@ def _imperial_clean_non_joinery_body(body: str, kind: str) -> str:
     return " - ".join(part for part in [value_text, *notes] if part)
 
 
-def _collect_room_overlays(documents: list[dict[str, object]], room_master_file: str = "") -> dict[str, dict[str, str]]:
+def _collect_room_overlays(
+    documents: list[dict[str, object]],
+    room_master_file: str = "",
+    builder_name: str = "",
+) -> dict[str, dict[str, str]]:
     overlays: dict[str, dict[str, str]] = {}
     for document in documents:
         file_name = str(document.get("file_name", ""))
@@ -6426,7 +6944,7 @@ def _collect_room_overlays(documents: list[dict[str, object]], room_master_file:
         )
         if not full_text.strip():
             continue
-        sections = _collect_room_sections_for_document(document)
+        sections = _collect_room_sections_for_document(document, builder_name_override=builder_name)
         material_allowed = not room_master_file or file_name == room_master_file
         for section in sections:
             chunk = str(section.get("text", "") or "")
@@ -6443,6 +6961,9 @@ def _collect_room_overlays(documents: list[dict[str, object]], room_master_file:
                     "bench_tops_island": "",
                     "bench_tops_other": "",
                     "floating_shelf": "",
+                    "toe_kick": [],
+                    "bulkheads": [],
+                    "handles": [],
                     "door_colours_overheads": "",
                     "door_colours_base": "",
                     "door_colours_tall": "",
@@ -6496,6 +7017,18 @@ def _collect_room_overlays(documents: list[dict[str, object]], room_master_file:
                     door_groups = _split_door_colour_groups(_collect_field(lines, DOOR_COLOUR_FIELD_PREFIXES))
                     for key, value in door_groups.items():
                         overlay[key] = _merge_clean_group_text(overlay[key], value, cleaner=_clean_door_colour_value)
+                overlay["toe_kick"] = _merge_lists(
+                    _coerce_string_list(overlay.get("toe_kick", [])),
+                    _collect_field(lines, ["Toe Kick", "Kickboard", "Island Bench Kickboard"]),
+                )
+                overlay["bulkheads"] = _merge_lists(
+                    _coerce_string_list(overlay.get("bulkheads", [])),
+                    _collect_field(lines, ["Bulkheads", "Bulkhead"]),
+                )
+                overlay["handles"] = _merge_lists(
+                    _coerce_string_list(overlay.get("handles", [])),
+                    _clean_handle_entries(_collect_field(lines, ["Handles", "Handle", "Base Cabinet Handles", "Overhead Handles", "Pantry Door Handles"])),
+                )
                 overlay["floating_shelf"] = _merge_text(overlay["floating_shelf"], _first_value(_collect_field(lines, ["Floating Shelves", "Floating Shelf"])))
                 if _collect_field(lines, ["LED Strip Lighting", "LED Lighting", "LED"]):
                     overlay["led"] = "Yes"
@@ -6747,6 +7280,8 @@ def _clean_handle_entries(values: list[str]) -> list[str]:
         normalized_entry = re.sub(r"[^\x00-\x7F]+", " ", normalized_entry)
         normalized_entry = normalize_space(normalized_entry).strip(" -;,")
         if not normalized_entry:
+            continue
+        if normalized_entry.lower() == "house":
             continue
         if normalized_entry in ENTRY_SUPPLIER_HINTS:
             pending_suppliers.append(normalized_entry)
