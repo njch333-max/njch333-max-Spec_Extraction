@@ -344,30 +344,49 @@ def spec_list_page(request: Request, job_id: int):
     raw_snapshot = raw_snapshot_row["data"] if raw_snapshot_row else None
     raw_verification = store.get_job_snapshot_verification(job_id, "raw_spec")
     latest_spec_run = _latest_completed_run(store.list_runs(job_id), "spec")
-    return templates.TemplateResponse(
+    return _spec_list_template_response(
         request,
-        "spec_list.html",
-        _context(
-            request,
-            f"Spec List {job['job_no']}",
-            sidebar_collapsible=True,
-            sidebar_default_hidden=True,
-            job=job,
-            job_site_address=_job_site_address(raw_snapshot, None),
-            raw_snapshot=raw_snapshot,
-            raw_generated_at=_format_brisbane_time((raw_snapshot or {}).get("generated_at", "")),
-            raw_analysis=_analysis_from_snapshot(raw_snapshot),
-            raw_verification=raw_verification,
-            raw_verification_summary=_verification_summary(raw_verification),
-            raw_extraction_duration=_format_run_duration(latest_spec_run),
-            raw_spec_rooms=_flatten_rooms(raw_snapshot or {}),
-            raw_special_sections=_flatten_special_sections(raw_snapshot or {}),
-            raw_spec_appliances=_flatten_appliances(raw_snapshot or {}),
-            raw_spec_others=_flatten_others(raw_snapshot or {}),
-            raw_spec_warnings=_string_list((raw_snapshot or {}).get("warnings", [])),
-            raw_source_documents=_source_document_rows((raw_snapshot or {}).get("source_documents", [])),
-            material_summary=_build_material_summary(raw_snapshot or {}),
-        ),
+        job=job,
+        raw_snapshot=raw_snapshot,
+        raw_verification=raw_verification,
+        raw_extraction_duration=_format_run_duration(latest_spec_run),
+    )
+
+
+@app.get("/jobs/{job_id}/runs/{run_id}/spec-list")
+def historical_spec_list_page(request: Request, job_id: int, run_id: int):
+    if not _require_page_user(request):
+        return RedirectResponse("/login", status_code=303)
+    job = store.get_job(job_id)
+    if not job:
+        return RedirectResponse("/jobs", status_code=303)
+    run = store.get_job_run(job_id, run_id)
+    if not run or str(run.get("run_kind", "")) != "spec" or str(run.get("status", "")) != "succeeded":
+        _set_flash(request, "error", "Historical spec result not found for that run.")
+        return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+    payload_text = str(run.get("result_json", "") or "").strip()
+    if not payload_text:
+        _set_flash(request, "error", "This run does not have a stored spec result.")
+        return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+    try:
+        payload = json.loads(payload_text)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        _set_flash(request, "error", "Stored run result is invalid JSON.")
+        return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+    historical_run = {
+        "id": int(run["id"]),
+        "requested_at": _format_brisbane_time(run.get("requested_at", "")),
+        "finished_at": _format_brisbane_time(run.get("finished_at", "")),
+        "duration": _run_duration_display(run),
+        "app_build_id": str(run.get("app_build_id", "") or ""),
+    }
+    return _spec_list_template_response(
+        request,
+        job=job,
+        raw_snapshot=payload if isinstance(payload, dict) else {},
+        raw_verification=None,
+        raw_extraction_duration=_run_duration_display(run),
+        historical_run=historical_run,
     )
 
 
@@ -665,6 +684,19 @@ def _format_run_duration(run: dict[str, Any] | None) -> str:
     if not started_at or not finished_at:
         return ""
     return _format_duration_seconds((finished_at - started_at).total_seconds())
+
+
+def _run_duration_display(run: dict[str, Any] | None, now: datetime | None = None) -> str:
+    if not run:
+        return "-"
+    started_at = _parse_datetime(run.get("started_at", ""))
+    finished_at = _parse_datetime(run.get("finished_at", ""))
+    if started_at and finished_at:
+        return _format_duration_seconds((finished_at - started_at).total_seconds())
+    if started_at and str(run.get("status", "")).lower() == "running":
+        current = now.astimezone(BRISBANE_TZ) if now else datetime.now(BRISBANE_TZ)
+        return _format_duration_seconds((current - started_at).total_seconds())
+    return "-"
 
 
 def _latest_completed_run(runs: list[dict[str, Any]], run_kind: str) -> dict[str, Any] | None:
@@ -1217,15 +1249,79 @@ def _present_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         worker_pid = int(run.get("worker_pid", 0) or 0)
         app_build_id = str(run.get("app_build_id", "") or "")
         if worker_pid and app_build_id:
-            row["runtime_display"] = f"PID {worker_pid} | {app_build_id}"
+            row["worker_build_display"] = f"PID {worker_pid} | {app_build_id}"
         elif worker_pid:
-            row["runtime_display"] = f"PID {worker_pid}"
+            row["worker_build_display"] = f"PID {worker_pid}"
         elif app_build_id:
-            row["runtime_display"] = app_build_id
+            row["worker_build_display"] = app_build_id
         else:
-            row["runtime_display"] = "Not claimed yet"
+            row["worker_build_display"] = "Not claimed yet"
+        row["duration_display"] = _run_duration_display(run)
+        row["can_open_result"] = (
+            str(run.get("run_kind", "")) == "spec"
+            and str(run.get("status", "")) == "succeeded"
+            and bool(str(run.get("result_json", "") or "").strip())
+            and int(run.get("id", 0) or 0) > 0
+            and int(run.get("job_id", 0) or 0) > 0
+        )
         rows.append(row)
     return rows
+
+
+def _historical_verification_summary() -> dict[str, Any]:
+    return {
+        "status": "pending",
+        "status_label": "Historical Run (Read-only)",
+        "status_class": "warning",
+        "checked_by": "",
+        "checked_at": "",
+        "notes": "",
+        "counts": {"pass": 0, "fail": 0, "na": 0, "pending": 0},
+        "total": 0,
+        "done": 0,
+        "can_export": False,
+    }
+
+
+def _spec_list_template_response(
+    request: Request,
+    job: dict[str, Any],
+    raw_snapshot: dict[str, Any] | None,
+    raw_verification: dict[str, Any] | None,
+    raw_extraction_duration: str,
+    historical_run: dict[str, Any] | None = None,
+):
+    historical_view = historical_run is not None
+    raw_verification_summary = (
+        _historical_verification_summary() if historical_view else _verification_summary(raw_verification)
+    )
+    return templates.TemplateResponse(
+        request,
+        "spec_list.html",
+        _context(
+            request,
+            f"Spec List {job['job_no']}",
+            sidebar_collapsible=True,
+            sidebar_default_hidden=True,
+            job=job,
+            job_site_address=_job_site_address(raw_snapshot, None),
+            raw_snapshot=raw_snapshot,
+            raw_generated_at=_format_brisbane_time((raw_snapshot or {}).get("generated_at", "")),
+            raw_analysis=_analysis_from_snapshot(raw_snapshot),
+            raw_verification=raw_verification,
+            raw_verification_summary=raw_verification_summary,
+            raw_extraction_duration=raw_extraction_duration,
+            raw_spec_rooms=_flatten_rooms(raw_snapshot or {}),
+            raw_special_sections=_flatten_special_sections(raw_snapshot or {}),
+            raw_spec_appliances=_flatten_appliances(raw_snapshot or {}),
+            raw_spec_others=_flatten_others(raw_snapshot or {}),
+            raw_spec_warnings=_string_list((raw_snapshot or {}).get("warnings", [])),
+            raw_source_documents=_source_document_rows((raw_snapshot or {}).get("source_documents", [])),
+            material_summary=_build_material_summary(raw_snapshot or {}),
+            historical_view=historical_view,
+            historical_run=historical_run,
+        ),
+    )
 
 
 def _is_plumbing_appliance_row(row: dict[str, Any]) -> bool:

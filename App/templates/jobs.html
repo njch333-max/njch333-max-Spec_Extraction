@@ -74,7 +74,7 @@
           <td data-label="Rooms">{{ job.room_count if job.room_count != "" else "-" }}</td>
           <td data-label="Created">{{ job.created_at }}</td>
           <td data-label="Actions" class="actions">
-            <a href="/jobs/{{ job.id }}" class="text-link" target="_blank" rel="noopener">Open</a>
+            <a href="/jobs/{{ job.id }}" class="ghost-button" target="_blank" rel="noopener">Open</a>
             <form method="post" action="/jobs/{{ job.id }}/delete" onsubmit="return confirm('Delete job {{ job.job_no }} and all server files?');">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <button type="submit" class="danger-button">Delete</button>

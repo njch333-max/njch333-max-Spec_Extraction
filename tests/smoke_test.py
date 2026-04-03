@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import importlib
 import io
+import json
 import os
 import shutil
 import tempfile
 import unittest
 import urllib.error
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
@@ -18,7 +20,7 @@ os.environ["SPEC_EXTRACTION_ENABLE_OPENAI_VISION"] = "0"
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 
-from App.main import _build_material_summary, _flatten_rooms, _format_brisbane_time, _format_run_duration, app
+from App.main import _build_material_summary, _flatten_rooms, _format_brisbane_time, _format_run_duration, _run_duration_display, app
 from App.services import cleaning_rules, extraction_service, parsing as parsing_module, store
 from App.services import appliance_official
 from App.services.appliance_official import _build_direct_product_candidates, _extract_size_from_text, _primary_model_token
@@ -3212,12 +3214,12 @@ class SmokeTest(unittest.TestCase):
         rooms = {row["room_key"]: row for row in snapshot["rooms"]}
         analysis = snapshot["analysis"]
         warning_text = " | ".join(snapshot["warnings"])
-        self.assertEqual(set(rooms.keys()), {"kitchen", "vanities", "main_bathroom"})
+        self.assertEqual(set(rooms.keys()), {"kitchen", "vanities"})
         self.assertEqual(analysis["room_master_file"], "drawings-and-colours.pdf")
-        self.assertIn("drawings-and-colours.pdf selected as room master", analysis["room_master_reason"])
+        self.assertIn("Drawings and Colours filename match", analysis["room_master_reason"])
         self.assertEqual(analysis["supplement_files"], ["colours-afc.pdf"])
         self.assertGreaterEqual(analysis["ignored_room_like_lines_count"], 1)
-        self.assertTrue(str(rooms["main_bathroom"]["basin_info"]).startswith("Johnson Suisse Emilia"))
+        self.assertTrue(str(rooms["vanities"]["basin_info"]).startswith("Johnson Suisse Emilia"))
         self.assertIn("Ignored room-like section", warning_text)
         self.assertNotIn("Laundry Door", " ".join(rooms.keys()))
         self.assertNotIn("powder_room_3", rooms)
@@ -3312,8 +3314,12 @@ class SmokeTest(unittest.TestCase):
         )
         room_keys = {row["room_key"] for row in snapshot["rooms"]}
         self.assertIn("kitchen", room_keys)
-        self.assertIn("main_bathroom", room_keys)
-        self.assertIn("ensuite", room_keys)
+        self.assertIn("vanities", room_keys)
+        vanities = next(row for row in snapshot["rooms"] if row["room_key"] == "vanities")
+        self.assertIn("Johnson Suisse Emilia Basin", vanities["basin_info"])
+        self.assertIn("Phoenix PINA", vanities["tap_info"])
+        self.assertNotIn("main_bathroom", room_keys)
+        self.assertNotIn("ensuite", room_keys)
         self.assertNotIn("forstan_pty_ltd_t_a_yourhome_kitchens_p_o_box_8248_baulkham_hillsbcnsw_2153_phone", room_keys)
 
     def test_spec_room_label_noise_filters_clarendon_company_heading(self) -> None:
@@ -3592,11 +3598,11 @@ class SmokeTest(unittest.TestCase):
         rooms = {row["room_key"]: row for row in snapshot["rooms"]}
         analysis = snapshot["analysis"]
         warning_text = " | ".join(snapshot["warnings"])
-        self.assertEqual(set(rooms.keys()), {"kitchen", "butlers_pantry", "vanities", "laundry", "main_bathroom"})
+        self.assertEqual(set(rooms.keys()), {"kitchen", "butlers_pantry", "vanities", "laundry"})
         self.assertEqual(analysis["room_master_file"], "drawings-and-colours.pdf")
         self.assertEqual(analysis["supplement_files"], ["colours-afc.pdf"])
         self.assertGreaterEqual(analysis["ignored_room_like_lines_count"], 1)
-        self.assertTrue(str(rooms["main_bathroom"]["basin_info"]).startswith("Johnson Suisse Emilia"))
+        self.assertTrue(str(rooms["vanities"]["basin_info"]).startswith("Johnson Suisse Emilia"))
         self.assertIn("Study", warning_text)
         self.assertNotIn("KITCHEN COLOUR SCHEDULEBENCHTOP", " ".join(room["original_room_label"] for room in snapshot["rooms"]))
 
@@ -3645,11 +3651,11 @@ class SmokeTest(unittest.TestCase):
         rooms = {row["room_key"]: row for row in snapshot["rooms"]}
         analysis = snapshot["analysis"]
         warning_text = " | ".join(snapshot["warnings"])
-        self.assertEqual(set(rooms.keys()), {"kitchen", "butlers_pantry", "vanities", "laundry", "main_bathroom"})
+        self.assertEqual(set(rooms.keys()), {"kitchen", "butlers_pantry", "vanities", "laundry"})
         self.assertEqual(analysis["room_master_file"], "drawings-and-colours.pdf")
         self.assertEqual(analysis["supplement_files"], ["colours-afc.pdf"])
         self.assertGreaterEqual(analysis["ignored_room_like_lines_count"], 1)
-        self.assertTrue(str(rooms["main_bathroom"]["basin_info"]).startswith("Johnson Suisse Emilia"))
+        self.assertTrue(str(rooms["vanities"]["basin_info"]).startswith("Johnson Suisse Emilia"))
         self.assertEqual(rooms["vanities"]["original_room_label"], "VANITIES")
         self.assertTrue(bool(warning_text))
         self.assertIn("Theatre", warning_text)
@@ -3858,8 +3864,107 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("Official size extraction", response.text)
         self.assertIn("Extracting official dimensions from spec PDF for Westinghouse WHC943BD", response.text)
         self.assertIn("Global Conservative", response.text)
+        self.assertIn("Worker / Build", response.text)
         self.assertIn("PID 4242 | build-test", response.text)
+        self.assertIn("Duration", response.text)
         self.assertIn("hx-trigger=\"load, every 2s\"", response.text)
+
+    def test_run_history_partial_shows_open_result_for_succeeded_spec_run(self) -> None:
+        builder_id = store.create_builder("Clarendon", "clarendon", "")
+        job_id = store.create_job("37530", builder_id, "Run Result Test", "")
+        run_id = store.create_run(job_id, "spec")
+        payload = {
+            "job_no": "37530",
+            "builder_name": "Clarendon",
+            "source_kind": "spec",
+            "generated_at": "2026-04-03T10:00:00+10:00",
+            "analysis": {"mode": "heuristic_only", "parser_strategy": "global_conservative"},
+            "rooms": [{"room_key": "kitchen", "original_room_label": "KITCHEN"}],
+            "appliances": [],
+            "others": {},
+            "warnings": [],
+            "source_documents": [],
+        }
+        with store.connect() as conn:
+            conn.execute(
+                "UPDATE runs SET status = 'succeeded', started_at = ?, finished_at = ?, result_json = ? WHERE id = ?",
+                ("2026-04-03T00:00:00+00:00", "2026-04-03T00:01:30+00:00", json.dumps(payload), run_id),
+            )
+        client = TestClient(app)
+        self._login(client)
+        response = client.get(f"/jobs/{job_id}/run-history")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("1m 30s", response.text)
+        self.assertIn(f"/jobs/{job_id}/runs/{run_id}/spec-list", response.text)
+
+    def test_historical_spec_list_page_uses_run_result_json_read_only(self) -> None:
+        builder_id = store.create_builder("Clarendon", "clarendon", "")
+        job_id = store.create_job("37531", builder_id, "Historical Spec Result", "")
+        store.upsert_snapshot(
+            job_id,
+            "raw_spec",
+            {
+                "job_no": "37531",
+                "builder_name": "Clarendon",
+                "source_kind": "spec",
+                "generated_at": "2026-04-03T09:00:00+10:00",
+                "analysis": {"mode": "heuristic_only", "parser_strategy": "global_conservative"},
+                "rooms": [{"room_key": "pantry", "original_room_label": "PANTRY"}],
+                "appliances": [],
+                "others": {},
+                "warnings": [],
+                "source_documents": [],
+            },
+        )
+        run_id = store.create_run(job_id, "spec")
+        historical_payload = {
+            "job_no": "37531",
+            "builder_name": "Clarendon",
+            "source_kind": "spec",
+            "generated_at": "2026-04-03T10:00:00+10:00",
+            "analysis": {"mode": "heuristic_only", "parser_strategy": "global_conservative"},
+            "rooms": [{"room_key": "kitchen", "original_room_label": "KITCHEN"}],
+            "appliances": [],
+            "others": {},
+            "warnings": [],
+            "source_documents": [],
+        }
+        with store.connect() as conn:
+            conn.execute(
+                "UPDATE runs SET status = 'succeeded', started_at = ?, finished_at = ?, result_json = ? WHERE id = ?",
+                ("2026-04-03T00:00:00+00:00", "2026-04-03T00:00:45+00:00", json.dumps(historical_payload), run_id),
+            )
+        client = TestClient(app)
+        self._login(client)
+        response = client.get(f"/jobs/{job_id}/runs/{run_id}/spec-list")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Historical spec result", response.text)
+        self.assertIn("KITCHEN", response.text)
+        self.assertNotIn("PANTRY", response.text)
+        self.assertIn("Export Disabled", response.text)
+        self.assertIn("Open Latest Spec List", response.text)
+
+    def test_jobs_page_renders_open_as_button(self) -> None:
+        builder_id = store.create_builder("Clarendon", "clarendon", "")
+        job_id = store.create_job("37532", builder_id, "Jobs Page Button", "")
+        client = TestClient(app)
+        self._login(client)
+        response = client.get("/jobs")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(f'href="/jobs/{job_id}" class="ghost-button"', response.text)
+
+    def test_run_duration_display_handles_running_and_missing_started_at(self) -> None:
+        running = {
+            "status": "running",
+            "started_at": "2026-04-03T00:00:00+00:00",
+            "finished_at": "",
+        }
+        queued = {"status": "queued", "started_at": "", "finished_at": ""}
+        self.assertEqual(
+            _run_duration_display(running, now=datetime.fromisoformat("2026-04-03T10:00:30+10:00")),
+            "30s",
+        )
+        self.assertEqual(_run_duration_display(queued), "-")
 
     def test_parse_request_requires_uploaded_files(self) -> None:
         builder_id = store.create_builder("Clarendon", "clarendon", "")

@@ -4789,10 +4789,19 @@ def _documents_have_layout_schema(documents: list[dict[str, object]]) -> bool:
     return any(_document_has_layout_schema(document) for document in documents)
 
 
+def _clarendon_is_drawings_and_colours_file(document: dict[str, object]) -> bool:
+    file_name = normalize_space(str(document.get("file_name", "") or ""))
+    simplified = re.sub(r"[_-]+", " ", file_name)
+    return bool(re.search(r"(?i)\bdrawings?\s+and\s+colours?\b", simplified))
+
+
 def _select_spec_room_master_document(builder_name: str, documents: list[dict[str, object]]) -> tuple[dict[str, object] | None, str]:
     if _is_imperial_builder(builder_name):
         return _select_imperial_room_master_document(documents)
     if builder_name.strip().lower() == "clarendon" and len(documents) > 1:
+        explicit_master = next((document for document in documents if _clarendon_is_drawings_and_colours_file(document)), None)
+        if explicit_master is not None:
+            return explicit_master, f"{explicit_master['file_name']} selected as room master by Clarendon Drawings and Colours filename match."
         best_document: dict[str, object] | None = None
         best_reason = ""
         best_score = -1
@@ -4907,25 +4916,6 @@ def _parse_spec_documents_structure_first(
             chunk = str(section.get("text", "") or "")
             room_key = source_room_key(original_room_label, fallback_key=str(section.get("section_key", "")))
             target_room_key, ignore_reason = _resolve_room_target(room_key, original_room_label, room_master_keys, is_room_master)
-            keep_clarendon_wet_area_standalone = (
-                builder_name.strip().lower() == "clarendon"
-                and not is_room_master
-                and target_room_key == "vanities"
-                and room_key != "vanities"
-                and any(token in room_key for token in ("bathroom", "ensuite"))
-            )
-            if (
-                keep_clarendon_wet_area_standalone
-                or (
-                    builder_name.strip().lower() == "clarendon"
-                    and not is_room_master
-                    and target_room_key == "vanities"
-                    and room_key != "vanities"
-                    and any(token in room_key for token in ("powder", "wc"))
-                    and _clarendon_supplement_fixture_section_is_standalone_candidate(chunk)
-                )
-            ):
-                target_room_key, ignore_reason = room_key, ""
             if ignore_reason:
                 ignored_room_like_lines_count += 1
                 warnings.append(f"Ignored room-like section '{original_room_label}' from {file_name}: {ignore_reason}.")

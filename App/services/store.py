@@ -420,6 +420,14 @@ def list_runs(job_id: int) -> list[dict[str, Any]]:
     return fetch_all("SELECT * FROM runs WHERE job_id = ? ORDER BY id DESC", (job_id,))
 
 
+def get_run(run_id: int) -> dict[str, Any] | None:
+    return fetch_one("SELECT * FROM runs WHERE id = ?", (run_id,))
+
+
+def get_job_run(job_id: int, run_id: int) -> dict[str, Any] | None:
+    return fetch_one("SELECT * FROM runs WHERE id = ? AND job_id = ?", (run_id, job_id))
+
+
 def acquire_worker_lease(owner_token: str, worker_pid: int, app_build_id: str, ttl_seconds: int = WORKER_LEASE_TTL_SECONDS) -> bool:
     now = utc_now_iso()
     expires_at = utc_after_seconds_iso(ttl_seconds)
