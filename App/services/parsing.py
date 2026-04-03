@@ -3863,7 +3863,29 @@ def _looks_like_soft_close_candidate(text: str) -> bool:
 
 def _looks_like_flooring_candidate(text: str) -> bool:
     normalized = normalize_space(text)
-    return bool(normalized and re.search(r"(?i)\b(?:tiled|tiles|tile|hybrid|carpet|timber|vinyl|laminate|engineered|stone)\b", normalized))
+    return bool(
+        normalized
+        and (
+            re.search(r"(?i)\b(?:tiled|tiles|tile|hybrid|carpet|timber|vinyl|laminate|engineered|stone)\b", normalized)
+            or re.search(r"(?i)\bN\s*/?\s*A\b", normalized)
+        )
+    )
+
+
+def _normalize_imperial_soft_close_floor_pair(soft: str, floor: str) -> tuple[str, str]:
+    soft_value = normalize_space(soft)
+    floor_value = normalize_space(floor)
+    if not soft_value and not floor_value:
+        return "", ""
+    soft_is_soft_close = _looks_like_soft_close_candidate(soft_value)
+    floor_is_soft_close = _looks_like_soft_close_candidate(floor_value)
+    soft_is_flooring = _looks_like_flooring_candidate(soft_value)
+    floor_is_flooring = _looks_like_flooring_candidate(floor_value)
+    if (not soft_is_soft_close and soft_is_flooring) and floor_is_soft_close:
+        return floor_value, soft_value
+    if soft_is_soft_close and (not floor_is_flooring and floor_value) and soft_is_flooring:
+        return floor_value, soft_value
+    return soft_value, floor_value
 
 
 def _imperial_extract_flooring_text(page_text: str, lines: list[str]) -> str:
@@ -3886,8 +3908,7 @@ def _imperial_extract_soft_close_and_flooring(page_text: str, lines: list[str]) 
             match = re.search(pattern, raw_line)
             if not match:
                 continue
-            soft = normalize_space(match.group("soft"))
-            floor = normalize_space(match.group("floor"))
+            soft, floor = _normalize_imperial_soft_close_floor_pair(match.group("soft"), match.group("floor"))
             if _looks_like_soft_close_candidate(soft):
                 soft_close_candidates.append(soft)
                 direct_soft_close_candidates.append(soft)
@@ -3902,8 +3923,7 @@ def _imperial_extract_soft_close_and_flooring(page_text: str, lines: list[str]) 
         combined_match = re.search(pattern, page_text)
         if not combined_match:
             continue
-        left = normalize_space(combined_match.group("left"))
-        right = normalize_space(combined_match.group("right"))
+        left, right = _normalize_imperial_soft_close_floor_pair(combined_match.group("left"), combined_match.group("right"))
         for candidate in (left, right):
             if _looks_like_soft_close_candidate(candidate):
                 soft_close_candidates.append(candidate)

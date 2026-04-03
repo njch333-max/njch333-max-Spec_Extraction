@@ -2594,6 +2594,14 @@ class SmokeTest(unittest.TestCase):
             "20mm Caesarstone - Stone",
         )
 
+    def test_imperial_extract_soft_close_and_flooring_swaps_reversed_na_and_soft_close(self) -> None:
+        soft_close, flooring = parsing_module._imperial_extract_soft_close_and_flooring(
+            "Hinges & Drawer Runners: NAFloor Type & Kick refacing required: Soft Close",
+            ["Hinges & Drawer Runners: NAFloor Type & Kick refacing required: Soft Close"],
+        )
+        self.assertEqual(soft_close, "Soft Close")
+        self.assertEqual(flooring, "NA")
+
     def test_vision_layout_to_text_preserves_row_boundaries(self) -> None:
         layout = {
             "page_type": "joinery",
