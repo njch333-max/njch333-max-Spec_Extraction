@@ -221,14 +221,34 @@ ROOM_PREFIX_SPLIT_EXCLUDED_TAILS: tuple[str, ...] = (
 
 APPLIANCE_TYPES = ["sink", "cooktop", "oven", "rangehood", "dishwasher", "microwave", "fridge", "refrigerator"]
 
+STRICT_APPLIANCE_FIELD_PREFIXES = {
+    "sink type/model",
+    "sink type",
+    "drop in tub",
+    "under bench oven",
+    "freestanding cooker",
+    "oven",
+    "cooktop",
+    "microwave make",
+    "microwave",
+    "dishwasher make",
+    "dishwasher",
+    "rangehood",
+    "integrated fridge/freezer",
+    "integrated fridge freezer",
+    "fridge/freezer",
+    "refrigerator",
+    "fridge",
+}
+
 APPLIANCE_LABEL_SPECS: list[tuple[str, list[str]]] = [
     ("Sink", [r"Sink Type/Model\s*:", r"Sink Type\s*:", r"Drop in Tub\s*:"]),
-    ("Oven", [r"Under Bench Oven\s*:", r"Freestanding Cooker\s*:", r"Oven\s*:"]),
-    ("Cooktop", [r"Cooktop\s*:"]),
-    ("Microwave", [r"Microwave Make\s*:", r"Microwave\s*:"]),
-    ("Dishwasher", [r"Dishwasher Make\s*:", r"Dishwasher\s*:"]),
-    ("Rangehood", [r"Rangehood\s*:"]),
-    ("Fridge", [r"Integrated Fridge/Freezer\s*:", r"Integrated Fridge Freezer\s*:", r"Fridge/Freezer\s*:", r"Refrigerator\s*:", r"Fridge\s*:"]),
+    ("Oven", [r"Under Bench Oven\s*:", r"Freestanding Cooker\s*:", r"Oven\s*:", r"(?im)^\s*OVEN(?:\s*/\s*STOVE)?(?:\s*\([^)]*\))?(?:\s+BY CLIENT)?\b"]),
+    ("Cooktop", [r"Cooktop\s*:", r"(?im)^\s*COOKTOP(?:\s*\([^)]*\))?(?:\s+AS ABOVE)?(?:\s+BY CLIENT)?\b"]),
+    ("Microwave", [r"Microwave Make\s*:", r"Microwave\s*:", r"(?im)^\s*MICROWAVE(?:\s*\([^)]*\))?(?:\s+LEAVE STANDARD SPACE BY CLIENT)?\b"]),
+    ("Dishwasher", [r"Dishwasher Make\s*:", r"Dishwasher\s*:", r"(?im)^\s*DISHWASHER(?:\s*\([^)]*\))?(?:\s+BY CLIENT)?\b"]),
+    ("Rangehood", [r"Rangehood\s*:", r"(?im)^\s*RANGEHOOD(?:\s*\([^)]*\))?(?:\s+BY CLIENT)?\b"]),
+    ("Fridge", [r"Integrated Fridge/Freezer\s*:", r"Integrated Fridge Freezer\s*:", r"Fridge/Freezer\s*:", r"Refrigerator\s*:", r"Fridge\s*:", r"(?im)^\s*FRIDGE(?:\s*/\s*FREEZER)?(?:\s*\([^)]*\))?(?:\s+BY CLIENT(?:\s+PLUMBED IN FRIDGE)?)?\b"]),
 ]
 
 LOOSE_APPLIANCE_TYPE_MAP: list[tuple[str, str]] = [
@@ -257,6 +277,9 @@ LOOSE_SKIP_PHRASES = {
     "taphole",
     "if applicable",
     "heatdeflectors",
+    "fridge space",
+    "specs tbc",
+    "docusign envelope id",
 }
 
 MODEL_STOPWORDS = {
@@ -5332,8 +5355,14 @@ def _extract_soft_close(lines: list[str], keyword: str) -> str:
 
 
 def _extract_appliances(text: str, file_name: str, pages: list[dict[str, object]]) -> list[ApplianceRow]:
-    rows = _extract_labeled_appliances(text, file_name, pages)
-    rows.extend(_extract_loose_appliances(text, file_name, pages))
+    prepared_text = _preprocess_appliance_text(text)
+    rows = _extract_labeled_appliances(prepared_text, file_name, pages)
+    labeled_types = {row.appliance_type.lower() for row in rows}
+    loose_rows = _extract_loose_appliances(prepared_text, file_name, pages)
+    for row in loose_rows:
+        if row.appliance_type.lower() in labeled_types:
+            continue
+        rows.append(row)
     return _dedupe_appliances(rows)
 
 
@@ -5347,16 +5376,36 @@ def _extract_appliances_from_pages(file_name: str, pages: list[dict[str, object]
     return _dedupe_appliances(rows)
 
 
+def _preprocess_appliance_text(text: str) -> str:
+    prepared = str(text or "")
+    prepared = re.sub(
+        r"(?<!^)(?<!\n)\s+(?=(?:RANGEHOOD|DISHWASHER|COOKTOP|OVEN|MICROWAVE|FRIDGE)(?:\s|\(|$))",
+        "\n",
+        prepared,
+    )
+    return prepared
+
+
 def _extract_labeled_appliances(text: str, file_name: str, pages: list[dict[str, object]]) -> list[ApplianceRow]:
     matches = _collect_appliance_label_matches(text)
     rows: list[ApplianceRow] = []
     for index, match in enumerate(matches):
         next_start = matches[index + 1]["start"] if index + 1 < len(matches) else len(text)
         segment = normalize_space(text[match["start"]:next_start])
+        label_text = normalize_space(text[match["start"]:match["end"]])
         details = _limit_appliance_details_to_local_context(
             text[match["end"]:next_start],
             appliance_type=str(match["appliance_type"]),
         )
+        placeholder = _extract_appliance_placeholder_model(label_text)
+        if placeholder:
+            if (
+                not details
+                or "as above" in placeholder.lower()
+                or "leave standard space" in placeholder.lower()
+                or _details_look_like_other_appliance_context(details, appliance_type=str(match["appliance_type"]))
+            ):
+                details = label_text
         row = _build_appliance_row(
             appliance_type=str(match["appliance_type"]),
             details=details,
@@ -5368,6 +5417,29 @@ def _extract_labeled_appliances(text: str, file_name: str, pages: list[dict[str,
         if row:
             rows.append(row)
     return rows
+
+
+def _details_look_like_other_appliance_context(details: str, *, appliance_type: str) -> bool:
+    lowered = normalize_space(details).lower()
+    if not lowered:
+        return False
+    other_tokens = {
+        "dishwasher": "Dishwasher",
+        "rangehood": "Rangehood",
+        "microwave": "Microwave",
+        "cooktop": "Cooktop",
+        "fridge": "Fridge",
+        "refrigerator": "Fridge",
+        "oven": "Oven",
+        "oven/stove": "Oven",
+        "stove": "Oven",
+    }
+    for token, token_type in other_tokens.items():
+        if token_type.lower() == appliance_type.lower():
+            continue
+        if token in lowered:
+            return True
+    return False
 
 
 def _collect_appliance_label_matches(text: str) -> list[dict[str, object]]:
@@ -5443,7 +5515,16 @@ def _looks_like_strict_appliance_label(line: str) -> bool:
 
 def _match_loose_appliance_type(lowered_line: str) -> str:
     for token, appliance_type in LOOSE_APPLIANCE_TYPE_MAP:
-        if token in lowered_line:
+        if re.match(rf"^\s*(?:{re.escape(token)})\b", lowered_line):
+            return appliance_type
+        inline_match = re.search(rf"\b{re.escape(token)}\b", lowered_line)
+        if not inline_match:
+            continue
+        prefix = normalize_space(lowered_line[: inline_match.start()])
+        if ":" in prefix:
+            continue
+        guess_text = _strip_urls_for_appliance_guessing(lowered_line)
+        if _guess_make(guess_text) or _guess_model(guess_text) or _extract_appliance_placeholder_model(guess_text):
             return appliance_type
     return ""
 
@@ -5457,6 +5538,10 @@ def _is_appliance_context_boundary_line(line: str, appliance_type: str = "") -> 
     if not text:
         return True
     lowered = text.lower()
+    if ":" in text and not re.search(r"(?i)\bmodel\s*[:#-]?\s*", text):
+        prefix = normalize_space(text.split(":", 1)[0]).lower()
+        if prefix and prefix not in STRICT_APPLIANCE_FIELD_PREFIXES:
+            return True
     if (
         _looks_like_strict_appliance_label(text)
         or _is_room_heading_line(text)
@@ -5494,33 +5579,94 @@ def _build_loose_appliance_details(lines: list[str], index: int, appliance_type:
     lowered_current = current.lower()
     if any(token in lowered_current for token in ("leave standard space", "space by client", "provide space only")):
         return current
-    collected: list[str] = [current]
+    starts_with_label = lowered_current.startswith(appliance_type.lower())
+    collected: list[str] = []
+    tail = ""
+    if starts_with_label:
+        tail = normalize_space(re.sub(rf"(?i)^\s*{re.escape(appliance_type)}\b", "", current)).strip(" -:")
+        if tail and not re.fullmatch(r"\(\s*[^)]+\s*\)", tail):
+            collected.append(tail)
+    else:
+        collected = [current]
 
-    back = index - 1
-    while back >= 0 and len(collected) < 4:
-        candidate = normalize_space(lines[back])
-        if not candidate:
-            break
-        if _is_appliance_context_boundary_line(candidate, appliance_type):
-            break
-        collected.insert(0, candidate)
-        if _guess_make(" ".join(collected)):
-            break
-        back -= 1
+    should_back_collect = not starts_with_label
+    if starts_with_label and tail:
+        placeholder = _extract_appliance_placeholder_model(tail)
+        if placeholder and "as above" not in placeholder.lower() and "leave standard space" not in placeholder.lower():
+            should_back_collect = not bool(_guess_make(_strip_urls_for_appliance_guessing(tail)))
+        elif not _guess_make(_strip_urls_for_appliance_guessing(tail)):
+            should_back_collect = True
+
+    if should_back_collect:
+        back = index - 1
+        while back >= 0 and len(collected) < 4:
+            candidate = normalize_space(lines[back])
+            if not candidate:
+                break
+            if _is_appliance_context_boundary_line(candidate, appliance_type):
+                break
+            collected.insert(0, candidate)
+            if _guess_make(" ".join(collected)):
+                break
+            back -= 1
 
     forward = index + 1
+    skipped_preface = 0
     while forward < len(lines) and len(collected) < 6:
         candidate = normalize_space(lines[forward])
         if not candidate or _is_appliance_context_boundary_line(candidate, appliance_type):
             break
+        if not collected and (_looks_like_url(candidate) or candidate.lower() in {"by others", "recirculating"}):
+            skipped_preface += 1
+            if skipped_preface >= 3:
+                break
+            forward += 1
+            continue
+        if not collected:
+            collected.append(candidate)
+            forward += 1
+            continue
         if "as above" in lowered_current and _guess_make(candidate) and not _guess_model(candidate):
+            break
+        joined = _strip_urls_for_appliance_guessing(" ".join(collected))
+        has_make = bool(_guess_make(joined))
+        has_model = bool(_guess_model(joined))
+        if has_make and has_model:
+            break
+        if re.search(r"(?i)\bmodel\s*[:#-]?\s*", candidate):
+            collected.append(candidate)
+            break
+        if starts_with_label and has_make and not has_model:
+            collected.append(candidate)
+            forward += 1
+            continue
+        if has_make or has_model:
             break
         collected.append(candidate)
         forward += 1
-        joined = normalize_space(" ".join(collected))
-        if (_guess_make(joined) and _guess_model(joined)) or (appliance_type.lower() == "fridge" and _guess_model(joined)):
-            break
     return normalize_space(" ".join(collected))
+
+
+def _strip_urls_for_appliance_guessing(text: str) -> str:
+    stripped = re.sub(r"(?i)\bhttps?://\S+", " ", str(text or ""))
+    stripped = re.sub(r"(?i)\bwww\.\S+", " ", stripped)
+    return normalize_space(stripped)
+
+
+def _looks_like_url(text: str) -> bool:
+    normalized = normalize_space(text)
+    return bool(normalized and re.match(r"(?i)^(?:https?://|www\.)", normalized))
+
+
+def _extract_explicit_appliance_model(text: str) -> str:
+    cleaned = normalize_space(str(text or ""))
+    if not cleaned:
+        return ""
+    for match in re.finditer(r"(?i)\bmodel\s*[:#-]?\s*([A-Za-z0-9./-]{3,})", cleaned):
+        candidate = match.group(1).upper().strip(".")
+        if _valid_model_candidate(candidate, allow_numeric=True):
+            return candidate
+    return ""
 
 
 def _extract_appliance_placeholder_model(text: str) -> str:
@@ -5532,6 +5678,7 @@ def _extract_appliance_placeholder_model(text: str) -> str:
     if not normalized:
         return ""
     placeholder_patterns = (
+        r"(?i)\bn\s*/\s*a(?:\s*-\s*by others)?\b",
         r"(?i)\bleave standard space by client\b",
         r"(?i)\bprovide space only\b",
         r"(?i)\bas above(?:\s+by client)?\b",
@@ -5587,13 +5734,19 @@ def _build_appliance_row(
     clean_details = normalize_space(details)
     if not clean_details:
         return None
-    if clean_details.upper().startswith("N/A") and not _guess_model(clean_details):
-        return None
-    make = _guess_make(clean_details)
-    guessed_model = _guess_model(clean_details)
+    guess_text = _strip_urls_for_appliance_guessing(clean_details)
+    make = _guess_make(guess_text)
+    guessed_model = _guess_model(guess_text)
     model_no = guessed_model
     placeholder_model = ""
     placeholder_model = _extract_appliance_placeholder_model(clean_details)
+    explicit_model = _extract_explicit_appliance_model(evidence or clean_details)
+    if appliance_type == "Cooktop" and re.search(r"(?i)\boven/stove\b", clean_details) and (_guess_make(guess_text) or explicit_model):
+        appliance_type = "Oven"
+    if clean_details.upper().startswith("N/A") and not (guessed_model or placeholder_model or explicit_model):
+        return None
+    if explicit_model and (not model_no or _looks_like_appliance_placeholder_model(model_no) or model_no.startswith("WWW.")):
+        model_no = explicit_model
     if placeholder_model and ("as above" in placeholder_model.lower() or not guessed_model):
         make = ""
         model_no = placeholder_model
@@ -5621,12 +5774,14 @@ def _limit_appliance_details_to_local_context(details: str, appliance_type: str 
     lines = [normalize_space(line) for line in str(details or "").splitlines() if normalize_space(line)]
     if not lines:
         return normalize_space(details)
+    while len(lines) > 1 and (_looks_like_url(lines[0]) or lines[0].lower() in {"by others", "recirculating"}):
+        lines.pop(0)
     kept = [lines[0]]
     for line in lines[1:]:
         if _is_appliance_context_boundary_line(line, appliance_type):
             break
-        combined = normalize_space(" ".join(kept))
-        if _guess_model(combined) or _guess_make(combined):
+        combined = _strip_urls_for_appliance_guessing(" ".join(kept))
+        if (_guess_model(combined) or _guess_make(combined)) and not re.search(r"(?i)\bmodel\s*[:#-]?\s*", line):
             break
         if len(kept) >= 2:
             break
@@ -7347,5 +7502,14 @@ def _dedupe_appliances(rows: list[ApplianceRow]) -> list[ApplianceRow]:
             and (row.source_file.lower(), row.appliance_type.lower()) in typed_source_with_concrete_model
         ):
             continue
+        if row.model_no and (
+            row.model_no.upper().startswith("WWW.")
+            or "HTTP" in row.model_no.upper()
+            or row.model_no.upper().startswith("FRAME")
+            or row.model_no.upper().startswith("KIT")
+            or re.fullmatch(r"[A-F0-9-]{16,}", row.model_no.upper())
+        ):
+            if (row.source_file.lower(), row.appliance_type.lower()) in typed_source_with_concrete_model:
+                continue
         filtered.append(row)
     return filtered

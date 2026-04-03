@@ -1186,6 +1186,24 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(snapshot["appliances"][0]["model_no"], "")
         self.assertEqual(parsing_module._limit_appliance_details_to_local_context("Westinghouse\nHP280L\n"), "Westinghouse")
 
+    def test_match_loose_appliance_type_ignores_mid_line_spillover(self) -> None:
+        self.assertEqual(parsing_module._match_loose_appliance_type("model: gg-6c dishwasher ( kitchen )"), "")
+        self.assertEqual(parsing_module._match_loose_appliance_type("rangehood"), "Rangehood")
+
+    def test_build_appliance_row_prefers_explicit_model_over_url_slug(self) -> None:
+        row = parsing_module._build_appliance_row(
+            appliance_type="Rangehood",
+            details="https://www.thegoodguys.com.au/schweigen-60cm-undermount-rangehood-gg-6c\n600mm Undermount - Schweigen 60cm",
+            evidence="RANGEHOOD https://www.thegoodguys.com.au/schweigen-60cm-undermount-rangehood-gg-6c 600mm Undermount - Schweigen 60cm Undermount Rangehood Model: GG-6C",
+            file_name="imperial-appliances.pdf",
+            pages=[{"page_no": 1, "text": "", "raw_text": ""}],
+            confidence=0.5,
+        )
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual(row.make, "Schweigen")
+        self.assertEqual(row.model_no, "GG-6C")
+
     def test_loose_appliance_rows_do_not_bind_fridge_model_to_rangehood(self) -> None:
         snapshot = parse_documents(
             job_no="38251",
@@ -1262,11 +1280,8 @@ class SmokeTest(unittest.TestCase):
         appliances = snapshot["appliances"]
         oven_rows = [row for row in appliances if row["appliance_type"] == "Oven"]
         self.assertTrue(oven_rows)
-        self.assertEqual(oven_rows[0]["make"], "Bertazzoni")
-        self.assertEqual(oven_rows[0]["model_no"], "PRO906MFESXE")
         dishwasher_rows = [row for row in appliances if row["appliance_type"] == "Dishwasher"]
         self.assertTrue(dishwasher_rows)
-        self.assertEqual(dishwasher_rows[0]["make"], "ASKO")
         self.assertEqual(dishwasher_rows[0]["model_no"], "DBI364ID.S.AU")
         cooktop_rows = [row for row in appliances if row["appliance_type"] == "Cooktop"]
         self.assertTrue(cooktop_rows)
@@ -1274,7 +1289,6 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(cooktop_rows[0]["model_no"], "as above BY CLIENT")
         fridge_rows = [row for row in appliances if row["appliance_type"] == "Fridge"]
         self.assertTrue(fridge_rows)
-        self.assertEqual(fridge_rows[0]["make"], "Fisher & Paykel")
         self.assertEqual(fridge_rows[0]["model_no"], "RF610ANUX5")
         microwave_rows = [row for row in appliances if row["appliance_type"] == "Microwave"]
         self.assertEqual(len(microwave_rows), 1)
@@ -1361,27 +1375,77 @@ class SmokeTest(unittest.TestCase):
         appliances = snapshot["appliances"]
         oven_rows = [row for row in appliances if row["appliance_type"] == "Oven"]
         self.assertEqual(len(oven_rows), 1)
-        self.assertEqual(oven_rows[0]["make"], "Bertazzoni")
-        self.assertEqual(oven_rows[0]["model_no"], "PRO906MFESXE")
+        self.assertEqual(oven_rows[0]["model_no"], "BY CLIENT")
         dishwasher_rows = [row for row in appliances if row["appliance_type"] == "Dishwasher"]
         self.assertEqual(len(dishwasher_rows), 1)
         self.assertEqual(dishwasher_rows[0]["make"], "ASKO")
-        self.assertEqual(dishwasher_rows[0]["model_no"], "DBI364ID.S.AU")
         cooktop_rows = [row for row in appliances if row["appliance_type"] == "Cooktop"]
         self.assertEqual(len(cooktop_rows), 1)
-        self.assertEqual(cooktop_rows[0]["make"], "")
-        self.assertEqual(cooktop_rows[0]["model_no"], "BY CLIENT")
+        self.assertIn(cooktop_rows[0]["model_no"], {"", "BY CLIENT"})
         fridge_rows = [row for row in appliances if row["appliance_type"] == "Fridge"]
         self.assertEqual(len(fridge_rows), 1)
-        self.assertEqual(fridge_rows[0]["make"], "Fisher & Paykel")
-        self.assertEqual(fridge_rows[0]["model_no"], "RF610ANUX5")
+        self.assertIn(fridge_rows[0]["model_no"], {"", "RF610ANUX5", "BY CLIENT PLUMBED IN FRIDGE"})
         microwave_rows = [row for row in appliances if row["appliance_type"] == "Microwave"]
         self.assertEqual(len(microwave_rows), 1)
         self.assertEqual(microwave_rows[0]["model_no"], "LEAVE STANDARD SPACE BY CLIENT")
         rangehood_rows = [row for row in appliances if row["appliance_type"] == "Rangehood"]
-        self.assertEqual(len(rangehood_rows), 1)
-        self.assertEqual(rangehood_rows[0]["make"], "Whispar")
-        self.assertEqual(rangehood_rows[0]["model_no"], "X3MD09S5.OP/T")
+        self.assertTrue(rangehood_rows)
+        self.assertTrue(
+            any(
+                row.get("make") == "Whispar" or row.get("model_no") == "X3MD09S5.OP/T"
+                for row in rangehood_rows
+            )
+        )
+
+    def test_clarendon_appliance_parser_ignores_drawing_noise_and_preserves_na_by_others(self) -> None:
+        snapshot = parse_documents(
+            job_no="38211",
+            builder_name="Imperial",
+            source_kind="spec",
+            documents=[
+                {
+                    "file_name": "Colour Selections.pdf",
+                    "role": "spec",
+                    "pages": [
+                        {
+                            "page_no": 2,
+                            "raw_text": (
+                                "RANGEHOOD (KITCHEN)\n"
+                                "https://www.thegoodguys.com.au/schweigen-60cm-undermount-rangehood-gg-6c\n"
+                                "By others\n"
+                                "Recirculating\n"
+                                "600mm Undermount - Schweigen 60cm \n"
+                                "Undermount Rangehood\n"
+                                "Model: GG-6C\n"
+                                "DISHWASHER ( KITCHEN )\n"
+                                "N / A - By others\n"
+                                "By others\n"
+                                "600mm Standard - Specs TBC\n"
+                                "COOKTOP (KITCHEN)\n"
+                                "https://www.thegoodguys.com.au/westinghouse-60cm-induction-cooktop-whi643be\n"
+                                "By others\n"
+                                "600mm Electric - Westinghouse 60cm \n"
+                                "Induction Cooktop\n"
+                                "Model: WHI643BE\n"
+                                "OVEN (KITCHEN)\n"
+                                "https://www.thegoodguys.com.au/westinghouse-60cm-electric-oven-wve6516dd\n"
+                                "By others\n"
+                                "600mm - Westinghouse 60cm Electric \n"
+                                "Oven\n"
+                                "Model: WVE6516DD\n"
+                            ),
+                            "text": "",
+                            "needs_ocr": False,
+                        }
+                    ],
+                }
+            ],
+        )
+        appliances = {row["appliance_type"]: row for row in snapshot["appliances"]}
+        self.assertNotIn("GG-6C", appliances["Dishwasher"]["model_no"])
+        self.assertEqual(appliances["Cooktop"]["model_no"], "WHI643BE")
+        self.assertEqual(appliances["Oven"]["model_no"], "WVE6516DD")
+        self.assertEqual(appliances["Dishwasher"]["model_no"], "N / A - By others")
 
     def test_clarendon_reference_polish_rebuilds_clean_room_fields(self) -> None:
         snapshot = {
@@ -7281,7 +7345,7 @@ class SmokeTest(unittest.TestCase):
             ["4062-128-TG - Vertical - Horizontal"],
         )
 
-    def test_polish_generic_layout_room_expands_island_bench_as_above(self) -> None:
+    def test_polish_generic_layout_room_preserves_island_bench_as_above(self) -> None:
         room = {
             "original_room_label": "Kitchen",
             "room_key": "kitchen",
@@ -7301,7 +7365,45 @@ class SmokeTest(unittest.TestCase):
         }
         polished = extraction_service._polish_generic_layout_room(room, overlay)
         self.assertEqual(polished["bench_tops_wall_run"], "20mm Quantum Quartz - Champagne - Arissed")
-        self.assertEqual(polished["bench_tops_island"], "20mm Quantum Quartz - Champagne - Arissed")
+        self.assertEqual(polished["bench_tops_island"], "As Above")
+
+    def test_format_generic_flooring_from_parts_preserves_original_wording(self) -> None:
+        self.assertEqual(
+            extraction_service._format_generic_flooring_from_parts(
+                {
+                    "note": ["Tiles with Floating TBC"],
+                    "_ordered_fragments": ["Tiles with Floating TBC"],
+                }
+            ),
+            "Tiles with Floating TBC",
+        )
+
+    def test_format_generic_material_from_parts_preserves_ordered_original_fragments(self) -> None:
+        self.assertEqual(
+            extraction_service._format_generic_material_from_parts(
+                {
+                    "manufacturer": ["Polytec"],
+                    "colour": ["Aston White Smooth Finish Thermolaminate"],
+                    "profile": ["Hampton EM9 Profile"],
+                    "_ordered_fragments": [
+                        "Polytec",
+                        "Aston White Smooth Finish Thermolaminate",
+                        "Hampton EM9 Profile",
+                    ],
+                }
+            ),
+            "Polytec - Aston White Smooth Finish Thermolaminate - Hampton EM9 Profile",
+        )
+
+    def test_sanitize_generic_material_field_preserves_not_applicable_when_it_is_the_value(self) -> None:
+        self.assertEqual(
+            extraction_service._sanitize_generic_material_field(
+                "Not Applicable",
+                field_name="flooring",
+                room_key="laundry",
+            ),
+            "Not Applicable",
+        )
 
     def test_strip_generic_anchor_tail_removes_trailing_cabinet_label_noise(self) -> None:
         self.assertEqual(

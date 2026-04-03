@@ -5784,17 +5784,18 @@ def _first_meaningful(values: list[str]) -> str:
 
 
 def _format_generic_flooring_from_parts(parts: dict[str, list[str]]) -> str:
-    values = _meaningful_generic_values(parts.get("note", []), exclude_tokens=("soft close",))
+    values = _ordered_material_fragments_from_parts(parts, exclude_tokens=("soft close",))
+    if not values:
+        values = _meaningful_generic_values(parts.get("note", []), exclude_tokens=("soft close",))
     if not values:
         return ""
-    joined = " - ".join(values)
-    lowered = joined.lower()
-    if lowered in {"tile", "tiles", "tiled"}:
-        return "Tiled"
-    return parsing.normalize_brand_casing_text(joined)
+    return parsing.normalize_brand_casing_text(" - ".join(values))
 
 
 def _format_generic_material_from_parts(parts: dict[str, list[str]]) -> str:
+    ordered = _ordered_material_fragments_from_parts(parts)
+    if ordered and all(_is_material_business_placeholder_text(value) for value in ordered):
+        return parsing.normalize_brand_casing_text(" - ".join(ordered))
     manufacturer = _first_meaningful(parts.get("manufacturer", []))
     finish_values = _meaningful_generic_values(parts.get("finish", []))
     material = _first_meaningful(parts.get("colour", [])) or (finish_values[-1] if finish_values else "")
@@ -5891,7 +5892,11 @@ def _trim_bench_noise_from_cabinetry_fragment(fragment: str) -> str:
 
 def _generic_material_fragment_is_noise(fragment: str, *, field_name: str = "") -> bool:
     text = _clean_generic_fragment(fragment)
-    if not text or _looks_like_generic_field_noise(text, field="material"):
+    if not text:
+        return True
+    if _material_field_should_preserve_text(text, field_name=field_name):
+        return False
+    if _looks_like_generic_field_noise(text, field="material"):
         return True
     lowered = text.lower()
     if any(
@@ -5981,6 +5986,59 @@ def _generic_fragment_token_key(value: str) -> set[str]:
         and token not in {"and", "the", "with", "mm", "n", "a", "na"}
         and not token.isdigit()
     }
+
+
+def _is_material_like_field(field_name: str) -> bool:
+    return field_name in {
+        "bench_tops_wall_run",
+        "bench_tops_island",
+        "bench_tops_other",
+        "door_colours_base",
+        "door_colours_overheads",
+        "door_colours_tall",
+        "door_colours_island",
+        "door_colours_bar_back",
+        "floating_shelf",
+        "toe_kick",
+        "bulkheads",
+        "splashback",
+        "flooring",
+    }
+
+
+def _material_field_should_preserve_text(text: str, *, field_name: str = "") -> bool:
+    if not _is_material_like_field(field_name):
+        return False
+    return _is_material_business_placeholder_text(text)
+
+
+def _is_material_business_placeholder_text(text: str) -> bool:
+    lowered = _clean_generic_fragment(text).lower()
+    if lowered in {"as above", "same as above", "by client", "by builder", "not applicable", "n/a", "na", "#n/a", "not included"}:
+        return True
+    return lowered.startswith("tiles by client")
+
+
+def _is_generic_na_placeholder(text: str) -> bool:
+    lowered = _clean_generic_fragment(text).lower()
+    return lowered in {"not applicable", "n/a", "na", "#n/a"}
+
+
+def _ordered_material_fragments_from_parts(
+    parts: dict[str, list[str]],
+    *,
+    exclude_tokens: tuple[str, ...] = (),
+) -> list[str]:
+    ordered = _ordered_generic_fragments_from_parts(
+        parts,
+        exclude_tokens=exclude_tokens,
+        preserve_placeholders=True,
+    )
+    if not ordered:
+        return []
+    if any(not _is_generic_na_placeholder(value) for value in ordered):
+        ordered = [value for value in ordered if not _is_generic_na_placeholder(value)]
+    return ordered
 
 
 def _sanitize_generic_material_field(value: Any, *, field_name: str = "", room_key: str = "") -> str:
@@ -6843,9 +6901,6 @@ def _polish_generic_layout_room(row: dict[str, Any], overlay: dict[str, Any]) ->
             room_key=room_key,
         )
     island_bench = parsing.normalize_space(str(polished.get("bench_tops_island", "") or ""))
-    wall_run_bench = parsing.normalize_space(str(polished.get("bench_tops_wall_run", "") or ""))
-    if room_key == "kitchen" and island_bench and wall_run_bench and re.fullmatch(r"(?i)(?:as|same)\s+above", island_bench):
-        polished["bench_tops_island"] = wall_run_bench
     if (
         polished.get("bench_tops_wall_run") or polished.get("bench_tops_island")
     ) and _bench_field_is_combined_duplicate(
