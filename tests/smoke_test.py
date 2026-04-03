@@ -20,6 +20,7 @@ from openpyxl import load_workbook
 
 from App.main import _build_material_summary, _flatten_rooms, _format_brisbane_time, _format_run_duration, app
 from App.services import cleaning_rules, extraction_service, parsing as parsing_module, store
+from App.services import appliance_official
 from App.services.appliance_official import _build_direct_product_candidates, _extract_size_from_text, _primary_model_token
 from App.services.export_service import build_spec_list_excel
 from App.services.parsing import enrich_snapshot_rooms, parse_documents
@@ -1269,13 +1270,15 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(dishwasher_rows[0]["model_no"], "DBI364ID.S.AU")
         cooktop_rows = [row for row in appliances if row["appliance_type"] == "Cooktop"]
         self.assertTrue(cooktop_rows)
-        self.assertEqual(cooktop_rows[0]["make"], "Bertazzoni")
-        self.assertEqual(cooktop_rows[0]["model_no"], "PRO906MFESXE")
+        self.assertEqual(cooktop_rows[0]["make"], "")
+        self.assertEqual(cooktop_rows[0]["model_no"], "as above BY CLIENT")
         fridge_rows = [row for row in appliances if row["appliance_type"] == "Fridge"]
         self.assertTrue(fridge_rows)
         self.assertEqual(fridge_rows[0]["make"], "Fisher & Paykel")
         self.assertEqual(fridge_rows[0]["model_no"], "RF610ANUX5")
-        self.assertFalse(any(row["appliance_type"] == "Microwave" for row in appliances))
+        microwave_rows = [row for row in appliances if row["appliance_type"] == "Microwave"]
+        self.assertEqual(len(microwave_rows), 1)
+        self.assertEqual(microwave_rows[0]["model_no"], "LEAVE STANDARD SPACE BY CLIENT")
         self.assertFalse(
             any(
                 row["appliance_type"] == "Rangehood"
@@ -1366,13 +1369,15 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(dishwasher_rows[0]["model_no"], "DBI364ID.S.AU")
         cooktop_rows = [row for row in appliances if row["appliance_type"] == "Cooktop"]
         self.assertEqual(len(cooktop_rows), 1)
-        self.assertEqual(cooktop_rows[0]["make"], "Bertazzoni")
-        self.assertEqual(cooktop_rows[0]["model_no"], "")
+        self.assertEqual(cooktop_rows[0]["make"], "")
+        self.assertEqual(cooktop_rows[0]["model_no"], "BY CLIENT")
         fridge_rows = [row for row in appliances if row["appliance_type"] == "Fridge"]
         self.assertEqual(len(fridge_rows), 1)
         self.assertEqual(fridge_rows[0]["make"], "Fisher & Paykel")
         self.assertEqual(fridge_rows[0]["model_no"], "RF610ANUX5")
-        self.assertFalse(any(row["appliance_type"] == "Microwave" for row in appliances))
+        microwave_rows = [row for row in appliances if row["appliance_type"] == "Microwave"]
+        self.assertEqual(len(microwave_rows), 1)
+        self.assertEqual(microwave_rows[0]["model_no"], "LEAVE STANDARD SPACE BY CLIENT")
         rangehood_rows = [row for row in appliances if row["appliance_type"] == "Rangehood"]
         self.assertEqual(len(rangehood_rows), 1)
         self.assertEqual(rangehood_rows[0]["make"], "Whispar")
@@ -7121,6 +7126,36 @@ class SmokeTest(unittest.TestCase):
                 room_key="kitchen",
             ),
             "Polytec - Belgian Oak Matt",
+        )
+
+    def test_sanitize_generic_material_field_preserves_as_above_for_colour_fields(self) -> None:
+        self.assertEqual(
+            extraction_service._sanitize_generic_material_field(
+                "As Above",
+                field_name="door_colours_island",
+                room_key="kitchen",
+            ),
+            "As Above",
+        )
+
+    def test_official_lookup_skips_appliance_placeholder_models(self) -> None:
+        self.assertFalse(
+            appliance_official._should_lookup(
+                {
+                    "appliance_type": "Cooktop",
+                    "make": "",
+                    "model_no": "as above BY CLIENT",
+                }
+            )
+        )
+        self.assertFalse(
+            appliance_official._should_lookup(
+                {
+                    "appliance_type": "Microwave",
+                    "make": "",
+                    "model_no": "LEAVE STANDARD SPACE BY CLIENT",
+                }
+            )
         )
 
     def test_sanitize_generic_handle_entries_drops_not_included_noise_and_has_placeholder(self) -> None:

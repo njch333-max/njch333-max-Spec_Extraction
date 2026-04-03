@@ -180,6 +180,15 @@ def _should_lookup(row: dict[str, Any]) -> bool:
         return False
     make = parsing.normalize_space(str(row.get("make", "")))
     model_no = parsing.normalize_space(str(row.get("model_no", "")))
+    placeholder_tokens = (
+        "as above",
+        "by client",
+        "provide space only",
+        "leave standard space",
+        "not included",
+    )
+    if model_no and any(token in model_no.lower() for token in placeholder_tokens):
+        return False
     return bool(make and model_no)
 
 

@@ -5365,7 +5365,7 @@ def _build_generic_layout_blocks(layout_rows: list[dict[str, Any]], page_type: s
 
 
 def _collect_generic_block_parts(block: dict[str, Any]) -> dict[str, list[str]]:
-    parts: dict[str, list[str]] = {"note": []}
+    parts: dict[str, list[str]] = {"note": [], "_ordered_fragments": []}
     anchor_label = parsing.normalize_space(str(block.get("anchor_label", "") or ""))
     unrelated_label_tokens = (
         "internal paint",
@@ -5398,6 +5398,7 @@ def _collect_generic_block_parts(block: dict[str, Any]) -> dict[str, list[str]]:
         if inline_pairs and (not label or label in GENERIC_LAYOUT_PROPERTY_MAP or len(inline_pairs) > 1):
             for inline_label, inline_value in inline_pairs:
                 _append_generic_part_value(parts, inline_label, inline_value)
+                _append_generic_ordered_fragment(parts, inline_value, label=inline_label)
             continue
         if label in {"colour", "colour & finish"}:
             text = re.sub(r"(?i)\bIsland Colour As Above\b", "", text)
@@ -5412,10 +5413,12 @@ def _collect_generic_block_parts(block: dict[str, Any]) -> dict[str, list[str]]:
             cleaned_note = parsing.normalize_space(text.replace("**", "")).strip(" -;,")
             if cleaned_note and cleaned_note.upper() not in {"N/A", "NOT APPLICABLE", "#N/A"}:
                 parts.setdefault("note", []).append(cleaned_note)
+                _append_generic_ordered_fragment(parts, cleaned_note, label=label)
             continue
         bucket = GENERIC_LAYOUT_PROPERTY_MAP.get(label)
         if bucket:
             _append_generic_part_value(parts, label, text)
+            _append_generic_ordered_fragment(parts, text, label=label)
         elif not label:
             lower_text = text.lower()
             if "benchtop" in lower_text:
@@ -5423,32 +5426,40 @@ def _collect_generic_block_parts(block: dict[str, Any]) -> dict[str, list[str]]:
                 note_text = re.sub(r"(?i)^.*?\bbenchtops?\b", "", text).strip(" -")
                 if note_text:
                     parts.setdefault("note", []).append(note_text)
+                    _append_generic_ordered_fragment(parts, note_text)
             elif any(token in lower_text for token in ("underbench", "base cabinet panels", "cabinet panels")):
                 parts.setdefault("anchor", []).append("Base Cabinetry")
                 note_text = re.sub(r"(?i)^.*?\b(?:underbench|base cabinet panels|cabinet panels)\b", "", text).strip(" -")
                 if note_text:
                     parts.setdefault("note", []).append(note_text)
+                    _append_generic_ordered_fragment(parts, note_text)
             elif "overhead cupboards" in lower_text:
                 parts.setdefault("anchor", []).append("Overhead Cupboards")
                 note_text = re.sub(r"(?i)^.*?\boverhead cupboards\b", "", text).strip(" -")
                 if note_text:
                     parts.setdefault("note", []).append(note_text)
+                    _append_generic_ordered_fragment(parts, note_text)
             elif any(token in lower_text for token in ("handles", "handle")):
                 parts.setdefault("anchor", []).append("Handles")
                 note_text = re.sub(r"(?i)^.*?\bhandles?\b", "", text).strip(" -")
                 if note_text:
                     parts.setdefault("note", []).append(note_text)
+                    _append_generic_ordered_fragment(parts, note_text)
             elif "kickboard" in lower_text:
                 parts.setdefault("anchor", []).append("Kickboard")
                 note_text = re.sub(r"(?i)^.*?\bkickboard\b", "", text).strip(" -")
                 if note_text:
                     parts.setdefault("note", []).append(note_text)
+                    _append_generic_ordered_fragment(parts, note_text)
         elif label and label != _normalize_generic_row_label(anchor_label):
-            parts.setdefault("note", []).append(f"{parsing.normalize_space(str(row.get('row_label', '') or ''))} {text}".strip())
+            note_text = f"{parsing.normalize_space(str(row.get('row_label', '') or ''))} {text}".strip()
+            parts.setdefault("note", []).append(note_text)
+            _append_generic_ordered_fragment(parts, note_text, label=label)
         elif label:
             if _normalize_generic_row_label(text) == label:
                 continue
             parts.setdefault("note", []).append(text)
+            _append_generic_ordered_fragment(parts, text, label=label)
     return parts
 
 
@@ -5535,6 +5546,18 @@ def _append_generic_part_value(parts: dict[str, list[str]], label: str, value: s
     if not text or text.upper() in {"N/A", "NOT APPLICABLE", "#N/A"}:
         return
     parts.setdefault(bucket, []).append(text)
+
+
+def _append_generic_ordered_fragment(parts: dict[str, list[str]], value: str, *, label: str = "") -> None:
+    text = _strip_generic_property_prefix(value, label) if label else _clean_generic_fragment(value)
+    if label not in {"location"}:
+        text = _strip_generic_anchor_tail(text)
+    text = parsing.normalize_space(text).strip(" -;,")
+    if not text:
+        return
+    ordered = parts.setdefault("_ordered_fragments", [])
+    if text.lower() not in {existing.lower() for existing in ordered}:
+        ordered.append(text)
 
 
 def _strip_generic_anchor_tail(text: str) -> str:
@@ -5713,6 +5736,48 @@ def _meaningful_generic_values(values: list[str], *, exclude_tokens: tuple[str, 
     return meaningful
 
 
+def _ordered_generic_fragments_from_parts(
+    parts: dict[str, list[str]],
+    *,
+    exclude_tokens: tuple[str, ...] = (),
+    preserve_placeholders: bool = False,
+) -> list[str]:
+    ordered_values = parts.get("_ordered_fragments", [])
+    if isinstance(ordered_values, list) and ordered_values:
+        source_values = ordered_values
+    else:
+        source_values = [
+            *_meaningful_generic_values(parts.get("manufacturer", [])),
+            *_meaningful_generic_values(parts.get("colour", [])),
+            *_meaningful_generic_values(parts.get("finish", [])),
+            *_meaningful_generic_values(parts.get("range", [])),
+            *_meaningful_generic_values(parts.get("model", [])),
+            *_meaningful_generic_values(parts.get("style", [])),
+            *_meaningful_generic_values(parts.get("type", [])),
+            *_meaningful_generic_values(parts.get("profile", [])),
+            *_meaningful_generic_values(parts.get("location", [])),
+            *_meaningful_generic_values(parts.get("note", [])),
+        ]
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for raw_value in source_values:
+        text = _clean_generic_fragment(raw_value)
+        if not text:
+            continue
+        if not preserve_placeholders and _is_generic_placeholder_text(text):
+            continue
+        lowered = text.lower()
+        if lowered in {"&", "finish", "& finish"}:
+            continue
+        if exclude_tokens and any(token in lowered for token in exclude_tokens):
+            continue
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        ordered.append(text)
+    return ordered
+
+
 def _first_meaningful(values: list[str]) -> str:
     meaningful = _meaningful_generic_values(values)
     return meaningful[0] if meaningful else ""
@@ -5877,7 +5942,7 @@ def _generic_material_fragment_is_noise(fragment: str, *, field_name: str = "") 
             return True
         if field_name != "door_colours_tall" and any(token in lowered for token in ("drawers", "pot drawers", "bin & pot")):
             return True
-        if lowered in {"laminate", "as above", "not applicable"}:
+        if lowered == "laminate":
             return True
     if field_name in {"bench_tops_wall_run", "bench_tops_island", "bench_tops_other"}:
         if any(

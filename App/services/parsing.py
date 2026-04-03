@@ -5415,9 +5415,10 @@ def _extract_loose_appliances(text: str, file_name: str, pages: list[dict[str, o
             continue
         make = _guess_make(details)
         model_no = _guess_model(details)
-        if not (make or model_no):
+        placeholder_model = _extract_appliance_placeholder_model(details)
+        if not (make or model_no or placeholder_model):
             continue
-        if not (make or _has_parenthesized_model(details) or model_no):
+        if not (make or _has_parenthesized_model(details) or model_no or placeholder_model):
             continue
         row = _build_appliance_row(
             appliance_type=appliance_type,
@@ -5494,22 +5495,13 @@ def _build_loose_appliance_details(lines: list[str], index: int, appliance_type:
     if any(token in lowered_current for token in ("leave standard space", "space by client", "provide space only")):
         return current
     collected: list[str] = [current]
-    allow_cross_type_backfill = "as above" in lowered_current
-    back_limit = 6 if allow_cross_type_backfill else 4
 
     back = index - 1
-    while back >= 0 and len(collected) < back_limit:
+    while back >= 0 and len(collected) < 4:
         candidate = normalize_space(lines[back])
         if not candidate:
             break
         if _is_appliance_context_boundary_line(candidate, appliance_type):
-            if not allow_cross_type_backfill:
-                break
-            if _match_loose_appliance_type(candidate.lower()) not in {"", appliance_type.lower()}:
-                allow_cross_type_backfill = False
-                collected.insert(0, candidate)
-                back -= 1
-                continue
             break
         collected.insert(0, candidate)
         if _guess_make(" ".join(collected)):
@@ -5531,6 +5523,59 @@ def _build_loose_appliance_details(lines: list[str], index: int, appliance_type:
     return normalize_space(" ".join(collected))
 
 
+def _extract_appliance_placeholder_model(text: str) -> str:
+    clean_text = normalize_space(text)
+    if not clean_text:
+        return ""
+    normalized = re.sub(r"(?i)^\s*(?:oven|cooktop|rangehood|microwave|fridge|dishwasher|washer|dryer|washing machine|appliance)\b", "", clean_text)
+    normalized = normalize_space(normalized).strip(" -;,")
+    if not normalized:
+        return ""
+    placeholder_patterns = (
+        r"(?i)\bleave standard space by client\b",
+        r"(?i)\bprovide space only\b",
+        r"(?i)\bas above(?:\s+by client)?\b",
+        r"(?i)\bby client\b(?:\s+plumbed in fridge)?",
+        r"(?i)\bby builder\b",
+    )
+    matches: list[str] = []
+    spans: list[tuple[int, int]] = []
+    for pattern in placeholder_patterns:
+        for match in re.finditer(pattern, normalized):
+            span = match.span()
+            if any(not (span[1] <= existing[0] or span[0] >= existing[1]) for existing in spans):
+                continue
+            spans.append(span)
+            matches.append(normalize_space(match.group(0)))
+    if not matches:
+        return ""
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for match in matches:
+        lowered = match.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        ordered.append(match)
+    return " ".join(ordered).strip()
+
+
+def _looks_like_appliance_placeholder_model(text: str) -> bool:
+    lowered = normalize_space(text).lower()
+    if not lowered:
+        return False
+    return any(
+        token in lowered
+        for token in (
+            "as above",
+            "by client",
+            "provide space only",
+            "leave standard space",
+            "by builder",
+        )
+    )
+
+
 def _build_appliance_row(
     appliance_type: str,
     details: str,
@@ -5545,7 +5590,15 @@ def _build_appliance_row(
     if clean_details.upper().startswith("N/A") and not _guess_model(clean_details):
         return None
     make = _guess_make(clean_details)
-    model_no = _guess_model(clean_details)
+    guessed_model = _guess_model(clean_details)
+    model_no = guessed_model
+    placeholder_model = ""
+    placeholder_model = _extract_appliance_placeholder_model(clean_details)
+    if placeholder_model and ("as above" in placeholder_model.lower() or not guessed_model):
+        make = ""
+        model_no = placeholder_model
+    elif not model_no and placeholder_model:
+        model_no = placeholder_model
     if not any((make, model_no)):
         return None
     return ApplianceRow(
@@ -7272,26 +7325,27 @@ def _dedupe_appliances(rows: list[ApplianceRow]) -> list[ApplianceRow]:
                 inferred_make = model_to_make.get(row.model_no.lower(), "")
                 if inferred_make:
                     row.make = inferred_make
-    make_to_models = {
-        (row.source_file, row.make.lower()): row.model_no
-        for row in result
-        if row.source_file and row.make and row.model_no
-    }
-    if make_to_models:
-        for row in result:
-            if row.make and not row.model_no and "as above" in row.evidence_snippet.lower():
-                inferred_model = make_to_models.get((row.source_file, row.make.lower()), "")
-                if inferred_model:
-                    row.model_no = inferred_model
     typed_make_with_model = {
         (row.appliance_type.lower(), row.make.lower())
         for row in result
         if row.make and row.model_no
     }
     filtered: list[ApplianceRow] = []
+    typed_source_with_concrete_model = {
+        (row.source_file.lower(), row.appliance_type.lower())
+        for row in result
+        if row.source_file and row.model_no and not _looks_like_appliance_placeholder_model(row.model_no)
+    }
     for row in result:
         typed_make = (row.appliance_type.lower(), row.make.lower())
         if row.make and not row.model_no and typed_make in typed_make_with_model:
+            continue
+        if (
+            row.source_file
+            and row.model_no
+            and _looks_like_appliance_placeholder_model(row.model_no)
+            and (row.source_file.lower(), row.appliance_type.lower()) in typed_source_with_concrete_model
+        ):
             continue
         filtered.append(row)
     return filtered
