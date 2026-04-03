@@ -283,6 +283,10 @@ KNOWN_BRANDS = {
     "fisher and paykel": "https://www.fisherpaykel.com/au/",
     "johnson suisse": "https://www.johnsonsuisse.com.au/",
     "westinghouse": "https://www.westinghouse.com.au/",
+    "asko": "https://au.asko.com/",
+    "bertazzoni": "https://au.bertazzoni.com/",
+    "schweigen": "https://schweigen.com.au/",
+    "whispar": "https://www.whispar.com.au/",
     "everhard": "https://www.everhard.com.au/",
     "phoenix": "https://www.phoenixtapware.com.au/",
     "parisi": "https://www.parisi.com.au/",
@@ -298,6 +302,10 @@ CANONICAL_BRAND_LABELS = {
     "fisher and paykel": "Fisher & Paykel",
     "johnson suisse": "Johnson Suisse",
     "westinghouse": "Westinghouse",
+    "asko": "ASKO",
+    "bertazzoni": "Bertazzoni",
+    "schweigen": "Schweigen",
+    "whispar": "Whispar",
     "everhard": "Everhard",
     "phoenix": "Phoenix",
     "parisi": "Parisi",
@@ -584,8 +592,10 @@ def normalize_space(text: str) -> str:
 
 def normalize_brand_label(value: str) -> str:
     lowered = normalize_space(str(value or "")).lower()
+    if not lowered:
+        return ""
     for brand, label in sorted(CANONICAL_BRAND_LABELS.items(), key=lambda item: len(item[0]), reverse=True):
-        if brand == lowered or brand in lowered or lowered in brand:
+        if brand == lowered or brand in lowered:
             return label
     return normalize_space(str(value or ""))
 
@@ -1567,6 +1577,14 @@ def _collect_schedule_room_sections(documents: list[dict[str, object]]) -> list[
 
 def _document_full_text(document: dict[str, object]) -> str:
     return "\n\n".join(str(page["text"]) for page in document.get("pages", []) if page.get("text"))
+
+
+def _document_full_raw_text(document: dict[str, object]) -> str:
+    return "\n\n".join(
+        str(page.get("raw_text") or page.get("text") or "")
+        for page in document.get("pages", [])
+        if page.get("raw_text") or page.get("text")
+    )
 
 
 def _document_room_master_score(document: dict[str, object]) -> dict[str, Any]:
@@ -4685,6 +4703,7 @@ def _parse_imperial_documents(
             }
         )
         full_text = "\n\n".join(str(page.get("text") or page.get("raw_text") or "") for page in pages if page.get("text") or page.get("raw_text"))
+        raw_full_text = _document_full_raw_text(document)
         if not full_text.strip():
             warnings.append(f"No extractable text found in {file_name}.")
             continue
@@ -4698,7 +4717,7 @@ def _parse_imperial_documents(
                     rooms[row.room_key] = row
                 else:
                     special_sections.append(_imperial_special_section_from_section(section))
-        appliances.extend(_extract_appliances(full_text, file_name, pages))
+        appliances.extend(_extract_appliances_from_pages(file_name, pages))
 
     payload = SnapshotPayload(
         job_no=job_no,
@@ -4814,6 +4833,7 @@ def _parse_spec_documents_structure_first(
             }
         )
         full_text = "\n\n".join(str(page.get("text") or page.get("raw_text") or "") for page in pages if page.get("text") or page.get("raw_text"))
+        raw_full_text = _document_full_raw_text(document)
         if not full_text.strip():
             warnings.append(f"No extractable text found in {file_name}.")
             continue
@@ -4908,7 +4928,7 @@ def _parse_spec_documents_structure_first(
             )
             rooms[target_room_key] = row
 
-        appliances.extend(_extract_appliances(full_text, file_name, pages))
+        appliances.extend(_extract_appliances_from_pages(file_name, pages))
         flooring_text = _extract_global_value(full_text, "flooring")
         splashback_text = _extract_global_value(full_text, "splashback")
         if flooring_text:
@@ -5000,6 +5020,7 @@ def parse_documents(
             }
         )
         full_text = "\n\n".join(str(page.get("text") or page.get("raw_text") or "") for page in pages if page.get("text") or page.get("raw_text"))
+        raw_full_text = _document_full_raw_text(document)
         if not full_text.strip():
             warnings.append(f"No extractable text found in {file_name}.")
             continue
@@ -5036,7 +5057,7 @@ def parse_documents(
                 authoritative_room_section=is_room_master,
             )
             rooms[target_room_key] = row
-        appliances.extend(_extract_appliances(full_text, file_name, pages))
+        appliances.extend(_extract_appliances_from_pages(file_name, pages))
         flooring_text = _extract_global_value(full_text, "flooring")
         splashback_text = _extract_global_value(full_text, "splashback")
         if flooring_text:
@@ -5296,13 +5317,26 @@ def _extract_appliances(text: str, file_name: str, pages: list[dict[str, object]
     return _dedupe_appliances(rows)
 
 
+def _extract_appliances_from_pages(file_name: str, pages: list[dict[str, object]]) -> list[ApplianceRow]:
+    rows: list[ApplianceRow] = []
+    for page in pages:
+        page_text = str(page.get("raw_text") or page.get("text") or "")
+        if not page_text.strip():
+            continue
+        rows.extend(_extract_appliances(page_text, file_name, [page]))
+    return _dedupe_appliances(rows)
+
+
 def _extract_labeled_appliances(text: str, file_name: str, pages: list[dict[str, object]]) -> list[ApplianceRow]:
     matches = _collect_appliance_label_matches(text)
     rows: list[ApplianceRow] = []
     for index, match in enumerate(matches):
         next_start = matches[index + 1]["start"] if index + 1 < len(matches) else len(text)
         segment = normalize_space(text[match["start"]:next_start])
-        details = _limit_appliance_details_to_local_context(text[match["end"]:next_start])
+        details = _limit_appliance_details_to_local_context(
+            text[match["end"]:next_start],
+            appliance_type=str(match["appliance_type"]),
+        )
         row = _build_appliance_row(
             appliance_type=str(match["appliance_type"]),
             details=details,
@@ -5344,8 +5378,8 @@ def _collect_appliance_label_matches(text: str) -> list[dict[str, object]]:
 
 def _extract_loose_appliances(text: str, file_name: str, pages: list[dict[str, object]]) -> list[ApplianceRow]:
     rows: list[ApplianceRow] = []
-    for raw_line in text.split("\n"):
-        line = normalize_space(raw_line)
+    lines = [normalize_space(raw_line) for raw_line in text.split("\n")]
+    for index, line in enumerate(lines):
         if not line:
             continue
         if _looks_like_strict_appliance_label(line):
@@ -5356,16 +5390,19 @@ def _extract_loose_appliances(text: str, file_name: str, pages: list[dict[str, o
         appliance_type = _match_loose_appliance_type(lowered)
         if not appliance_type:
             continue
-        make = _guess_make(line)
-        model_no = _guess_model(line)
+        details = _build_loose_appliance_details(lines, index, appliance_type)
+        if not details:
+            continue
+        make = _guess_make(details)
+        model_no = _guess_model(details)
         if not (make or model_no):
             continue
-        if not (make or _has_parenthesized_model(line)):
+        if not (make or _has_parenthesized_model(details) or model_no):
             continue
         row = _build_appliance_row(
             appliance_type=appliance_type,
-            details=line,
-            evidence=line,
+            details=details,
+            evidence=details,
             file_name=file_name,
             pages=pages,
             confidence=0.5,
@@ -5392,6 +5429,86 @@ def _match_loose_appliance_type(lowered_line: str) -> str:
 
 def _has_parenthesized_model(text: str) -> bool:
     return any(_valid_model_candidate(candidate.upper(), allow_numeric=True) for candidate in re.findall(r"\(([A-Za-z0-9/-]{3,})\)", text))
+
+
+def _is_appliance_context_boundary_line(line: str, appliance_type: str = "") -> bool:
+    text = normalize_space(line)
+    if not text:
+        return True
+    lowered = text.lower()
+    if (
+        _looks_like_strict_appliance_label(text)
+        or _is_room_heading_line(text)
+        or _is_schedule_room_heading(text)
+        or _looks_like_field_label(text)
+    ):
+        return True
+    if any(
+        token in lowered
+        for token in (
+            "address:",
+            "client:",
+            "area / item",
+            "specs / description",
+            "appliances",
+        )
+    ):
+        return True
+    if lowered == "by client" or lowered.startswith("by client "):
+        return True
+    if any(token in lowered for token in ("designer:", "client name", "signature:", "signed date", "document ref:")):
+        return True
+    other_type = _match_loose_appliance_type(lowered)
+    if other_type and other_type.lower() != appliance_type.lower():
+        return True
+    return False
+
+
+def _build_loose_appliance_details(lines: list[str], index: int, appliance_type: str) -> str:
+    if index < 0 or index >= len(lines):
+        return ""
+    current = normalize_space(lines[index])
+    if not current:
+        return ""
+    lowered_current = current.lower()
+    if any(token in lowered_current for token in ("leave standard space", "space by client", "provide space only")):
+        return current
+    collected: list[str] = [current]
+    allow_cross_type_backfill = "as above" in lowered_current
+    back_limit = 6 if allow_cross_type_backfill else 4
+
+    back = index - 1
+    while back >= 0 and len(collected) < back_limit:
+        candidate = normalize_space(lines[back])
+        if not candidate:
+            break
+        if _is_appliance_context_boundary_line(candidate, appliance_type):
+            if not allow_cross_type_backfill:
+                break
+            if _match_loose_appliance_type(candidate.lower()) not in {"", appliance_type.lower()}:
+                allow_cross_type_backfill = False
+                collected.insert(0, candidate)
+                back -= 1
+                continue
+            break
+        collected.insert(0, candidate)
+        if _guess_make(" ".join(collected)):
+            break
+        back -= 1
+
+    forward = index + 1
+    while forward < len(lines) and len(collected) < 6:
+        candidate = normalize_space(lines[forward])
+        if not candidate or _is_appliance_context_boundary_line(candidate, appliance_type):
+            break
+        if "as above" in lowered_current and _guess_make(candidate) and not _guess_model(candidate):
+            break
+        collected.append(candidate)
+        forward += 1
+        joined = normalize_space(" ".join(collected))
+        if (_guess_make(joined) and _guess_model(joined)) or (appliance_type.lower() == "fridge" and _guess_model(joined)):
+            break
+    return normalize_space(" ".join(collected))
 
 
 def _build_appliance_row(
@@ -5427,13 +5544,13 @@ def _build_appliance_row(
     )
 
 
-def _limit_appliance_details_to_local_context(details: str) -> str:
+def _limit_appliance_details_to_local_context(details: str, appliance_type: str = "") -> str:
     lines = [normalize_space(line) for line in str(details or "").splitlines() if normalize_space(line)]
     if not lines:
         return normalize_space(details)
     kept = [lines[0]]
     for line in lines[1:]:
-        if _looks_like_strict_appliance_label(line) or _is_room_heading_line(line) or _is_schedule_room_heading(line) or _looks_like_field_label(line):
+        if _is_appliance_context_boundary_line(line, appliance_type):
             break
         combined = normalize_space(" ".join(kept))
         if _guess_model(combined) or _guess_make(combined):
@@ -5453,19 +5570,20 @@ def _guess_make(text: str) -> str:
 
 
 def _guess_model(text: str) -> str:
-    quantity_match = re.search(r"\b(\d+)\s*[xX]\s*([A-Z0-9/-]*[A-Z][A-Z0-9/-]*\d[A-Z0-9/-]*)\b", text)
+    upper_text = str(text or "").upper()
+    quantity_match = re.search(r"\b(\d+)\s*[xX]\s*([A-Z0-9./-]*[A-Z][A-Z0-9./-]*\d[A-Z0-9./-]*)\b", upper_text)
     if quantity_match:
-        candidate = quantity_match.group(2).upper()
+        candidate = quantity_match.group(2).upper().strip(".")
         if _valid_model_candidate(candidate):
             return f"{quantity_match.group(1)} x {candidate}"
 
-    for candidate in re.findall(r"\(([A-Za-z0-9/-]{3,})\)", text):
-        normalized = candidate.upper()
+    for candidate in re.findall(r"\(([A-Za-z0-9./-]{3,})\)", upper_text):
+        normalized = candidate.upper().strip(".")
         if _valid_model_candidate(normalized, allow_numeric=True):
             return normalized
 
-    for match in re.finditer(r"\b([A-Z0-9/-]*[A-Z][A-Z0-9/-]*\d[A-Z0-9/-]*)\b", text):
-        candidate = match.group(1).upper()
+    for match in re.finditer(r"\b([A-Z0-9./-]*[A-Z][A-Z0-9./-]*\d[A-Z0-9./-]*)\b", upper_text):
+        candidate = match.group(1).upper().strip(".")
         if _valid_model_candidate(candidate):
             return candidate
     return ""
@@ -7123,4 +7241,37 @@ def _dedupe_appliances(rows: list[ApplianceRow]) -> list[ApplianceRow]:
             continue
         seen.add(key)
         result.append(row)
-    return result
+    model_to_make = {
+        row.model_no.lower(): row.make
+        for row in result
+        if row.model_no and row.make
+    }
+    if model_to_make:
+        for row in result:
+            if not row.make and row.model_no:
+                inferred_make = model_to_make.get(row.model_no.lower(), "")
+                if inferred_make:
+                    row.make = inferred_make
+    make_to_models = {
+        (row.source_file, row.make.lower()): row.model_no
+        for row in result
+        if row.source_file and row.make and row.model_no
+    }
+    if make_to_models:
+        for row in result:
+            if row.make and not row.model_no and "as above" in row.evidence_snippet.lower():
+                inferred_model = make_to_models.get((row.source_file, row.make.lower()), "")
+                if inferred_model:
+                    row.model_no = inferred_model
+    typed_make_with_model = {
+        (row.appliance_type.lower(), row.make.lower())
+        for row in result
+        if row.make and row.model_no
+    }
+    filtered: list[ApplianceRow] = []
+    for row in result:
+        typed_make = (row.appliance_type.lower(), row.make.lower())
+        if row.make and not row.model_no and typed_make in typed_make_with_model:
+            continue
+        filtered.append(row)
+    return filtered

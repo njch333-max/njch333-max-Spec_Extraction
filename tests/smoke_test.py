@@ -1185,6 +1185,199 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(snapshot["appliances"][0]["model_no"], "")
         self.assertEqual(parsing_module._limit_appliance_details_to_local_context("Westinghouse\nHP280L\n"), "Westinghouse")
 
+    def test_loose_appliance_rows_do_not_bind_fridge_model_to_rangehood(self) -> None:
+        snapshot = parse_documents(
+            job_no="38251",
+            builder_name="Imperial",
+            source_kind="spec",
+            documents=[
+                {
+                    "file_name": "imperial-appliances.pdf",
+                    "role": "spec",
+                    "pages": [
+                        {
+                            "page_no": 5,
+                            "raw_text": (
+                                "Address: 2510-076 - Private - 21 Shadowood Street, Kenmore Hills\n"
+                                "Client: Eloise Cawcutt Foxover\n"
+                                "Date: 20.3.26\n"
+                                "APPLIANCES\n"
+                                "AREA / ITEM SPECS / DESCRIPTION IMAGE SUPPLIER NOTES\n"
+                                "Bertazzoni 90cm\n"
+                                "Professional Series\n"
+                                "OVEN BY CLIENT\n"
+                                "Freestanding Dual Fuel Oven/Stove\n"
+                                "PRO906MFESXE\n"
+                                "COOKTOP as above BY CLIENT\n"
+                                "ASKO\n"
+                                "60cm classic built under dishwasher\n"
+                                "DISHWASHER BY CLIENT\n"
+                                "stainless steel\n"
+                                "DBI364ID.S.AU\n"
+                                "Document Ref: VVQAD-QWDJF-RPUJB-WQZDZ Page 5 of 8\n"
+                            ),
+                            "text": (
+                                "Address: 2510-076 - Private - 21 Shadowood Street, Kenmore Hills APPLIANCES "
+                                "Bertazzoni 90cm Professional Series OVEN BY CLIENT Freestanding Dual Fuel Oven/Stove "
+                                "PRO906MFESXE COOKTOP as above BY CLIENT ASKO 60cm classic built under dishwasher "
+                                "DISHWASHER BY CLIENT stainless steel DBI364ID.S.AU"
+                            ),
+                            "needs_ocr": False,
+                        },
+                        {
+                            "page_no": 6,
+                            "raw_text": (
+                                "Whispar 90cm Monte Carlo Undermount\n"
+                                "RANGEHOOD Rangehood with Power on board Motor BY CLIENT\n"
+                                "X3md09s5.op/t\n"
+                                "MICROWAVE LEAVE STANDARD SPACE BY CLIENT\n"
+                                "Fisher and Paykel\n"
+                                "Series 7 569L French Door Fridge\n"
+                                "FRIDGE BY CLIENT PLUMBED IN FRIDGE\n"
+                                "with Ice and Water plumbed in\n"
+                                "RF610ANUX5\n"
+                                "DESIGNER: MELISSA COAKES CLIENT NAME: SIGNATURE: SIGNED DATE:\n"
+                                "Document Ref: VVQAD-QWDJF-RPUJB-WQZDZ Page 6 of 8\n"
+                            ),
+                            "text": (
+                                "Whispar 90cm Monte Carlo Undermount\n"
+                                "RANGEHOOD Rangehood with Power on board Motor BY CLIENT\n"
+                                "X3md09s5.op/t\n"
+                                "MICROWAVE LEAVE STANDARD SPACE BY CLIENT\n"
+                                "Fisher and Paykel\n"
+                                "Series 7 569L French Door Fridge\n"
+                                "FRIDGE BY CLIENT PLUMBED IN FRIDGE\n"
+                                "with Ice and Water plumbed in\n"
+                                "RF610ANUX5\n"
+                                "DESIGNER: MELISSA COAKES CLIENT NAME: SIGNATURE: SIGNED DATE:\n"
+                                "Document Ref: VVQAD-QWDJF-RPUJB-WQZDZ Page 6 of 8\n"
+                            ),
+                            "needs_ocr": False,
+                        }
+                    ],
+                }
+            ],
+        )
+        appliances = snapshot["appliances"]
+        oven_rows = [row for row in appliances if row["appliance_type"] == "Oven"]
+        self.assertTrue(oven_rows)
+        self.assertEqual(oven_rows[0]["make"], "Bertazzoni")
+        self.assertEqual(oven_rows[0]["model_no"], "PRO906MFESXE")
+        dishwasher_rows = [row for row in appliances if row["appliance_type"] == "Dishwasher"]
+        self.assertTrue(dishwasher_rows)
+        self.assertEqual(dishwasher_rows[0]["make"], "ASKO")
+        self.assertEqual(dishwasher_rows[0]["model_no"], "DBI364ID.S.AU")
+        cooktop_rows = [row for row in appliances if row["appliance_type"] == "Cooktop"]
+        self.assertTrue(cooktop_rows)
+        self.assertEqual(cooktop_rows[0]["make"], "Bertazzoni")
+        self.assertEqual(cooktop_rows[0]["model_no"], "PRO906MFESXE")
+        fridge_rows = [row for row in appliances if row["appliance_type"] == "Fridge"]
+        self.assertTrue(fridge_rows)
+        self.assertEqual(fridge_rows[0]["make"], "Fisher & Paykel")
+        self.assertEqual(fridge_rows[0]["model_no"], "RF610ANUX5")
+        self.assertFalse(any(row["appliance_type"] == "Microwave" for row in appliances))
+        self.assertFalse(
+            any(
+                row["appliance_type"] == "Rangehood"
+                and row.get("make") == "Fisher & Paykel"
+                and row.get("model_no") == "RF610ANUX5"
+                for row in appliances
+            )
+        )
+
+    def test_appliance_rows_handle_pypdf_reordered_appliance_pages(self) -> None:
+        snapshot = parse_documents(
+            job_no="38251",
+            builder_name="Imperial",
+            source_kind="spec",
+            documents=[
+                {
+                    "file_name": "imperial-appliances-pypdf.pdf",
+                    "role": "spec",
+                    "pages": [
+                        {
+                            "page_no": 5,
+                            "raw_text": (
+                                "DISHWASHER\n"
+                                "ASKO \n"
+                                "60cm classic built under dishwasher \n"
+                                "stainless steel \n"
+                                "DBI364ID.S.AU\n"
+                                "BY CLIENT\n"
+                                "OVEN BY CLIENT\n"
+                                "COOKTOP BY CLIENT\n"
+                                "Bertazzoni 90cm \n"
+                                "Professional Series \n"
+                                "Freestanding Dual Fuel Oven/Stove \n"
+                                "PRO906MFESXE\n"
+                                "as above\n"
+                                "AREA / ITEM SPECS / DESCRIPTION IMAGE SUPPLIER NOTES\n"
+                                "APPLIANCES\n"
+                                "Address:2510-076 - Private - 21 Shadowood Street, Kenmore Hills\n"
+                                "Client:Eloise Cawcutt Foxover\n"
+                                "Date:20.3.26\n"
+                                "Document Ref: VVQAD-QWDJF-RPUJB-WQZDZ Page 5 of 8\n"
+                            ),
+                            "text": (
+                                "DISHWASHER ASKO 60cm classic built under dishwasher stainless steel "
+                                "DBI364ID.S.AU BY CLIENT OVEN BY CLIENT COOKTOP BY CLIENT Bertazzoni "
+                                "90cm Professional Series Freestanding Dual Fuel Oven/Stove PRO906MFESXE as above"
+                            ),
+                            "needs_ocr": False,
+                        },
+                        {
+                            "page_no": 6,
+                            "raw_text": (
+                                "MICROWAVE LEAVE STANDARD SPACE BY CLIENT\n"
+                                "RANGEHOOD\n"
+                                "Whispar 90cm Monte Carlo Undermount \n"
+                                "Rangehood with Power on board Motor \n"
+                                "X3md09s5.op/t \n"
+                                "BY CLIENT\n"
+                                "FRIDGE\n"
+                                "Fisher and Paykel \n"
+                                "Series 7 569L French Door Fridge \n"
+                                "with Ice and Water plumbed in \n"
+                                "RF610ANUX5 \n"
+                                "BY CLIENT PLUMBED IN FRIDGE\n"
+                                "SIGNATURE: SIGNED DATE:DESIGNER: MELISSA COAKES CLIENT NAME:\n"
+                                "Document Ref: VVQAD-QWDJF-RPUJB-WQZDZ Page 6 of 8\n"
+                            ),
+                            "text": (
+                                "MICROWAVE LEAVE STANDARD SPACE BY CLIENT RANGEHOOD Whispar 90cm Monte Carlo "
+                                "Undermount Rangehood with Power on board Motor X3md09s5.op/t BY CLIENT "
+                                "FRIDGE Fisher and Paykel Series 7 569L French Door Fridge with Ice and Water "
+                                "plumbed in RF610ANUX5 BY CLIENT PLUMBED IN FRIDGE"
+                            ),
+                            "needs_ocr": False,
+                        },
+                    ],
+                }
+            ],
+        )
+        appliances = snapshot["appliances"]
+        oven_rows = [row for row in appliances if row["appliance_type"] == "Oven"]
+        self.assertEqual(len(oven_rows), 1)
+        self.assertEqual(oven_rows[0]["make"], "Bertazzoni")
+        self.assertEqual(oven_rows[0]["model_no"], "PRO906MFESXE")
+        dishwasher_rows = [row for row in appliances if row["appliance_type"] == "Dishwasher"]
+        self.assertEqual(len(dishwasher_rows), 1)
+        self.assertEqual(dishwasher_rows[0]["make"], "ASKO")
+        self.assertEqual(dishwasher_rows[0]["model_no"], "DBI364ID.S.AU")
+        cooktop_rows = [row for row in appliances if row["appliance_type"] == "Cooktop"]
+        self.assertEqual(len(cooktop_rows), 1)
+        self.assertEqual(cooktop_rows[0]["make"], "Bertazzoni")
+        self.assertEqual(cooktop_rows[0]["model_no"], "")
+        fridge_rows = [row for row in appliances if row["appliance_type"] == "Fridge"]
+        self.assertEqual(len(fridge_rows), 1)
+        self.assertEqual(fridge_rows[0]["make"], "Fisher & Paykel")
+        self.assertEqual(fridge_rows[0]["model_no"], "RF610ANUX5")
+        self.assertFalse(any(row["appliance_type"] == "Microwave" for row in appliances))
+        rangehood_rows = [row for row in appliances if row["appliance_type"] == "Rangehood"]
+        self.assertEqual(len(rangehood_rows), 1)
+        self.assertEqual(rangehood_rows[0]["make"], "Whispar")
+        self.assertEqual(rangehood_rows[0]["model_no"], "X3MD09S5.OP/T")
+
     def test_clarendon_reference_polish_rebuilds_clean_room_fields(self) -> None:
         snapshot = {
             "job_no": "37031",
