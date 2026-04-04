@@ -4010,6 +4010,73 @@ class SmokeTest(unittest.TestCase):
             "White Melamine",
         )
 
+    def test_extract_explicit_shelf_material_trims_following_handle_noise(self) -> None:
+        self.assertEqual(
+            parsing_module._extract_explicit_shelf_material_from_text(
+                "Open Shelving White Melamine Overhead Handles Handless Lip Pull N/A Base Cabinet Handles C137 Caloundra Lip Pull"
+            ),
+            "White Melamine",
+        )
+
+    def test_extract_explicit_shelf_material_supports_material_before_single_shelf_phrase(self) -> None:
+        self.assertEqual(
+            parsing_module._extract_explicit_shelf_material_from_text(
+                "BED 2 ROBE FIT OUT Robe Fit Out As Per Plan White Melamine Single Shelf with Hanging Rail As supplied by builder"
+            ),
+            "White Melamine",
+        )
+
+    def test_promote_conditional_shelf_field_drops_prepopulated_handle_noise(self) -> None:
+        row = {
+            "room_key": "kitchen",
+            "original_room_label": "Kitchen",
+            "shelf": "Overhead Handles Handless Lip Pull N/A Base Cabinet Handles C137 Caloundra Lip Pull White Melamine",
+            "evidence_snippet": "",
+            "other_items": [],
+        }
+        parsing_module._promote_conditional_shelf_field(row)
+        self.assertEqual(row["shelf"], "")
+
+    def test_promote_conditional_shelf_field_drops_prepopulated_surrounds_noise(self) -> None:
+        row = {
+            "room_key": "kitchen",
+            "original_room_label": "Kitchen",
+            "shelf": "+ SURROUNDS Laminex Blackbutt Truescale Natural Finish 2618 Laminex LIP PULL",
+            "evidence_snippet": "",
+            "other_items": [],
+        }
+        parsing_module._promote_conditional_shelf_field(row)
+        self.assertEqual(row["shelf"], "")
+
+    def test_promote_conditional_shelf_field_keeps_clean_material_phrase(self) -> None:
+        row = {
+            "room_key": "pantry",
+            "original_room_label": "PANTRY",
+            "shelf": "White Melamine",
+            "evidence_snippet": "",
+            "other_items": [],
+        }
+        parsing_module._promote_conditional_shelf_field(row)
+        self.assertEqual(row["shelf"], "White Melamine")
+
+    def test_promote_conditional_shelf_field_keeps_robe_fit_out_room_when_material_precedes_shelf(self) -> None:
+        row = {
+            "room_key": "bed_2_robe",
+            "original_room_label": "BED 2 ROBE FIT OUT",
+            "evidence_snippet": (
+                "BED 2 ROBE FIT OUT\n"
+                "Robe Fit Out As Per Plan\n"
+                "White Melamine\n"
+                "Single Shelf with Hanging Rail\n"
+                "As supplied by builder"
+            ),
+            "other_items": [{"label": "RAIL", "value": "Single Shelf with Hanging Rail"}],
+        }
+        parsing_module._promote_conditional_shelf_field(row)
+        self.assertEqual(row["shelf"], "White Melamine")
+        self.assertEqual(row["other_items"], [])
+        self.assertTrue(parsing_module._yellowwood_should_keep_final_room(row))
+
     def test_yellowwood_material_driven_rooms_keep_real_media_and_robe_when_joinery_material_exists(self) -> None:
         media_section = {
             "section_key": "media_room",

@@ -8068,8 +8068,30 @@ def _extract_explicit_shelf_material_from_text(text: Any) -> str:
     lowered = normalized.lower()
     if "floating shelf" in lowered or "floating shelving" in lowered:
         return ""
+    if re.search(r"(?i)\binternals?\b.{0,30}\bshelves?\b|\bshelves?\b.{0,30}\binternals?\b", normalized):
+        return ""
     if not re.search(r"(?i)\b(?:open shelving|shelving|single shelf|double shelf|shelf material|shelves|shelf)\b", normalized):
         return ""
+    shelf_match = re.search(r"(?i)\b(?:open shelving|shelving|single shelf|double shelf|shelf material|shelves|shelf)\b", normalized)
+    if shelf_match:
+        prefix = normalize_space(normalized[: shelf_match.start()])
+        prefix = re.sub(r"(?i)\bwith\s+hanging\s+rail\b", "", prefix)
+        prefix = re.sub(r"(?i)\bhanging\s+rail\b", "", prefix)
+        prefix = re.sub(r"(?i)\byellowwood supplier\b", "", prefix)
+        prefix = re.sub(r"(?i)\bas supplied by cabinetmaker\b", "", prefix)
+        prefix = re.sub(r"(?i)\bas supplied by builder\b", "", prefix)
+        prefix = re.sub(r"(?i)\b(?:robe fit out|fit out|as per plan|pantry|wip|linen cupboard)\b", "", prefix)
+        prefix = re.sub(r"(?i)\bbed\s*\d+\b", "", prefix)
+        prefix = re.sub(r"(?i)\bmaster\b", "", prefix)
+        prefix = re.sub(r"(?i)\b(?:ground floor|upper[- ]level|upper[- ]floor)\b", "", prefix)
+        prefix = re.sub(r"(?i)\b(?:walk[- ]in[- ]robe|walk in robe|wir|robe|ensuite|bathroom|powder room|laundry|kitchen)\b", "", prefix)
+        prefix = normalize_space(prefix).strip(" -:|,")
+        if prefix:
+            prefix_tokens = prefix.split()
+            for start in range(max(0, len(prefix_tokens) - 8), len(prefix_tokens)):
+                candidate = normalize_space(" ".join(prefix_tokens[start:]))
+                if _is_clean_material_phrase(candidate):
+                    return normalize_brand_casing_text(candidate)
     candidate_parts = re.split(r"(?i)\b(?:open shelving|shelving|single shelf|double shelf|shelf material|shelves|shelf)\b", normalized)
     candidate = normalize_space(candidate_parts[-1] if candidate_parts else normalized)
     candidate = re.sub(r"(?i)\bwith\s+hanging\s+rail\b", "", candidate)
@@ -8081,6 +8103,19 @@ def _extract_explicit_shelf_material_from_text(text: Any) -> str:
     candidate = _trim_fixture_text_at_markers(
         candidate,
         (
+            r"\bOVERHEAD HANDLES\b",
+            r"\bBASE CABINET HANDLES\b",
+            r"\bPANTRY DOOR HANDLES\b",
+            r"\bHANDLES?\b",
+            r"\bSINK(?:\s+INFO)?\b",
+            r"\bBASIN(?:\s+INFO)?\b",
+            r"\bTAP(?:\s+INFO)?\b",
+            r"\bTOE KICK\b",
+            r"\bBULKHEADS?\b",
+            r"\bSPLASHBACK\b",
+            r"\bBENCH\s*TOPS?\b",
+            r"\bOVERHEAD CUPBOARDS?\b",
+            r"\bBASE CUPBOARDS?\b",
             r"\bINTERNAL FINISHES\b",
             r"\bTILING SCHEDULE\b",
             r"\bREFER TO NATIONAL TILES\b",
@@ -8100,6 +8135,21 @@ def _extract_explicit_shelf_material_from_text(text: Any) -> str:
     return normalize_brand_casing_text(candidate)
 
 
+def _is_clean_material_phrase(text: str) -> bool:
+    normalized = normalize_space(text)
+    if not normalized or not _has_joinery_material_keyword(normalized):
+        return False
+    if len(normalized.split()) > 10:
+        return False
+    if re.search(
+        r"(?i)\b(?:handles?|lip pull|sink|basin|tap|toe\s*kick|bulkheads?|splashback|"
+        r"surrounds?|internals?|drawer|cabinet|overhead|base|tall|bench(?:top)?|rail)\b",
+        normalized,
+    ):
+        return False
+    return True
+
+
 def _other_item_is_actual_rail(item: dict[str, str]) -> bool:
     label = normalize_space(str(item.get("label", "") or ""))
     value = normalize_space(str(item.get("value", "") or ""))
@@ -8117,8 +8167,14 @@ def _other_item_is_actual_rail(item: dict[str, str]) -> bool:
 
 def _promote_conditional_shelf_field(row: dict[str, Any]) -> None:
     shelf_value = normalize_space(str(row.get("shelf", "") or ""))
-    if shelf_value and not _has_joinery_material_keyword(shelf_value):
-        shelf_value = ""
+    if shelf_value:
+        cleaned_existing = _extract_explicit_shelf_material_from_text(shelf_value)
+        if cleaned_existing:
+            shelf_value = cleaned_existing
+        elif _is_clean_material_phrase(shelf_value):
+            shelf_value = normalize_brand_casing_text(shelf_value)
+        else:
+            shelf_value = ""
     candidate_texts: list[str] = [normalize_space(str(row.get("evidence_snippet", "") or ""))]
     filtered_other_items: list[dict[str, str]] = []
     for item in _merge_other_items([], row.get("other_items", [])):
