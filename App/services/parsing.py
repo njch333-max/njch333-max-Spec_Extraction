@@ -8085,6 +8085,7 @@ def _extract_explicit_shelf_material_from_text(text: Any) -> str:
         prefix = re.sub(r"(?i)\bmaster\b", "", prefix)
         prefix = re.sub(r"(?i)\b(?:ground floor|upper[- ]level|upper[- ]floor)\b", "", prefix)
         prefix = re.sub(r"(?i)\b(?:walk[- ]in[- ]robe|walk in robe|wir|robe|ensuite|bathroom|powder room|laundry|kitchen)\b", "", prefix)
+        prefix = re.sub(r"(?i)^(?:in\s+)+", "", prefix)
         prefix = normalize_space(prefix).strip(" -:|,")
         if prefix:
             prefix_tokens = prefix.split()
@@ -8143,7 +8144,8 @@ def _is_clean_material_phrase(text: str) -> bool:
         return False
     if re.search(
         r"(?i)\b(?:handles?|lip pull|sink|basin|tap|toe\s*kick|bulkheads?|splashback|"
-        r"surrounds?|internals?|drawer|cabinet|overhead|base|tall|bench(?:top)?|rail)\b",
+        r"surrounds?|internals?|drawer|cabinet|overhead|base|tall|bench(?:top)?|rail|"
+        r"bed\s*\d+|walk(?:\s+in)?|robe|pantry|powder|ensuite|bathroom|kitchen|laundry|vanity)\b",
         normalized,
     ):
         return False
@@ -8168,13 +8170,18 @@ def _other_item_is_actual_rail(item: dict[str, str]) -> bool:
 def _promote_conditional_shelf_field(row: dict[str, Any]) -> None:
     shelf_value = normalize_space(str(row.get("shelf", "") or ""))
     if shelf_value:
-        cleaned_existing = _extract_explicit_shelf_material_from_text(shelf_value)
-        if cleaned_existing:
-            shelf_value = cleaned_existing
-        elif _is_clean_material_phrase(shelf_value):
-            shelf_value = normalize_brand_casing_text(shelf_value)
-        else:
-            shelf_value = ""
+        cleaned_parts: list[str] = []
+        for part in re.split(r"\s*\|\s*", shelf_value):
+            part = normalize_space(re.sub(r"(?i)^(?:in\s+)+", "", part))
+            if not part:
+                continue
+            cleaned_existing = _extract_explicit_shelf_material_from_text(part)
+            if cleaned_existing:
+                cleaned_parts.append(cleaned_existing)
+                continue
+            if _is_clean_material_phrase(part):
+                cleaned_parts.append(normalize_brand_casing_text(part))
+        shelf_value = " | ".join(_unique(cleaned_parts))
     candidate_texts: list[str] = [normalize_space(str(row.get("evidence_snippet", "") or ""))]
     filtered_other_items: list[dict[str, str]] = []
     for item in _merge_other_items([], row.get("other_items", [])):
