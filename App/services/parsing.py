@@ -7559,6 +7559,31 @@ def _yellowwood_normalize_kitchen_material_fields(row: dict[str, Any]) -> None:
         row["bench_tops_other"] = " | ".join(other_parts[1:])
 
 
+def _yellowwood_normalize_vanity_material_fields(row: dict[str, Any]) -> None:
+    room_label = normalize_space(str(row.get("original_room_label", "") or row.get("room_name", "") or ""))
+    if not room_label:
+        return
+    if "VANITY" not in room_label.upper() and "POWDER ROOM" not in room_label.upper():
+        return
+    bench_other = normalize_space(str(row.get("bench_tops_other", "") or ""))
+    if bench_other:
+        match = re.search(r"(?i)\b(?:wall\s+hung\s+vanity|floor\s+mount(?:ed)?\s+vanity)\b", bench_other)
+        if match:
+            benchtop_value = normalize_space(bench_other[: match.start()])
+            vanity_value = _clean_door_colour_value(bench_other[match.end() :])
+            if benchtop_value:
+                row["bench_tops_other"] = benchtop_value
+            if vanity_value:
+                row["door_colours_base"] = _merge_clean_group_text(row.get("door_colours_base", ""), vanity_value, cleaner=_clean_door_colour_value)
+    toe_kick_values = []
+    for value in _coerce_string_list(row.get("toe_kick", [])):
+        cleaned = normalize_space(value)
+        if re.fullmatch(r"(?i)n/?a(?:\s+n/?a)?", cleaned):
+            continue
+        toe_kick_values.append(cleaned)
+    row["toe_kick"] = _unique(toe_kick_values)
+
+
 def _yellowwood_material_fallback(row: dict[str, Any]) -> str:
     candidates = [
         *(_coerce_string_list(row.get("toe_kick", []))),
@@ -7840,6 +7865,7 @@ def _finalize_yellowwood_rooms(
         row["bulkheads"] = _yellowwood_cleanup_bulkheads(row.get("bulkheads", []))
         row["handles"] = _yellowwood_cleanup_handles(row)
         _yellowwood_normalize_kitchen_material_fields(row)
+        _yellowwood_normalize_vanity_material_fields(row)
         overlay = overlays.get(str(row.get("room_key", "")), {})
         row["sink_info"] = _clean_room_fixture_text(
             _yellowwood_prefer_overlay_text(row.get("sink_info", ""), overlay.get("sink_info", ""), "sink"),
@@ -7916,6 +7942,7 @@ def _finalize_yellowwood_rooms(
     rooms[:] = list(merged_by_key.values())
     for row in rooms:
         _yellowwood_normalize_kitchen_material_fields(row)
+        _yellowwood_normalize_vanity_material_fields(row)
         row["splashback"] = _yellowwood_cleanup_splashback_text(row.get("splashback", ""), str(row.get("room_key", "") or ""))
 
 
@@ -8263,6 +8290,7 @@ def _yellowwood_filter_other_items(row: dict[str, Any]) -> list[dict[str, str]]:
         fallback_key=str(row.get("room_key", "")),
     )
     is_vanity_room = "vanity" in room_label.lower()
+    is_fitout_or_pantry_room = bool(re.search(r"(?i)\b(?:pantry|robe fit out|walk in robe fit out)\b", room_label))
     for item in _merge_other_items([], row.get("other_items", [])):
         label = normalize_space(str(item.get("label", "") or ""))
         value = normalize_space(str(item.get("value", "") or ""))
@@ -8271,6 +8299,8 @@ def _yellowwood_filter_other_items(row: dict[str, Any]) -> list[dict[str, str]]:
         if not label or not value:
             continue
         if tap_present and label.lower() in {"mixer", "pull-out mixer", "sink mixer", "basin mixer"}:
+            continue
+        if is_fitout_or_pantry_room and re.search(r"(?i)\b(?:mixer|sink|basin|tap|waste|floor waste|shower|bath|toilet)\b", f"{label} {value}"):
             continue
         if _is_blacklisted_wet_area_label(label) or _is_blacklisted_wet_area_label(value) or _is_blacklisted_wet_area_label(f"{label} {value}"):
             continue

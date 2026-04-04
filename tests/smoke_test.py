@@ -4088,6 +4088,29 @@ class SmokeTest(unittest.TestCase):
         parsing_module._promote_conditional_shelf_field(row)
         self.assertEqual(row["shelf"], "White Melamine")
 
+    def test_yellowwood_normalize_vanity_material_fields_splits_vanity_material_from_benchtop(self) -> None:
+        row = {
+            "room_key": "bathroom_vanity",
+            "original_room_label": "BATHROOM VANITY",
+            "bench_tops_other": "20mm YDL Classic White Polished Wall Hung Vanity Polytec Jamaican Walnut Matt (Vertical Grain Direction)",
+            "door_colours_base": "",
+            "toe_kick": ["N/A N/A"],
+        }
+        parsing_module._yellowwood_normalize_vanity_material_fields(row)
+        self.assertEqual(row["bench_tops_other"], "20mm YDL Classic White Polished")
+        self.assertEqual(row["door_colours_base"], "Polytec Jamaican Walnut Matt (Vertical Grain Direction)")
+        self.assertEqual(row["toe_kick"], [])
+
+    def test_yellowwood_filter_other_items_drops_plumbing_noise_for_pantry_fitout_rooms(self) -> None:
+        row = {
+            "room_key": "pantry",
+            "original_room_label": "PANTRY",
+            "other_items": [{"label": "Mixer", "value": "Spin Gooseneck Chrome Highgrove"}],
+            "tap_info": "",
+        }
+        filtered = parsing_module._yellowwood_filter_other_items(row)
+        self.assertEqual(filtered, [])
+
     def test_yellowwood_material_driven_rooms_keep_real_media_and_robe_when_joinery_material_exists(self) -> None:
         media_section = {
             "section_key": "media_room",
