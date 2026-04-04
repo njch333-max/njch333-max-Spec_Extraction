@@ -9761,6 +9761,57 @@ class SmokeTest(unittest.TestCase):
         parsing_module._remove_duplicate_benchtop_other_parts(row)
         self.assertEqual(row["bench_tops_other"], "")
 
+    def test_apply_room_cleaning_rules_reduces_duplicate_benchtop_other_parts(self) -> None:
+        row = {
+            "room_key": "kitchen",
+            "original_room_label": "Kitchen",
+            "room_name": "Kitchen",
+            "bench_tops": [
+                "Back Benchtops 20mm Quantum Quartz - Champagne - Arissed",
+                "Island Benchtop 40mm Quantum Quartz - Champagne - Arissed",
+                "20mm Quantum Quartz - Champagne - Arissed",
+                "40mm Quantum Quartz - Champagne - Arissed",
+            ],
+            "bench_tops_wall_run": "20mm Quantum Quartz - Champagne - Arissed",
+            "bench_tops_island": "40mm Quantum Quartz - Champagne - Arissed",
+            "bench_tops_other": "20mm Quantum Quartz - Champagne - Arissed | 40mm Quantum Quartz - Champagne - Arissed",
+        }
+        cleaned = parsing_module._apply_room_cleaning_rules(row, cleaning_rules.normalize_rule_flags(None))
+        self.assertEqual(cleaned["bench_tops_other"], "")
+
+    def test_yellowwood_cleanup_handles_moves_prefixed_note_to_end(self) -> None:
+        row = {
+            "original_room_label": "Kitchen",
+            "handles": [
+                "(To All Lower Doors & Drawers excluding Pantry) C137 Caloundra Lip Pull Matt Black 100mm (Laid Horizontal to All)"
+            ],
+        }
+        self.assertEqual(
+            parsing_module._yellowwood_cleanup_handles(row),
+            ["C137 Caloundra Lip Pull Matt Black 100mm (Laid Horizontal to All) (To All Lower Doors & Drawers excluding Pantry)"],
+        )
+
+    def test_finalize_yellowwood_rooms_clears_shelf_without_explicit_local_shelf_evidence(self) -> None:
+        rooms = [
+            {
+                "room_key": "kitchen",
+                "original_room_label": "Kitchen",
+                "room_name": "Kitchen",
+                "shelf": "White Melamine",
+                "bench_tops_wall_run": "20mm YDL Classic White Polished",
+                "door_colours_base": "Polytec Classic White Matt",
+                "door_panel_colours": ["Polytec Classic White Matt"],
+                "toe_kick": [],
+                "bulkheads": [],
+                "handles": [],
+                "other_items": [],
+                "accessories": [],
+                "evidence_snippet": "Kitchen YDL Classic White Polished Polytec Classic White Matt",
+            }
+        ]
+        parsing_module._finalize_yellowwood_rooms(rooms, {}, [])
+        self.assertEqual(rooms[0]["shelf"], "")
+
     def test_repair_handle_fragment_restores_drawers_suffix(self) -> None:
         self.assertEqual(
             parsing_module._repair_handle_fragment(

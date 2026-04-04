@@ -7527,6 +7527,12 @@ def _yellowwood_cleanup_handles(row: dict[str, Any]) -> list[str]:
         if "VANITY" in room_label.upper() or "POWDER ROOM" in room_label.upper():
             if re.search(r"(?i)\b(?:mirrored shaving cabinet|highgrove bathrooms|led edge)\b", text):
                 continue
+        prefixed_note_match = re.match(r"^\(([^)]+)\)\s+(.+)$", text)
+        if prefixed_note_match:
+            note = normalize_space(prefixed_note_match.group(1))
+            remainder = normalize_space(prefixed_note_match.group(2))
+            if note and remainder:
+                text = f"{remainder} ({note})"
         if text.startswith("House "):
             text = f"Handle {text}"
         cleaned.append(text)
@@ -7735,6 +7741,23 @@ def _yellowwood_cleanup_flooring_text(text: Any, room_key: str) -> str:
     return cleaned
 
 
+def _yellowwood_has_explicit_shelf_evidence(row: dict[str, Any]) -> bool:
+    explicit_sources: list[str] = [
+        normalize_space(str(row.get("evidence_snippet", "") or "")),
+        normalize_space(str(row.get("original_room_label", "") or "")),
+        normalize_space(str(row.get("room_name", "") or "")),
+    ]
+    for item in _merge_other_items([], row.get("other_items", [])):
+        label = normalize_space(str(item.get("label", "") or ""))
+        value = normalize_space(str(item.get("value", "") or ""))
+        if label or value:
+            explicit_sources.append(f"{label} {value}".strip())
+    combined = normalize_space("\n".join(part for part in explicit_sources if part))
+    if not combined:
+        return False
+    return bool(re.search(r"(?i)\b(?:open shelving|shelving only|single shelf|double shelf|shelves|shelf)\b", combined))
+
+
 def _yellowwood_cleanup_splashback_text(text: Any, room_key: str) -> str:
     cleaned = normalize_space(str(text or ""))
     if not cleaned:
@@ -7941,6 +7964,8 @@ def _finalize_yellowwood_rooms(
         )
         row["splashback"] = _yellowwood_cleanup_splashback_text(row.get("splashback", ""), str(row.get("room_key", "") or ""))
         row["shelf"] = _merge_text(_string_value(row.get("shelf", "")), overlay.get("shelf", ""))
+        if row.get("shelf") and not _yellowwood_has_explicit_shelf_evidence(row):
+            row["shelf"] = ""
         if normalize_space(str(row.get("original_room_label", "") or "")).upper() == "PANTRY":
             pantry_materials = any(
                 normalize_space(str(row.get(key, "") or ""))
@@ -8459,6 +8484,7 @@ def _apply_room_cleaning_rules(row: dict[str, Any], rule_flags: dict[str, bool])
     row["bench_tops_other"] = _display_rule_text(_merge_text(row.get("bench_tops_other", ""), benchtop_groups["bench_tops_other"]), rule_flags)
     if row["bench_tops_other"] and row["bench_tops_other"] in {row["bench_tops_wall_run"], row["bench_tops_island"]}:
         row["bench_tops_other"] = ""
+    _remove_duplicate_benchtop_other_parts(row)
     if cleaning_rules.rule_enabled(rule_flags, "kitchen_only_split_benchtops") and normalized_room_key != "kitchen":
         folded = " | ".join(part for part in [row.get("bench_tops_other", ""), row.get("bench_tops_wall_run", ""), row.get("bench_tops_island", "")] if part)
         row["bench_tops_other"] = _merge_text(row.get("bench_tops_other", ""), folded)
