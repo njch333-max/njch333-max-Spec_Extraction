@@ -4077,7 +4077,7 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(row["other_items"], [])
         self.assertTrue(parsing_module._yellowwood_should_keep_final_room(row))
 
-    def test_promote_conditional_shelf_field_drops_kickboard_noise_for_kitchen(self) -> None:
+    def test_promote_conditional_shelf_field_keeps_explicit_shelf_material_while_dropping_kickboard_noise(self) -> None:
         row = {
             "room_key": "kitchen",
             "original_room_label": "Kitchen",
@@ -4086,7 +4086,7 @@ class SmokeTest(unittest.TestCase):
             "other_items": [],
         }
         parsing_module._promote_conditional_shelf_field(row)
-        self.assertEqual(row["shelf"], "")
+        self.assertEqual(row["shelf"], "White Melamine")
 
     def test_yellowwood_material_driven_rooms_keep_real_media_and_robe_when_joinery_material_exists(self) -> None:
         media_section = {
