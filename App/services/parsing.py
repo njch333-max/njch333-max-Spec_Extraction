@@ -8112,6 +8112,7 @@ def _extract_explicit_shelf_material_from_text(text: Any) -> str:
             r"\bBASIN(?:\s+INFO)?\b",
             r"\bTAP(?:\s+INFO)?\b",
             r"\bTOE KICK\b",
+            r"\bKICKBOARDS?\b",
             r"\bBULKHEADS?\b",
             r"\bSPLASHBACK\b",
             r"\bBENCH\s*TOPS?\b",
@@ -8142,9 +8143,11 @@ def _is_clean_material_phrase(text: str) -> bool:
         return False
     if len(normalized.split()) > 10:
         return False
+    if re.search(r"(?i)\bx\s*\d+\b|\b\d+\s*x\b", normalized):
+        return False
     if re.search(
         r"(?i)\b(?:handles?|lip pull|sink|basin|tap|toe\s*kick|bulkheads?|splashback|"
-        r"surrounds?|internals?|drawer|cabinet|overhead|base|tall|bench(?:top)?|rail|"
+        r"surrounds?|internals?|drawer|cabinet|overhead|base|tall|bench(?:top)?|rail|kickboards?|"
         r"bed\s*\d+|walk(?:\s+in)?|robe|pantry|powder|ensuite|bathroom|kitchen|laundry|vanity)\b",
         normalized,
     ):

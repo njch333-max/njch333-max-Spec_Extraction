@@ -4077,6 +4077,17 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(row["other_items"], [])
         self.assertTrue(parsing_module._yellowwood_should_keep_final_room(row))
 
+    def test_promote_conditional_shelf_field_drops_kickboard_noise_for_kitchen(self) -> None:
+        row = {
+            "room_key": "kitchen",
+            "original_room_label": "Kitchen",
+            "shelf": "Kickboard Polytec Classic White Matt X4",
+            "evidence_snippet": "Pantry X4 Shelves White Melamine Kickboard Polytec Classic White Matt X4",
+            "other_items": [],
+        }
+        parsing_module._promote_conditional_shelf_field(row)
+        self.assertEqual(row["shelf"], "")
+
     def test_yellowwood_material_driven_rooms_keep_real_media_and_robe_when_joinery_material_exists(self) -> None:
         media_section = {
             "section_key": "media_room",
