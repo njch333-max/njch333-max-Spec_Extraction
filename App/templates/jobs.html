@@ -60,6 +60,7 @@
     <table class="table-cardify">
       <thead>
         <tr>
+          <th>No.</th>
           <th>Job No.</th>
           <th>Builder</th>
           <th>Status</th>
@@ -74,6 +75,7 @@
       <tbody>
         {% for job in jobs %}
         <tr>
+          <td data-label="No.">{{ loop.index }}</td>
           <td data-label="Job No.">{{ job.job_no }}</td>
           <td data-label="Builder">{{ job.builder_name }}</td>
           <td data-label="Status"><span class="status-chip status-{{ job.status }}">{{ job.status }}</span></td>
@@ -91,7 +93,7 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="9" class="empty-cell">{{ "No jobs matched the current search." if job_query else "No jobs created yet." }}</td></tr>
+        <tr><td colspan="10" class="empty-cell">{{ "No jobs matched the current search." if job_query else "No jobs created yet." }}</td></tr>
         {% endfor %}
       </tbody>
     </table>

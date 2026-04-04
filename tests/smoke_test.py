@@ -5378,6 +5378,8 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("Worker / Build", response.text)
         self.assertIn("PID 4242 | build-test", response.text)
         self.assertIn("Duration", response.text)
+        self.assertIn(">No.</th>", response.text)
+        self.assertIn('data-label="No.">1<', response.text)
         self.assertIn("hx-trigger=\"load, every 2s\"", response.text)
 
     def test_run_history_partial_shows_open_result_for_succeeded_spec_run(self) -> None:
@@ -5553,8 +5555,10 @@ class SmokeTest(unittest.TestCase):
         response = client.get("/jobs")
         self.assertEqual(response.status_code, 200)
         self.assertIn("Last Updated", response.text)
+        self.assertIn(">No.</th>", response.text)
         self.assertIn('name="sort" value="created_desc"', response.text)
         self.assertIn('name="sort" value="updated_desc"', response.text)
+        self.assertIn('data-label="No.">1<', response.text)
         self.assertIn('data-label="Rooms">2<', response.text)
         self.assertIn('data-label="Last Updated">', response.text)
         self.assertIn("Delete", response.text)

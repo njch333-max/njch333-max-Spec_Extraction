@@ -22,6 +22,7 @@
     <table class="table-cardify">
       <thead>
         <tr>
+          <th>No.</th>
           <th>ID</th>
           <th>Kind</th>
           <th>Status</th>
@@ -38,6 +39,7 @@
       <tbody>
         {% for run in runs %}
         <tr>
+          <td data-label="No.">{{ loop.index }}</td>
           <td data-label="ID">{{ run.id }}</td>
           <td data-label="Kind">{{ run.kind_label }}</td>
           <td data-label="Status"><span class="status-chip status-{{ run.status }}">{{ run.status_label }}</span></td>
@@ -57,7 +59,7 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="11" class="empty-cell">No runs queued yet.</td></tr>
+        <tr><td colspan="12" class="empty-cell">No runs queued yet.</td></tr>
         {% endfor %}
       </tbody>
     </table>

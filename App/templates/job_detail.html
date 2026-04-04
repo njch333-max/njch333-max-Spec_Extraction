@@ -23,10 +23,11 @@
     <p class="muted">Choose one or more spec files to upload immediately, then click Parse Spec Files to start a worker run.</p>
     <div class="table-wrap">
       <table class="table-cardify">
-        <thead><tr><th>Name</th><th>Uploaded</th><th>Actions</th></tr></thead>
+        <thead><tr><th>No.</th><th>Name</th><th>Uploaded</th><th>Actions</th></tr></thead>
         <tbody>
           {% for file in spec_files %}
           <tr>
+            <td data-label="No.">{{ loop.index }}</td>
             <td data-label="Name">{{ file.original_name }}</td>
             <td data-label="Uploaded">{{ file.uploaded_at }}</td>
             <td data-label="Actions" class="actions">
@@ -38,7 +39,7 @@
             </td>
           </tr>
           {% else %}
-          <tr><td colspan="3" class="empty-cell">No spec files uploaded.</td></tr>
+          <tr><td colspan="4" class="empty-cell">No spec files uploaded.</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -60,10 +61,11 @@
     <p class="muted">Choose drawing PDFs to upload immediately, then click Parse Drawing Files to prepare compare-ready data.</p>
     <div class="table-wrap">
       <table class="table-cardify">
-        <thead><tr><th>Name</th><th>Uploaded</th><th>Actions</th></tr></thead>
+        <thead><tr><th>No.</th><th>Name</th><th>Uploaded</th><th>Actions</th></tr></thead>
         <tbody>
           {% for file in drawing_files %}
           <tr>
+            <td data-label="No.">{{ loop.index }}</td>
             <td data-label="Name">{{ file.original_name }}</td>
             <td data-label="Uploaded">{{ file.uploaded_at }}</td>
             <td data-label="Actions" class="actions">
@@ -75,7 +77,7 @@
             </td>
           </tr>
           {% else %}
-          <tr><td colspan="3" class="empty-cell">No drawing files uploaded.</td></tr>
+          <tr><td colspan="4" class="empty-cell">No drawing files uploaded.</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -126,10 +128,11 @@
     {% endif %}
     <div class="table-wrap">
       <table class="table-cardify">
-        <thead><tr><th>File</th><th>Modified</th><th>Size</th><th>Download</th></tr></thead>
+        <thead><tr><th>No.</th><th>File</th><th>Modified</th><th>Size</th><th>Download</th></tr></thead>
         <tbody>
           {% for file in exports %}
           <tr>
+            <td data-label="No.">{{ loop.index }}</td>
             <td data-label="File">{{ file.name }}</td>
             <td data-label="Modified">{{ file.modified }}</td>
             <td data-label="Size">{{ file.size_bytes }}</td>
@@ -142,7 +145,7 @@
             </td>
           </tr>
           {% else %}
-          <tr><td colspan="4" class="empty-cell">No exports generated yet.</td></tr>
+          <tr><td colspan="5" class="empty-cell">No exports generated yet.</td></tr>
           {% endfor %}
         </tbody>
       </table>
