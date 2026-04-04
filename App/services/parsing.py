@@ -7238,6 +7238,9 @@ def _clear_room_specific_splashback_notes(snapshot: dict[str, Any]) -> None:
         return
     if builder_name == "clarendon" and _looks_like_appliance_noise(splashback_notes):
         others["splashback_notes"] = ""
+        return
+    if re.fullmatch(r"(?i)(?:tile\s+)?refer to .*tiling.*n/?a", splashback_notes):
+        others["splashback_notes"] = ""
 
 
 def _apply_clarendon_room_overlap_corrections(rooms: list[dict[str, Any]]) -> None:
@@ -7578,14 +7581,22 @@ def _yellowwood_normalize_vanity_material_fields(row: dict[str, Any]) -> None:
         return
     bench_other = normalize_space(str(row.get("bench_tops_other", "") or ""))
     if bench_other:
-        match = re.search(r"(?i)\b(?:wall\s+hung\s+vanity|floor\s+mount(?:ed)?\s+vanity)\b", bench_other)
-        if match:
-            benchtop_value = normalize_space(bench_other[: match.start()])
-            vanity_value = _clean_door_colour_value(bench_other[match.end() :])
-            if benchtop_value:
-                row["bench_tops_other"] = benchtop_value
-            if vanity_value:
-                row["door_colours_base"] = _merge_clean_group_text(row.get("door_colours_base", ""), vanity_value, cleaner=_clean_door_colour_value)
+        benchtop_parts: list[str] = []
+        vanity_parts: list[str] = []
+        for part in [normalize_space(part) for part in bench_other.split("|") if normalize_space(part)]:
+            match = re.search(r"(?i)\b(?:wall\s+hung\s+vanity|floor\s+mount(?:ed)?\s+vanity)\b", part)
+            if match:
+                benchtop_value = normalize_space(part[: match.start()])
+                vanity_value = _clean_door_colour_value(part[match.end() :])
+                if benchtop_value:
+                    benchtop_parts.append(benchtop_value)
+                if vanity_value:
+                    vanity_parts.append(vanity_value)
+                continue
+            benchtop_parts.append(part)
+        row["bench_tops_other"] = " | ".join(_unique([part for part in benchtop_parts if part]))
+        for vanity_value in _unique(vanity_parts):
+            row["door_colours_base"] = _merge_clean_group_text(row.get("door_colours_base", ""), vanity_value, cleaner=_clean_door_colour_value)
     toe_kick_values = []
     for value in _coerce_string_list(row.get("toe_kick", [])):
         cleaned = normalize_space(value)

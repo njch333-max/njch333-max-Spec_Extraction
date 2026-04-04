@@ -4101,6 +4101,21 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(row["door_colours_base"], "Polytec Jamaican Walnut Matt (Vertical Grain Direction)")
         self.assertEqual(row["toe_kick"], [])
 
+    def test_yellowwood_normalize_vanity_material_fields_dedupes_split_parts(self) -> None:
+        row = {
+            "room_key": "bathroom_vanity",
+            "original_room_label": "BATHROOM VANITY",
+            "bench_tops_other": (
+                "20mm YDL Classic White Polished | "
+                "20mm YDL Classic White Polished Wall Hung Vanity Polytec Jamaican Walnut Matt (Vertical Grain Direction)"
+            ),
+            "door_colours_base": "",
+            "toe_kick": [],
+        }
+        parsing_module._yellowwood_normalize_vanity_material_fields(row)
+        self.assertEqual(row["bench_tops_other"], "20mm YDL Classic White Polished")
+        self.assertEqual(row["door_colours_base"], "Polytec Jamaican Walnut Matt (Vertical Grain Direction)")
+
     def test_yellowwood_filter_other_items_drops_plumbing_noise_for_pantry_fitout_rooms(self) -> None:
         row = {
             "room_key": "pantry",
@@ -4280,6 +4295,14 @@ class SmokeTest(unittest.TestCase):
             ),
             "",
         )
+
+    def test_clear_room_specific_splashback_notes_drops_generic_tiling_referral_noise(self) -> None:
+        snapshot = {
+            "builder_name": "Yellowwood",
+            "others": {"splashback_notes": "Refer to Tiling section below N/A"},
+        }
+        parsing_module._clear_room_specific_splashback_notes(snapshot)
+        self.assertEqual(snapshot["others"]["splashback_notes"], "")
 
     def test_yellowwood_normalize_kitchen_material_fields_promotes_wall_run_and_fills_overheads(self) -> None:
         row = {
