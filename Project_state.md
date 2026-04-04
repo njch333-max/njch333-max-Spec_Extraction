@@ -48,8 +48,9 @@
   - Yellowwood now uses selective Docling on grouped schedule/table pages while final field ownership remains row-local
   - Yellowwood final room names now prefer concrete joinery/spec titles such as `BED 1 ENSUITE VANITY`, `BATHROOM VANITY`, `BED 1 WALK IN ROBE`, and `BED 2/3/4 ROBE`
   - Yellowwood rooms without joinery/material evidence are dropped, and `robe` or `media` rooms remain only when they contain real material evidence such as `Polytec` or `Laminex`
-  - Yellowwood vanity wet-area cleanup now trims shower-floor-waste and repeated room-heading tails out of vanity accessory text instead of leaving those plumbing tails inside `Accessories`
-  - Clarendon AFC `CARPET & MAIN FLOOR TILE` pages now enrich existing room-master rooms with room-local flooring values instead of leaving those room-specific values blank or stranded in global notes
+  - Yellowwood vanity wet-area cleanup now removes non-joinery wet-area items such as shower, bath, toilet, towel-rail, towel-hook, floor-waste, feature-waste, shower-base/frame, basin-waste, bottle-trap, and in-wall-mixer-only rows from final room output, while keeping vanity `Basin / Basin Mixer` and room-local flooring
+  - Clarendon AFC `CARPET & MAIN FLOOR TILE` pages now enrich existing room-master rooms with strict-PDF room-local flooring values instead of leaving those room-specific values blank or stranded in global notes
+  - Broad AFC area labels such as `WIL/Linen/s Ground Floor` no longer backfill inferred `LAUNDRY` flooring on Clarendon jobs unless the PDF explicitly uses a laundry room label
   - Yellowwood `FLOORING` and `TILING SCHEDULE` pages now act as room-local flooring overlays for retained rooms such as `Kitchen`, robe rooms, and vanity rooms, while contents-page flooring lines are excluded from `others.flooring_notes`
   - Imperial builder parsing now uses page-top `... JOINERY SELECTION SHEET` titles as authoritative section boundaries, keeps continuation pages with the current section, and ignores signature/footer blocks during field extraction
   - Imperial room sections now also stop cleanly when later pages switch into non-joinery headings such as `APPLIANCES` or `SINKWARE & TAPWARE`, so office/joinery cards do not swallow appliance and tapware pages
@@ -152,6 +153,12 @@
 - Improve room-section detection for more builder formats
 - Improve official product URL lookup accuracy, size extraction coverage, and brand coverage
 - Continue tightening Yellowwood handle cleanup and wet-area plumbing merge purity where combined basin/tap/toilet text still leaks across row-local boundaries
+- Complete the active 5-builder core / 10-job PDF-QA matrix:
+  - `Clarendon`: `job 1`, `job 23`, `job 25`
+  - `Yellowwood`: `job 37`
+  - `Imperial`: `job 34`, `job 35`, `job 36`, `job 38`
+  - `Simonds`: `job 19`
+  - `Evoca`: `job 39`
 - Continue checking the latest Clarendon and Yellowwood reruns against source PDF and only mark PDF QA `passed` when the current live snapshot fully matches the source pages
 - Continue validating the new Clarendon and Yellowwood flooring overlays against source PDF so `job 1`, `job 23`, and `job 37` room-level flooring lands on the correct retained rooms
 - Continue tightening noisy field cleanup inside the fixed global conservative profile without reintroducing per-builder configuration

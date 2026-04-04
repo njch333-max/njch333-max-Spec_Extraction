@@ -94,13 +94,15 @@
   - glued headers such as `VanitiesDate`, `LaundryDate`, and `TheatreDate` are normalized back to clean room titles
   - deterministic post-polish prefers `raw_text` over vision-normalized `text`
   - AFC `CARPET & MAIN FLOOR TILE` pages now act as room-local flooring overlays for existing master rooms such as `KITCHEN`, `BUTLERS PANTRY`, `THEATRE ROOM`, and `RUMPUS ROOM`
+  - Clarendon flooring overlay is strict-PDF-only: broad AFC labels such as `WIL/Linen/s Ground Floor` must not be inferred back into `LAUNDRY`
 11. Yellowwood-specific behavior:
   - uses selective Docling for grouped schedule/table pages
   - preserves the more specific spec-title room names such as `BED 1 ENSUITE VANITY` and `BED 1 WALK IN ROBE`
   - retains rooms only when there is joinery/material evidence
   - `robe` and `media` rooms remain only when they contain real material evidence such as `Polytec` or `Laminex`
   - fixture-only wet-area parent rooms are merged into the corresponding vanity room instead of surviving as standalone rooms
-  - vanity-room plumbing cleanup trims shower/floor-waste/basin-waste and repeated heading tails out of accessory text so wet-area enrichment stays room-relevant
+  - vanity-room plumbing cleanup now removes non-joinery wet-area items entirely, including shower, bath, toilet, towel-rail, towel-hook, floor-waste, feature-waste, shower-base/frame, basin-waste, bottle-trap, and in-wall-mixer-only rows
+  - only `Basin`, `Basin Mixer`, room-local flooring, and joinery/material fields are allowed to survive on final Yellowwood vanity room cards
   - non-wet-area `FLOORING` pages and wet-area `TILING SCHEDULE` pages enrich retained room cards as room-local flooring overlays, while contents-page flooring text is excluded from `others.flooring_notes`
 12. For Imperial-only spec runs, apply a title-driven section parser before the generic cleanup stages:
   - use the page-top `... JOINERY SELECTION SHEET` title as the authoritative section start

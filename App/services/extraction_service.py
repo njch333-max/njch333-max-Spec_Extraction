@@ -2809,6 +2809,9 @@ def _infer_layout_row_kind(label: str, page_type: str, line: str = "") -> str:
     def label_has_token(*tokens: str) -> bool:
         return any(re.search(rf"(?<![A-Z0-9]){re.escape(token.upper())}(?![A-Z0-9])", label_upper) for token in tokens)
 
+    if parsing._is_blacklisted_wet_area_label(label_upper):
+        return "metadata"
+
     if page_type == "sinkware_tapware":
         if label_upper.startswith("SINKWARE"):
             return "sink"
@@ -5013,6 +5016,8 @@ def _is_generic_anchor_row(row: dict[str, Any]) -> bool:
     raw_label = _normalize_generic_row_label(str(row.get("row_label", "") or ""))
     label = _generic_anchor_signal(row)
     row_kind = parsing.normalize_space(str(row.get("row_kind", "") or "")).lower().replace(" ", "_")
+    if parsing._is_blacklisted_wet_area_label(raw_label) or parsing._is_blacklisted_wet_area_label(label):
+        return False
     if row_kind in {"sink", "tap", "basin"} and raw_label not in GENERIC_LAYOUT_PROPERTY_MAP:
         return True
     if not label:
@@ -5082,6 +5087,8 @@ def _is_generic_empty_property_row(row: dict[str, Any]) -> bool:
 def _is_generic_layout_noise_row(row: dict[str, Any]) -> bool:
     label = _normalize_generic_row_label(str(row.get("row_label", "") or ""))
     text = _row_fragment_text(row).lower()
+    if parsing._is_blacklisted_wet_area_label(label):
+        return True
     if _is_generic_anchor_row(row):
         return False
     if not text:
@@ -5120,6 +5127,8 @@ def _classify_generic_anchor(row: dict[str, Any], page_type: str = "") -> str:
     raw_label = _normalize_generic_row_label(str(row.get("row_label", "") or ""))
     label = _generic_anchor_signal(row)
     row_kind = parsing.normalize_space(str(row.get("row_kind", "") or "")).lower().replace(" ", "_")
+    if parsing._is_blacklisted_wet_area_label(raw_label) or parsing._is_blacklisted_wet_area_label(label):
+        return "metadata"
     if "hinges & drawer runners" in raw_label:
         return "soft_close"
     if "floor type & kick refacing required" in raw_label or raw_label == "flooring":
@@ -6506,6 +6515,8 @@ def _extract_generic_layout_overlay(section: dict[str, Any], *, documents: list[
         parts = _collect_generic_block_parts(block)
         kind = str(block.get("anchor_kind", "") or "")
         anchor_label = _normalize_generic_row_label(str(block.get("anchor_label", "") or ""))
+        if parsing._is_blacklisted_wet_area_label(anchor_label):
+            continue
         embedded_handle_text = ""
         if any(
             parts.get(key)
@@ -6963,6 +6974,8 @@ def _polish_generic_layout_room(row: dict[str, Any], overlay: dict[str, Any]) ->
         polished["handles"] = [entry for entry in polished.get("handles", []) if not _looks_like_placeholder_entry(entry)]
     if overlay.get("has_accessories_block"):
         polished["accessories"] = [entry for entry in polished.get("accessories", []) if not _looks_like_placeholder_entry(entry)]
+    polished["accessories"] = parsing._filter_blacklisted_room_accessories(polished.get("accessories", []))
+    polished["other_items"] = parsing._filter_blacklisted_room_other_items(polished.get("other_items", []))
     for field_name in (
         "bench_tops_wall_run",
         "bench_tops_island",

@@ -100,10 +100,12 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Clarendon post-polish should prefer clean schedule-page text for benchtops, door colours, toe kicks, bulkheads, handles, sink/basin/tap fixtures, and soft-close states instead of falling back to OCR-noisy field fragments when the schedule pages already provide a cleaner source.
 - Clarendon polish and address extraction must prefer `raw_text` from the source PDF whenever it is present; vision-normalized `text` is only a fallback and must not erase schedule-note fields such as `KICKBOARDS`, `BULKHEAD SHADOWLINE`, `HANDLE 1/2`, `DOOR HINGES`, or `DRAWER RUNNERS`.
 - Clarendon address extraction must use page-header stop markers so `Site Address:` lines do not absorb nearby joinery body text such as `BENCHTOP`, `DOOR COLOUR`, `HANDLE`, or `THERMOLAMINATE NOTES`.
-- Clarendon AFC pages such as `CARPET & MAIN FLOOR TILE` must be parsed as room-local flooring overlays. Their area labels should enrich existing master rooms like `KITCHEN`, `BUTLERS PANTRY`, `THEATRE ROOM`, and `RUMPUS ROOM` without creating synthetic AFC-only rooms.
+- Clarendon AFC pages such as `CARPET & MAIN FLOOR TILE` must be parsed as room-local flooring overlays. Their area labels should enrich only clearly matching master rooms like `KITCHEN`, `BUTLERS PANTRY`, `THEATRE ROOM`, and `RUMPUS ROOM` without creating synthetic AFC-only rooms or inferred `LAUNDRY` flooring from broad labels such as `WIL/Linen/s Ground Floor`.
 - Appliance parsing must prefer explicit `model_no` values from labeled rows or table columns and must not use brand-only words or generic notes as model numbers.
 - Appliance placeholders such as `As Above`, `By Client`, `N/A - By others`, or `N/A CLIENT TO CHECK` should keep their source wording, but placeholder-only rows should be deduplicated away when the same source file already contains a concrete model for that appliance type.
 - Sink, basin, and tap selections must be captured as room-level fixture fields instead of appliance rows.
+- Wet-area plumbing items that do not affect cabinetry or benchtop depth must not appear in final room fields. `Shower Mixer`, `Shower Screen`, `Shower Base`, `Shower Frame`, `Towel Rail`, `Toilet Roll Holder`, `Toilet Suite`, `Toilet`, `Floor Waste`, `Feature Waste`, `Bath`, `Bath Mixer`, `Bath Spout`, `Bath Waste`, `Shower on Rail`, `Shower Rose`, `Basin Waste`, `Bottle Trap`, and similar wet-area hooks or in-wall mixer-only rows are blacklisted from final room output.
+- The only wet-area fixture exceptions that may stay in final room output are `Sink`, `Basin`, `Sink Mixer`, and `Basin Mixer`, because they affect benchtop or stone cutout/depth decisions.
 - Door colour information should expose room-level splits for `Overheads`, `Base`, `Island`, and `Bar Back` whenever the source text makes those categories explicit.
 - Door colour information should also expose a room-level `Tall` split when the source explicitly labels tall cabinets, tall doors, tall panels, or combined `Upper Cabinetry Colour + Tall Cabinets` rows.
 - Grouped rooms such as `Vanities` must treat door-colour splits as explicit-marker-driven: `Overheads` may only appear when the authoritative room section explicitly labels overhead cabinetry; otherwise grouped door colours default to `Base`.
@@ -115,7 +117,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - For Yellowwood, final room names must preserve the more specific spec-title form, such as `BED 1 ENSUITE VANITY`, `BATHROOM VANITY`, `BED 1 WALK IN ROBE`, and `BED 2/3/4 ROBE`.
 - For Yellowwood, rooms are kept only when they have real joinery/material evidence. Pure plumbing, tiling, accessory, or flooring-only rooms must be dropped, while `robe` or `media` rooms may stay only when they contain material evidence such as `Polytec` or `Laminex`.
 - For Yellowwood, wet-area plumbing pages may enrich the corresponding vanity room, but fixture-only parent rooms such as plain `BED 1 ENSUITE`, `BATHROOM`, `WC`, or `LAUNDRY` must not survive as standalone rooms when they have no joinery/material evidence.
-- For Yellowwood vanity rooms, wet-area plumbing enrichment must stay room-relevant: towel rails and toilet-roll holders may remain as accessories, but shower-floor-waste, basin-waste, shower, bath, or repeated room-heading tails must be trimmed out of vanity accessory text.
+- For Yellowwood vanity rooms, wet-area plumbing enrichment must stay room-relevant: only `Basin`, `Basin Mixer`, `Flooring`, and joinery/material fields may survive. Blacklisted wet-area items such as towel rails, toilet-roll holders, toilets, shower items, bath items, floor waste, basin waste, and bottle traps must be removed from final room output.
 - For Yellowwood, non-wet-area `FLOORING` pages and wet-area `TILING SCHEDULE` pages must enrich the retained room cards as room-local overlays. Room flooring should land on `Kitchen`, robe rooms, and vanity rooms when the schedule area labels match, and contents-page flooring lines must never populate `others.flooring_notes`.
 - Imperial-style joinery selection sheets must use page-top section titles as authoritative section boundaries, keep continuation pages with the current section until the next section title, and stop extraction at `CLIENT NAME / SIGNATURE / SIGNED DATE` footer blocks.
 - Imperial section parsing must treat obvious in-section row labels such as `ISLAND CABINETRY COLOUR`, `GPO'S`, `BIN`, `HAMPER`, `HANGING RAIL`, `MIRRORED SHAVING CABINET`, and `EXTRA TOP IN ...` as row boundaries even when they are not final business fields, so preceding benchtop, floating-shelf, handle, and cabinetry rows do not continue through them.
@@ -169,6 +171,12 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
   - marking a snapshot `failed`,
   - recording `checked_by`, `checked_at`, `notes`, and per-field `pdf_page_ref` / `qa_note`.
 - Parser-accuracy changes are only complete after the affected live rerun passes PDF QA against the source PDF.
+- The active cross-builder parser regression matrix currently includes:
+  - `Clarendon`: `job 1`, `job 23`, `job 25`
+  - `Yellowwood`: `job 37`
+  - `Imperial`: `job 34`, `job 35`, `job 36`, `job 38`
+  - `Simonds`: `job 19`
+  - `Evoca`: `job 39`
 
 ### 4.6 Export
 - Export reviewed data to:

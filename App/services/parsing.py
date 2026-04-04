@@ -222,6 +222,32 @@ ROOM_PREFIX_SPLIT_EXCLUDED_TAILS: tuple[str, ...] = (
     "door colours",
 )
 
+WET_AREA_PLUMBING_BLACKLIST_PATTERNS: tuple[str, ...] = (
+    r"\bshower mixer\b",
+    r"\bshower screen\b",
+    r"\bshower floor waste\b",
+    r"\bshower base\b",
+    r"\bshower frame\b",
+    r"\bshower on rail\b",
+    r"\bshower rail(?:\s*/\s*rose)?\b",
+    r"\bshower rose\b",
+    r"\btowel rail\b",
+    r"\bhand towel rail\b",
+    r"\bbath towel hooks?\b",
+    r"\bhand towel hooks?\b",
+    r"\btowel hooks?\b",
+    r"\brobe hooks?\b",
+    r"\btoilet roll holder\b",
+    r"\btoilet suite\b",
+    r"\btoilet\b",
+    r"\bfloor waste\b",
+    r"\bfeature waste\b",
+    r"\bin wall mixer\b",
+    r"\bbath(?:\s+mixer|\s+spout|\s+waste)?\b",
+    r"\bbasin waste\b",
+    r"\bbottle trap\b",
+)
+
 APPLIANCE_TYPES = ["sink", "cooktop", "oven", "rangehood", "dishwasher", "microwave", "fridge", "refrigerator"]
 
 STRICT_APPLIANCE_FIELD_PREFIXES = {
@@ -2397,6 +2423,42 @@ def _is_imperial_builder(builder_name: str) -> bool:
 
 def _is_yellowwood_builder(builder_name: str) -> bool:
     return "yellowwood" in normalize_space(builder_name).lower()
+
+
+def _is_blacklisted_wet_area_label(text: Any) -> bool:
+    normalized = normalize_space(str(text or "")).lower()
+    if not normalized:
+        return False
+    normalized = re.sub(r"[_|]+", " ", normalized)
+    normalized = re.sub(r"[^a-z0-9]+", " ", normalized).strip()
+    if not normalized:
+        return False
+    return any(re.search(pattern, normalized, re.IGNORECASE) for pattern in WET_AREA_PLUMBING_BLACKLIST_PATTERNS)
+
+
+def _filter_blacklisted_room_accessories(values: Any) -> list[str]:
+    filtered: list[str] = []
+    for value in _coerce_string_list(values):
+        cleaned = normalize_space(value)
+        if not cleaned or _is_blacklisted_wet_area_label(cleaned):
+            continue
+        filtered.append(cleaned)
+    return filtered
+
+
+def _filter_blacklisted_room_other_items(items: Any) -> list[dict[str, str]]:
+    filtered: list[dict[str, str]] = []
+    for item in _merge_other_items([], items):
+        label = normalize_space(str(item.get("label", "") or ""))
+        value = normalize_space(str(item.get("value", "") or ""))
+        if not label or not value:
+            continue
+        if re.fullmatch(r"(?i)(?:not applicable|not included|n/?a|na)", value):
+            continue
+        if _is_blacklisted_wet_area_label(label) or _is_blacklisted_wet_area_label(value) or _is_blacklisted_wet_area_label(f"{label} {value}"):
+            continue
+        filtered.append({"label": label, "value": value})
+    return filtered
 
 
 def _select_imperial_room_master_document(documents: list[dict[str, object]]) -> tuple[dict[str, object] | None, str]:
@@ -6672,8 +6734,6 @@ def _clarendon_flooring_targets(area_label: str, overlays: dict[str, dict[str, A
         if "walk_in_pantry" in overlays:
             targets.append("walk_in_pantry")
         return _unique(targets)
-    if "groundfloor" in collapsed and any(token in collapsed for token in ("wil", "linen")):
-        return ["laundry"]
     if re.search(r"\btheatre\b", normalized):
         return [source_room_key("THEATRE ROOM")]
     if re.search(r"\brumpus\b", normalized):
@@ -6903,112 +6963,11 @@ def _collect_yellowwood_fixture_overlays(
     overlays: dict[str, dict[str, Any]],
     documents: list[dict[str, object]],
 ) -> None:
-    area_targets: tuple[tuple[str, str], ...] = (
-        (r"BATHROOM", source_room_key("BATHROOM VANITY")),
-        (r"BED\s*1\s+ENSUITE", source_room_key("BED 1 ENSUITE VANITY")),
-    )
-    area_stops = (
-        r"BED\s*1\s+ENSUITE",
-        r"BATHROOM",
-        r"WC",
-        r"LAUNDRY",
-        r"KITCHEN",
-        r"APPLIANCES",
-    )
-    area_headers = (
-        r"BED\s*1\s+ENSUITE",
-        r"BATHROOM",
-        r"WC",
-        r"LAUNDRY",
-        r"KITCHEN",
-        r"APPLIANCES",
-    )
-    bath_stops = (
-        r"Bath Waste",
-        r"Bath Mixer",
-        r"Bath Spout",
-        r"Toilet Roll Holder",
-        r"Toilet",
-        r"Sink Mixer",
-        r"Pull-?Out Mixer",
-        r"Basin Waste",
-        r"Basin",
-        r"Shower on Rail",
-        r"Shower Mixer",
-        r"Shower Floor Waste",
-    )
-    bath_mixer_stops = (
-        r"Bath Spout",
-        r"Bath Waste",
-        r"Toilet Roll Holder",
-        r"Toilet",
-        r"Sink Mixer",
-        r"Pull-?Out Mixer",
-        r"Basin Waste",
-        r"Basin",
-        r"Shower on Rail",
-        r"Shower Mixer",
-        r"Shower Floor Waste",
-    )
-    bath_spout_stops = (
-        r"Bath Waste",
-        r"Toilet Roll Holder",
-        r"Toilet",
-        r"Sink Mixer",
-        r"Pull-?Out Mixer",
-        r"Basin Waste",
-        r"Basin",
-        r"Shower on Rail",
-        r"Shower Mixer",
-        r"Shower Floor Waste",
-    )
-    bath_waste_stops = (
-        r"Bath Mixer",
-        r"Bath Spout",
-        r"Toilet Roll Holder",
-        r"Toilet",
-        r"Sink Mixer",
-        r"Pull-?Out Mixer",
-        r"Basin Waste",
-        r"Basin",
-        r"Shower on Rail",
-        r"Shower Mixer",
-        r"Shower Floor Waste",
-    )
-    for document in documents:
-        combined_lines = _build_yellowwood_overlay_lines(
-            document,
-            page_filter=lambda upper: (
-                "BATHWARE & FIXTURES" in upper
-                or "SINK MIXER" in upper
-                or "BASIN WASTE" in upper
-                or "TOILET ROLL HOLDER" in upper
-                or "SHOWER FLOOR WASTE" in upper
-                or "BATH MIXER" in upper
-                or "BATH SPOUT" in upper
-                or "BATH WASTE" in upper
-            ),
-        )
-        if not combined_lines:
-            continue
-        for area_pattern, room_key in area_targets:
-            block = _extract_area_block_from_lines(combined_lines, area_pattern, area_headers)
-            if not block:
-                continue
-            overlay = overlays.setdefault(room_key, _blank_overlay())
-            bath_value = _extract_named_value_from_block(block, r"Bath", bath_stops)
-            bath_mixer = _extract_named_value_from_block(block, r"Bath Mixer", bath_mixer_stops)
-            bath_spout = _extract_named_value_from_block(block, r"Bath Spout", bath_spout_stops)
-            bath_waste = _extract_named_value_from_block(block, r"Bath Waste", bath_waste_stops)
-            overlay["other_items"] = _merge_other_items(
-                overlay.get("other_items", []),
-                [
-                    {"label": "BATH", "value": bath_value},
-                    {"label": "BATH MIXER", "value": bath_mixer},
-                    {"label": "BATH SPOUT", "value": bath_spout},
-                    {"label": "BATH WASTE", "value": bath_waste},
-                ],
-            )
+    # Yellowwood bathware/plumbing rows no longer enrich room cards with
+    # bath/shower/toilet-style fixtures. Only basin/tap data that survives the
+    # shared row-local pipeline is kept, so this legacy bath-family overlay path
+    # intentionally does nothing.
+    return
 
 
 def _clear_room_specific_flooring_notes(snapshot: dict[str, Any]) -> None:
@@ -7023,6 +6982,12 @@ def _clear_room_specific_flooring_notes(snapshot: dict[str, Any]) -> None:
         _yellowwood_looks_like_contents_noise(flooring_notes)
         or re.search(r"(?i)\bother than tiling to wet areas\b", flooring_notes)
     ):
+        others["flooring_notes"] = ""
+        return
+    if re.search(r"(?i)\brequires expansion joints\b", flooring_notes):
+        others["flooring_notes"] = ""
+        return
+    if re.search(r"(?i)\bsupplier\s+beaumont\s+tiles\s+tile\s+range\s+floor\s+tile\s+type\b", flooring_notes):
         others["flooring_notes"] = ""
         return
     if builder_name == "clarendon" and re.search(r"(?i)\bcarpet\s*&\s*main\s*floor\s*tile\b", flooring_notes):
@@ -7260,10 +7225,18 @@ def _yellowwood_wet_area_tail_markers() -> tuple[str, ...]:
     return (
         r"\bShower Floor Waste\b",
         r"\bShower on Rail\b",
+        r"\bShower Screen\b",
         r"\bShower Mixer\b",
+        r"\bShower Rose\b",
         r"\bBath(?: Mixer| Spout| Waste)?\b",
+        r"\bTowel Rail\b",
+        r"\bHand Towel Rail\b",
+        r"\bToilet Roll Holder\b",
+        r"\bToilet Suite\b",
+        r"\bToilet\b",
         r"\bSink Mixer\b",
         r"\bBasin(?: Waste)?\b",
+        r"\bBottle Trap\b",
         r"\bBED\s*\d+\s+ENSUITE\b",
         r"\bBATHROOM\b",
     )
@@ -7291,10 +7264,10 @@ def _yellowwood_filter_accessories(row: dict[str, Any]) -> list[str]:
         if is_vanity_room and cleaned:
             cleaned = _trim_fixture_text_at_markers(cleaned, _yellowwood_wet_area_tail_markers())
         lowered = cleaned.lower()
-        if not cleaned or any(lowered.startswith(prefix) for prefix in drop_prefixes):
+        if not cleaned or any(lowered.startswith(prefix) for prefix in drop_prefixes) or _is_blacklisted_wet_area_label(cleaned):
             continue
         filtered.append(cleaned)
-    return filtered
+    return _filter_blacklisted_room_accessories(filtered)
 
 
 def _yellowwood_filter_other_items(row: dict[str, Any]) -> list[dict[str, str]]:
@@ -7308,20 +7281,25 @@ def _yellowwood_filter_other_items(row: dict[str, Any]) -> list[dict[str, str]]:
     for item in _merge_other_items([], row.get("other_items", [])):
         label = normalize_space(str(item.get("label", "") or ""))
         value = normalize_space(str(item.get("value", "") or ""))
-        if is_vanity_room and value and label.lower() not in {"bath", "bath mixer", "bath spout", "bath waste"}:
+        if is_vanity_room and value:
             value = _trim_fixture_text_at_markers(value, _yellowwood_wet_area_tail_markers())
         if not label or not value:
             continue
         if tap_present and label.lower() in {"mixer", "pull-out mixer", "sink mixer", "basin mixer"}:
             continue
+        if _is_blacklisted_wet_area_label(label) or _is_blacklisted_wet_area_label(value) or _is_blacklisted_wet_area_label(f"{label} {value}"):
+            continue
         filtered.append({"label": label, "value": value})
-    return filtered
+    return _filter_blacklisted_room_other_items(filtered)
 
 
 def apply_snapshot_cleaning_rules(snapshot: dict[str, Any], rule_flags: Any = None) -> dict[str, Any]:
     flags = cleaning_rules.normalize_rule_flags(rule_flags)
     cleaned = dict(snapshot)
     cleaned["rooms"] = [_apply_room_cleaning_rules(dict(row), flags) for row in snapshot.get("rooms", []) if isinstance(row, dict)]
+    for row in cleaned["rooms"]:
+        row["accessories"] = _filter_blacklisted_room_accessories(row.get("accessories", []))
+        row["other_items"] = _filter_blacklisted_room_other_items(row.get("other_items", []))
     if _is_yellowwood_builder(str(cleaned.get("builder_name", ""))):
         for row in cleaned["rooms"]:
             row["accessories"] = _yellowwood_filter_accessories(row)
@@ -8785,69 +8763,63 @@ def _clean_room_fixture_text(value: Any, kind: str) -> str:
     text = _clean_fixture_text(value)
     if not text:
         return ""
+    basin_bath_combo = bool(re.search(r"(?i)\b(?:wall\s+)?basin\s*/\s*bath mixer\b", text))
+    wet_area_tail_markers = (
+        r"\bBasin Waste\b",
+        r"\bSink Waste\b",
+        r"\bWaste\b",
+        r"\bBottle Trap\b",
+        r"\bToilet Roll Holder\b",
+        r"\bToilet Suite\b",
+        r"\bToilet\b",
+        r"\bFloor Waste\b",
+        r"\bFeature Waste\b",
+        r"\bHand Towel Rail\b",
+        r"\bTowel Rail\b",
+        r"\bHand Towel Hooks?\b",
+        r"\bBath Towel Hooks?\b",
+        r"\bTowel Hooks?\b",
+        r"\bRobe Hooks?\b",
+        r"\bShower Screen\b",
+        r"\bShower Base\b",
+        r"\bShower Frame\b",
+        r"\bShower on Rail\b",
+        r"\bShower Rose\b",
+        r"\bShower\b",
+        r"\bSemi[- ]Frameless\b",
+        r"\bFrameless\b",
+        r"\bGlazing\b",
+        r"\bHandle\b",
+        r"\bPop-?up\b",
+        r"\bMirror\b",
+    )
     if kind == "sink":
         if re.match(r"(?i)^(?:sink mixer|pull-?out mixer|basin mixer|mixer)\b", text):
             return ""
-        text = _trim_fixture_text_at_markers(
-            text,
-            (
-                r"\bBasin Waste\b",
-                r"\bSink Waste\b",
-                r"\bWaste\b",
-                r"\bBottle Trap\b",
-                r"\bToilet Roll Holder\b",
-                r"\bToilet Suite\b",
-                r"\bToilet\b",
-                r"\bFloor Waste\b",
-                r"\bHand Towel Rail\b",
-                r"\bTowel Rail\b",
-                r"\bRobe Hook\b",
-                r"\bShower\b",
-                r"\bBath\b",
-                r"\bMirror\b",
-            ),
-        )
+        text = _trim_fixture_text_at_markers(text, wet_area_tail_markers + (r"\bBath\b",))
     elif kind == "basin":
         if re.match(r"(?i)^(?:waste\b|pop up waste\b|bottle trap\b|mixer\b|sink mixer\b|pull-?out mixer\b|tap\b)", text):
             return ""
-        text = _trim_fixture_text_at_markers(
-            text,
-            (
-                r"\bBasin Waste\b",
-                r"\bSink Waste\b",
-                r"\bWaste\b",
-                r"\bBottle Trap\b",
-                r"\bToilet Roll Holder\b",
-                r"\bToilet Suite\b",
-                r"\bToilet\b",
-                r"\bFloor Waste\b",
-                r"\bHand Towel Rail\b",
-                r"\bTowel Rail\b",
-                r"\bRobe Hook\b",
-                r"\bShower\b",
-                r"\bBath\b",
-                r"\bMirror\b",
-            ),
-        )
+        text = _trim_fixture_text_at_markers(text, wet_area_tail_markers + (r"\bBath\b",))
     elif kind == "tap":
-        if re.match(r"(?i)^(?:basin waste\b|bottle trap\b|toilet(?: roll holder)?\b|floor waste\b|mirror\b)", text):
+        if re.match(r"(?i)^(?:basin waste\b|bottle trap\b|toilet(?: roll holder)?\b|floor waste\b|mirror\b|shower(?: mixer| screen| floor waste| on rail| rose)?\b|bath(?: mixer| spout| waste)?\b|bath\b|towel rail\b|hand towel rail\b)", text):
             return ""
+        basin_mixer_match = re.search(r"(?i)\b(?:tall\s+)?basin(?:\s*/\s*bath)?\s+mixer\b.*", text)
+        if basin_mixer_match:
+            prefix = normalize_space(text[: basin_mixer_match.start()])
+            if prefix and re.search(r"(?i)\b(?:in-wall mixer|shower mixer|bath mixer|bath spout|bath waste)\b", prefix):
+                cut_start = text.rfind(" - ", 0, basin_mixer_match.start())
+                if cut_start != -1:
+                    text = normalize_space(text[cut_start + 3 :])
+                else:
+                    text = normalize_space(text[basin_mixer_match.start() :])
+                basin_bath_combo = bool(re.search(r"(?i)\b(?:wall\s+)?basin\s*/\s*bath mixer\b", text))
+        tap_markers: list[str] = list(wet_area_tail_markers)
+        if not basin_bath_combo:
+            tap_markers.append(r"\bBath\b")
         text = _trim_fixture_text_at_markers(
             text,
-            (
-                r"\bBasin Waste\b",
-                r"\bSink Waste\b",
-                r"\bWaste\b",
-                r"\bBottle Trap\b",
-                r"\bToilet Roll Holder\b",
-                r"\bToilet Suite\b",
-                r"\bToilet\b",
-                r"\bFloor Waste\b",
-                r"\bHand Towel Rail\b",
-                r"\bTowel Rail\b",
-                r"\bRobe Hook\b",
-                r"\bMirror\b",
-            ),
+            tuple(tap_markers),
         )
     return text.strip(" -;,")
 

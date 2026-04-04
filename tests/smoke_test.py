@@ -2167,6 +2167,15 @@ class SmokeTest(unittest.TestCase):
             )
         )
 
+    def test_infer_layout_row_kind_blacklists_wet_area_plumbing_rows_but_keeps_countertop_fixtures(self) -> None:
+        self.assertEqual(extraction_service._infer_layout_row_kind("Shower Mixer", "sinkware_tapware"), "metadata")
+        self.assertEqual(extraction_service._infer_layout_row_kind("Bath", "sinkware_tapware"), "metadata")
+        self.assertEqual(extraction_service._infer_layout_row_kind("Towel Rail", "sinkware_tapware"), "metadata")
+        self.assertEqual(extraction_service._infer_layout_row_kind("Shower Base", "sinkware_tapware"), "metadata")
+        self.assertEqual(extraction_service._infer_layout_row_kind("Feature Waste", "sinkware_tapware"), "metadata")
+        self.assertEqual(extraction_service._infer_layout_row_kind("Basin", "sinkware_tapware"), "basin")
+        self.assertEqual(extraction_service._infer_layout_row_kind("Sink Mixer", "sinkware_tapware"), "tap")
+
     def test_build_spec_snapshot_uses_docling_without_heavy_vision_by_default_for_imperial(self) -> None:
         documents = [
             {
@@ -4154,10 +4163,7 @@ class SmokeTest(unittest.TestCase):
         }
         cleaned = parsing_module.apply_snapshot_cleaning_rules(snapshot)
         room = cleaned["rooms"][0]
-        self.assertEqual(
-            room["other_items"],
-            [{"label": "Accessories 1", "value": "Towel Rail - Spin Double Towel Rail Chrome 600mm Highgrove"}],
-        )
+        self.assertEqual(room["other_items"], [])
 
     def test_apply_snapshot_cleaning_rules_trims_yellowwood_vanity_accessory_tails(self) -> None:
         snapshot = {
@@ -4188,7 +4194,7 @@ class SmokeTest(unittest.TestCase):
         }
         cleaned = parsing_module.apply_snapshot_cleaning_rules(snapshot)
         room = cleaned["rooms"][0]
-        self.assertEqual(room["accessories"], ["Towel Rail - Spin Double Towel Rail Chrome 600mm Highgrove"])
+        self.assertEqual(room["accessories"], [])
 
     def test_apply_snapshot_cleaning_rules_trims_generic_yellowwood_fixture_waste_and_accessory_tails(self) -> None:
         snapshot = {
@@ -4338,8 +4344,20 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(rooms["theatre"]["flooring"], "CARPET")
         self.assertEqual(rooms["rumpus_room"]["flooring"], "CARPET")
         self.assertEqual(rooms["rumpus_desk"]["flooring"], "")
-        self.assertEqual(rooms["laundry"]["flooring"], "TILED")
+        self.assertEqual(rooms["laundry"]["flooring"], "")
         self.assertEqual(enriched["others"]["flooring_notes"], "")
+
+    def test_clear_room_specific_flooring_notes_drops_disclaimer_and_global_tile_range_noise(self) -> None:
+        disclaimer_snapshot = {"builder_name": "Simonds", "others": {"flooring_notes": "requires expansion joints for large open areas. The"}}
+        parsing_module._clear_room_specific_flooring_notes(disclaimer_snapshot)
+        self.assertEqual(disclaimer_snapshot["others"]["flooring_notes"], "")
+
+        evoca_snapshot = {
+            "builder_name": "Evoca",
+            "others": {"flooring_notes": "Supplier Beaumont Tiles Tile Range Floor Tile Type Standard Floor Tile Size 300mm x 300mm"},
+        }
+        parsing_module._clear_room_specific_flooring_notes(evoca_snapshot)
+        self.assertEqual(evoca_snapshot["others"]["flooring_notes"], "")
 
     def test_enrich_snapshot_rooms_moves_clarendon_rumpus_desk_tall_out_of_rumpus_room(self) -> None:
         snapshot = {
@@ -4700,15 +4718,7 @@ class SmokeTest(unittest.TestCase):
         ]
         enriched = parsing_module.enrich_snapshot_rooms(snapshot, documents)
         rooms = {row["room_key"]: row for row in enriched["rooms"]}
-        bath_items = {item["label"]: item["value"] for item in rooms["bathroom"]["other_items"]}
-        self.assertIn("BATH", bath_items)
-        self.assertIn("Eden Freestanding Back to Wall Bath", bath_items["BATH"])
-        self.assertIn("BATH MIXER", bath_items)
-        self.assertIn("Spin Mixer Set Chrome", bath_items["BATH MIXER"])
-        self.assertIn("BATH SPOUT", bath_items)
-        self.assertIn("Bath Spout 220mm Chrome", bath_items["BATH SPOUT"])
-        self.assertIn("BATH WASTE", bath_items)
-        self.assertIn("Turn Down waste Without Overflow", bath_items["BATH WASTE"])
+        self.assertEqual(rooms["bathroom"]["other_items"], [])
 
     def test_enrich_snapshot_rooms_moves_clarendon_laundry_accessories_out_of_vanities(self) -> None:
         snapshot = {
@@ -8243,18 +8253,8 @@ class SmokeTest(unittest.TestCase):
             "accessories": ["Towel Rail - Spin Double Towel Rail Chrome 600mm Highgrove"],
         }
         polished = extraction_service._polish_generic_layout_room(row, overlay)
-        other_labels = {item["label"] for item in polished["other_items"]}
-        self.assertEqual(
-            other_labels,
-            {"BATH", "BATH MIXER", "BATH SPOUT", "BATH WASTE", "Shower Mixer"},
-        )
-        self.assertEqual(
-            polished["accessories"],
-            [
-                "Toilet Roll Holder - Spin Toilet Roll Holder Chrome Highgrove",
-                "Towel Rail - Spin Double Towel Rail Chrome 600mm Highgrove",
-            ],
-        )
+        self.assertEqual(polished["other_items"], [])
+        self.assertEqual(polished["accessories"], [])
 
     def test_shared_generic_polish_clears_noisy_fixture_fields_when_layout_blocks_exist(self) -> None:
         row = {
@@ -9073,6 +9073,45 @@ class SmokeTest(unittest.TestCase):
             "Alder - Samm - Wall Basin/Bath Mixer Set Backplate - 220mm - Matt Black",
         )
 
+    def test_clean_room_fixture_text_preserves_wall_basin_bath_mixer_set(self) -> None:
+        self.assertEqual(
+            parsing_module._clean_room_fixture_text(
+                "Alder - Samm - Wall Basin/Bath Mixer Set Backplate - 220mm - Matt Black",
+                "tap",
+            ),
+            "Alder - Samm - Wall Basin/Bath Mixer Set Backplate - 220mm - Matt Black",
+        )
+
+    def test_clean_room_fixture_text_prefers_basin_mixer_over_blacklisted_in_wall_mixer_prefix(self) -> None:
+        self.assertEqual(
+            parsing_module._clean_room_fixture_text(
+                "Spin Gun Metal In-wall Mixer (SP141-GM) - Spin Gun Metal Tall Basin Mixer (SP110-GM) - Centre of Basin",
+                "tap",
+            ),
+            "Spin Gun Metal Tall Basin Mixer (SP110-GM) - Centre of Basin",
+        )
+
+    def test_clean_room_fixture_text_strips_shower_screen_and_pop_up_tail_from_basin_mixer(self) -> None:
+        self.assertEqual(
+            parsing_module._clean_room_fixture_text(
+                "Alder - Samm - Wall Basin/Bath Mixer Set Backplate - 220mm - Semi Frameless InlineFrameBlackHandleBlackGlazingClear - Pop-up",
+                "tap",
+            ),
+            "Alder - Samm - Wall Basin/Bath Mixer Set Backplate - 220mm",
+        )
+
+    def test_filter_blacklisted_room_other_items_drops_placeholder_and_shower_items(self) -> None:
+        self.assertEqual(
+            parsing_module._filter_blacklisted_room_other_items(
+                [
+                    {"label": "Drawers", "value": "Not Applicable"},
+                    {"label": "Shower Base", "value": "Semi Frameless Inline"},
+                    {"label": "Drawers", "value": "1x Set of 4 Drawers"},
+                ]
+            ),
+            [{"label": "Drawers", "value": "1x Set of 4 Drawers"}],
+        )
+
     def test_clean_fixture_text_strips_leading_tap_prefix(self) -> None:
         self.assertEqual(
             parsing_module._clean_fixture_text("Tap Franke Eos Neo pull out tap copper TA9601CP"),
@@ -9171,8 +9210,8 @@ class SmokeTest(unittest.TestCase):
         blocks = extraction_service._build_generic_layout_blocks(rows, page_type="sinkware_tapware")
         labels = [block["anchor_label"] for block in blocks]
         self.assertIn("Basin Mixer", labels)
-        self.assertIn("Shower Rail / Rose", labels)
-        self.assertIn("Shower Screen", labels)
+        self.assertNotIn("Shower Rail / Rose", labels)
+        self.assertNotIn("Shower Screen", labels)
 
     def test_generic_sinkware_overlay_keeps_basin_mixer_separate_from_shower_rows(self) -> None:
         section = {
@@ -9195,9 +9234,7 @@ class SmokeTest(unittest.TestCase):
         overlay = extraction_service._extract_generic_layout_overlay(section)
         self.assertIn("Spin Gun Metal Tall Basin Mixer", overlay["tap_info"])
         self.assertNotIn("Omega Integrated Gun Metal Shower System", overlay["tap_info"])
-        other_labels = {item.get("label") for item in overlay["other_items"]}
-        self.assertIn("Shower Rail / Rose", other_labels)
-        self.assertIn("Shower Screen", other_labels)
+        self.assertEqual(overlay["other_items"], [])
 
     def test_generic_sinkware_overlay_keeps_cabinetry_rows_from_same_room(self) -> None:
         section = {

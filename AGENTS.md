@@ -46,14 +46,15 @@ If a change affects user-visible behavior, architecture, storage, deployment, wo
     - default automatic `Heavy Vision`: off
     - default automatic `AI merge`: off
 14. Clarendon room names must come only from the `Drawings and Colours` room-master file when that file exists. AFC/supplement files may enrich existing rooms only and may not create new room names.
-15. Clarendon AFC flooring pages such as `CARPET & MAIN FLOOR TILE` must enrich existing room-master rooms only. Room-specific flooring should land on the relevant room cards, not in `others.flooring_notes`.
+15. Clarendon AFC flooring pages such as `CARPET & MAIN FLOOR TILE` must enrich existing room-master rooms only. Room-specific flooring should land on the relevant room cards, not in `others.flooring_notes`, and broad AFC labels such as `WIL/Linen/s Ground Floor` must not be inferred back into `LAUNDRY`.
 16. Yellowwood room names must prefer the concrete joinery/spec title, and rooms without joinery/material evidence must be dropped. `robe` and `media` rooms stay only when they contain real material evidence such as `Polytec` or `Laminex`.
 17. Yellowwood flooring and tiling schedule pages must enrich retained rooms such as `Kitchen`, robe rooms, and vanity rooms without creating new plumbing-only rooms; contents-page flooring text must never populate `others.flooring_notes`.
 18. Keep `colour/material` values and appliance placeholders close to source wording with light cleanup only. Placeholder appliance rows such as `As Above`, `By Client`, or `N/A CLIENT TO CHECK` may be deduplicated only when the same source already contains a concrete model for that appliance type.
-19. Yellowwood vanity plumbing enrichment must stay room-relevant: accessory text may keep towel rails or toilet-roll holders, but shower/floor-waste/basin-waste tails and repeated room-heading tails should be trimmed out.
-20. All new `spec` parse runs for all builders must enter field-level PDF QA automatically. Raw results may be viewed before signoff, but they are not formally accepted until PDF QA passes.
-21. Formal spec exports are locked behind PDF QA. Do not treat a raw spec snapshot as complete, export-ready, or fixed until the current raw snapshot verification is `passed`.
-22. Parser-accuracy work is only complete after the affected live rerun passes PDF QA against the source PDF page-by-page. Older webpages and older snapshots are reference material only.
+19. Wet-area plumbing rows that are not joinery/cabinet related must be blacklisted from final room output across builders. This includes shower, bath, toilet, towel-rail, towel-hook, floor-waste, feature-waste, shower-base/frame, basin-waste, bottle-trap, and in-wall-mixer-only items. The only fixture exceptions that may survive are `Sink`, `Basin`, `Sink Mixer`, and `Basin Mixer`.
+20. Yellowwood vanity plumbing enrichment must stay room-relevant: only `Basin`, `Basin Mixer`, room-local flooring, and joinery/material fields may survive on final vanity room cards.
+21. All new `spec` parse runs for all builders must enter field-level PDF QA automatically. Raw results may be viewed before signoff, but they are not formally accepted until PDF QA passes.
+22. Formal spec exports are locked behind PDF QA. Do not treat a raw spec snapshot as complete, export-ready, or fixed until the current raw snapshot verification is `passed`.
+23. Parser-accuracy work is only complete after the affected live rerun passes PDF QA against the source PDF page-by-page. Older webpages and older snapshots are reference material only.
 
 ## Verification Expectations
 - The app should boot with `uvicorn App.main:app`
