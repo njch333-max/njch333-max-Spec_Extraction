@@ -9832,6 +9832,7 @@ def _strip_grouped_fixture_property_noise(text: str) -> str:
         probe = re.sub(r"(?i)\bColour\s*&\s*Finish\b\s+", "", probe)
         probe = re.sub(r"(?i)^(?:Model|Type|Range|Profile)\b\s+", "", probe)
         probe = re.sub(r"(?i)\bLocation\b\s+", "", probe)
+        probe = re.sub(r"(?i)\bType\b.*$", "", probe)
         probe = re.sub(r"(?i)\b(?:Model|Type|Range|Profile)\b(?:\s*#)?\s*$", "", probe)
         probe = normalize_space(probe).strip(" -;,#")
         if not probe:
@@ -9892,6 +9893,15 @@ def _clean_room_fixture_text(value: Any, kind: str) -> str:
     elif kind == "tap":
         if re.match(r"(?i)^(?:basin waste\b|bottle trap\b|toilet(?: roll holder)?\b|floor waste\b|mirror\b|shower(?: mixer| screen| floor waste| on rail| rose)?\b|bath(?: mixer| spout| waste)?\b|bath\b|towel rail\b|hand towel rail\b)", text):
             return ""
+        tap_parts = [normalize_space(part) for part in _split_group_entries(text) if normalize_space(part)]
+        if any(re.search(r"(?i)\bbasin\s+mixer\b", part) for part in tap_parts):
+            tap_parts = [
+                part
+                for part in tap_parts
+                if not re.search(r"(?i)\bin-wall mixer\b", part)
+            ]
+            if tap_parts:
+                text = _collapse_pipe_text_variants(" | ".join(tap_parts))
         basin_mixer_match = re.search(r"(?i)\b(?:tall\s+)?basin(?:\s*/\s*bath)?\s+mixer\b.*", text)
         if basin_mixer_match:
             prefix = normalize_space(text[: basin_mixer_match.start()])

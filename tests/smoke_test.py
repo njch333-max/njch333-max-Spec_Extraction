@@ -9728,6 +9728,20 @@ class SmokeTest(unittest.TestCase):
             ),
             "Zara Gun Metal Pull-Out (ZA120-GM) - Centre of Sink",
         )
+        self.assertEqual(
+            parsing_module._clean_room_fixture_text(
+                "Eden Bench Mount Gloss White (FL135-W) - Overmount | Eden Bench Mount Gloss White (FL135-W) Type Overmount",
+                "basin",
+            ),
+            "Eden Bench Mount Gloss White (FL135-W) - Overmount",
+        )
+        self.assertEqual(
+            parsing_module._clean_room_fixture_text(
+                "Spin Gun Metal Tall Basin Mixer (SP110-GM) - Centre of Basin | Spin Gun Metal In-wall Mixer (SP141-GM)",
+                "tap",
+            ),
+            "Spin Gun Metal Tall Basin Mixer (SP110-GM) - Centre of Basin",
+        )
 
     def test_clean_room_fixture_text_prefers_basin_mixer_over_blacklisted_in_wall_mixer_prefix(self) -> None:
         self.assertEqual(
