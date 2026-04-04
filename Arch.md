@@ -78,15 +78,19 @@
    - default automatic `Heavy Vision`: disabled
    - default automatic `AI merge`: disabled
 5. Apply `Docling` only to builder/page combinations that need structure recovery, such as grouped joinery schedules, cabinetry tables, vanity schedules, tiling schedules, and `Area / Item / Colour / Supplier` style pages. Docling runs per-page subset only and keeps OCR off by default.
-6. Run heuristic extraction into canonical schema, then rebuild final fields through `layout_rows -> row-fragment -> row-local mapping` so supplier, model, profile, note, and value text stay attached to the owning row.
-7. Enrich room rows with fixture fields (`sink_info`, `basin_info`, `tap_info`), split door-colour fields (`door_colours_overheads`, `door_colours_base`, `door_colours_tall`, `door_colours_island`, `door_colours_bar_back`), and derived bench-top fields (`bench_tops_wall_run`, `bench_tops_island`, `bench_tops_other`).
-8. Remove plumbing fixtures from appliance rows so they only appear on room rows.
-9. Apply the fixed `Global Conservative` profile for every builder:
+6. Run heuristic extraction into canonical schema, then rebuild shared fields through `layout_rows -> row-fragment -> row-local mapping` so supplier, model, profile, note, and value text stay attached to the owning row.
+7. Run a builder-finalizer dispatch stage:
+   - the shared layer owns page classification, room/row block detection, room-local overlays, and generic noise cleanup
+   - each builder finalizer owns final room-title preservation, overlay merge priority, fixture blacklist enforcement, and grouped-row/property-row cleanup
+   - this stage is where Clarendon room whitelisting, Yellowwood vanity/robe title preservation, Imperial fixture cleanup, and future Simonds/Evoca grouped-row cleanup are applied
+8. Enrich room rows with fixture fields (`sink_info`, `basin_info`, `tap_info`), split door-colour fields (`door_colours_overheads`, `door_colours_base`, `door_colours_tall`, `door_colours_island`, `door_colours_bar_back`), and derived bench-top fields (`bench_tops_wall_run`, `bench_tops_island`, `bench_tops_other`).
+9. Remove plumbing fixtures from appliance rows so they only appear on room rows.
+10. Apply the fixed `Global Conservative` profile for every builder:
   - room identity is source-driven
   - field ownership is same-room-only, same-section-only, and same-row-or-row-fragment-only
   - supplement files may enrich existing rooms only and must not create new rooms outside the room-master set
   - `colour/material` and appliance placeholders use `original wording + light cleanup`, not semantic rewriting
-10. Clarendon-specific behavior:
+11. Clarendon-specific behavior:
   - stays heuristic-only
   - if a `Drawings and Colours` file exists, it is the deterministic room-name master
   - final room names may only come from that master file
@@ -95,16 +99,18 @@
   - deterministic post-polish prefers `raw_text` over vision-normalized `text`
   - AFC `CARPET & MAIN FLOOR TILE` pages now act as room-local flooring overlays for existing master rooms such as `KITCHEN`, `BUTLERS PANTRY`, `THEATRE ROOM`, and `RUMPUS ROOM`
   - Clarendon flooring overlay is strict-PDF-only: broad AFC labels such as `WIL/Linen/s Ground Floor` must not be inferred back into `LAUNDRY`
-11. Yellowwood-specific behavior:
+12. Yellowwood-specific behavior:
   - uses selective Docling for grouped schedule/table pages
-  - preserves the more specific spec-title room names such as `BED 1 ENSUITE VANITY` and `BED 1 WALK IN ROBE`
+  - preserves the more specific spec-title room names such as `PANTRY`, `BED 1 MASTER ENSUITE VANITY`, `GROUND FLOOR POWDER ROOM`, `UPPER-LEVEL POWDER ROOM`, `BED 1 MASTER WALK IN ROBE FIT OUT`, and `BED 2/3/4/5 ROBE FIT OUT`
   - retains rooms only when there is joinery/material evidence
+  - fake room fragments such as `WIP`, row-note cells, shelving-only cell text, and collapsed generic labels like a single `ROBE FIT OUT` room are removed during the Yellowwood finalizer
   - `robe` and `media` rooms remain only when they contain real material evidence such as `Polytec` or `Laminex`
   - fixture-only wet-area parent rooms are merged into the corresponding vanity room instead of surviving as standalone rooms
   - vanity-room plumbing cleanup now removes non-joinery wet-area items entirely, including shower, bath, toilet, towel-rail, towel-hook, floor-waste, feature-waste, shower-base/frame, basin-waste, bottle-trap, and in-wall-mixer-only rows
   - only `Basin`, `Basin Mixer`, room-local flooring, and joinery/material fields are allowed to survive on final Yellowwood vanity room cards
+  - the Yellowwood finalizer keeps `Kitchen` wall-run / island / other benchtops separate, preserves `Overhead Cupboards`, treats `*To Bulkhead*` text as a note instead of a bulkhead material value, and rehydrates kitchen sink/tap from plumbing overlays when needed
   - non-wet-area `FLOORING` pages and wet-area `TILING SCHEDULE` pages enrich retained room cards as room-local flooring overlays, while contents-page flooring text is excluded from `others.flooring_notes`
-12. For Imperial-only spec runs, apply a title-driven section parser before the generic cleanup stages:
+13. For Imperial-only spec runs, apply a title-driven section parser before the generic cleanup stages:
   - use the page-top `... JOINERY SELECTION SHEET` title as the authoritative section start
   - use the currently extractable title body as the authoritative room label, preserving values such as `WALK-BEHIND PANTRY`, `BENCH SEAT`, or `OFFICE` without shorthand aliases
   - use the title to identify the section, but do not discard same-page body text that appears before the title in extracted reading order
@@ -123,14 +129,14 @@
   - prefer builder-specific Imperial sink/tap overlay text over noisier AI fixture guesses when both are present
   - emit non-room sections such as `FEATURE TALL DOORS` into `special_sections[]` instead of merging them into nearby room cards
   - recover delayed Imperial handle lines that appear later in the same section while rejecting adjacent cabinet-colour rows as handle noise
-13. Apply the fixed global cleaning rules after heuristic parsing, Clarendon post-polish, Imperial section parsing, and row-local field reconstruction so brand casing, door-colour cleanup, kitchen-only bench-top splitting, tall-cabinet capture, and soft-close normalization stay consistent across all builders.
-14. Record analysis metadata in the snapshot: parser strategy, layout metadata, runtime identifiers, Docling metadata, and whether any manual OpenAI stage was attempted.
-15. Normalize drawer and hinge states to `Soft Close`, `Not Soft Close`, or blank.
-16. Look up official appliance resources by `make + model_no`, first probing deterministic brand-site model URLs where supported and then falling back to search-based discovery; AEG, Westinghouse, and Fisher & Paykel now extract official dimensions from product pages when available, including JSON-like structured metadata.
-17. Before final appliance storage, placeholder rows such as `As Above`, `By Client`, `N/A - By others`, and `N/A CLIENT TO CHECK` keep their original wording, but same-source placeholder rows are deduplicated away when a concrete model of the same appliance type already exists.
-18. Extract an optional `site_address` from the authoritative source text and carry it in the snapshot for header display on the Job Workspace and Raw Spec List pages.
-19. Save the raw snapshot.
-20. Immediately generate or reset a `snapshot_verifications` row for the latest `raw_spec` snapshot with status `pending` and a field-level checklist derived from the extracted room/appliance fields.
+14. Apply the fixed global cleaning rules after heuristic parsing, builder-finalizer cleanup, Imperial section parsing, and row-local field reconstruction so brand casing, door-colour cleanup, kitchen-only bench-top splitting, tall-cabinet capture, and soft-close normalization stay consistent across all builders.
+15. Record analysis metadata in the snapshot: parser strategy, layout metadata, runtime identifiers, Docling metadata, and whether any manual OpenAI stage was attempted.
+16. Normalize drawer and hinge states to `Soft Close`, `Not Soft Close`, or blank.
+17. Look up official appliance resources by `make + model_no`, first probing deterministic brand-site model URLs where supported and then falling back to search-based discovery; AEG, Westinghouse, and Fisher & Paykel now extract official dimensions from product pages when available, including JSON-like structured metadata.
+18. Before final appliance storage, placeholder rows such as `As Above`, `By Client`, `N/A - By others`, and `N/A CLIENT TO CHECK` keep their original wording, but same-source placeholder rows are deduplicated away when a concrete model of the same appliance type already exists.
+19. Extract an optional `site_address` from the authoritative source text and carry it in the snapshot for header display on the Job Workspace and Raw Spec List pages.
+20. Save the raw snapshot.
+21. Immediately generate or reset a `snapshot_verifications` row for the latest `raw_spec` snapshot with status `pending` and a field-level checklist derived from the extracted room/appliance fields.
 
 ### 3.5 Review Pipeline
 1. Load latest raw snapshot.

@@ -3693,8 +3693,8 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(parsing_module.source_room_label("KITCHEN SPLASHBACK"), "KITCHEN")
         self.assertEqual(parsing_module.source_room_label("BED 1 ENSUITE VANITY"), "BED 1 ENSUITE VANITY")
         self.assertEqual(parsing_module.source_room_label("BATHOOM VANITY").lower(), "bathroom vanity")
-        self.assertEqual(parsing_module.source_room_label("BED 1 WALK IN ROBE FIT OUT"), "BED 1 WALK IN ROBE")
-        self.assertEqual(parsing_module.source_room_label("BED 3 ROBE FIT OUT"), "BED 3 ROBE")
+        self.assertEqual(parsing_module.source_room_label("BED 1 WALK IN ROBE FIT OUT"), "BED 1 WALK IN ROBE FIT OUT")
+        self.assertEqual(parsing_module.source_room_label("BED 3 ROBE FIT OUT"), "BED 3 ROBE FIT OUT")
         self.assertEqual(parsing_module.source_room_label("ROBE FIT OUT TO BED 3"), "BED 3 ROBE")
         self.assertEqual(parsing_module.source_room_key("BATHOOM VANITY"), "bathroom")
         self.assertEqual(parsing_module.source_room_key("BED 1 WALK IN ROBE FIT OUT"), "bed_1_wir")
@@ -3777,7 +3777,7 @@ class SmokeTest(unittest.TestCase):
         labels = {section["original_section_label"] for section in sections}
         self.assertNotIn("Pantry", labels)
         self.assertIn("Laundry", labels)
-        self.assertIn("WC", labels)
+        self.assertNotIn("WC", labels)
         self.assertIn("BED 1 ENSUITE VANITY", labels)
 
     def test_yellowwood_section_filter_drops_material_name_rooms_but_keeps_material_driven_rooms(self) -> None:
@@ -3932,10 +3932,10 @@ class SmokeTest(unittest.TestCase):
         }
         sections = parsing_module._collect_yellowwood_text_room_sections_for_document(document)
         labels = [section["original_section_label"] for section in sections]
-        self.assertIn("BED 3 ROBE", labels)
-        self.assertIn("BED 4 ROBE", labels)
+        self.assertIn("BED 3 ROBE FIT OUT", labels)
+        self.assertIn("BED 4 ROBE FIT OUT", labels)
         self.assertNotIn("ROBE FIT OUT", labels)
-        bed4 = next(section for section in sections if section["original_section_label"] == "BED 4 ROBE")
+        bed4 = next(section for section in sections if section["original_section_label"] == "BED 4 ROBE FIT OUT")
         self.assertNotIn("LAUNDRY LINEN FIT OUT", bed4["text"])
         self.assertNotIn("PASSAGE LINEN FIT OUT", bed4["text"])
 
@@ -4634,6 +4634,226 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("Floor Tile Regina Grey Matt 450x450mm", rooms["bathroom"]["flooring"])
         self.assertIn("Floor Tile Regina Grey Matt 450x450mm", rooms["ensuite_1"]["flooring"])
         self.assertEqual(enriched["others"]["flooring_notes"], "")
+
+    def test_extract_yellowwood_area_block_from_lines_handles_multiline_heading(self) -> None:
+        lines = [
+            "GROUND FLOOR",
+            "POWDER ROOM",
+            "Sink Mixer Spin Mixer Chrome",
+            "SP100-CH",
+            "Highgrove",
+            "Wall Hung Basin Byron Wall Hung Basin (RHS) Gloss White",
+            "UPPER-LEVEL",
+            "POWDER ROOM",
+            "Sink Mixer Spin Tall Basin Mixer Chrome",
+        ]
+        header_patterns = (
+            r"GROUND\s+FLOOR\s+POWDER\s+ROOM",
+            r"UPPER[- ](?:LEVEL|FLOOR)\s+POWDER\s+ROOM",
+        )
+        block = parsing_module._extract_yellowwood_area_block_from_lines(
+            lines,
+            r"GROUND\s+FLOOR\s+POWDER\s+ROOM",
+            header_patterns,
+        )
+        self.assertIn("Spin Mixer Chrome", block)
+        self.assertIn("Wall Hung Basin Byron", block)
+        self.assertNotIn("UPPER-LEVEL", block)
+
+    def test_collect_yellowwood_fixture_overlays_parses_job24_style_plumbing_pages(self) -> None:
+        overlays: dict[str, dict[str, object]] = {}
+        documents = [
+            {
+                "file_name": "job24.pdf",
+                "role": "spec",
+                "builder_name": "Yellowwood Homes",
+                "pages": [
+                    {
+                        "page_no": 34,
+                        "text": (
+                            "GROUND FLOOR BATHROOM\n"
+                            "Sink Mixer Spin Tall Basin Mixer Chrome\n"
+                            "SP110-CH\n"
+                            "Highgrove\n"
+                            "Basin Byron Bench Mount Basin Gloss White\n"
+                            "MC142-W\n"
+                            "Highgrove\n"
+                            "Basin Waste Pop Up Waste Without overflow\n"
+                        ),
+                        "raw_text": (
+                            "GROUND FLOOR BATHROOM\n"
+                            "Sink Mixer Spin Tall Basin Mixer Chrome\n"
+                            "SP110-CH\n"
+                            "Highgrove\n"
+                            "Basin Byron Bench Mount Basin Gloss White\n"
+                            "MC142-W\n"
+                            "Highgrove\n"
+                            "Basin Waste Pop Up Waste Without overflow\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 36,
+                        "text": (
+                            "GROUND FLOOR\n"
+                            "POWDER ROOM\n"
+                            "Sink Mixer Spin Mixer Chrome\n"
+                            "SP100-CH\n"
+                            "Highgrove\n"
+                            "Wall Hung Basin Byron Wall Hung Basin (RHS) Gloss White\n"
+                            "Highgrove\n"
+                            "Basin Bottle Trap Spin Bottle trap Chrome\n"
+                        ),
+                        "raw_text": (
+                            "GROUND FLOOR\n"
+                            "POWDER ROOM\n"
+                            "Sink Mixer Spin Mixer Chrome\n"
+                            "SP100-CH\n"
+                            "Highgrove\n"
+                            "Wall Hung Basin Byron Wall Hung Basin (RHS) Gloss White\n"
+                            "Highgrove\n"
+                            "Basin Bottle Trap Spin Bottle trap Chrome\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 40,
+                        "text": (
+                            "KITCHEN\n"
+                            "Mixer Zara Pull-out Kitchen Mixer\n"
+                            "Brushed Nickel\n"
+                            "(As per contract)\n"
+                            "Highgrove\n"
+                            "Sink Burazzo Undermount 750mm Double\n"
+                            "Bowl Sink Stainless Steel\n"
+                            "750x450x220mm\n"
+                            "*Installed Undermount*\n"
+                            "(As per contract) Highgrove\n"
+                        ),
+                        "raw_text": (
+                            "KITCHEN\n"
+                            "Mixer Zara Pull-out Kitchen Mixer\n"
+                            "Brushed Nickel\n"
+                            "(As per contract)\n"
+                            "Highgrove\n"
+                            "Sink Burazzo Undermount 750mm Double\n"
+                            "Bowl Sink Stainless Steel\n"
+                            "750x450x220mm\n"
+                            "*Installed Undermount*\n"
+                            "(As per contract) Highgrove\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                ],
+            }
+        ]
+        parsing_module._collect_yellowwood_fixture_overlays(overlays, documents)
+        self.assertIn("Spin Tall Basin Mixer Chrome", overlays["bathroom"]["tap_info"])
+        self.assertIn("Byron Bench Mount Basin Gloss White", overlays["bathroom"]["basin_info"])
+        self.assertIn("Spin Mixer Chrome", overlays["ground_floor_powder_room"]["tap_info"])
+        self.assertIn("Byron Wall Hung Basin (RHS) Gloss White", overlays["ground_floor_powder_room"]["basin_info"])
+        self.assertIn("Zara Pull-out Kitchen Mixer", overlays["kitchen"]["tap_info"])
+        self.assertIn("Burazzo Undermount 750mm Double", overlays["kitchen"]["sink_info"])
+
+    def test_finalize_yellowwood_rooms_cleans_job24_specific_fields(self) -> None:
+        rooms = [
+            {
+                "room_key": "kitchen",
+                "original_room_label": "KITCHEN",
+                "room_name": "KITCHEN",
+                "bench_tops_island": "Only 40mm YDL Aurum White Polished",
+                "bench_tops_other": "40mm YDL Classic White Polished | Only 40mm YDL Aurum White Polished",
+                "door_colours_base": "*Inc",
+                "door_colours_overheads": "*To Builders",
+                "toe_kick": ["Polytec – Blossom White Matt"],
+                "bulkheads": ["* Polytec – Blossom White Matt"],
+                "handles": ["Handle House C79 Mainz Cabinet", "Handle 128mm Polished Stainless Steel"],
+                "sink_info": "Burazzo Undermount 750mm Double Bowl",
+                "basin_info": "",
+                "tap_info": "Zara Pull-out Kitchen",
+                "flooring": "Tiles Stone Union Bianco In-out Tile",
+                "led": "Yes",
+                "led_note": "LED Top Mounted*",
+                "door_panel_colours": [],
+                "other_items": [],
+                "accessories": [],
+            },
+            {
+                "room_key": "walk_in_pantry",
+                "original_room_label": "WIP",
+                "room_name": "WIP",
+                "evidence_snippet": "PANTRY WIP Open Shelving X4 Shelves White Melamine",
+                "bench_tops_other": "",
+                "door_colours_base": "",
+                "door_colours_overheads": "",
+                "door_panel_colours": [],
+                "sink_info": "Burazzo Undermount 750mm Double Bowl",
+                "basin_info": "",
+                "tap_info": "Zara Pull-out Kitchen Mixer",
+                "flooring": "Tiles Stone Union Bianco In-out Tile",
+                "toe_kick": [],
+                "bulkheads": [],
+                "handles": [],
+                "other_items": [],
+                "accessories": [],
+            },
+            {
+                "room_key": "bed_5_robe",
+                "original_room_label": "BED 5 ROBE FIT OUT",
+                "room_name": "BED 5 ROBE FIT OUT",
+                "flooring": "Hybrid Floorboards Admired Grand Hybrid Colour Blackbutt Flooring Xtra UPPER-LEVEL RETREAT Hybrid Floorboards",
+                "door_panel_colours": [],
+                "toe_kick": [],
+                "bulkheads": [],
+                "handles": [],
+                "other_items": [],
+                "accessories": [],
+            },
+            {
+                "room_key": "ground_floor_powder_room",
+                "original_room_label": "GROUND FLOOR POWDER ROOM",
+                "room_name": "GROUND FLOOR POWDER ROOM",
+                "bench_tops_other": "",
+                "door_panel_colours": [],
+                "toe_kick": [],
+                "bulkheads": [],
+                "handles": [],
+                "other_items": [],
+                "accessories": [],
+                "sink_info": "",
+                "basin_info": "Only Refer to \"Plumbing\" section below",
+                "tap_info": "Spin",
+                "flooring": "Floor Tile Como Beige Matt Unrectified",
+            },
+        ]
+        overlays = {
+            "kitchen": {
+                "door_colours_base": "Polytec – Blossom White Matt",
+                "door_colours_overheads": "Polytec – Blossom White Matt",
+                "sink_info": "Burazzo Undermount 750mm Double Bowl Sink Stainless Steel 750x450x220mm (As per contract) Highgrove",
+                "tap_info": "Zara Pull-out Kitchen Mixer Brushed Nickel (As per contract) Highgrove",
+            },
+            "ground_floor_powder_room": {
+                "basin_info": "Byron Wall Hung Basin (RHS) Gloss White Highgrove",
+                "tap_info": "Spin Mixer Chrome SP100-CH Highgrove",
+            },
+        }
+        parsing_module._finalize_yellowwood_rooms(rooms, overlays, [])
+        by_key = {row["room_key"]: row for row in rooms}
+        self.assertEqual(by_key["kitchen"]["door_colours_base"], "Polytec – Blossom White Matt")
+        self.assertEqual(by_key["kitchen"]["door_colours_overheads"], "Polytec – Blossom White Matt")
+        self.assertEqual(by_key["kitchen"]["bulkheads"], [])
+        self.assertEqual(by_key["kitchen"]["led"], "No")
+        self.assertEqual(by_key["kitchen"]["led_note"], "")
+        self.assertIn("Kitchen Mixer", by_key["kitchen"]["tap_info"])
+        self.assertNotIn("Only 40mm YDL Aurum White Polished", by_key["kitchen"]["bench_tops_other"])
+        self.assertEqual(by_key["pantry"]["original_room_label"], "PANTRY")
+        self.assertEqual(by_key["pantry"]["sink_info"], "")
+        self.assertEqual(by_key["pantry"]["tap_info"], "")
+        self.assertNotIn("UPPER-LEVEL", by_key["bed_5_robe"]["flooring"])
+        self.assertNotIn("RETREAT", by_key["bed_5_robe"]["flooring"])
+        self.assertEqual(by_key["ground_floor_powder_room"]["basin_info"], "Byron Wall Hung Basin (RHS) Gloss White Highgrove")
+        self.assertIn("SP100-CH", by_key["ground_floor_powder_room"]["tap_info"])
 
     def test_enrich_snapshot_rooms_merges_yellowwood_bath_family_into_bathroom_vanity(self) -> None:
         snapshot = {

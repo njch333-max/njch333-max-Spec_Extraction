@@ -101,6 +101,9 @@
   - kitchen-only split benchtop display on the raw Spec List page, with non-kitchen rooms collapsed back to one benchtop row
   - Material Summary bench-top normalization now keeps distinct thickness and edge/apron variants instead of collapsing `20mm` and `40mm` entries together
   - Yellowwood grouped schedule pages now route through selective Docling while final field ownership stays row-local and source-driven
+  - shared structure output now passes through a builder-finalizer layer so final room-title preservation, overlay merge priority, fixture blacklist enforcement, and grouped-row/property-row cleanup can be owned per builder instead of only by shared post-cleaning
+  - Yellowwood finalization now preserves concrete titles such as `PANTRY`, `BED 1 MASTER ENSUITE VANITY`, `GROUND FLOOR POWDER ROOM`, `UPPER-LEVEL POWDER ROOM`, `BED 1 MASTER WALK IN ROBE FIT OUT`, and `BED 2/3/4/5 ROBE FIT OUT`, while suppressing fake room fragments such as `WIP` or generic collapsed `ROBE FIT OUT`
+  - Yellowwood kitchen/plumbing overlays now rehydrate room-local `Sink` / `Tap`, keep island and wall-run benchtops separate, and treat `*To Bulkhead*` text as a note rather than a bulkhead material value
   - cleaned door-colour display that removes duplicated location suffixes and common OCR noise
   - plumbing fixtures filtered out of appliance presentation/export
   - auto-upload on file selection for spec and drawing files
@@ -162,6 +165,7 @@
   - `Evoca`: `job 39`
 - Continue checking the latest Clarendon and Yellowwood reruns against source PDF and only mark PDF QA `passed` when the current live snapshot fully matches the source pages
 - Continue validating the new Clarendon and Yellowwood flooring overlays against source PDF so `job 1`, `job 23`, and `job 37` room-level flooring lands on the correct retained rooms
+- Continue validating the new builder-finalizer split on Yellowwood-heavy grouped schedule jobs such as `job 24`, especially pantry/WIP suppression, robe-fit-out title preservation, powder-room separation, kitchen plumbing reinjection, and vanity-room plumbing cleanup
 - Continue tightening noisy field cleanup inside the fixed global conservative profile without reintroducing per-builder configuration
 - Continue tightening Clarendon field wording so kitchen/bathroom/laundry text stays close to the accepted `37016` readability standard without relying on manual snapshot restores or fixed room buckets
 - Continue removing residual Clarendon appliance/master OCR noise from jobs such as `job 1`, and continue merging multiline handle descriptions more cleanly on jobs such as `job 23`
