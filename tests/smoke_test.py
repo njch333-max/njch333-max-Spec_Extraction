@@ -4201,6 +4201,59 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(kitchen["door_colours_overheads"], "Polytec Blossom White Matt")
         self.assertEqual(kitchen["splashback"], "")
 
+    def test_shared_layout_row_polish_reapplies_yellowwood_finalizer_after_overlay_merge(self) -> None:
+        snapshot = {
+            "job_no": "39024",
+            "builder_name": "Yellowwood",
+            "source_kind": "spec",
+            "generated_at": "2026-04-04T10:00:00+10:00",
+            "rooms": [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "bench_tops": [],
+                    "bench_tops_wall_run": "",
+                    "bench_tops_island": "Only 40mm YDL Aurum White Polished",
+                    "bench_tops_other": "40mm YDL Classic White Polished | Only 40mm YDL Aurum White Polished",
+                    "door_panel_colours": ["Polytec 每 Blossom White Matt"],
+                    "door_colours_base": "Polytec 每 Blossom White Matt",
+                    "door_colours_overheads": "",
+                    "has_explicit_overheads": True,
+                    "toe_kick": [],
+                    "bulkheads": [],
+                    "handles": [],
+                    "splashback": "Tile Refer to ※Tiling§ section below N/A",
+                }
+            ],
+            "appliances": [],
+            "others": {},
+            "warnings": [],
+            "source_documents": [],
+            "analysis": {"mode": "structure_first"},
+        }
+        documents = [{"file_name": "yellowwood.pdf", "role": "spec", "pages": []}]
+        section = {"section_key": "kitchen", "original_section_label": "KITCHEN", "layout_rows": [{"row_label": "dummy"}]}
+        overlay = {"original_room_label": "KITCHEN"}
+        with mock.patch("App.services.parsing._collect_room_sections_for_document", return_value=[section]), mock.patch(
+            "App.services.extraction_service._extract_generic_layout_overlay",
+            return_value=overlay,
+        ), mock.patch(
+            "App.services.extraction_service._resolve_generic_room_label_from_documents",
+            return_value="KITCHEN",
+        ):
+            polished = extraction_service._apply_shared_layout_row_polish(
+                snapshot,
+                documents,
+                builder_name="Yellowwood",
+                parser_strategy="stable_hybrid",
+            )
+        kitchen = polished["rooms"][0]
+        self.assertEqual(kitchen["bench_tops_wall_run"], "40mm YDL Classic White Polished")
+        self.assertEqual(kitchen["bench_tops_other"], "")
+        self.assertEqual(kitchen["door_colours_base"], "Polytec Blossom White Matt")
+        self.assertEqual(kitchen["door_colours_overheads"], "Polytec Blossom White Matt")
+        self.assertEqual(kitchen["splashback"], "")
+
     def test_apply_snapshot_cleaning_rules_purifies_yellowwood_wet_area_fixtures(self) -> None:
         snapshot = {
             "job_no": "38095",

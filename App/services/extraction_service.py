@@ -4838,7 +4838,8 @@ def _apply_shared_layout_row_polish(
         resolved_rooms.append(current)
     polished = dict(snapshot)
     polished["rooms"] = _merge_rooms_by_source_identity(resolved_rooms)
-    return parsing.apply_snapshot_cleaning_rules(polished, rule_flags=rule_flags)
+    polished = parsing.apply_snapshot_cleaning_rules(polished, rule_flags=rule_flags)
+    return parsing.enrich_snapshot_rooms(polished, documents, rule_flags=rule_flags)
 
 
 def _blank_generic_layout_overlay() -> dict[str, Any]:

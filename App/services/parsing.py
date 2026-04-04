@@ -8874,6 +8874,8 @@ def _clean_handle_value(value: Any) -> str:
     text = re.sub(r"^\((?:to all lower doors? & drawers?)\)\s*", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\bHandle House\b", "", text, flags=re.IGNORECASE)
     text = normalize_brand_casing_text(text)
+    text = re.sub(r"[每]+", " ", text)
+    text = re.sub(r"(?<=\w)\?(?=\w)", " ", text)
     text = re.sub(r"\s{2,}", " ", text)
     return text.strip(" -;,")
 
