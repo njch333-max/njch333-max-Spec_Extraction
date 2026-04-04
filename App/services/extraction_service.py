@@ -7449,6 +7449,11 @@ def _extract_clarendon_fixture_overlays(text: str) -> dict[str, dict[str, Any]]:
         tap_detail = _extract_first_pattern(laundry_segment, r"PINA SINK MIXER.+?\([A-Z0-9.-]+\)")
         if not tap_detail:
             tap_detail = _extract_first_pattern(laundry_segment, r"GASTON PULL DOWN MIXER[ A-Z0-9/-]*\([A-Z0-9.-]+\)")
+        if not tap_detail:
+            tap_detail = _extract_first_pattern(
+                laundry_segment,
+                r"[A-Z][A-Z0-9 /_-]*SINK MIXER[ A-Z0-9_./()-]*?(?=\s+(?:\d+MM CP QUARTER TURN WASHING MACHINE COCK\b|CABINETRY\b|Client Signature\b|$))",
+            )
         washing_tap = _extract_first_pattern(laundry_segment, r"\d+MM CP QUARTER TURN WASHING MACHINE COCK\s*\([A-Z0-9.-]+\)")
         if sink_detail:
             sink_text = sink_detail

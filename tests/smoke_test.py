@@ -4306,6 +4306,7 @@ class SmokeTest(unittest.TestCase):
                 {"room_key": "theatre", "original_room_label": "THEATRE ROOM", "flooring": ""},
                 {"room_key": "rumpus_room", "original_room_label": "RUMPUS ROOM", "flooring": ""},
                 {"room_key": "rumpus_desk", "original_room_label": "RUMPUS - DESK", "flooring": ""},
+                {"room_key": "laundry", "original_room_label": "LAUNDRY", "flooring": ""},
             ],
             "appliances": [],
             "others": {"flooring_notes": "CARPET & MAIN FLOOR TILE"},
@@ -4318,6 +4319,7 @@ class SmokeTest(unittest.TestCase):
             "Kitchen/Pantry/Family/Meals: TILED\n"
             "Theatre: CARPET\n"
             "Rumpus: CARPET\n"
+            "WIL/Linen/s Ground Floor: TILED\n"
             "WIR/S & Robes: CARPET\n"
         )
         documents = [
@@ -4336,7 +4338,41 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(rooms["theatre"]["flooring"], "CARPET")
         self.assertEqual(rooms["rumpus_room"]["flooring"], "CARPET")
         self.assertEqual(rooms["rumpus_desk"]["flooring"], "")
+        self.assertEqual(rooms["laundry"]["flooring"], "TILED")
         self.assertEqual(enriched["others"]["flooring_notes"], "")
+
+    def test_enrich_snapshot_rooms_moves_clarendon_rumpus_desk_tall_out_of_rumpus_room(self) -> None:
+        snapshot = {
+            "job_no": "49906511",
+            "builder_name": "Clarendon",
+            "source_kind": "spec",
+            "generated_at": "2026-04-04T00:00:00+10:00",
+            "rooms": [
+                {
+                    "room_key": "rumpus_room",
+                    "original_room_label": "RUMPUS ROOM",
+                    "door_colours_tall": "Polytec CLASSIC WHITE MATT FINSIH MELAMINE WITH MATCHING 1MM ABSE EDGES - TO TALL OPEN SHELVES",
+                    "has_explicit_tall": True,
+                },
+                {
+                    "room_key": "rumpus_desk",
+                    "original_room_label": "RUMPUS - DESK",
+                    "door_colours_tall": "",
+                    "has_explicit_tall": False,
+                },
+            ],
+            "appliances": [],
+            "others": {"flooring_notes": ""},
+            "warnings": [],
+            "source_documents": [],
+            "analysis": {"mode": "heuristic_only"},
+        }
+        enriched = parsing_module.enrich_snapshot_rooms(snapshot, [])
+        rooms = {row["room_key"]: row for row in enriched["rooms"]}
+        self.assertEqual(rooms["rumpus_room"]["door_colours_tall"], "")
+        self.assertFalse(rooms["rumpus_room"]["has_explicit_tall"])
+        self.assertIn("TALL OPEN SHELVES", rooms["rumpus_desk"]["door_colours_tall"])
+        self.assertTrue(rooms["rumpus_desk"]["has_explicit_tall"])
 
     def test_clean_handle_entries_drops_orphan_handle_house_fragment(self) -> None:
         self.assertEqual(
@@ -8505,6 +8541,21 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("Everhard", laundry["sink_info"])
         self.assertIn("Prism Large Single Bowl Undermount PPR10LGB", laundry["sink_info"])
         self.assertIn("gaston pull down mixer black / chrome (02-1055)", laundry["tap_info"].lower())
+        self.assertIn("15mm cp quarter turn washing machine cock (60822)", laundry["tap_info"].lower())
+
+    def test_extract_clarendon_fixture_overlays_recovers_arlo_laundry_sink_mixer_without_parentheses(self) -> None:
+        text = (
+            "LAUNDRY SUPPLIER DESCRIPTION DESIGN COMMENTS "
+            "Drop in Tub: EVERHARD "
+            "Tap Style: PHOENIX "
+            "EVERHARD INDUSTRIES CLASSIC 45L UTILITY SINK (71245) "
+            "ARLO SINK MIXER GOOSENECK 200MM_ 151-7310-40-1 BN "
+            "15MM CP QUARTER TURN WASHING MACHINE COCK (60822)"
+        )
+        overlays = extraction_service._extract_clarendon_fixture_overlays(text)
+        laundry = overlays["laundry"]
+        self.assertIn("Everhard", laundry["sink_info"])
+        self.assertIn("arlo sink mixer gooseneck 200mm 151-7310-40-1 bn", laundry["tap_info"].lower())
         self.assertIn("15mm cp quarter turn washing machine cock (60822)", laundry["tap_info"].lower())
 
     def test_select_clarendon_room_overlay_maps_butlers_pantry_to_walk_in_pantry(self) -> None:

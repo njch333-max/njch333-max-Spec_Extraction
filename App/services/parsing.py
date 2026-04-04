@@ -6668,6 +6668,8 @@ def _clarendon_flooring_targets(area_label: str, overlays: dict[str, dict[str, A
         if "walk_in_pantry" in overlays:
             targets.append("walk_in_pantry")
         return _unique(targets)
+    if "groundfloor" in collapsed and any(token in collapsed for token in ("wil", "linen")):
+        return ["laundry"]
     if re.search(r"\btheatre\b", normalized):
         return [source_room_key("THEATRE ROOM")]
     if re.search(r"\brumpus\b", normalized):
@@ -6813,6 +6815,35 @@ def _clear_room_specific_flooring_notes(snapshot: dict[str, Any]) -> None:
         others["flooring_notes"] = ""
 
 
+def _apply_clarendon_room_overlap_corrections(rooms: list[dict[str, Any]]) -> None:
+    room_lookup: dict[str, dict[str, Any]] = {}
+    for row in rooms:
+        if not isinstance(row, dict):
+            continue
+        candidates = (
+            normalize_space(str(row.get("room_key", ""))),
+            source_room_key(str(row.get("original_room_label", "")), fallback_key=str(row.get("room_key", ""))),
+            same_room_identity(str(row.get("original_room_label", "")), str(row.get("room_key", ""))),
+        )
+        for room_key in candidates:
+            if room_key and room_key not in room_lookup:
+                room_lookup[room_key] = row
+    rumpus_room = room_lookup.get("rumpus_room") or room_lookup.get("rumpus")
+    rumpus_desk = room_lookup.get("rumpus_desk")
+    if not rumpus_room or not rumpus_desk:
+        return
+    parent_tall = normalize_space(str(rumpus_room.get("door_colours_tall", "") or ""))
+    if not re.search(r"(?i)\btall open shelves\b", parent_tall):
+        return
+    rumpus_room["door_colours_tall"] = ""
+    rumpus_room["has_explicit_tall"] = False
+    if not normalize_space(str(rumpus_desk.get("door_colours_tall", "") or "")):
+        rumpus_desk["door_colours_tall"] = parent_tall
+    rumpus_desk["has_explicit_tall"] = bool(normalize_space(str(rumpus_desk.get("door_colours_tall", "") or "")))
+    rumpus_room["door_panel_colours"] = _rebuild_door_panel_colours(rumpus_room)
+    rumpus_desk["door_panel_colours"] = _rebuild_door_panel_colours(rumpus_desk)
+
+
 def _merge_lists(left: list[str], right: list[str]) -> list[str]:
     return _unique(left + right)
 
@@ -6903,6 +6934,8 @@ def enrich_snapshot_rooms(snapshot: dict[str, Any], documents: list[dict[str, ob
             row["flooring"] = _string_value(overlay.get("flooring", ""))
         row["drawers_soft_close"] = merge_soft_close_values(row.get("drawers_soft_close", ""), "")
         row["hinges_soft_close"] = merge_soft_close_values(row.get("hinges_soft_close", ""), "")
+    if normalize_space(str(snapshot.get("builder_name", "") or "")).lower() == "clarendon":
+        _apply_clarendon_room_overlap_corrections(rooms)
     snapshot["rooms"] = rooms
     snapshot["appliances"] = [row for row in snapshot.get("appliances", []) if isinstance(row, dict) and not _is_room_fixture_appliance(row)]
     _clear_room_specific_flooring_notes(snapshot)
@@ -8482,6 +8515,7 @@ def _clean_room_fixture_text(value: Any, kind: str) -> str:
             text,
             (
                 r"\bBasin Waste\b",
+                r"\bSink Waste\b",
                 r"\bWaste\b",
                 r"\bBottle Trap\b",
                 r"\bToilet Roll Holder\b",
@@ -8503,6 +8537,7 @@ def _clean_room_fixture_text(value: Any, kind: str) -> str:
             text,
             (
                 r"\bBasin Waste\b",
+                r"\bSink Waste\b",
                 r"\bWaste\b",
                 r"\bBottle Trap\b",
                 r"\bToilet Roll Holder\b",
@@ -8524,6 +8559,7 @@ def _clean_room_fixture_text(value: Any, kind: str) -> str:
             text,
             (
                 r"\bBasin Waste\b",
+                r"\bSink Waste\b",
                 r"\bWaste\b",
                 r"\bBottle Trap\b",
                 r"\bToilet Roll Holder\b",
