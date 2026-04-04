@@ -3951,6 +3951,30 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(parsing_module._collect_explicit_bulkhead_values(lines), [])
         self.assertFalse(parsing_module._has_explicit_led_field(lines))
         self.assertFalse(parsing_module._has_explicit_led_field(["LED Topmount*"]))
+        self.assertEqual(parsing_module._normalize_led_value("", ""), "No")
+        self.assertEqual(parsing_module._normalize_led_value("Yes", ""), "Yes")
+        self.assertEqual(parsing_module._extract_led_note_from_lines(["LED STRIP LIGHTING", "Warm white strip light"]), "LED STRIP LIGHTING - Warm white strip light")
+        self.assertEqual(parsing_module._extract_led_note_from_lines(["LED's As per drawings"]), "LED's As per drawings")
+        self.assertEqual(parsing_module._extract_led_note_from_lines(["LED UNDERMOUTNED"]), "")
+        self.assertEqual(
+            parsing_module._extract_led_note_from_lines(["LED Strip Lighting to Kickboards (Provision", "ONLY)"]),
+            "LED Strip Lighting to Kickboards (Provision ONLY)",
+        )
+        self.assertEqual(
+            parsing_module._merge_led_note("LED'S As per drawings", "LED - 'S As per drawings"),
+            "LED's As per drawings",
+        )
+        self.assertEqual(
+            parsing_module._merge_led_note(
+                "LED LIGHTING - LED Strip Lighting to Kickboards (Provision ONLY) | LED Lighting",
+                "LED Strip Lighting to Kickboards (Provision ONLY)",
+            ),
+            "LED LIGHTING - LED Strip Lighting to Kickboards (Provision ONLY)",
+        )
+        self.assertEqual(
+            parsing_module._clean_led_note_text("LED'S (BED 2) HANDLES As per drawings BASE- BEVEL EDGE FINGERPULL"),
+            "LED's (BED 2) As per drawings",
+        )
 
     def test_yellowwood_material_probe_uses_evidence_snippet_for_real_robe_rooms(self) -> None:
         row = {
@@ -6346,6 +6370,7 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(office["bench_tops_other"], "Tasmanian Oak Matt - Laminate Benchtop - 33mm square edge")
         self.assertEqual(office["door_colours_base"], "Polytec - Classic White Matt")
         self.assertEqual(office["led"], "Yes")
+        self.assertEqual(office["led_note"], "LED STRIP LIGHTING - Warm white strip light")
         self.assertEqual(
             office["accessories"],
             [
@@ -6415,6 +6440,7 @@ class SmokeTest(unittest.TestCase):
                         "bulkheads": [],
                         "handles": [],
                         "led": "Yes",
+                        "led_note": "LED STRIP LIGHTING - Warm white strip light",
                         "accessories": ["Safe Desk Prodigy Cable Basket 950mm Black", "2 x Black Cable Grommet"],
                         "other_items": [{"label": "RAIL", "value": "Square Edge recessed rail in black"}],
                         "drawers_soft_close": "",
@@ -6454,6 +6480,8 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("Extraction duration:</strong> 2m 5s", response.text)
         self.assertIn("<strong>Floating Shelf</strong>", response.text)
         self.assertIn("<strong>LED</strong>", response.text)
+        self.assertIn("<strong>LED Note</strong>", response.text)
+        self.assertIn("LED STRIP LIGHTING - Warm white strip light", response.text)
         self.assertIn("Accessories 1", response.text)
         self.assertIn("RAIL", response.text)
         self.assertIn("Spec List for 37647 - 92 Haldham Crescent, Regents Park", response.text)
@@ -6479,6 +6507,7 @@ class SmokeTest(unittest.TestCase):
                     "bulkheads": [],
                     "handles": [],
                     "led": "Yes",
+                    "led_note": "LED STRIP LIGHTING - Warm white strip light",
                     "accessories": ["Safe Desk Prodigy Cable Basket 950mm Black"],
                     "other_items": [{"label": "RAIL", "value": "Square Edge recessed rail in black"}],
                     "drawers_soft_close": "",
@@ -6514,6 +6543,7 @@ class SmokeTest(unittest.TestCase):
         headers = [cell.value for cell in next(rooms_sheet.iter_rows(min_row=1, max_row=1))]
         self.assertIn("door_colours_tall", headers)
         self.assertIn("floating_shelf", headers)
+        self.assertIn("led_note", headers)
         self.assertIn("accessories", headers)
         self.assertIn("other_items", headers)
         special_sheet = workbook["Special Sections"]

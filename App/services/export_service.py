@@ -53,6 +53,7 @@ def _write_excel(path: Path, snapshot: dict[str, Any]) -> None:
             "bulkheads",
             "handles",
             "led",
+            "led_note",
             "accessories",
             "other_items",
             "sink_info",
@@ -88,7 +89,8 @@ def _write_excel(path: Path, snapshot: dict[str, Any]) -> None:
                 _display_value(row.get("toe_kick", [])),
                 _display_value(row.get("bulkheads", [])),
                 _display_value(row.get("handles", [])),
-                _display_value(row.get("led", "")),
+                "Yes" if parsing.normalize_space(str(row.get("led", ""))).lower() == "yes" else "No",
+                _display_value(row.get("led_note", "")),
                 _display_value(row.get("accessories", [])),
                 _display_other_items(row.get("other_items", [])),
                 _display_value(row.get("sink_info", "")),
@@ -240,6 +242,7 @@ def _write_csv(path: Path, snapshot: dict[str, Any]) -> None:
                 "door_colours_island",
                 "door_colours_bar_back",
                 "led",
+                "led_note",
                 "sink_info",
                 "basin_info",
                 "tap_info",
@@ -251,6 +254,8 @@ def _write_csv(path: Path, snapshot: dict[str, Any]) -> None:
                 "confidence",
             ):
                 field_value = benchtop_groups.get(field_name, _display_value(row.get(field_name, "")))
+                if field_name == "led":
+                    field_value = "Yes" if parsing.normalize_space(str(row.get("led", ""))).lower() == "yes" else "No"
                 writer.writerow(["rooms", room_key, field_name, field_value])
             writer.writerow(["rooms", room_key, "drawers_soft_close", _normalize_soft_close(row.get("drawers_soft_close", ""), "drawer")])
             writer.writerow(["rooms", room_key, "hinges_soft_close", _normalize_soft_close(row.get("hinges_soft_close", ""), "hinge")])

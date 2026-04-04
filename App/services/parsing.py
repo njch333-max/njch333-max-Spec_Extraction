@@ -4988,6 +4988,7 @@ def _imperial_layout_overlay_from_section(section: dict[str, Any]) -> dict[str, 
         "handles": [],
         "floating_shelf": "",
         "led": "",
+        "led_note": "",
         "accessories": [],
         "other_items": [],
         "sink_info": "",
@@ -5104,6 +5105,7 @@ def _imperial_layout_overlay_from_section(section: dict[str, Any]) -> dict[str, 
             continue
         if "LED" in label_upper:
             overlay["led"] = "Yes"
+            overlay["led_note"] = _merge_led_note(overlay.get("led_note", ""), _extract_led_note_from_layout_row(row))
             continue
         if any(token in label_upper for token in ("GPO", "BIN", "HAMPER", "ACCESSORIES")):
             accessory_value = _imperial_layout_row_accessory_entry(row)
@@ -5278,7 +5280,8 @@ def _imperial_room_from_section(section: dict[str, Any]) -> RoomRow:
         )
     if bulkhead_text:
         row.bulkheads = [_imperial_clean_bulkhead_value(bulkhead_text)]
-    row.led = fields.get("led", "")
+    row.led_note = _extract_led_note_from_lines(section_text.splitlines())
+    row.led = _normalize_led_value(fields.get("led", ""), row.led_note)
     row.accessories = _imperial_finalize_accessory_entries(accessories or _coerce_string_list(fields.get("accessories", "")))
     row.other_items = other_items
     handles: list[str] = []
@@ -5347,8 +5350,8 @@ def _imperial_room_from_section(section: dict[str, Any]) -> RoomRow:
         row.toe_kick = _coerce_string_list(layout_overlay["toe_kick"])
     if layout_overlay.get("handles"):
         row.handles = _clean_handle_entries(_coerce_string_list(layout_overlay["handles"]))
-    if layout_overlay.get("led"):
-        row.led = layout_overlay["led"]
+    row.led_note = _merge_led_note(row.led_note, layout_overlay.get("led_note", ""))
+    row.led = _normalize_led_value(layout_overlay.get("led") or row.led, row.led_note)
     if layout_overlay.get("accessories"):
         row.accessories = _imperial_finalize_accessory_entries(_coerce_string_list(layout_overlay["accessories"]))
     if layout_overlay.get("other_items"):
@@ -5903,8 +5906,9 @@ def _merge_room_section_into_row(
             _clean_handle_entries(_collect_field(lines, ["Handles", "Handle", "Base Cabinet Handles", "Overhead Handles", "Pantry Door Handles"])),
         )
         row.floating_shelf = _merge_text(row.floating_shelf, _first_value(_collect_field(lines, ["Floating Shelves", "Floating Shelf"])))
-        if _has_explicit_led_field(lines):
-            row.led = "Yes"
+        led_note = _extract_led_note_from_lines(lines)
+        row.led_note = _merge_led_note(row.led_note, led_note)
+        row.led = _normalize_led_value(row.led, row.led_note)
         row.accessories = _merge_lists(row.accessories, _collect_field(lines, ["Accessories", "Accessory"]))
         row.other_items = _merge_other_items(
             row.other_items,
@@ -6087,7 +6091,48 @@ def _collect_explicit_bulkhead_values(lines: list[str]) -> list[str]:
     return _unique(values)
 
 
-def _has_explicit_led_field(lines: list[str]) -> bool:
+def _is_led_noise_text(text: str) -> bool:
+    return bool(re.search(r"(?i)\b(?:topmount|undermount(?:ed)?|undermoutned|installed?|instal)\b", normalize_space(text)))
+
+
+def _clean_led_note_text(value: Any) -> str:
+    text = normalize_space(str(value or ""))
+    if not text:
+        return ""
+    text = re.sub(r"(?i)\bLED\s*-\s*'S\b", "LED's", text)
+    text = re.sub(r"(?i)\bLED'S\b", "LED's", text)
+    text = re.sub(r"(?i)\bLED\s+LIGHTING\s+LED\s+STRIP\s+LIGHTING\b", "LED LIGHTING - LED Strip Lighting", text)
+    text = re.sub(r"(?i)\bLED\s+STRIP\s+LIGHTING\s*-\s+to\b", "LED Strip Lighting to", text)
+    text = re.sub(
+        r"(?i)\b(LED(?:'?S)?(?:\s+\([^)]+\))?)\s+HANDLES\b.*$",
+        lambda match: f"{match.group(1)} As per drawings" if "AS PER DRAWINGS" in text.upper() else match.group(1),
+        text,
+    )
+    text = re.sub(r"(?i)\b(BASE-|UPPER\b|TALL\b|ACCESSORIES\b|BIN\b).*$", "", text).strip(" -|")
+    if "LED LIGHTING" in text.upper() and "LED STRIP LIGHTING" in text.upper():
+        text = re.sub(r"(?i)\bLED\s+STRIP\s+LIGHTING\s*-\s*", "LED Strip Lighting ", text)
+    return normalize_space(text.strip(" -|"))
+
+
+def _merge_led_note(*values: Any) -> str:
+    notes: list[str] = []
+    for value in values:
+        raw_text = normalize_space(str(value or ""))
+        if not raw_text:
+            continue
+        for fragment in [part.strip() for part in raw_text.split("|")]:
+            text = _clean_led_note_text(fragment)
+            if not text:
+                continue
+            if any(text.lower() == existing.lower() or text.lower() in existing.lower() for existing in notes):
+                continue
+            notes = [existing for existing in notes if existing.lower() not in text.lower()]
+            notes.append(text)
+    return " | ".join(notes)
+
+
+def _extract_led_note_from_lines(lines: list[str]) -> str:
+    notes: list[str] = []
     for index, line in enumerate(lines):
         text = normalize_space(line)
         match = re.match(r"(?i)^LED(?:'?S)?(?:\s+STRIP\s+LIGHTING|\s+LIGHTING)?\b", text)
@@ -6095,15 +6140,58 @@ def _has_explicit_led_field(lines: list[str]) -> bool:
             continue
         tail = normalize_space(text[match.end() :].strip(" :-"))
         if tail:
-            if re.search(r"(?i)\b(?:topmount|installed?|instal)\b", tail):
+            if _is_led_noise_text(tail):
                 continue
-            return True
-        if index + 1 < len(lines) and not _looks_like_field_label(lines[index + 1]):
-            continuation = normalize_space(lines[index + 1])
-            if re.search(r"(?i)\b(?:topmount|installed?|instal)\b", continuation):
-                continue
-            return True
-    return False
+            note = text
+            if "(" in text and ")" not in text and index + 1 < len(lines):
+                continuation = normalize_space(lines[index + 1])
+                if continuation and not _looks_like_field_label(continuation) and not _is_led_noise_text(continuation):
+                    note = normalize_space(f"{note} {continuation}")
+        else:
+            note = normalize_space(text[: match.end()])
+            if index + 1 < len(lines) and not _looks_like_field_label(lines[index + 1]):
+                continuation = normalize_space(lines[index + 1])
+                if continuation and not _is_led_noise_text(continuation):
+                    note = normalize_space(f"{note} - {continuation}")
+        note = _clean_led_note_text(note)
+        if not note or _is_led_noise_text(note) or note in notes:
+            continue
+        notes.append(note)
+    return " | ".join(notes)
+
+
+def _extract_led_note_from_layout_row(row: dict[str, Any]) -> str:
+    label = normalize_space(str(row.get("row_label", "") or ""))
+    if not label or "LED" not in label.upper():
+        return ""
+    note = label
+    extras: list[str] = []
+    for key in ("value_region_text", "value_text", "notes_region_text", "notes_text"):
+        text = normalize_space(str(row.get(key, "") or ""))
+        if not text or text.lower() == label.lower() or _is_led_noise_text(text):
+            continue
+        extras.append(text)
+    if extras:
+        note = normalize_space(f"{label} - {' - '.join(_unique(extras))}")
+    note = _clean_led_note_text(note)
+    return "" if _is_led_noise_text(note) else note
+
+
+def _normalize_led_value(value: Any, note: Any = "") -> str:
+    note_text = normalize_space(str(note or ""))
+    text = normalize_space(str(value or ""))
+    if note_text:
+        return "Yes"
+    lowered = text.lower()
+    if lowered in {"", "no", "n", "false", "0"}:
+        return "No"
+    if lowered in {"yes", "y", "true", "1"}:
+        return "Yes"
+    return "Yes"
+
+
+def _has_explicit_led_field(lines: list[str]) -> bool:
+    return bool(_extract_led_note_from_lines(lines))
 
 
 def _extract_soft_close(lines: list[str], keyword: str) -> str:
@@ -7119,7 +7207,8 @@ def enrich_snapshot_rooms(snapshot: dict[str, Any], documents: list[dict[str, ob
             row["door_panel_colours"] = _rebuild_door_panel_colours(row)
             row["handles"] = _clean_handle_entries(_coerce_string_list(row.get("handles", [])))
             row["floating_shelf"] = _string_value(row.get("floating_shelf", ""))
-            row["led"] = "Yes" if row.get("led") else ""
+            row["led_note"] = _merge_led_note(row.get("led_note", ""))
+            row["led"] = _normalize_led_value(row.get("led", ""), row["led_note"])
             row["accessories"] = _clean_accessory_entries(_coerce_string_list(row.get("accessories", [])))
             row["other_items"] = _merge_other_items([], row.get("other_items", []))
             row["sink_info"] = _clean_room_fixture_text(overlay.get("sink_info", "") or _string_value(row.get("sink_info", "")), "sink")
@@ -7163,7 +7252,8 @@ def enrich_snapshot_rooms(snapshot: dict[str, Any], documents: list[dict[str, ob
             _coerce_string_list(overlay.get("handles", [])) or _coerce_string_list(row.get("handles", []))
         )
         row["floating_shelf"] = _merge_text(_string_value(row.get("floating_shelf", "")), overlay.get("floating_shelf", ""))
-        row["led"] = "Yes" if (overlay.get("led") or row.get("led")) else ""
+        row["led_note"] = _merge_led_note(row.get("led_note", ""), overlay.get("led_note", ""))
+        row["led"] = _normalize_led_value(overlay.get("led") or row.get("led", ""), row["led_note"])
         row["accessories"] = _merge_lists(_coerce_string_list(row.get("accessories", [])), _coerce_string_list(overlay.get("accessories", [])))
         row["other_items"] = _merge_other_items(row.get("other_items", []), overlay.get("other_items", []))
         row["sink_info"] = _merge_text(_string_value(row.get("sink_info", "")), overlay.get("sink_info", ""))
@@ -7338,7 +7428,8 @@ def _apply_room_cleaning_rules(row: dict[str, Any], rule_flags: dict[str, bool])
     row["bulkheads"] = _normalize_text_list(row.get("bulkheads", []), rule_flags)
     row["handles"] = _normalize_text_list(_clean_handle_entries(_coerce_string_list(row.get("handles", []))), rule_flags)
     row["floating_shelf"] = _display_rule_text(row.get("floating_shelf", ""), rule_flags)
-    row["led"] = "Yes" if normalize_space(str(row.get("led", ""))) else ""
+    row["led_note"] = _display_rule_text(_merge_led_note(row.get("led_note", "")), rule_flags)
+    row["led"] = _normalize_led_value(row.get("led", ""), row["led_note"])
     row["accessories"] = _normalize_text_list(row.get("accessories", []), rule_flags)
     row["other_items"] = [
         {
@@ -7786,8 +7877,9 @@ def _collect_room_overlays(
                     _clean_handle_entries(_collect_field(lines, ["Handles", "Handle", "Base Cabinet Handles", "Overhead Handles", "Pantry Door Handles"])),
                 )
                 overlay["floating_shelf"] = _merge_text(overlay["floating_shelf"], _first_value(_collect_field(lines, ["Floating Shelves", "Floating Shelf"])))
-                if _has_explicit_led_field(lines):
-                    overlay["led"] = "Yes"
+                led_note = _extract_led_note_from_lines(lines)
+                overlay["led_note"] = _merge_led_note(overlay.get("led_note", ""), led_note)
+                overlay["led"] = _normalize_led_value(overlay.get("led", ""), overlay["led_note"])
                 overlay["accessories"] = _merge_lists(_coerce_string_list(overlay.get("accessories", [])), _collect_field(lines, ["Accessories", "Accessory"]))
                 overlay["other_items"] = _merge_other_items(
                     overlay.get("other_items", []),
@@ -7894,6 +7986,7 @@ def _blank_overlay() -> dict[str, Any]:
         "has_explicit_island": False,
         "has_explicit_bar_back": False,
         "led": "",
+        "led_note": "",
         "accessories": [],
         "other_items": [],
         "sink_info": "",

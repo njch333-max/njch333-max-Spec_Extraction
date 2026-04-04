@@ -81,6 +81,7 @@ class RoomRow(BaseModel):
     bulkheads: list[str] = Field(default_factory=list)
     handles: list[str] = Field(default_factory=list)
     led: str = ""
+    led_note: str = ""
     accessories: list[str] = Field(default_factory=list)
     other_items: list[dict[str, str]] = Field(default_factory=list)
     sink_info: str = ""

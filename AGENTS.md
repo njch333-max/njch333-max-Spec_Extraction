@@ -52,9 +52,10 @@ If a change affects user-visible behavior, architecture, storage, deployment, wo
 18. Keep `colour/material` values and appliance placeholders close to source wording with light cleanup only. Placeholder appliance rows such as `As Above`, `By Client`, or `N/A CLIENT TO CHECK` may be deduplicated only when the same source already contains a concrete model for that appliance type.
 19. Wet-area plumbing rows that are not joinery/cabinet related must be blacklisted from final room output across builders. This includes shower, bath, toilet, towel-rail, towel-hook, floor-waste, feature-waste, shower-base/frame, basin-waste, bottle-trap, and in-wall-mixer-only items. The only fixture exceptions that may survive are `Sink`, `Basin`, `Sink Mixer`, and `Basin Mixer`.
 20. Yellowwood vanity plumbing enrichment must stay room-relevant: only `Basin`, `Basin Mixer`, room-local flooring, and joinery/material fields may survive on final vanity room cards.
-21. All new `spec` parse runs for all builders must enter field-level PDF QA automatically. Raw results may be viewed before signoff, but they are not formally accepted until PDF QA passes.
-22. Formal spec exports are locked behind PDF QA. Do not treat a raw spec snapshot as complete, export-ready, or fixed until the current raw snapshot verification is `passed`.
-23. Parser-accuracy work is only complete after the affected live rerun passes PDF QA against the source PDF page-by-page. Older webpages and older snapshots are reference material only.
+21. `LED` is a first-class room field. Store it internally as explicit `Yes/No`, keep matched source wording in a separate `LED Note`, and only render the LED block on user-facing pages when `LED = Yes`.
+22. All new `spec` parse runs for all builders must enter field-level PDF QA automatically. Raw results may be viewed before signoff, but they are not formally accepted until PDF QA passes.
+23. Formal spec exports are locked behind PDF QA. Do not treat a raw spec snapshot as complete, export-ready, or fixed until the current raw snapshot verification is `passed`.
+24. Parser-accuracy work is only complete after the affected live rerun passes PDF QA against the source PDF page-by-page. Older webpages and older snapshots are reference material only.
 
 ## Verification Expectations
 - The app should boot with `uvicorn App.main:app`

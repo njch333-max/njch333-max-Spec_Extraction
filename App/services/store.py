@@ -764,6 +764,8 @@ def _build_snapshot_verification_checklist(snapshot: dict[str, Any]) -> list[dic
             ("bulkheads", "bulkheads"),
             ("handles", "handles"),
             ("floating_shelf", "floating_shelf"),
+            ("led", "led"),
+            ("led_note", "led_note"),
             ("accessories", "accessories"),
             ("others", "other_items"),
             ("sink", "sink_info"),

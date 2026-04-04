@@ -167,7 +167,7 @@
 10. Render appliance official links as a clickable wrapped `Product` column.
 11. Render non-room joinery sections such as `FEATURE TALL DOORS` in a dedicated `Special Sections` block instead of folding them into nearby rooms.
 12. Show `Generated at`, `Extraction duration`, and the current PDF QA status in Brisbane time / human-readable duration format on the raw Spec List page.
-13. Export that raw snapshot through a dedicated Excel route, including a `Special Sections` worksheet and the expanded room fields for `Floating Shelf`, `LED`, `Accessories`, and curated accessory `Others`, but only when PDF QA has passed.
+13. Export that raw snapshot through a dedicated Excel route, including a `Special Sections` worksheet and the expanded room fields for `Floating Shelf`, `LED`, `LED Note`, `Accessories`, and curated accessory `Others`, but only when PDF QA has passed.
 14. Never fall back to `reviews` when rendering the raw Spec List page.
 15. Start the page shell with the left navigation rail collapsed by default and let the user toggle it open client-side when needed.
 16. When a parsed `site_address` exists, append it to the page heading as `job no - site address`; otherwise omit the separator.
@@ -215,6 +215,7 @@
 - Snapshot payloads now also carry an optional `site_address` string extracted from source documents.
 - Clarendon rows pass through a deterministic post-polish layer after layout stabilization so handle strings, fixture text, splashback notes, and soft-close fallbacks stay readable without changing source-driven room ownership.
 - That Clarendon post-polish now detects at least two schedule families: the `37016` reference family and the denser single-line `LUXE / handleless / mirror splashback` family, then applies family-specific field splitting before the shared compact-summary cleanup.
+- LED evidence is handled as a dedicated room pair: parsing normalizes `led` to explicit `Yes/No`, keeps the matched source wording in `led_note`, and only the presentation layer suppresses `No` rows for readability.
 
 ### Special Sections
 - Non-room sections such as `FEATURE TALL DOORS` are stored in `special_sections[]`.

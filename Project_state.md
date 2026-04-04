@@ -64,7 +64,7 @@
   - orientation-only notes such as `Vertical on Tall doors only` and `Horizontal on all` are now rejected as door-colour material values, so they do not populate `Tall` or `Island`
   - Imperial sink and tap room fields now prefer the builder-specific non-joinery overlay parser over noisier AI fixture guesses when both are present
   - all room cards and exports now support a global `Tall` material field for tall cabinets / tall doors / tall panels when the source provides that split
-  - room cards and exports now also support optional `Floating Shelf`, `LED`, ordered `Accessories`, and curated accessory `Others` rows
+  - room cards and exports now also support optional `Floating Shelf`, explicit `LED Yes/No`, dedicated `LED Note`, ordered `Accessories`, and curated accessory `Others` rows
   - the raw Spec List summary now shows `Extraction duration`, and `Floating Shelf` materials also contribute to the `Material Summary -> Bench Tops` bucket
   - the Job page temporarily hides the Review cards while the review UX is being redesigned, without removing the backend review model
   - all user-facing timestamps are now rendered in fixed Brisbane time (`YYYY-MM-DD HH:mm AEST`) across job lists, uploads, run history, export tables, and spec-list summary
@@ -152,6 +152,7 @@
 - Refine OCR fallback for image-heavy PDFs
 - Improve room-section detection for more builder formats
 - Improve official product URL lookup accuracy, size extraction coverage, and brand coverage
+- Continue checking the new `LED Note` rollout on live reruns so true LED evidence such as `LED STRIP LIGHTING`, `LED LIGHTING`, or `LED's As per drawings` lands on the right room without reintroducing false positives from sinkware noise such as `LED Topmount` or `LED UNDERMOUTNED`
 - Continue tightening Yellowwood handle cleanup and wet-area plumbing merge purity where combined basin/tap/toilet text still leaks across row-local boundaries
 - Complete the active 5-builder core / 10-job PDF-QA matrix:
   - `Clarendon`: `job 1`, `job 23`, `job 25`

@@ -106,6 +106,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Sink, basin, and tap selections must be captured as room-level fixture fields instead of appliance rows.
 - Wet-area plumbing items that do not affect cabinetry or benchtop depth must not appear in final room fields. `Shower Mixer`, `Shower Screen`, `Shower Base`, `Shower Frame`, `Towel Rail`, `Toilet Roll Holder`, `Toilet Suite`, `Toilet`, `Floor Waste`, `Feature Waste`, `Bath`, `Bath Mixer`, `Bath Spout`, `Bath Waste`, `Shower on Rail`, `Shower Rose`, `Basin Waste`, `Bottle Trap`, and similar wet-area hooks or in-wall mixer-only rows are blacklisted from final room output.
 - The only wet-area fixture exceptions that may stay in final room output are `Sink`, `Basin`, `Sink Mixer`, and `Basin Mixer`, because they affect benchtop or stone cutout/depth decisions.
+- `LED` is a dedicated room field with explicit `Yes/No` output. When source wording such as `LED`, `LED LIGHTING`, `LED STRIP LIGHTING`, or `LED's As per drawings` is present, the room must output `LED = Yes` and preserve that wording in a separate `LED Note` field; pages should only render the LED row when the value is `Yes`.
 - Door colour information should expose room-level splits for `Overheads`, `Base`, `Island`, and `Bar Back` whenever the source text makes those categories explicit.
 - Door colour information should also expose a room-level `Tall` split when the source explicitly labels tall cabinets, tall doors, tall panels, or combined `Upper Cabinetry Colour + Tall Cabinets` rows.
 - Grouped rooms such as `Vanities` must treat door-colour splits as explicit-marker-driven: `Overheads` may only appear when the authoritative room section explicitly labels overhead cabinetry; otherwise grouped door colours default to `Base`.
@@ -208,7 +209,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Each room card must show room fixture rows for `Sink`, `Basin`, and `Tap`.
 - Each room card must show `Door Colours` as separate `Overheads`, `Base`, `Island`, and `Bar Back` rows.
 - Each room card must also show a `Tall` row so tall-cabinet material can be captured when the source provides it.
-- Each room card must support optional `Floating Shelf`, `LED`, `Accessories 1..n`, and curated `Others` accessory rows, and only render those rows when values exist.
+- Each room card must support optional `Floating Shelf`, `LED`, `LED Note`, `Accessories 1..n`, and curated `Others` accessory rows, and only render the LED block when `LED = Yes`.
 - Non-kitchen room cards must never render `Island` or `Bar Back`, and non-kitchen `Overheads` should only render when the authoritative room section explicitly provides that split.
 - Each room card should prefer separate `Wall Run Bench Top` and `Island Bench Top` rows when the source text supports that split.
 - Only the `Kitchen` room card should render split `Wall Run Bench Top` and `Island Bench Top` rows; other rooms should render a single `Benchtop` row even when internal split fields exist.

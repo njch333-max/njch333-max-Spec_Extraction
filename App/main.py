@@ -781,7 +781,9 @@ def _flatten_rooms(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
                 "bulkheads": _display_value(row.get("bulkheads", [])),
                 "handles": _display_value(row.get("handles", [])),
                 "floating_shelf": _display_value(row.get("floating_shelf", "")),
-                "led": "Yes" if _display_value(row.get("led", "")) else "",
+                "led": "Yes" if str(_display_value(row.get("led", ""))).strip().lower() == "yes" else "No",
+                "show_led": str(_display_value(row.get("led", ""))).strip().lower() == "yes",
+                "led_note": _display_value(row.get("led_note", "")),
                 "accessories": _string_list(row.get("accessories", [])),
                 "other_items": [
                     {
