@@ -7424,15 +7424,26 @@ ROOM_MATERIAL_EVIDENCE_LIST_FIELDS: tuple[str, ...] = (
 )
 
 
+def _is_placeholder_material_value(text: Any) -> bool:
+    cleaned = normalize_space(str(text or "")).strip(" -;,")
+    if not cleaned:
+        return True
+    return bool(re.fullmatch(r"(?i)(?:not applicable|not included|n/?a|na)(?:\b.*)?", cleaned))
+
+
 def _room_material_evidence_values(row: dict[str, Any]) -> list[str]:
     values: list[str] = []
     for key in ROOM_MATERIAL_EVIDENCE_SCALAR_FIELDS:
         text = normalize_space(str(row.get(key, "") or ""))
-        if text:
+        if text and not _is_placeholder_material_value(text):
             values.append(text)
     for key in ROOM_MATERIAL_EVIDENCE_LIST_FIELDS:
-        values.extend(_coerce_string_list(row.get(key, [])))
-    return [value for value in values if normalize_space(value)]
+        values.extend(
+            value
+            for value in _coerce_string_list(row.get(key, []))
+            if not _is_placeholder_material_value(value)
+        )
+    return [value for value in values if normalize_space(value) and not _is_placeholder_material_value(value)]
 
 
 def _room_has_material_evidence(row: dict[str, Any]) -> bool:

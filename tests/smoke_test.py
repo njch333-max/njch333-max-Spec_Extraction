@@ -4232,6 +4232,38 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("BED 2 ROBE FIT OUT", kept)
         self.assertNotIn("GROUND FLOOR POWDER ROOM", kept)
 
+    def test_room_material_evidence_ignores_not_applicable_placeholders(self) -> None:
+        row = {
+            "bench_tops_other": "Not Applicable",
+            "toe_kick": ["N/A"],
+            "bulkheads": ["Not Included"],
+        }
+        self.assertFalse(parsing_module._room_has_material_evidence(row))
+
+    def test_apply_builder_material_room_gate_drops_placeholder_only_evoca_rooms(self) -> None:
+        snapshot = {
+            "builder_name": "Evoca",
+            "rooms": [
+                {
+                    "original_room_label": "BUTLERS",
+                    "room_key": "butlers",
+                    "bench_tops_other": "Not Applicable",
+                    "toe_kick": [],
+                    "bulkheads": [],
+                },
+                {
+                    "original_room_label": "KITCHEN",
+                    "room_key": "kitchen",
+                    "bench_tops_wall_run": "20mm Quantum Quartz - Champagne - Arissed",
+                    "toe_kick": [],
+                    "bulkheads": [],
+                },
+            ],
+        }
+        gated = parsing_module._apply_builder_material_room_gate(snapshot)
+        labels = [row["original_room_label"] for row in gated["rooms"]]
+        self.assertEqual(labels, ["KITCHEN"])
+
     def test_yellowwood_cleanup_splashback_text_drops_tiling_referral_noise_for_kitchen_and_powder(self) -> None:
         self.assertEqual(
             parsing_module._yellowwood_cleanup_splashback_text("Tile Refer to Tiling section below N/A", "kitchen"),
