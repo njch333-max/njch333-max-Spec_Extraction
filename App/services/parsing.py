@@ -9082,6 +9082,9 @@ def _clean_door_colour_value(value: Any) -> str:
     if re.fullmatch(r"(?i)(?:not applicable|n/?a)(?:\s+manufacturer)?(?:\s+colour\s*&\s*finish)?", text.strip(" -;,") or ""):
         return ""
     text = normalize_brand_casing_text(text)
+    text = re.sub(r"[每]+", " ", text)
+    text = re.sub(r"(?<=\w)\?(?=\w)", " ", text)
+    text = re.sub(r"(?<=\w)\s*[^\w\s/&()'.,:-]+\s*(?=\w)", " ", text)
     text = text.replace("每", " ")
     text = re.sub(r"(?i)\bas supplied by (?:cabinetmaker|builder)\b", "", text)
     if any(re.search(pattern, text, re.IGNORECASE) for pattern in CABINET_ONLY_EXCLUDE_PATTERNS):

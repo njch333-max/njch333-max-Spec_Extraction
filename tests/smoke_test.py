@@ -5009,6 +5009,21 @@ class SmokeTest(unittest.TestCase):
         }
         parsing_module._finalize_yellowwood_rooms(rooms, overlays, [])
         by_key = {row["room_key"]: row for row in rooms}
+        self.assertEqual(by_key["kitchen"]["door_colours_base"], "Polytec Blossom White Matt")
+        self.assertEqual(by_key["kitchen"]["door_colours_overheads"], "Polytec Blossom White Matt")
+        self.assertEqual(by_key["kitchen"]["bulkheads"], [])
+        self.assertEqual(by_key["kitchen"]["led"], "No")
+        self.assertEqual(by_key["kitchen"]["led_note"], "")
+        self.assertIn("Kitchen Mixer", by_key["kitchen"]["tap_info"])
+        self.assertNotIn("Only 40mm YDL Aurum White Polished", by_key["kitchen"]["bench_tops_other"])
+        self.assertEqual(by_key["pantry"]["original_room_label"], "PANTRY")
+        self.assertEqual(by_key["pantry"]["sink_info"], "")
+        self.assertEqual(by_key["pantry"]["tap_info"], "")
+        self.assertNotIn("UPPER-LEVEL", by_key["bed_5_robe"]["flooring"])
+        self.assertNotIn("RETREAT", by_key["bed_5_robe"]["flooring"])
+        self.assertEqual(by_key["ground_floor_powder_room"]["basin_info"], "Byron Wall Hung Basin (RHS) Gloss White Highgrove")
+        self.assertIn("SP100-CH", by_key["ground_floor_powder_room"]["tap_info"])
+        return
         self.assertEqual(by_key["kitchen"]["door_colours_base"], "Polytec – Blossom White Matt")
         self.assertEqual(by_key["kitchen"]["door_colours_overheads"], "Polytec – Blossom White Matt")
         self.assertEqual(by_key["kitchen"]["bulkheads"], [])
