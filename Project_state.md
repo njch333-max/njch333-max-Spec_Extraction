@@ -125,6 +125,13 @@
 - `spec.lxtransport.online` resolves to `43.160.209.86` and is now deployed live on the LXtransport Tencent Cloud server.
 - The production stack is running through `nginx + systemd + uvicorn`, with `spec-extraction-web.service` and `spec-extraction-worker.service` active on the server.
 - HTTPS for `spec.lxtransport.online` is now issued by Certbot and terminates correctly at Nginx.
+- The current live PDF QA state for the active 11-job regression matrix is:
+  - `passed`: `job 24`, `job 34`, `job 37`, `job 38`, `job 39`
+  - `failed`: `job 1`, `job 19`, `job 23`, `job 25`, `job 35`, `job 36`
+- The latest Yellowwood/Evoca live reruns now also include:
+  - Yellowwood kitchen `Shelf` is suppressed unless the same room has explicit shelf-source wording
+  - Yellowwood handle strings with a prefixed pantry/base note are reformatted into a cleaner handle value instead of leaving the note in front of the model
+  - grouped-row builders such as Evoca now re-run benchtop-other dedupe after display cleaning, preventing wall-run/island values from being reintroduced into `bench_tops_other`
 
 ## Current Goals
 1. Keep Builder and Job flows stable while iterating extraction quality
@@ -157,7 +164,6 @@
 - Improve room-section detection for more builder formats
 - Improve official product URL lookup accuracy, size extraction coverage, and brand coverage
 - Continue checking the new `LED Note` rollout on live reruns so true LED evidence such as `LED STRIP LIGHTING`, `LED LIGHTING`, or `LED's As per drawings` lands on the right room without reintroducing false positives from sinkware noise such as `LED Topmount` or `LED UNDERMOUTNED`
-- Continue tightening Yellowwood handle cleanup and wet-area plumbing merge purity where combined basin/tap/toilet text still leaks across row-local boundaries
 - Complete the active 5-builder core / 10-job PDF-QA matrix:
   - `Clarendon`: `job 1`, `job 23`, `job 25`
   - `Yellowwood`: `job 37`

@@ -217,7 +217,7 @@
 - Array-like fields are stored as lists in JSON and flattened with ` | ` in the review UI
 - `room_key` is a source-driven normalized identity, `original_room_label` preserves the detected source label
 - Room rows also carry fixture fields for sinks, basins, and taps plus split door-colour and bench-top display fields, including the global `door_colours_tall` split for tall-cabinet material.
-- Room rows now also support `floating_shelf`, conditional `shelf`, `led`, ordered `accessories`, and curated `other_items` accessory labels such as `RAIL` and `JEWELLERY INSERT`.
+- Room rows now also support `floating_shelf`, conditional `shelf`, `led`, ordered `accessories`, and curated `other_items` accessory labels such as `RAIL` and `JEWELLERY INSERT`. `Shelf` is source-driven and same-room-local: it must come from explicit shelf wording in that room's own source text, not from generic fit-out notes or nearby room content.
 - Builder finalization now applies a global material-evidence gate after overlays merge: rooms survive only when they hold true joinery/material fields, not merely handles, plumbing fixtures, flooring, LED, or accessory text.
 - Snapshot payloads now also carry an optional `site_address` string extracted from source documents.
 - Clarendon rows pass through a deterministic post-polish layer after layout stabilization so handle strings, fixture text, splashback notes, and soft-close fallbacks stay readable without changing source-driven room ownership.
