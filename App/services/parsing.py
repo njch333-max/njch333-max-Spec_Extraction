@@ -5849,6 +5849,10 @@ def _merge_room_section_into_row(
             [
                 {"label": "RAIL", "value": _first_value(_collect_field(lines, ["Rail"]))},
                 {"label": "JEWELLERY INSERT", "value": _first_value(_collect_field(lines, ["Jewellery Insert"]))},
+                {"label": "BATH", "value": _first_value(_collect_field(lines, ["Bath"]))},
+                {"label": "BATH MIXER", "value": _first_value(_collect_field(lines, ["Bath Mixer"]))},
+                {"label": "BATH SPOUT", "value": _first_value(_collect_field(lines, ["Bath Spout"]))},
+                {"label": "BATH WASTE", "value": _first_value(_collect_field(lines, ["Bath Waste"]))},
             ],
         )
         row.drawers_soft_close = merge_soft_close_values(row.drawers_soft_close, _extract_soft_close(lines, "drawer"))
@@ -6736,6 +6740,68 @@ def _extract_floor_tile_block_from_text(text: str, area_pattern: str, stop_patte
     return _clean_flooring_overlay_text(f"Floor Tile {floor_match.group('value')}")
 
 
+def _extract_area_block_from_text(text: str, area_pattern: str, stop_patterns: tuple[str, ...]) -> str:
+    normalized = normalize_space(text)
+    if not normalized:
+        return ""
+    stop_union = "|".join(stop_patterns)
+    match = re.search(
+        rf"(?is)\b{area_pattern}\b\s+(?P<value>.+?)(?=\b(?:{stop_union})\b|$)",
+        normalized,
+    )
+    if not match:
+        return ""
+    return normalize_space(match.group("value"))
+
+
+def _extract_named_value_from_block(block: str, label_pattern: str, stop_patterns: tuple[str, ...]) -> str:
+    normalized = normalize_space(block)
+    if not normalized:
+        return ""
+    stop_union = "|".join(stop_patterns)
+    match = re.search(
+        rf"(?is)\b{label_pattern}\b\s+(?P<value>.+?)(?=\b(?:{stop_union})\b|$)",
+        normalized,
+    )
+    if not match:
+        return ""
+    return normalize_space(match.group("value")).strip(" -|;,")
+
+
+def _clean_yellowwood_overlay_source_text(text: str) -> str:
+    cleaned_lines: list[str] = []
+    for raw_line in str(text or "").splitlines():
+        line = normalize_space(raw_line)
+        if not line:
+            continue
+        if re.match(r"(?i)^page\s+\d+\s*/\s*\d+$", line):
+            continue
+        if "Tone Interior Design Consulting" in line:
+            continue
+        if re.match(r"(?i)^LOT\s+\d+\b", line):
+            continue
+        cleaned_lines.append(line)
+    return "\n".join(cleaned_lines)
+
+
+def _build_yellowwood_overlay_text(
+    document: dict[str, object],
+    page_filter: Callable[[str], bool] | None = None,
+) -> str:
+    page_texts: list[str] = []
+    for page in sorted(document.get("pages", []), key=lambda item: int(item.get("page_no", 0) or 0)):
+        text = str(page.get("raw_text") or page.get("text") or "")
+        if not text or _yellowwood_looks_like_contents_noise(text):
+            continue
+        upper = text.upper()
+        if page_filter and not page_filter(upper):
+            continue
+        cleaned = _clean_yellowwood_overlay_source_text(text)
+        if cleaned:
+            page_texts.append(cleaned)
+    return "\n".join(page_texts)
+
+
 def _collect_yellowwood_flooring_overlays(
     overlays: dict[str, dict[str, Any]],
     documents: list[dict[str, object]],
@@ -6780,21 +6846,124 @@ def _collect_yellowwood_flooring_overlays(
         r"ALFRESCO",
     )
     for document in documents:
-        for page in document.get("pages", []):
-            text = str(page.get("raw_text") or page.get("text") or "")
-            if not text or _yellowwood_looks_like_contents_noise(text):
+        combined_text = _build_yellowwood_overlay_text(document)
+        if not combined_text:
+            continue
+        combined_upper = combined_text.upper()
+        if "OTHER THAN TILING TO WET AREAS" in combined_upper:
+            for area_pattern, room_key in non_wet_areas:
+                flooring_value = _extract_flooring_block_from_text(combined_text, area_pattern, non_wet_stops)
+                if flooring_value and _looks_like_flooring_overlay_value(flooring_value):
+                    _merge_room_flooring_overlay(overlays, room_key, flooring_value)
+        if "TILING SCHEDULE" in combined_upper or "FLOOR TILE" in combined_upper:
+            for area_pattern, room_key in wet_area_targets:
+                flooring_value = _extract_floor_tile_block_from_text(combined_text, area_pattern, wet_area_stops)
+                if flooring_value and _looks_like_flooring_overlay_value(flooring_value):
+                    _merge_room_flooring_overlay(overlays, room_key, flooring_value)
+
+
+def _collect_yellowwood_fixture_overlays(
+    overlays: dict[str, dict[str, Any]],
+    documents: list[dict[str, object]],
+) -> None:
+    area_targets: tuple[tuple[str, str], ...] = (
+        (r"BATHROOM", source_room_key("BATHROOM VANITY")),
+        (r"BED\s*1\s+ENSUITE", source_room_key("BED 1 ENSUITE VANITY")),
+    )
+    area_stops = (
+        r"BED\s*1\s+ENSUITE",
+        r"BATHROOM",
+        r"WC",
+        r"LAUNDRY",
+        r"KITCHEN",
+        r"APPLIANCES",
+    )
+    bath_stops = (
+        r"Bath Waste",
+        r"Bath Mixer",
+        r"Bath Spout",
+        r"Toilet Roll Holder",
+        r"Toilet",
+        r"Sink Mixer",
+        r"Pull-?Out Mixer",
+        r"Basin Waste",
+        r"Basin",
+        r"Shower on Rail",
+        r"Shower Mixer",
+        r"Shower Floor Waste",
+    )
+    bath_mixer_stops = (
+        r"Bath Spout",
+        r"Bath Waste",
+        r"Toilet Roll Holder",
+        r"Toilet",
+        r"Sink Mixer",
+        r"Pull-?Out Mixer",
+        r"Basin Waste",
+        r"Basin",
+        r"Shower on Rail",
+        r"Shower Mixer",
+        r"Shower Floor Waste",
+    )
+    bath_spout_stops = (
+        r"Bath Waste",
+        r"Toilet Roll Holder",
+        r"Toilet",
+        r"Sink Mixer",
+        r"Pull-?Out Mixer",
+        r"Basin Waste",
+        r"Basin",
+        r"Shower on Rail",
+        r"Shower Mixer",
+        r"Shower Floor Waste",
+    )
+    bath_waste_stops = (
+        r"Bath Mixer",
+        r"Bath Spout",
+        r"Toilet Roll Holder",
+        r"Toilet",
+        r"Sink Mixer",
+        r"Pull-?Out Mixer",
+        r"Basin Waste",
+        r"Basin",
+        r"Shower on Rail",
+        r"Shower Mixer",
+        r"Shower Floor Waste",
+    )
+    for document in documents:
+        combined_text = _build_yellowwood_overlay_text(
+            document,
+            page_filter=lambda upper: (
+                "BATHWARE & FIXTURES" in upper
+                or "BATH " in upper
+                or "BATH MIXER" in upper
+                or "BATH SPOUT" in upper
+                or "BATH WASTE" in upper
+                or "BASIN " in upper
+                or "SHOWER " in upper
+                or "TOILET " in upper
+            ),
+        )
+        if not combined_text:
+            continue
+        for area_pattern, room_key in area_targets:
+            block = _extract_area_block_from_text(combined_text, area_pattern, area_stops)
+            if not block:
                 continue
-            upper = text.upper()
-            if "OTHER THAN TILING TO WET AREAS" in upper:
-                for area_pattern, room_key in non_wet_areas:
-                    flooring_value = _extract_flooring_block_from_text(text, area_pattern, non_wet_stops)
-                    if flooring_value and _looks_like_flooring_overlay_value(flooring_value):
-                        _merge_room_flooring_overlay(overlays, room_key, flooring_value)
-            if "TILING SCHEDULE" in upper or "FLOOR TILE" in upper:
-                for area_pattern, room_key in wet_area_targets:
-                    flooring_value = _extract_floor_tile_block_from_text(text, area_pattern, wet_area_stops)
-                    if flooring_value and _looks_like_flooring_overlay_value(flooring_value):
-                        _merge_room_flooring_overlay(overlays, room_key, flooring_value)
+            overlay = overlays.setdefault(room_key, _blank_overlay())
+            bath_value = _extract_named_value_from_block(block, r"Bath", bath_stops)
+            bath_mixer = _extract_named_value_from_block(block, r"Bath Mixer", bath_mixer_stops)
+            bath_spout = _extract_named_value_from_block(block, r"Bath Spout", bath_spout_stops)
+            bath_waste = _extract_named_value_from_block(block, r"Bath Waste", bath_waste_stops)
+            overlay["other_items"] = _merge_other_items(
+                overlay.get("other_items", []),
+                [
+                    {"label": "BATH", "value": bath_value},
+                    {"label": "BATH MIXER", "value": bath_mixer},
+                    {"label": "BATH SPOUT", "value": bath_spout},
+                    {"label": "BATH WASTE", "value": bath_waste},
+                ],
+            )
 
 
 def _clear_room_specific_flooring_notes(snapshot: dict[str, Any]) -> None:
@@ -6813,6 +6982,36 @@ def _clear_room_specific_flooring_notes(snapshot: dict[str, Any]) -> None:
         return
     if builder_name == "clarendon" and re.search(r"(?i)\bcarpet\s*&\s*main\s*floor\s*tile\b", flooring_notes):
         others["flooring_notes"] = ""
+
+
+def _looks_like_appliance_noise(text: str) -> bool:
+    normalized = normalize_space(text).lower()
+    if not normalized:
+        return False
+    if "appliances" in normalized:
+        return True
+    markers = (
+        "freestanding cooker",
+        "under bench oven",
+        "cooktop",
+        "dishwasher",
+        "rangehood",
+        "fridge",
+        "microwave",
+    )
+    return sum(1 for marker in markers if marker in normalized) >= 2
+
+
+def _clear_room_specific_splashback_notes(snapshot: dict[str, Any]) -> None:
+    builder_name = normalize_space(str(snapshot.get("builder_name", "") or "")).lower()
+    others = snapshot.get("others")
+    if not isinstance(others, dict):
+        return
+    splashback_notes = normalize_space(str(others.get("splashback_notes", "") or ""))
+    if not splashback_notes:
+        return
+    if builder_name == "clarendon" and _looks_like_appliance_noise(splashback_notes):
+        others["splashback_notes"] = ""
 
 
 def _apply_clarendon_room_overlap_corrections(rooms: list[dict[str, Any]]) -> None:
@@ -6842,6 +7041,36 @@ def _apply_clarendon_room_overlap_corrections(rooms: list[dict[str, Any]]) -> No
     rumpus_desk["has_explicit_tall"] = bool(normalize_space(str(rumpus_desk.get("door_colours_tall", "") or "")))
     rumpus_room["door_panel_colours"] = _rebuild_door_panel_colours(rumpus_room)
     rumpus_desk["door_panel_colours"] = _rebuild_door_panel_colours(rumpus_desk)
+
+
+def _apply_clarendon_accessory_room_corrections(rooms: list[dict[str, Any]]) -> None:
+    room_lookup: dict[str, dict[str, Any]] = {}
+    for row in rooms:
+        if not isinstance(row, dict):
+            continue
+        room_key = source_room_key(
+            str(row.get("original_room_label", "") or row.get("room_name", "") or ""),
+            fallback_key=str(row.get("room_key", "")),
+        )
+        if room_key and room_key not in room_lookup:
+            room_lookup[room_key] = row
+    vanities = room_lookup.get("vanities")
+    laundry = room_lookup.get("laundry")
+    if not vanities or not laundry:
+        return
+    moved: list[str] = []
+    kept: list[str] = []
+    for value in _coerce_string_list(vanities.get("accessories", [])):
+        if re.search(r"(?i)\b(?:lincoln sentry|finista|centre pillar|end support)\b", value):
+            moved.append(value)
+        else:
+            kept.append(value)
+    if not moved:
+        return
+    vanities["accessories"] = _clean_accessory_entries(kept)
+    laundry["accessories"] = _clean_accessory_entries(
+        _merge_lists(_coerce_string_list(laundry.get("accessories", [])), moved)
+    )
 
 
 def _merge_lists(left: list[str], right: list[str]) -> list[str]:
@@ -6936,9 +7165,11 @@ def enrich_snapshot_rooms(snapshot: dict[str, Any], documents: list[dict[str, ob
         row["hinges_soft_close"] = merge_soft_close_values(row.get("hinges_soft_close", ""), "")
     if normalize_space(str(snapshot.get("builder_name", "") or "")).lower() == "clarendon":
         _apply_clarendon_room_overlap_corrections(rooms)
+        _apply_clarendon_accessory_room_corrections(rooms)
     snapshot["rooms"] = rooms
     snapshot["appliances"] = [row for row in snapshot.get("appliances", []) if isinstance(row, dict) and not _is_room_fixture_appliance(row)]
     _clear_room_specific_flooring_notes(snapshot)
+    _clear_room_specific_splashback_notes(snapshot)
     return apply_snapshot_cleaning_rules(snapshot, rule_flags=rule_flags)
 
 
@@ -7032,7 +7263,7 @@ def _yellowwood_filter_other_items(row: dict[str, Any]) -> list[dict[str, str]]:
     for item in _merge_other_items([], row.get("other_items", [])):
         label = normalize_space(str(item.get("label", "") or ""))
         value = normalize_space(str(item.get("value", "") or ""))
-        if is_vanity_room and value:
+        if is_vanity_room and value and label.lower() not in {"bath", "bath mixer", "bath spout", "bath waste"}:
             value = _trim_fixture_text_at_markers(value, _yellowwood_wet_area_tail_markers())
         if not label or not value:
             continue
@@ -7553,6 +7784,7 @@ def _collect_room_overlays(
         _collect_clarendon_flooring_overlays(overlays, documents)
     elif _is_yellowwood_builder(builder_name):
         _collect_yellowwood_flooring_overlays(overlays, documents)
+        _collect_yellowwood_fixture_overlays(overlays, documents)
     return overlays
 
 

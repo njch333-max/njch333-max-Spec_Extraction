@@ -4374,6 +4374,25 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("TALL OPEN SHELVES", rooms["rumpus_desk"]["door_colours_tall"])
         self.assertTrue(rooms["rumpus_desk"]["has_explicit_tall"])
 
+    def test_enrich_snapshot_rooms_clears_clarendon_appliance_noise_from_splashback_notes(self) -> None:
+        snapshot = {
+            "job_no": "49906511",
+            "builder_name": "Clarendon",
+            "source_kind": "spec",
+            "generated_at": "2026-04-04T00:00:00+10:00",
+            "rooms": [],
+            "appliances": [],
+            "others": {
+                "flooring_notes": "",
+                "splashback_notes": "APPLIANCES Freestanding Cooker: N/A Under Bench Oven: Westinghouse 2 X WVE6515SDA 60CM ELECTRIC",
+            },
+            "warnings": [],
+            "source_documents": [],
+            "analysis": {"mode": "heuristic_only"},
+        }
+        enriched = parsing_module.enrich_snapshot_rooms(snapshot, [])
+        self.assertEqual(enriched["others"]["splashback_notes"], "")
+
     def test_clean_handle_entries_drops_orphan_handle_house_fragment(self) -> None:
         self.assertEqual(
             parsing_module._clean_handle_entries(
@@ -4471,7 +4490,6 @@ class SmokeTest(unittest.TestCase):
                             "Carpet Silverwood\n"
                             "Colour: Putty\n"
                             "8mm Underlay\n"
-                            "Flooring Xtra\n"
                         ),
                         "raw_text": (
                             "FLOORING - OTHER THAN TILING TO WET AREAS\n"
@@ -4500,7 +4518,22 @@ class SmokeTest(unittest.TestCase):
                             "Carpet Silverwood\n"
                             "Colour: Putty\n"
                             "8mm Underlay\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 16,
+                        "text": (
                             "Flooring Xtra\n"
+                            "LAUNDRY Tiles Refer to Tiling section below N/A\n"
+                            "BED 1 ENSUITE Tiles Refer to Tiling section below N/A\n"
+                            "BATHROOM Tiles Refer to Tiling section below N/A\n"
+                        ),
+                        "raw_text": (
+                            "Flooring Xtra\n"
+                            "LAUNDRY Tiles Refer to Tiling section below N/A\n"
+                            "BED 1 ENSUITE Tiles Refer to Tiling section below N/A\n"
+                            "BATHROOM Tiles Refer to Tiling section below N/A\n"
                         ),
                         "needs_ocr": False,
                     },
@@ -4555,9 +4588,160 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("Spotted Gum", rooms["kitchen"]["flooring"])
         self.assertIn("Carpet Silverwood", rooms["bed_1_wir"]["flooring"])
         self.assertIn("Carpet Silverwood", rooms["bed_2_robe"]["flooring"])
+        self.assertIn("Flooring Xtra", rooms["bed_4_robe"]["flooring"])
         self.assertIn("Floor Tile Regina Grey Matt 450x450mm", rooms["bathroom"]["flooring"])
         self.assertIn("Floor Tile Regina Grey Matt 450x450mm", rooms["ensuite_1"]["flooring"])
         self.assertEqual(enriched["others"]["flooring_notes"], "")
+
+    def test_enrich_snapshot_rooms_merges_yellowwood_bath_family_into_bathroom_vanity(self) -> None:
+        snapshot = {
+            "job_no": "37",
+            "builder_name": "Yellowwood Homes",
+            "source_kind": "spec",
+            "generated_at": "2026-04-04T00:00:00+10:00",
+            "rooms": [
+                {
+                    "room_key": "bathroom",
+                    "original_room_label": "BATHROOM VANITY",
+                    "room_name": "BATHROOM VANITY",
+                    "bench_tops_wall_run": "20mm YDL Classic White Polished",
+                    "bench_tops_island": "",
+                    "bench_tops_other": "",
+                    "bench_tops": [],
+                    "door_panel_colours": [],
+                    "door_colours_overheads": "",
+                    "door_colours_base": "Polytec Classic White Matt",
+                    "door_colours_tall": "",
+                    "door_colours_island": "",
+                    "door_colours_bar_back": "",
+                    "toe_kick": ["Polytec Classic White Matt"],
+                    "bulkheads": [],
+                    "handles": [],
+                    "floating_shelf": "",
+                    "led": "",
+                    "accessories": [],
+                    "other_items": [],
+                    "sink_info": "",
+                    "basin_info": "Byron Bench Mount Basin White Gloss Highgrove",
+                    "tap_info": "Spin Tall Basin Mixer Chrome Highgrove",
+                    "drawers_soft_close": "",
+                    "hinges_soft_close": "",
+                    "splashback": "",
+                    "flooring": "",
+                    "source_file": "yellowwood.pdf",
+                    "page_refs": "19",
+                    "evidence_snippet": "",
+                    "confidence": 0.55,
+                }
+            ],
+            "appliances": [],
+            "others": {"flooring_notes": "", "splashback_notes": ""},
+            "warnings": [],
+            "source_documents": [],
+            "analysis": {"mode": "docling"},
+        }
+        documents = [
+            {
+                "file_name": "yellowwood.pdf",
+                "role": "spec",
+                "builder_name": "Yellowwood Homes",
+                "pages": [
+                    {
+                        "page_no": 28,
+                        "text": (
+                            "BATHROOM\n"
+                            "Sink Mixer Spin Tall Basin Mixer Chrome Highgrove\n"
+                            "Basin Byron Bench Mount Basin White Gloss Highgrove\n"
+                        ),
+                        "raw_text": (
+                            "LOT 13 ZACHARY COURT, BEACHMERE\n"
+                            "BATHROOM\n"
+                            "Sink Mixer Spin Tall Basin Mixer Chrome Highgrove\n"
+                            "Basin Byron Bench Mount Basin White Gloss Highgrove\n"
+                            "page 28/33\n"
+                            "Tone Interior Design Consulting | tone.interiorco@gmail.com |0450026294\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 29,
+                        "text": (
+                            "Bath Eden Freestanding Back to Wall Bath with Overflow Gloss White Size as per plan Highgrove\n"
+                            "Bath Waste Turn Down waste Without Overflow Chrome 40x60mm Highgrove\n"
+                        ),
+                        "raw_text": (
+                            "LOT 13 ZACHARY COURT, BEACHMERE\n"
+                            "Bath Eden Freestanding Back to Wall Bath with Overflow Gloss White Size as per plan Highgrove\n"
+                            "Bath Waste Turn Down waste Without Overflow Chrome 40x60mm Highgrove\n"
+                            "page 29/33\n"
+                            "Tone Interior Design Consulting | tone.interiorco@gmail.com |0450026294\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 30,
+                        "text": (
+                            "Bath Mixer Spin Mixer Set Chrome Highgrove\n"
+                            "Bath Spout Spin In Wall Bath Spout 220mm Chrome Highgrove\n"
+                            "WC\n"
+                        ),
+                        "raw_text": (
+                            "LOT 13 ZACHARY COURT, BEACHMERE\n"
+                            "Bath Mixer Spin Mixer Set Chrome Highgrove\n"
+                            "Bath Spout Spin In Wall Bath Spout 220mm Chrome Highgrove\n"
+                            "WC\n"
+                            "page 30/33\n"
+                            "Tone Interior Design Consulting | tone.interiorco@gmail.com |0450026294\n"
+                        ),
+                        "needs_ocr": False,
+                    }
+                ],
+            }
+        ]
+        enriched = parsing_module.enrich_snapshot_rooms(snapshot, documents)
+        rooms = {row["room_key"]: row for row in enriched["rooms"]}
+        bath_items = {item["label"]: item["value"] for item in rooms["bathroom"]["other_items"]}
+        self.assertIn("BATH", bath_items)
+        self.assertIn("Eden Freestanding Back to Wall Bath", bath_items["BATH"])
+        self.assertIn("BATH MIXER", bath_items)
+        self.assertIn("Spin Mixer Set Chrome", bath_items["BATH MIXER"])
+        self.assertIn("BATH SPOUT", bath_items)
+        self.assertIn("Bath Spout 220mm Chrome", bath_items["BATH SPOUT"])
+        self.assertIn("BATH WASTE", bath_items)
+        self.assertIn("Turn Down waste Without Overflow", bath_items["BATH WASTE"])
+
+    def test_enrich_snapshot_rooms_moves_clarendon_laundry_accessories_out_of_vanities(self) -> None:
+        snapshot = {
+            "job_no": "49906613",
+            "builder_name": "Clarendon",
+            "source_kind": "spec",
+            "generated_at": "2026-04-04T00:00:00+10:00",
+            "rooms": [
+                {
+                    "room_key": "vanities",
+                    "original_room_label": "VANITIES",
+                    "accessories": [
+                        "LINCOLN SENTRY 7104019 CENTRE PILLAR, CHROME",
+                        "LINCOLN SENTRY 7104020 FINISTA END PILLAR, CHROME",
+                    ],
+                },
+                {
+                    "room_key": "laundry",
+                    "original_room_label": "LAUNDRY",
+                    "accessories": [],
+                },
+            ],
+            "appliances": [],
+            "others": {"flooring_notes": "", "splashback_notes": ""},
+            "warnings": [],
+            "source_documents": [],
+            "analysis": {"mode": "heuristic_only"},
+        }
+        enriched = parsing_module.enrich_snapshot_rooms(snapshot, [])
+        rooms = {row["room_key"]: row for row in enriched["rooms"]}
+        self.assertEqual(rooms["vanities"]["accessories"], [])
+        self.assertIn("Lincoln Sentry - 7104019 CENTRE PILLAR, CHROME", rooms["laundry"]["accessories"])
+        self.assertIn("Lincoln Sentry - 7104020 FINISTA END PILLAR, CHROME", rooms["laundry"]["accessories"])
 
     def test_merge_yellowwood_layout_and_text_sections_trims_override_pages_from_merged_layout_room(self) -> None:
         layout_sections = [
