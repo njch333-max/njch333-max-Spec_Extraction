@@ -206,9 +206,14 @@ def jobs_page(request: Request):
     if not _require_page_user(request):
         return RedirectResponse("/login", status_code=303)
     query = request.query_params.get("q", "").strip()
-    jobs = _present_jobs(store.list_jobs(query))
+    sort = _normalize_job_sort(request.query_params.get("sort", "created_desc"))
+    jobs = _present_jobs(store.list_jobs(query, sort))
     builders = store.list_builders()
-    return templates.TemplateResponse(request, "jobs.html", _context(request, "Jobs", jobs=jobs, builders=builders, job_query=query))
+    return templates.TemplateResponse(
+        request,
+        "jobs.html",
+        _context(request, "Jobs", jobs=jobs, builders=builders, job_query=query, job_sort=sort),
+    )
 
 
 @app.post("/jobs")
@@ -711,6 +716,7 @@ def _present_jobs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for row in rows:
         item = dict(row)
         item["created_at"] = _format_brisbane_time(item.get("created_at", ""))
+        item["updated_at"] = _format_brisbane_time(item.get("updated_at", ""))
         room_count = ""
         raw_snapshot_json = item.get("raw_snapshot_json", "")
         if raw_snapshot_json:
@@ -722,6 +728,13 @@ def _present_jobs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         item["room_count"] = room_count
         presented.append(item)
     return presented
+
+
+def _normalize_job_sort(value: Any) -> str:
+    text = str(value or "created_desc").strip().lower()
+    if text in {"created_desc", "updated_desc"}:
+        return text
+    return "created_desc"
 
 
 def _present_files(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

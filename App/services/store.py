@@ -299,7 +299,11 @@ def create_job(job_no: str, builder_id: int, title: str, notes: str) -> int:
         return int(cur.lastrowid)
 
 
-def list_jobs(job_query: str = "") -> list[dict[str, Any]]:
+def list_jobs(job_query: str = "", sort_by: str = "created_desc") -> list[dict[str, Any]]:
+    order_by = {
+        "created_desc": "j.created_at DESC, j.id DESC",
+        "updated_desc": "j.updated_at DESC, j.id DESC",
+    }.get(sort_by, "j.created_at DESC, j.id DESC")
     query = (
         """
         SELECT j.*, b.name AS builder_name, b.slug AS builder_slug,
@@ -314,7 +318,7 @@ def list_jobs(job_query: str = "") -> list[dict[str, Any]]:
     if job_query:
         query += " WHERE j.job_no LIKE ?"
         params = (f"%{job_query}%",)
-    query += " ORDER BY j.created_at DESC, j.id DESC"
+    query += f" ORDER BY {order_by}"
     return fetch_all(query, params)
 
 

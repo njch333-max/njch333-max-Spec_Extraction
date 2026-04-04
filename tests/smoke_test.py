@@ -579,6 +579,51 @@ class SmokeTest(unittest.TestCase):
         )
         self.assertIn("Finger Pull on Uppers", cleaned)
 
+    def test_clean_handle_entries_merges_slash_split_drawers_fragment(self) -> None:
+        cleaned = parsing_module._clean_handle_entries(
+            [
+                "Hettich - Matane 9113228 Brushed Stainless Steel Look 105MM Long - Horizontal Mount Doors/",
+                "Drawers - Base Cabinets * Drawer Location - Centre to Profile* Door Location - 25MM down and 50MM in",
+            ]
+        )
+        self.assertEqual(
+            cleaned,
+            [
+                "Hettich - Matane 9113228 Brushed Stainless Steel Look 105MM Long - Horizontal Mount Doors/Drawers - Base Cabinets * Drawer Location - Centre to Profile* Door Location - 25MM down and 50MM in"
+            ],
+        )
+
+    def test_collect_field_does_not_treat_sink_mixer_or_basin_waste_as_sink_or_basin(self) -> None:
+        lines = [
+            "Sink Mixer Spin Tall Basin Mixer Chrome Highgrove",
+            "Basin Byron Bench Mount Basin White Gloss Highgrove",
+            "Basin Waste Pop Up Waste Without Overflow 32x80mm Chrome Highgrove",
+        ]
+        self.assertEqual(parsing_module._collect_field(lines, ["Sink"]), [])
+        self.assertEqual(parsing_module._collect_field(lines, ["Basin"]), ["Byron Bench Mount Basin White Gloss Highgrove"])
+
+    def test_dedupe_appliances_drops_drawing_dimension_noise_when_real_model_exists(self) -> None:
+        rows = [
+            parsing_module.ApplianceRow(
+                appliance_type="Fridge",
+                make="Fisher & Paykel",
+                model_no="30120018EQ740900740EQ30",
+                source_file="drawings-and-colours.pdf",
+                page_refs="1",
+                evidence_snippet="Fridge 30120018EQ740900740EQ30",
+            ),
+            parsing_module.ApplianceRow(
+                appliance_type="Fridge",
+                make="Fisher & Paykel",
+                model_no="2 x RB60V18",
+                source_file="drawings-and-colours.pdf",
+                page_refs="5",
+                evidence_snippet="Fridge 2 x RB60V18",
+            ),
+        ]
+        deduped = parsing_module._dedupe_appliances(rows)
+        self.assertEqual([(row.make, row.model_no) for row in deduped], [("Fisher & Paykel", "2 x RB60V18")])
+
     def test_imperial_toe_kick_cleaner_preserves_match_above_materials(self) -> None:
         cleaned = parsing_module._imperial_clean_toe_kick_value(
             [
@@ -2099,6 +2144,12 @@ class SmokeTest(unittest.TestCase):
         self.assertTrue(snapshot["analysis"]["docling_attempted"])
         self.assertFalse(snapshot["analysis"]["vision_attempted"])
 
+    def test_spec_docling_enabled_matches_builder_aliases(self) -> None:
+        with mock.patch.object(extraction_service.runtime, "SPEC_DOCLING_BUILDERS", {"imperial", "simonds", "evoca", "yellowwood"}):
+            self.assertTrue(extraction_service._spec_docling_enabled("Yellowwood Homes", "spec"))
+            self.assertTrue(extraction_service._spec_docling_enabled("Imperial Kitchens", "spec"))
+            self.assertFalse(extraction_service._spec_docling_enabled("Clarendon", "spec"))
+
     def test_page_requires_vision_for_yellowwood_schedule_pages(self) -> None:
         page = {
             "page_no": 17,
@@ -2760,7 +2811,7 @@ class SmokeTest(unittest.TestCase):
             extraction_service._sanitize_generic_handle_entries(
                 ["N/A, Category 6, C137 Black 100m, Horizontal", "up to 20mm Drop Down - No Handle N/A Category 6, Horizontal, Soft Close"]
             ),
-            ["C137 Black 100m, Horizontal", "up to 20mm Drop Down - No Handle, Horizontal"],
+            ["C137 Black 100m, Horizontal", "up to 20mm Drop Down - No Handle N/A, Horizontal"],
         )
 
     def test_polish_generic_layout_room_sanitizes_toe_kick_before_material_cleanup(self) -> None:
@@ -3631,7 +3682,11 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(parsing_module.source_room_label("LaundryDate: 02-09-25 LAUNDRY COLOUR SCHEDULE"), "LAUNDRY")
         self.assertEqual(parsing_module.source_room_key("TheatreDate: 02-09-25 THEATRE ROOM COLOUR SCHEDULE"), "theatre")
         self.assertEqual(parsing_module.source_room_label("KITCHEN SPLASHBACK"), "KITCHEN")
+        self.assertEqual(parsing_module.source_room_label("BED 1 ENSUITE VANITY"), "BED 1 ENSUITE VANITY")
         self.assertEqual(parsing_module.source_room_label("BATHOOM VANITY").lower(), "bathroom vanity")
+        self.assertEqual(parsing_module.source_room_label("BED 1 WALK IN ROBE FIT OUT"), "BED 1 WALK IN ROBE")
+        self.assertEqual(parsing_module.source_room_label("BED 3 ROBE FIT OUT"), "BED 3 ROBE")
+        self.assertEqual(parsing_module.source_room_label("ROBE FIT OUT TO BED 3"), "BED 3 ROBE")
         self.assertEqual(parsing_module.source_room_key("BATHOOM VANITY"), "bathroom")
         self.assertEqual(parsing_module.source_room_key("BED 1 WALK IN ROBE FIT OUT"), "bed_1_wir")
         self.assertEqual(parsing_module.source_room_key("BED 3 ROBE FIT OUT"), "bed_3_robe")
@@ -3711,7 +3766,7 @@ class SmokeTest(unittest.TestCase):
         }
         sections = parsing_module._collect_spec_sections_for_document("Yellowwood", document)
         labels = {section["original_section_label"] for section in sections}
-        self.assertIn("Pantry", labels)
+        self.assertNotIn("Pantry", labels)
         self.assertIn("Laundry", labels)
         self.assertIn("WC", labels)
         self.assertIn("BED 1 ENSUITE VANITY", labels)
@@ -3738,8 +3793,8 @@ class SmokeTest(unittest.TestCase):
             "text": "BED 1 WALK IN ROBE\nFIT OUT\nBoard Colour: Standard White\nAs supplied by builder",
         }
         self.assertFalse(parsing_module._yellowwood_should_keep_section(fake_material))
-        self.assertTrue(parsing_module._yellowwood_should_keep_section(robe_room))
-        self.assertTrue(parsing_module._yellowwood_should_keep_section(media_room))
+        self.assertFalse(parsing_module._yellowwood_should_keep_section(robe_room))
+        self.assertFalse(parsing_module._yellowwood_should_keep_section(media_room))
         self.assertTrue(parsing_module._yellowwood_should_keep_section(wir_room))
 
     def test_yellowwood_section_filter_drops_contents_page_noise(self) -> None:
@@ -3788,6 +3843,501 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual([section["page_nos"] for section in kitchen_sections], [[16], [17]])
         self.assertIn("Base Cupboards & Drawers", kitchen_sections[1]["text"])
 
+    def test_collect_yellowwood_text_room_sections_attaches_preamble_to_previous_kitchen_room(self) -> None:
+        document = {
+            "file_name": "yellowwood.pdf",
+            "pages": [
+                {
+                    "page_no": 17,
+                    "raw_text": "KITCHEN\nBase Cupboards & Drawers\nPolytec Classic White Matt\n",
+                    "text": "KITCHEN\nBase Cupboards & Drawers\nPolytec Classic White Matt\n",
+                },
+                {
+                    "page_no": 18,
+                    "raw_text": (
+                        "INTERNAL FINISHES\n"
+                        "JOINERY - REFER TO CABINETRY PLANS FOR ALL FURTHER DETAIL\n"
+                        "Pantry Door Handles C137 Caloundra Lip Pull Matt Black 200mm\n"
+                        "Handle House\n"
+                        "LAUNDRY\n"
+                        "Freestanding Laundry Cabinet Kitset Only Refer to Plumbing section below N/A\n"
+                    ),
+                    "text": (
+                        "INTERNAL FINISHES\n"
+                        "JOINERY - REFER TO CABINETRY PLANS FOR ALL FURTHER DETAIL\n"
+                        "Pantry Door Handles C137 Caloundra Lip Pull Matt Black 200mm\n"
+                        "Handle House\n"
+                        "LAUNDRY\n"
+                        "Freestanding Laundry Cabinet Kitset Only Refer to Plumbing section below N/A\n"
+                    ),
+                },
+            ],
+        }
+        sections = parsing_module._collect_yellowwood_text_room_sections_for_document(document)
+        labels = {section["original_section_label"] for section in sections}
+        kitchen_section = next(section for section in sections if section["section_key"] == "kitchen" and section["page_nos"] == [18])
+        self.assertIn("Pantry Door", kitchen_section["text"])
+        self.assertIn("Handles C137 Caloundra Lip Pull Matt Black 200mm", kitchen_section["text"])
+        self.assertNotIn("Pantry", labels)
+
+    def test_collect_yellowwood_text_room_sections_recovers_split_bed_robe_fit_out_headings(self) -> None:
+        document = {
+            "file_name": "yellowwood.pdf",
+            "pages": [
+                {
+                    "page_no": 20,
+                    "raw_text": (
+                        "BED 3\n"
+                        "ROBE FIT OUT\n"
+                        "Robe Fit Out X1 Single Shelf with Hanging Rail\n"
+                        "White Melamine\n"
+                        "Yellowwood supplier\n"
+                        "BED 4\n"
+                        "ROBE FIT OUT\n"
+                        "Robe Fit Out X1 Single Shelf with Hanging Rail\n"
+                        "White Melamine\n"
+                        "Yellowwood supplier\n"
+                        "LAUNDRY LINEN FIT OUT\n"
+                        "White Melamine\n"
+                        "PASSAGE LINEN FIT OUT\n"
+                        "White Melamine\n"
+                    ),
+                    "text": (
+                        "BED 3\n"
+                        "ROBE FIT OUT\n"
+                        "Robe Fit Out X1 Single Shelf with Hanging Rail\n"
+                        "White Melamine\n"
+                        "Yellowwood supplier\n"
+                        "BED 4\n"
+                        "ROBE FIT OUT\n"
+                        "Robe Fit Out X1 Single Shelf with Hanging Rail\n"
+                        "White Melamine\n"
+                        "Yellowwood supplier\n"
+                        "LAUNDRY LINEN FIT OUT\n"
+                        "White Melamine\n"
+                        "PASSAGE LINEN FIT OUT\n"
+                        "White Melamine\n"
+                    ),
+                },
+            ],
+        }
+        sections = parsing_module._collect_yellowwood_text_room_sections_for_document(document)
+        labels = [section["original_section_label"] for section in sections]
+        self.assertIn("BED 3 ROBE", labels)
+        self.assertIn("BED 4 ROBE", labels)
+        self.assertNotIn("ROBE FIT OUT", labels)
+        bed4 = next(section for section in sections if section["original_section_label"] == "BED 4 ROBE")
+        self.assertNotIn("LAUNDRY LINEN FIT OUT", bed4["text"])
+        self.assertNotIn("PASSAGE LINEN FIT OUT", bed4["text"])
+
+    def test_yellowwood_helpers_keep_island_bench_ignore_bulkhead_note_and_require_explicit_led(self) -> None:
+        lines = [
+            "Overhead Cupboards *To Builders",
+            "Bulkhead above rear Kitchen, Pantry and Fridge* Polytec Classic White Matt",
+            "Island Bench 20mm YDL Classic White Polished",
+            "Island Bench Kickboard Polytec Classic White Matt",
+            "installed by builder",
+        ]
+        self.assertEqual(parsing_module._collect_island_benchtop_values(lines), ["20mm YDL Classic White Polished"])
+        self.assertEqual(parsing_module._collect_explicit_bulkhead_values(lines), [])
+        self.assertFalse(parsing_module._has_explicit_led_field(lines))
+        self.assertFalse(parsing_module._has_explicit_led_field(["LED Topmount*"]))
+
+    def test_yellowwood_material_probe_uses_evidence_snippet_for_real_robe_rooms(self) -> None:
+        row = {
+            "room_key": "bed_3_robe",
+            "original_room_label": "BED 3 ROBE",
+            "bench_tops": [],
+            "door_panel_colours": [],
+            "toe_kick": [],
+            "bulkheads": [],
+            "evidence_snippet": "BED 3 ROBE FIT OUT White Melamine Yellowwood supplier",
+        }
+        self.assertTrue(parsing_module._yellowwood_should_keep_final_room(row))
+
+    def test_yellowwood_material_driven_rooms_keep_real_media_and_robe_when_joinery_material_exists(self) -> None:
+        media_section = {
+            "section_key": "media_room",
+            "original_section_label": "MEDIA ROOM",
+            "text": "MEDIA ROOM\nTV UNIT\nPolytec Boston Oak Woodmatt\nAs supplied by cabinetmaker",
+        }
+        robe_section = {
+            "section_key": "bed_2_robe",
+            "original_section_label": "BED 2 ROBE",
+            "text": "BED 2 ROBE\nFIT OUT\nLaminex Classic White\nYellowwood supplier",
+        }
+        self.assertTrue(parsing_module._yellowwood_should_keep_section(media_section))
+        self.assertTrue(parsing_module._yellowwood_should_keep_section(robe_section))
+
+    def test_polish_generic_layout_room_prefers_specific_yellowwood_joinery_title(self) -> None:
+        polished = extraction_service._polish_generic_layout_room(
+            {
+                "room_key": "bathroom",
+                "original_room_label": "BATHROOM VANITY",
+                "room_name": "BATHROOM VANITY",
+            },
+            {
+                "original_room_label": "BATHROOM",
+            },
+        )
+        self.assertEqual(polished["original_room_label"], "BATHROOM VANITY")
+
+    def test_apply_snapshot_cleaning_rules_drops_yellowwood_rooms_without_joinery_material_evidence(self) -> None:
+        snapshot = {
+            "job_no": "38095",
+            "builder_name": "Yellowwood",
+            "source_kind": "spec",
+            "generated_at": "2026-04-03T10:00:00+10:00",
+            "rooms": [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "bench_tops_wall_run": "20mm YDL Classic White Polished",
+                    "door_colours_base": "Polytec Classic White Matt",
+                    "door_panel_colours": [],
+                    "toe_kick": [],
+                    "bulkheads": [],
+                    "handles": [],
+                },
+                {
+                    "room_key": "media_room",
+                    "original_room_label": "MEDIA ROOM",
+                    "flooring": "Carpet Mapelton Falls",
+                    "door_panel_colours": [],
+                    "toe_kick": [],
+                    "bulkheads": [],
+                    "handles": [],
+                },
+                {
+                    "room_key": "laundry",
+                    "original_room_label": "LAUNDRY",
+                    "sink_info": "Wall Hung Basin",
+                    "tap_info": "Highgrove mixer",
+                    "door_panel_colours": [],
+                    "toe_kick": [],
+                    "bulkheads": [],
+                    "handles": [],
+                },
+                {
+                    "room_key": "ensuite_1",
+                    "original_room_label": "BED 1 ENSUITE VANITY",
+                    "bench_tops_wall_run": "20mm YDL Classic White Polished",
+                    "door_colours_base": "Polytec Classic White Matt",
+                    "door_panel_colours": [],
+                    "toe_kick": [],
+                    "bulkheads": [],
+                    "handles": [],
+                },
+                {
+                    "room_key": "ensuite_1",
+                    "original_room_label": "BED 1 ENSUITE",
+                    "door_panel_colours": [],
+                    "toe_kick": [],
+                    "bulkheads": [],
+                    "handles": [],
+                    "evidence_snippet": "BED 1 ENSUITE MIRROR Frameless Mirror As supplied by builder",
+                },
+            ],
+            "appliances": [],
+            "others": {},
+            "warnings": [],
+            "source_documents": [],
+            "analysis": {"mode": "heuristic_only"},
+        }
+        cleaned = parsing_module.apply_snapshot_cleaning_rules(snapshot)
+        kept = {row["original_room_label"] for row in cleaned["rooms"]}
+        self.assertIn("KITCHEN", kept)
+        self.assertIn("BED 1 ENSUITE VANITY", kept)
+        self.assertNotIn("MEDIA ROOM", kept)
+        self.assertNotIn("LAUNDRY", kept)
+
+    def test_apply_snapshot_cleaning_rules_purifies_yellowwood_wet_area_fixtures(self) -> None:
+        snapshot = {
+            "job_no": "38095",
+            "builder_name": "Yellowwood",
+            "source_kind": "spec",
+            "generated_at": "2026-04-03T10:00:00+10:00",
+            "rooms": [
+                {
+                    "room_key": "bathroom",
+                    "original_room_label": "BATHROOM VANITY",
+                    "bench_tops_wall_run": "20mm YDL Classic White Polished",
+                    "door_colours_base": "Polytec Classic White Matt",
+                    "sink_info": "Mixer Spin Tall Basin Mixer Chrome Highgrove",
+                    "basin_info": "Byron Bench Mount Basin White Gloss Highgrove Basin Waste Pop Up Waste Without Overflow 32x80mm Chrome Highgrove Toilet Meldon Rimless Wall Faced Toilet Suite Highgrove",
+                    "tap_info": "Spin Tall Basin Mixer Chrome Highgrove Basin Waste Pop Up Waste Without Overflow 32x80mm Chrome Highgrove",
+                    "door_panel_colours": [],
+                    "toe_kick": [],
+                    "bulkheads": [],
+                    "handles": [],
+                }
+            ],
+            "appliances": [],
+            "others": {},
+            "warnings": [],
+            "source_documents": [],
+            "analysis": {"mode": "heuristic_only"},
+        }
+        cleaned = parsing_module.apply_snapshot_cleaning_rules(snapshot)
+        room = cleaned["rooms"][0]
+        self.assertEqual(room["sink_info"], "")
+        self.assertEqual(room["basin_info"], "Byron Bench Mount Basin White Gloss Highgrove")
+        self.assertEqual(room["tap_info"], "Spin Tall Basin Mixer Chrome Highgrove")
+
+    def test_apply_snapshot_cleaning_rules_drops_yellowwood_duplicate_plumbing_other_items(self) -> None:
+        snapshot = {
+            "job_no": "38095",
+            "builder_name": "Yellowwood",
+            "source_kind": "spec",
+            "generated_at": "2026-04-03T10:00:00+10:00",
+            "rooms": [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "bench_tops_wall_run": "20mm YDL Classic White Polished",
+                    "door_colours_base": "Polytec Classic White Matt",
+                    "tap_info": "Spin Gooseneck Matte Black Highgrove",
+                    "other_items": [
+                        {"label": "Mixer", "value": "Spin Gooseneck Matte Black Highgrove"},
+                        {"label": "Pull-Out Mixer", "value": "Spin Gooseneck Chrome Highgrove"},
+                        {"label": "RAIL", "value": "Square Edge recessed rail in black"},
+                    ],
+                    "door_panel_colours": [],
+                    "toe_kick": [],
+                    "bulkheads": [],
+                    "handles": [],
+                }
+            ],
+            "appliances": [],
+            "others": {},
+            "warnings": [],
+            "source_documents": [],
+            "analysis": {"mode": "heuristic_only"},
+        }
+        cleaned = parsing_module.apply_snapshot_cleaning_rules(snapshot)
+        room = cleaned["rooms"][0]
+        labels = {item["label"] for item in room["other_items"]}
+        self.assertNotIn("Mixer", labels)
+        self.assertNotIn("Pull-Out Mixer", labels)
+        self.assertIn("RAIL", labels)
+
+    def test_apply_snapshot_cleaning_rules_trims_yellowwood_vanity_other_item_tails(self) -> None:
+        snapshot = {
+            "job_no": "38095",
+            "builder_name": "Yellowwood",
+            "source_kind": "spec",
+            "generated_at": "2026-04-03T10:00:00+10:00",
+            "rooms": [
+                {
+                    "room_key": "bathroom",
+                    "original_room_label": "BATHROOM VANITY",
+                    "bench_tops_wall_run": "20mm YDL Classic White Polished",
+                    "door_colours_base": "Polytec Classic White Matt",
+                    "tap_info": "Spin Tall Basin Mixer Chrome Highgrove",
+                    "other_items": [
+                        {
+                            "label": "Accessories 1",
+                            "value": "Towel Rail - Spin Double Towel Rail Chrome 600mm Highgrove Shower Floor Waste LIDO Square tile grate 125mm with DN100 outlet Chrome Highgrove BATHROOM",
+                        }
+                    ],
+                    "door_panel_colours": [],
+                    "toe_kick": [],
+                    "bulkheads": [],
+                    "handles": [],
+                }
+            ],
+            "appliances": [],
+            "others": {},
+            "warnings": [],
+            "source_documents": [],
+            "analysis": {"mode": "heuristic_only"},
+        }
+        cleaned = parsing_module.apply_snapshot_cleaning_rules(snapshot)
+        room = cleaned["rooms"][0]
+        self.assertEqual(
+            room["other_items"],
+            [{"label": "Accessories 1", "value": "Towel Rail - Spin Double Towel Rail Chrome 600mm Highgrove"}],
+        )
+
+    def test_apply_snapshot_cleaning_rules_trims_yellowwood_vanity_accessory_tails(self) -> None:
+        snapshot = {
+            "job_no": "38095",
+            "builder_name": "Yellowwood",
+            "source_kind": "spec",
+            "generated_at": "2026-04-03T10:00:00+10:00",
+            "rooms": [
+                {
+                    "room_key": "bathroom",
+                    "original_room_label": "BATHROOM VANITY",
+                    "bench_tops_wall_run": "20mm YDL Classic White Polished",
+                    "door_colours_base": "Polytec Classic White Matt",
+                    "accessories": [
+                        "Towel Rail - Spin Double Towel Rail Chrome 600mm Highgrove Shower Floor Waste LIDO Square tile grate 125mm with DN100 outlet Chrome Highgrove BATHROOM"
+                    ],
+                    "door_panel_colours": [],
+                    "toe_kick": [],
+                    "bulkheads": [],
+                    "handles": [],
+                }
+            ],
+            "appliances": [],
+            "others": {},
+            "warnings": [],
+            "source_documents": [],
+            "analysis": {"mode": "heuristic_only"},
+        }
+        cleaned = parsing_module.apply_snapshot_cleaning_rules(snapshot)
+        room = cleaned["rooms"][0]
+        self.assertEqual(room["accessories"], ["Towel Rail - Spin Double Towel Rail Chrome 600mm Highgrove"])
+
+    def test_apply_snapshot_cleaning_rules_trims_generic_yellowwood_fixture_waste_and_accessory_tails(self) -> None:
+        snapshot = {
+            "job_no": "38095",
+            "builder_name": "Yellowwood",
+            "source_kind": "spec",
+            "generated_at": "2026-04-04T10:00:00+10:00",
+            "rooms": [
+                {
+                    "room_key": "bathroom",
+                    "original_room_label": "BATHROOM VANITY",
+                    "bench_tops_wall_run": "20mm YDL Classic White Polished",
+                    "door_colours_base": "Polytec Classic White Matt",
+                    "sink_info": "Byron Bench Mount Basin White Gloss Waste Chrome Highgrove BATHROOM",
+                    "basin_info": "Byron Bench Mount Basin White Gloss Waste Chrome Highgrove Toilet Suite Valencia Back To Wall Highgrove",
+                    "tap_info": "Spin Tall Basin Mixer Chrome Highgrove Towel Rail - Spin Double Towel Rail Chrome 600mm Highgrove",
+                    "door_panel_colours": [],
+                    "toe_kick": [],
+                    "bulkheads": [],
+                    "handles": [],
+                }
+            ],
+            "appliances": [],
+            "others": {},
+            "warnings": [],
+            "source_documents": [],
+            "analysis": {"mode": "heuristic_only"},
+        }
+        cleaned = parsing_module.apply_snapshot_cleaning_rules(snapshot)
+        room = cleaned["rooms"][0]
+        self.assertEqual(room["sink_info"], "Byron Bench Mount Basin White Gloss")
+        self.assertEqual(room["basin_info"], "Byron Bench Mount Basin White Gloss")
+        self.assertEqual(room["tap_info"], "Spin Tall Basin Mixer Chrome Highgrove")
+
+    def test_dedupe_appliances_drops_gibberish_fridge_when_real_fridge_model_exists(self) -> None:
+        rows = [
+            parsing_module.ApplianceRow(
+                appliance_type="Fridge",
+                make="Fisher & Paykel",
+                model_no="RB60V18",
+                source_file="clarendon.pdf",
+                evidence="Integrated Fridge/Freezer: Fisher & Paykel 2 X RB60V18",
+            ),
+            parsing_module.ApplianceRow(
+                appliance_type="Fridge",
+                make="",
+                model_no="30120018EQ740900740EQ30",
+                source_file="clarendon.pdf",
+                evidence="30120018EQ740900740EQ30 44102X INTEGRATED FRIDGE/ FREEZERFISHER & PAYKEL RB60V18",
+            ),
+        ]
+        deduped = parsing_module._dedupe_appliances(rows)
+        self.assertEqual([(row.appliance_type, row.model_no) for row in deduped], [("Fridge", "RB60V18")])
+
+    def test_dedupe_appliances_drops_client_to_check_placeholder_when_real_model_exists(self) -> None:
+        rows = [
+            parsing_module.ApplianceRow(
+                appliance_type="Fridge",
+                make="Fisher & Paykel",
+                model_no="RB60V18",
+                source_file="clarendon.pdf",
+                evidence="Integrated Fridge/Freezer: Fisher & Paykel 2 X RB60V18",
+            ),
+            parsing_module.ApplianceRow(
+                appliance_type="Fridge",
+                make="",
+                model_no="N/A CLIENT TO CHECK",
+                source_file="clarendon.pdf",
+                evidence="Fridge: N/A CLIENT TO CHECK",
+            ),
+        ]
+        deduped = parsing_module._dedupe_appliances(rows)
+        self.assertEqual([(row.appliance_type, row.model_no) for row in deduped], [("Fridge", "RB60V18")])
+
+    def test_clarendon_schedule_room_key_preserves_rumpus_desk(self) -> None:
+        self.assertEqual(
+            extraction_service._clarendon_schedule_room_key("RUMPUS - DESK JOINERY COLOUR SCHEDULE"),
+            "rumpus_desk",
+        )
+
+    def test_collect_spec_sections_for_clarendon_separates_rumpus_room_and_rumpus_desk(self) -> None:
+        text = (
+            "RUMPUS ROOM COLOUR SCHEDULE\n"
+            "Door Colour - Polytec Classic White Matt Finish Thermolaminate - Atlanta EM2 Profile\n"
+            "RUMPUS - DESK JOINERY COLOUR SCHEDULE\n"
+            "Door Colour 2 - Laminex Classic White - TO TALL OPEN SHELVES\n"
+        )
+        document = {
+            "file_name": "clarendon.pdf",
+            "role": "spec",
+            "pages": [
+                {"page_no": 1, "text": text, "raw_text": text, "needs_ocr": False},
+            ],
+        }
+        sections = parsing_module._collect_spec_sections_for_document("Clarendon", document)
+        labels = {
+            str(section.get("original_section_label", "")): str(section.get("text", ""))
+            for section in sections
+            if section.get("section_kind") == "room"
+        }
+        self.assertIn("RUMPUS ROOM", labels)
+        self.assertIn("RUMPUS - DESK", labels)
+        self.assertNotIn("Tall Open Shelves", labels["RUMPUS ROOM"])
+        self.assertIn("TALL OPEN SHELVES", labels["RUMPUS - DESK"])
+
+    def test_enrich_snapshot_rooms_applies_clarendon_afc_flooring_overlay(self) -> None:
+        snapshot = {
+            "job_no": "49906511",
+            "builder_name": "Clarendon",
+            "source_kind": "spec",
+            "generated_at": "2026-04-04T00:00:00+10:00",
+            "rooms": [
+                {"room_key": "kitchen", "original_room_label": "KITCHEN", "flooring": ""},
+                {"room_key": "butlers_pantry", "original_room_label": "BUTLERS PANTRY", "flooring": ""},
+                {"room_key": "theatre", "original_room_label": "THEATRE ROOM", "flooring": ""},
+                {"room_key": "rumpus_room", "original_room_label": "RUMPUS ROOM", "flooring": ""},
+                {"room_key": "rumpus_desk", "original_room_label": "RUMPUS - DESK", "flooring": ""},
+            ],
+            "appliances": [],
+            "others": {"flooring_notes": "CARPET & MAIN FLOOR TILE"},
+            "warnings": [],
+            "source_documents": [],
+            "analysis": {"mode": "heuristic_only"},
+        }
+        text = (
+            "CARPET & MAIN FLOOR TILE\n"
+            "Kitchen/Pantry/Family/Meals: TILED\n"
+            "Theatre: CARPET\n"
+            "Rumpus: CARPET\n"
+            "WIR/S & Robes: CARPET\n"
+        )
+        documents = [
+            {
+                "file_name": "job1_afc.pdf",
+                "role": "spec",
+                "pages": [
+                    {"page_no": 14, "text": text, "raw_text": text, "needs_ocr": False},
+                ],
+            }
+        ]
+        enriched = parsing_module.enrich_snapshot_rooms(snapshot, documents)
+        rooms = {row["room_key"]: row for row in enriched["rooms"]}
+        self.assertEqual(rooms["kitchen"]["flooring"], "TILED")
+        self.assertEqual(rooms["butlers_pantry"]["flooring"], "TILED")
+        self.assertEqual(rooms["theatre"]["flooring"], "CARPET")
+        self.assertEqual(rooms["rumpus_room"]["flooring"], "CARPET")
+        self.assertEqual(rooms["rumpus_desk"]["flooring"], "")
+        self.assertEqual(enriched["others"]["flooring_notes"], "")
+
     def test_clean_handle_entries_drops_orphan_handle_house_fragment(self) -> None:
         self.assertEqual(
             parsing_module._clean_handle_entries(
@@ -3820,6 +4370,158 @@ class SmokeTest(unittest.TestCase):
         labels = {section["original_section_label"] for section in merged}
         self.assertIn("KITCHEN", labels)
         self.assertNotIn("Revival Hoya Powder Matt 200x200mm", labels)
+
+    def test_enrich_snapshot_rooms_applies_yellowwood_flooring_overlay_and_clears_contents_noise(self) -> None:
+        snapshot = {
+            "job_no": "37",
+            "builder_name": "Yellowwood",
+            "source_kind": "spec",
+            "generated_at": "2026-04-04T00:00:00+10:00",
+            "rooms": [
+                {"room_key": "kitchen", "original_room_label": "KITCHEN", "door_colours_base": "Polytec Classic White Matt", "flooring": ""},
+                {"room_key": "bed_1_wir", "original_room_label": "BED 1 WALK IN ROBE", "door_colours_base": "Polytec Standard White", "flooring": ""},
+                {"room_key": "bed_2_robe", "original_room_label": "BED 2 ROBE", "door_colours_base": "Polytec Standard White", "flooring": ""},
+                {"room_key": "bed_3_robe", "original_room_label": "BED 3 ROBE", "door_colours_base": "Polytec Standard White", "flooring": ""},
+                {"room_key": "bed_4_robe", "original_room_label": "BED 4 ROBE", "door_colours_base": "Polytec Standard White", "flooring": ""},
+                {"room_key": "ensuite_1", "original_room_label": "BED 1 ENSUITE VANITY", "bench_tops_wall_run": "20mm YDL Classic White Polished", "flooring": ""},
+                {"room_key": "bathroom", "original_room_label": "BATHROOM VANITY", "bench_tops_wall_run": "20mm YDL Classic White Polished", "flooring": ""},
+            ],
+            "appliances": [],
+            "others": {
+                "flooring_notes": "OTHER THAN TILING TO WET AREAS............................................................................................................................15-16"
+            },
+            "warnings": [],
+            "source_documents": [],
+            "analysis": {"mode": "heuristic_only"},
+        }
+        documents = [
+            {
+                "file_name": "job37.pdf",
+                "role": "spec",
+                "builder_name": "Yellowwood",
+                "pages": [
+                    {
+                        "page_no": 2,
+                        "text": "TABLE OF CONTENTS FLOORING - OTHER THAN TILING TO WET AREAS 15-16 TILING SCHEDULE 21-25",
+                        "raw_text": "TABLE OF CONTENTS FLOORING - OTHER THAN TILING TO WET AREAS 15-16 TILING SCHEDULE 21-25",
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 15,
+                        "text": (
+                            "FLOORING - OTHER THAN TILING TO WET AREAS\n"
+                            "ENTRY, HALLWAY, LIVING, RUMPUS, PASSAGE, PASSAGE LINEN, KITCHEN & DINING\n"
+                            "Hybrid Flooring Admired Grand Hybrid\n"
+                            "Colour: Spotted Gum\n"
+                            "1530x228x6.5mm\n"
+                            "*Matching trims as required*\n"
+                            "Flooring Xtra\n"
+                            "BED 1 + WIR\n"
+                            "Carpet Silverwood\n"
+                            "Colour: Putty\n"
+                            "8mm Underlay\n"
+                            "Flooring Xtra\n"
+                            "BED 2 + ROBE\n"
+                            "Carpet Silverwood\n"
+                            "Colour: Putty\n"
+                            "8mm Underlay\n"
+                            "Flooring Xtra\n"
+                            "BED 3 + ROBE\n"
+                            "Carpet Silverwood\n"
+                            "Colour: Putty\n"
+                            "8mm Underlay\n"
+                            "Flooring Xtra\n"
+                            "BED 4 + ROBE\n"
+                            "Carpet Silverwood\n"
+                            "Colour: Putty\n"
+                            "8mm Underlay\n"
+                            "Flooring Xtra\n"
+                        ),
+                        "raw_text": (
+                            "FLOORING - OTHER THAN TILING TO WET AREAS\n"
+                            "ENTRY, HALLWAY, LIVING, RUMPUS, PASSAGE, PASSAGE LINEN, KITCHEN & DINING\n"
+                            "Hybrid Flooring Admired Grand Hybrid\n"
+                            "Colour: Spotted Gum\n"
+                            "1530x228x6.5mm\n"
+                            "*Matching trims as required*\n"
+                            "Flooring Xtra\n"
+                            "BED 1 + WIR\n"
+                            "Carpet Silverwood\n"
+                            "Colour: Putty\n"
+                            "8mm Underlay\n"
+                            "Flooring Xtra\n"
+                            "BED 2 + ROBE\n"
+                            "Carpet Silverwood\n"
+                            "Colour: Putty\n"
+                            "8mm Underlay\n"
+                            "Flooring Xtra\n"
+                            "BED 3 + ROBE\n"
+                            "Carpet Silverwood\n"
+                            "Colour: Putty\n"
+                            "8mm Underlay\n"
+                            "Flooring Xtra\n"
+                            "BED 4 + ROBE\n"
+                            "Carpet Silverwood\n"
+                            "Colour: Putty\n"
+                            "8mm Underlay\n"
+                            "Flooring Xtra\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 22,
+                        "text": (
+                            "TILING SCHEDULE\n"
+                            "BATHROOM\n"
+                            "Floor Tile Regina Grey Matt 450x450mm\n"
+                            "Lay Pattern - Square\n"
+                            "Grout: Mapei 110 Manhattan\n"
+                            "National Tiles\n"
+                            "Wall Tile Regina Grey Matt 450x450mm\n"
+                        ),
+                        "raw_text": (
+                            "TILING SCHEDULE\n"
+                            "BATHROOM\n"
+                            "Floor Tile Regina Grey Matt 450x450mm\n"
+                            "Lay Pattern - Square\n"
+                            "Grout: Mapei 110 Manhattan\n"
+                            "National Tiles\n"
+                            "Wall Tile Regina Grey Matt 450x450mm\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 23,
+                        "text": (
+                            "BED 1 ENSUITE\n"
+                            "Floor Tile Regina Grey Matt 450x450mm\n"
+                            "Lay Pattern - Square\n"
+                            "Grout: Mapei 110 Manhattan\n"
+                            "National Tiles\n"
+                            "Wall Tile Regina Grey Matt 450x450mm\n"
+                        ),
+                        "raw_text": (
+                            "BED 1 ENSUITE\n"
+                            "Floor Tile Regina Grey Matt 450x450mm\n"
+                            "Lay Pattern - Square\n"
+                            "Grout: Mapei 110 Manhattan\n"
+                            "National Tiles\n"
+                            "Wall Tile Regina Grey Matt 450x450mm\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                ],
+            }
+        ]
+        enriched = parsing_module.enrich_snapshot_rooms(snapshot, documents)
+        rooms = {row["room_key"]: row for row in enriched["rooms"]}
+        self.assertIn("Hybrid Flooring Admired Grand Hybrid", rooms["kitchen"]["flooring"])
+        self.assertIn("Spotted Gum", rooms["kitchen"]["flooring"])
+        self.assertIn("Carpet Silverwood", rooms["bed_1_wir"]["flooring"])
+        self.assertIn("Carpet Silverwood", rooms["bed_2_robe"]["flooring"])
+        self.assertIn("Floor Tile Regina Grey Matt 450x450mm", rooms["bathroom"]["flooring"])
+        self.assertIn("Floor Tile Regina Grey Matt 450x450mm", rooms["ensuite_1"]["flooring"])
+        self.assertEqual(enriched["others"]["flooring_notes"], "")
 
     def test_merge_yellowwood_layout_and_text_sections_trims_override_pages_from_merged_layout_room(self) -> None:
         layout_sections = [
@@ -4583,6 +5285,29 @@ class SmokeTest(unittest.TestCase):
         self.assertNotIn("47001", response.text)
         self.assertIn('value="375"', response.text)
 
+    def test_jobs_page_sorts_by_created_or_updated_time(self) -> None:
+        builder_id = store.create_builder("Clarendon", "clarendon", "")
+        older_job = store.create_job("11111", builder_id, "Older Job", "")
+        newer_job = store.create_job("22222", builder_id, "Newer Job", "")
+        with store.connect() as conn:
+            conn.execute(
+                "UPDATE jobs SET created_at = ?, updated_at = ? WHERE id = ?",
+                ("2026-04-01T00:00:00+00:00", "2026-04-03T00:00:00+00:00", older_job),
+            )
+            conn.execute(
+                "UPDATE jobs SET created_at = ?, updated_at = ? WHERE id = ?",
+                ("2026-04-02T00:00:00+00:00", "2026-04-02T00:00:00+00:00", newer_job),
+            )
+        client = TestClient(app)
+        self._login(client)
+        created_response = client.get("/jobs?sort=created_desc")
+        self.assertEqual(created_response.status_code, 200)
+        self.assertLess(created_response.text.index("22222"), created_response.text.index("11111"))
+        updated_response = client.get("/jobs?sort=updated_desc")
+        self.assertEqual(updated_response.status_code, 200)
+        self.assertIn("Sort by", updated_response.text)
+        self.assertLess(updated_response.text.index("11111"), updated_response.text.index("22222"))
+
     def test_jobs_page_shows_room_count_from_latest_raw_snapshot(self) -> None:
         builder_id = store.create_builder("Clarendon", "clarendon", "")
         job_with_rooms = store.create_job("37529", builder_id, "Kitchen Spec", "")
@@ -4607,7 +5332,11 @@ class SmokeTest(unittest.TestCase):
         self._login(client)
         response = client.get("/jobs")
         self.assertEqual(response.status_code, 200)
+        self.assertIn("Last Updated", response.text)
+        self.assertIn('name="sort" value="created_desc"', response.text)
+        self.assertIn('name="sort" value="updated_desc"', response.text)
         self.assertIn('data-label="Rooms">2<', response.text)
+        self.assertIn('data-label="Last Updated">', response.text)
         self.assertIn("Delete", response.text)
         self.assertIn(f'/jobs/{job_with_rooms}/delete', response.text)
 
@@ -6782,6 +7511,19 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(cleaned["door_colours_island"], "")
         self.assertEqual(cleaned["tap_info"], "Mixer Tap Clients own | Water Filter Tap Clients own")
 
+    def test_split_door_colour_groups_keeps_tall_open_shelves_as_tall(self) -> None:
+        grouped = parsing_module._split_door_colour_groups(
+            [
+                "Door Colour 1 - Polytec Classic White Matt Finish Thermolaminate - Atlanta EM2 Profile - Base Cabinetry",
+                "Door Colour 2 - Polytec Classic White Matt Finsih Melamine with Matching 1MM ABSE Edges - to Tall Open Shelves",
+            ]
+        )
+        self.assertIn("Atlanta EM2 Profile", grouped["door_colours_base"])
+        self.assertEqual(
+            grouped["door_colours_tall"],
+            "Polytec Classic White Matt Finsih Melamine with Matching 1MM ABSE Edges - to Tall Open Shelves",
+        )
+
     def test_stable_hybrid_room_merge_keeps_base_accessories_and_rejects_orientation_only_ai_groups(self) -> None:
         merged = extraction_service._merge_single_room(
             {
@@ -7231,6 +7973,33 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(polished["door_colours_base"], "")
         self.assertEqual(polished["door_colours_overheads"], "")
         self.assertEqual(polished["handles"], [])
+
+    def test_shared_generic_polish_preserves_more_complete_existing_handles_over_truncated_overlay(self) -> None:
+        row = {
+            "room_key": "kitchen",
+            "original_room_label": "Kitchen",
+            "handles": [
+                "Handless Lip Pull N/A",
+                "(To All Lower Doors & Drawers excluding Pantry) C137 Caloundra Lip Pull Matt Black 100mm (Laid Horizontal to All)",
+                "C137 Caloundra Lip Pull Matt Black 200mm (Laid Vertical)",
+            ],
+        }
+        overlay = {
+            "has_handles_block": True,
+            "handles": [
+                "Handless Lip Pull",
+                "(To All Lower Doors & Drawers",
+            ],
+        }
+        polished = extraction_service._polish_generic_layout_room(row, overlay)
+        self.assertEqual(
+            polished["handles"],
+            [
+                "Handless Lip Pull N/A",
+                "(To All Lower Doors & Drawers excluding Pantry) C137 Caloundra Lip Pull Matt Black 100mm (Laid Horizontal to All)",
+                "C137 Caloundra Lip Pull Matt Black 200mm (Laid Vertical)",
+            ],
+        )
 
     def test_shared_generic_polish_clears_noisy_fixture_fields_when_layout_blocks_exist(self) -> None:
         row = {
@@ -7769,6 +8538,18 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(overlay["handles"], ["Hettich - Salemi 9113368 30MM Brushed Stainless Steel Look"])
         self.assertEqual(overlay["basin_info"], "Eden Bench Mount Gloss White")
         self.assertEqual(overlay["tap_info"], "Spin Gun Metal Tall Basin Mixer")
+
+    def test_clarendon_schedule_room_key_maps_rumpus_room_explicitly(self) -> None:
+        self.assertEqual(
+            extraction_service._clarendon_schedule_room_key("RUMPUS ROOM COLOUR SCHEDULE"),
+            "rumpus_room",
+        )
+
+    def test_clarendon_clean_benchtop_text_drops_shadowline_note(self) -> None:
+        self.assertEqual(
+            extraction_service._clarendon_clean_benchtop_text("Shadowline : Matching Melamine Finish *"),
+            "",
+        )
 
     def test_extract_generic_layout_overlay_uses_additional_section_location_as_room_label(self) -> None:
         section = {

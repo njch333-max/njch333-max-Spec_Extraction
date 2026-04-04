@@ -137,7 +137,13 @@ def _job_matches_runtime_override(job_no: str, overrides: set[str]) -> bool:
 def _spec_docling_enabled(builder_name: str, source_kind: str) -> bool:
     if source_kind != "spec":
         return False
-    return _normalized_builder_key(builder_name) in runtime.SPEC_DOCLING_BUILDERS
+    normalized_builder = _normalized_builder_key(builder_name)
+    if normalized_builder in runtime.SPEC_DOCLING_BUILDERS:
+        return True
+    for policy_builder in runtime.SPEC_DOCLING_BUILDERS:
+        if re.search(rf"(?<![a-z0-9]){re.escape(policy_builder)}(?![a-z0-9])", normalized_builder):
+            return True
+    return False
 
 
 def _spec_heavy_vision_enabled(job_no: str, source_kind: str) -> bool:
@@ -301,6 +307,7 @@ def build_spec_snapshot(
                 rule_flags=rule_flags,
             )
             merged = _crosscheck_clarendon_snapshot_with_raw(merged, raw_crosscheck)
+        merged = parsing.apply_snapshot_cleaning_rules(merged, rule_flags=rule_flags)
         merged["analysis"] = analysis
         return merged
     _report_progress(progress_callback, "room_enrichment", "Applying room fixture and door-colour overlays")
@@ -333,6 +340,7 @@ def build_spec_snapshot(
             rule_flags=rule_flags,
         )
         heuristic = _crosscheck_clarendon_snapshot_with_raw(heuristic, raw_crosscheck)
+    heuristic = parsing.apply_snapshot_cleaning_rules(heuristic, rule_flags=rule_flags)
     heuristic["analysis"] = analysis
     return heuristic
 
@@ -2546,6 +2554,7 @@ def _heuristic_room_heading_blocks(lines: list[str], page_type: str, builder_nam
 
 def _infer_page_type_from_text(builder_name: str, source_kind: str, text: str) -> str:
     upper = str(text or "").upper()
+    builder_key = builder_name.strip().lower()
     if source_kind != "spec":
         return "unknown"
     has_explicit_sinkware_heading = "SINKWARE & TAPWARE" in upper or "SINKWARE (" in upper or "TAPWARE (" in upper
@@ -2576,10 +2585,18 @@ def _infer_page_type_from_text(builder_name: str, source_kind: str, text: str) -
         for token in (
             "BENCHTOP",
             "UNDERBENCH",
+            "BASE CUPBOARDS",
+            "DRAWERS",
             "BASE CABINET PANELS",
             "CABINET PANELS",
             "KICKBOARD",
             "OVERHEAD",
+            "OVERHEAD CUPBOARDS",
+            "PANTRY DOOR HANDLES",
+            "ISLAND BAR BACK",
+            "FLOOR MOUNTED VANITY",
+            "LINEN CUPBOARD FITOUT",
+            "ROBE FIT OUT",
             "CABINETRY HANDLES",
             "SHAVING CABINETS",
             "WALL RUN",
@@ -2587,6 +2604,22 @@ def _infer_page_type_from_text(builder_name: str, source_kind: str, text: str) -
         )
         if token in upper
     )
+    yellowwood_schedule_markers = (
+        "BASE CUPBOARDS",
+        "OVERHEAD CUPBOARDS",
+        "PANTRY DOOR HANDLES",
+        "ISLAND BAR BACK",
+        "FLOOR MOUNTED VANITY",
+        "LINEN CUPBOARD FITOUT",
+        "ROBE FIT OUT",
+        "FLOOR TILE",
+        "WALL TILE",
+        "SKIRTING",
+        "AREA",
+        "ITEM",
+    )
+    if builder_key == "yellowwood" and sum(1 for token in yellowwood_schedule_markers if token in upper) >= 2:
+        return "joinery"
     if (
         not has_explicit_sinkware_heading
         and any(token in upper for token in ("KITCHEN", "PANTRY", "LAUNDRY", "BATHROOM", "ENSUITE", "POWDER", "ALFRESCO", "BUTLERS", "WIP", "STUDY"))
@@ -2649,9 +2682,10 @@ def _infer_layout_labels(builder_name: str, lines: list[str], page_type: str) ->
         return "SINKWARE & TAPWARE", ""
     for line in lines[:12]:
         if "COLOUR SCHEDULE" in line.upper():
-            return line, parsing.source_room_label(line)
+            cleaned_label = parsing._clean_layout_room_label(line, line)
+            return line, cleaned_label or parsing.source_room_label(line)
     for line in lines[:8]:
-        label = parsing.source_room_label(line)
+        label = parsing._clean_layout_room_label(line, line) or parsing.source_room_label(line)
         if label and label not in {"Room", "room"}:
             return line, label
     return "", ""
@@ -3089,12 +3123,30 @@ def _looks_like_reversed_sinkware_page(text: str) -> bool:
 
 def _looks_like_high_risk_table_page(text: str, builder_name: str, source_kind: str) -> bool:
     upper = text.upper()
+    builder_key = builder_name.strip().lower()
     has_table_headers = "AREA / ITEM" in upper and ("SUPPLIER" in upper or "NOTES" in upper)
     if has_table_headers:
         return True
     if source_kind == "spec" and "COLOUR SCHEDULE" in upper and "SUPPLIER DESCRIPTION" in upper:
         return True
-    if "imperial" in builder_name.strip().lower() and any(
+    if builder_key == "yellowwood" and sum(
+        1
+        for marker in (
+            "BASE CUPBOARDS",
+            "OVERHEAD CUPBOARDS",
+            "PANTRY DOOR HANDLES",
+            "ISLAND BAR BACK",
+            "FLOOR MOUNTED VANITY",
+            "LINEN CUPBOARD FITOUT",
+            "ROBE FIT OUT",
+            "FLOOR TILE",
+            "WALL TILE",
+            "SKIRTING",
+        )
+        if marker in upper
+    ) >= 2:
+        return True
+    if builder_key == "imperial" and any(
         marker in upper for marker in ("JOINERY SELECTION SHEET", "SINKWARE & TAPWARE", "APPLIANCES")
     ):
         return True
@@ -4384,8 +4436,8 @@ CLARENDON_SCHEDULE_PAGE_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"\bVANITIES COLOUR SCHEDULE\b", "vanities"),
     (r"\bLAUNDRY COLOUR SCHEDULE\b", "laundry"),
     (r"\bTHEATRE(?: ROOM)? COLOUR SCHEDULE\b", "theatre"),
-    (r"\bRUMPUS(?: ROOM)? COLOUR SCHEDULE\b", "rumpus"),
-    (r"\bRUMPUS\s*-\s*DESK JOINERY COLOUR SCHEDULE\b", "rumpus"),
+    (r"\bRUMPUS(?: ROOM)? COLOUR SCHEDULE\b", "rumpus_room"),
+    (r"\bRUMPUS\s*-\s*DESK JOINERY COLOUR SCHEDULE\b", "rumpus_desk"),
     (r"\bSTUDY COLOUR SCHEDULE\b", "study"),
     (r"\bOFFICE COLOUR SCHEDULE\b", "office"),
     (r"\bKITCHENETTE COLOUR SCHEDULE\b", "kitchenette"),
@@ -6314,7 +6366,11 @@ def _sanitize_generic_handle_entries(values: list[str]) -> list[str]:
         text = parsing.normalize_brand_casing_text(_clean_generic_fragment(str(value or ""))).strip(" -;,")
         if not text:
             continue
-        text = re.sub(r"(?i)\bN/?A\b", "", text)
+        preserve_na = bool(re.search(r"(?i)\b(?:handless|lip pull|no handle|recessed|finger space)\b", text))
+        if preserve_na:
+            text = re.sub(r"(?i)\bN\s*/?\s*A\b", "N/A", text)
+        else:
+            text = re.sub(r"(?i)\bN/?A\b", "", text)
         text = re.sub(r"(?i)\bCategory\s*\d+\b", "", text)
         text = re.sub(r"(?i)\bSoft Close\b", "", text)
         text = re.sub(r"(?i)\b(?:shaving cabinets?|drawers?)\s+not included\b", "", text)
@@ -6336,6 +6392,26 @@ def _sanitize_generic_handle_entries(values: list[str]) -> list[str]:
             continue
         cleaned.append(text)
     return cleaned
+
+
+def _merge_generic_handle_entries(existing: list[str], overlay: list[str]) -> list[str]:
+    merged: list[str] = []
+    for value in [*existing, *overlay]:
+        text = parsing.normalize_space(str(value or ""))
+        if not text:
+            continue
+        replaced = False
+        for index, existing_text in enumerate(merged):
+            lowered = text.lower()
+            existing_lowered = existing_text.lower()
+            if lowered == existing_lowered or lowered in existing_lowered or existing_lowered in lowered:
+                if len(text) > len(existing_text):
+                    merged[index] = text
+                replaced = True
+                break
+        if not replaced:
+            merged.append(text)
+    return _sanitize_generic_handle_entries(merged)
 
 
 def _format_generic_accessory_from_parts(parts: dict[str, list[str]], *, anchor_label: str = "") -> str:
@@ -6746,7 +6822,10 @@ def _polish_generic_layout_room(row: dict[str, Any], overlay: dict[str, Any]) ->
     polished = dict(row)
     room_key = parsing.same_room_identity(str(polished.get("original_room_label", "")), str(polished.get("room_key", "")))
     if overlay.get("original_room_label"):
-        polished["original_room_label"] = overlay["original_room_label"]
+        polished["original_room_label"] = parsing._prefer_more_specific_room_label(
+            str(polished.get("original_room_label", "")),
+            str(overlay.get("original_room_label", "")),
+        )
         room_key = parsing.same_room_identity(str(polished.get("original_room_label", "")), str(polished.get("room_key", "")))
     existing_bench_fields = (
         str(polished.get("bench_tops_wall_run", "") or ""),
@@ -6814,12 +6893,17 @@ def _polish_generic_layout_room(row: dict[str, Any], overlay: dict[str, Any]) ->
             )
             if parsing.normalize_space(str(value or ""))
         ]
-    if overlay.get("has_handles_block") and overlay.get("handles"):
-        polished["handles"] = list(overlay.get("handles", []))
-    elif overlay.get("has_handles_block"):
-        polished["handles"] = []
+    if overlay.get("has_handles_block"):
+        overlay_handles = parsing._coerce_string_list(overlay.get("handles", []))
+        if overlay_handles:
+            polished["handles"] = _merge_generic_handle_entries(
+                parsing._coerce_string_list(polished.get("handles", [])),
+                overlay_handles,
+            )
+        else:
+            polished["handles"] = []
     elif overlay.get("handles"):
-        polished["handles"] = overlay["handles"]
+        polished["handles"] = _merge_generic_handle_entries([], parsing._coerce_string_list(overlay.get("handles", [])))
     if overlay.get("has_accessories_block") and overlay.get("accessories"):
         polished["accessories"] = list(overlay.get("accessories", []))
     elif overlay.get("has_accessories_block"):
@@ -6870,12 +6954,7 @@ def _polish_generic_layout_room(row: dict[str, Any], overlay: dict[str, Any]) ->
                     "skirtings",
                     "architraves",
                     "internal walls",
-                    "carpet",
-                    "timber",
                     "client initials",
-                    "manufacturer",
-                    "range",
-                    "underlay",
                 )
             )
         ):
@@ -6990,8 +7069,15 @@ def _select_clarendon_room_overlay(room: dict[str, Any], overlays: dict[str, dic
     room_key = str(room.get("room_key", ""))
     original_room_label = str(room.get("original_room_label", ""))
     overlay = _blank_clarendon_overlay()
+    room_identity = parsing.same_room_identity(original_room_label, room_key)
     if room_key in overlays:
         _merge_clarendon_overlay(overlay, overlays[room_key])
+    for overlay_key, overlay_value in overlays.items():
+        if overlay_key == room_key:
+            continue
+        if parsing.same_room_identity(overlay_key) != room_identity:
+            continue
+        _merge_clarendon_overlay(overlay, overlay_value)
     fallback_keys: list[tuple[str, str]] = []
     if room_key == "walk_in_pantry":
         fallback_keys.append(("butlers_pantry", "full"))
@@ -7127,7 +7213,7 @@ def _clarendon_schedule_room_key(text: str) -> str:
     generic_match = re.search(r"(?is)\b([A-Z][A-Z0-9/&' \-]{2,80}?)\s+COLOUR SCHEDULE\b", text)
     if generic_match:
         label = parsing.normalize_space(generic_match.group(1))
-        label = re.sub(r"(?i)\s*-\s*DESK JOINERY\s*$", "", label)
+        label = re.sub(r"(?i)\s+JOINERY\s*$", "", label)
         key = parsing.source_room_key(label)
         if key:
             return key
@@ -7561,6 +7647,7 @@ def _clarendon_clean_benchtop_text(value: Any) -> str:
     text = parsing.normalize_brand_casing_text(text)
     text = _clarendon_to_readable_text(text)
     text = _clarendon_inline_text(text)
+    text = re.sub(r"(?i)^shadowline\s*:?\s*matching\b.*$", "", text)
     if _looks_like_clarendon_noise(text):
         return ""
     return text.strip(" -;,")
@@ -7868,6 +7955,9 @@ def _merge_rooms_by_source_identity(rows: list[dict[str, Any]]) -> list[dict[str
         current = dict(row)
         current["room_key"] = target_key
         current["original_room_label"] = parsing.source_room_label(str(row.get("original_room_label", "")), fallback_key=target_key)
+        current["room_name"] = parsing.normalize_space(
+            str(current.get("original_room_label", "") or target_key.replace("_", " "))
+        )
         if target_key not in grouped:
             grouped[target_key] = current
             order.append(target_key)

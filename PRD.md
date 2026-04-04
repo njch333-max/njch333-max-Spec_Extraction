@@ -42,9 +42,12 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Create jobs with unique `job_no`.
 - Each job must belong to exactly one Builder.
 - List jobs with status summary.
+- Allow sorting the Jobs list by `Created` or `Last Updated`.
 - Allow `job_no` search from the main job list using partial-match input and explicit submit.
 - View a job detail page with files, runs, results, and exports.
-- The Jobs list `Open` link must open each job in a new browser tab so the list page remains available.
+- The Jobs list `Open` action must render as a button-styled control and open each job in a new browser tab so the list page remains available.
+- The Job Workspace run history must show actual parse `Duration`, separate `Worker / Build` metadata, and an `Open Result` action for succeeded spec runs with stored result JSON.
+- The app must provide a read-only historical spec-result page for succeeded spec runs, using stored run payloads instead of the latest snapshot, without enabling export or PDF QA from that historical view.
 
 ### 4.3 File Support
 - Spec files: `PDF`, `DOCX`
@@ -66,18 +69,20 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
   - source references.
 - Merge information across multiple spec files in the same job.
 - For multi-file spec jobs, select one authoritative room-master file automatically and use it to define the room list; other spec files may only enrich existing rooms and appliances.
-- For multi-file Clarendon jobs, the room-master selector must strongly prefer cabinetry colour-schedule files such as `COLOURS AFC` over broad `Signed Drawings` miscellany when the colour-schedule file contains room-specific joinery fields.
+- For multi-file Clarendon jobs, if any uploaded spec file name contains `Drawings and Colours`, that file must become the room-name master ahead of score-based selection.
+- For Clarendon jobs, final room names may only come from titles found in the selected `Drawings and Colours` master file; AFC or supplement files may enrich those rooms only and may not create new room names.
 - Room-master detection must normalize glued headings such as `KITCHEN COLOUR SCHEDULEBENCHTOP...` so only the clean room heading becomes the room label.
+- Clarendon glued headers such as `VanitiesDate`, `LaundryDate`, and `TheatreDate` must normalize back to clean room titles before room-master whitelisting is applied.
 - The room-master room set must be established before supplement files are processed, so supplement-file upload order cannot create extra rooms.
-- If OpenAI is configured, use it to improve structured extraction.
-- The default OpenAI extraction model is `gpt-4.1-mini`; production and local environments should stay aligned unless a deliberate override is documented.
-- Extraction now uses a heuristic-first, vision-fallback pipeline for high-risk pages: render the PDF page to an image, ask OpenAI for page/block/row structure, then let the row-matched text fill final values.
-- Vision fallback is structure-first, not answer-first. It should correct section, room-block, and row boundaries, while final field values continue to come from the matched source row text/OCR.
-- Every spec page must receive at least lightweight layout analysis. Joinery schedules, colour schedules, sinkware/tapware pages, appliance tables, and OCR-glued or order-reversed pages must escalate to the heavy vision layout path by default.
+- The default hot path is now speed-first:
+  - all builders run `layout + row-local parser`
+  - `Imperial`, `Simonds`, `Evoca`, and `Yellowwood` may additionally run selective `Docling` on difficult schedule/table pages
+  - default automatic `Heavy Vision` is disabled
+  - default automatic `AI merge` is disabled
+- OpenAI-powered `Heavy Vision` and `AI merge` remain available only as manual rescue tools for targeted parser-debug or QA-failed jobs; they are not part of the normal production pipeline.
 - Layout analysis must emit `page_type`, `section_label`, `room_label`, `room_blocks`, and `rows`, and later extraction stages may only read values from those matched blocks instead of scanning freely across the page.
 - All builders must use the fixed `Global Conservative` profile based on the accepted `37016` output style.
-- Under `Global Conservative`, heuristic room structure and cleaning remain primary, room identity is source-driven, OpenAI fills missing fields conservatively, and AI must not inject extra rooms, collapse distinct rooms into broad buckets, or overwrite already-clean room text with noisier duplicates.
-- When OpenAI and heuristic room sets disagree, keep the heuristic room layout as the primary room skeleton and merge AI fields conservatively into that layout so repeated parses of the same spec stay visually stable.
+- Under `Global Conservative`, heuristic room structure and row-local field ownership remain primary; parser output must not invent extra rooms, collapse distinct rooms into broad buckets, or overwrite already-clean source text with noisier guesses.
 - Room rows must come from actual source headings or labels, and only the same room should merge across pages/files. Bathroom, ensuite, powder, vanity, pantry, WIP, theatre, rumpus, study, office, and similar rooms must stay separate unless the source clearly uses the same room label.
 - Full source room names from authoritative colour-schedule pages must be preserved in `original_room_label`, including labels such as `WALK-IN-PANTRY` and `MEALS ROOM`.
 - For Imperial jobs, room names must use the currently extractable `... JOINERY SELECTION SHEET` title body as-is, such as `WALK-BEHIND PANTRY`, `BENCH SEAT`, or `OFFICE`, without shorthand aliases or manual remapping.
@@ -91,10 +96,13 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Generic `DOORS/PANELS` or `Door/Panel Colour` values may fall back to `Base` only when the same room section has no explicit `Overhead Cupboards`, `Base Cupboards & Drawers`, `Island Bench Base Cupboards & Drawers`, or `Island Bar Back` group markers.
 - Supplement-file room-like lines that do not belong to the room-master set, such as glazing, door-finish, waste-colour, or stray room headings, must be ignored and surfaced as warnings instead of becoming new rooms.
 - Clarendon jobs must still pass through a deterministic post-polish stage, but that polish now runs per detected room instead of compressing output into a fixed 6-room layout.
+- Clarendon remains `heuristic-only`; it does not use Docling in the default runtime path.
 - Clarendon post-polish should prefer clean schedule-page text for benchtops, door colours, toe kicks, bulkheads, handles, sink/basin/tap fixtures, and soft-close states instead of falling back to OCR-noisy field fragments when the schedule pages already provide a cleaner source.
 - Clarendon polish and address extraction must prefer `raw_text` from the source PDF whenever it is present; vision-normalized `text` is only a fallback and must not erase schedule-note fields such as `KICKBOARDS`, `BULKHEAD SHADOWLINE`, `HANDLE 1/2`, `DOOR HINGES`, or `DRAWER RUNNERS`.
 - Clarendon address extraction must use page-header stop markers so `Site Address:` lines do not absorb nearby joinery body text such as `BENCHTOP`, `DOOR COLOUR`, `HANDLE`, or `THERMOLAMINATE NOTES`.
+- Clarendon AFC pages such as `CARPET & MAIN FLOOR TILE` must be parsed as room-local flooring overlays. Their area labels should enrich existing master rooms like `KITCHEN`, `BUTLERS PANTRY`, `THEATRE ROOM`, and `RUMPUS ROOM` without creating synthetic AFC-only rooms.
 - Appliance parsing must prefer explicit `model_no` values from labeled rows or table columns and must not use brand-only words or generic notes as model numbers.
+- Appliance placeholders such as `As Above`, `By Client`, `N/A - By others`, or `N/A CLIENT TO CHECK` should keep their source wording, but placeholder-only rows should be deduplicated away when the same source file already contains a concrete model for that appliance type.
 - Sink, basin, and tap selections must be captured as room-level fixture fields instead of appliance rows.
 - Door colour information should expose room-level splits for `Overheads`, `Base`, `Island`, and `Bar Back` whenever the source text makes those categories explicit.
 - Door colour information should also expose a room-level `Tall` split when the source explicitly labels tall cabinets, tall doors, tall panels, or combined `Upper Cabinetry Colour + Tall Cabinets` rows.
@@ -103,11 +111,17 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Kitchen and similar room bench-top data should split into `Wall Run Bench Top` and `Island Bench Top` when the source text clearly describes separate wall-run and island materials.
 - If no explicit `Wall Run Bench Top` is present, a plain `Bench Top` or `Cooktop Run` description defaults to `Wall Run Bench Top`.
 - Yellowwood-style joinery schedules must map `Back Benchtops` to `Wall Run Bench Top` and preserve `Waterfall Ends` as part of `Island Bench Top`.
+- Yellowwood jobs must use `layout + row-local parser + selective Docling` on grouped schedule pages such as cabinetry, vanity, tiling, and `Area / Item / Colour / Supplier` tables.
+- For Yellowwood, final room names must preserve the more specific spec-title form, such as `BED 1 ENSUITE VANITY`, `BATHROOM VANITY`, `BED 1 WALK IN ROBE`, and `BED 2/3/4 ROBE`.
+- For Yellowwood, rooms are kept only when they have real joinery/material evidence. Pure plumbing, tiling, accessory, or flooring-only rooms must be dropped, while `robe` or `media` rooms may stay only when they contain material evidence such as `Polytec` or `Laminex`.
+- For Yellowwood, wet-area plumbing pages may enrich the corresponding vanity room, but fixture-only parent rooms such as plain `BED 1 ENSUITE`, `BATHROOM`, `WC`, or `LAUNDRY` must not survive as standalone rooms when they have no joinery/material evidence.
+- For Yellowwood vanity rooms, wet-area plumbing enrichment must stay room-relevant: towel rails and toilet-roll holders may remain as accessories, but shower-floor-waste, basin-waste, shower, bath, or repeated room-heading tails must be trimmed out of vanity accessory text.
+- For Yellowwood, non-wet-area `FLOORING` pages and wet-area `TILING SCHEDULE` pages must enrich the retained room cards as room-local overlays. Room flooring should land on `Kitchen`, robe rooms, and vanity rooms when the schedule area labels match, and contents-page flooring lines must never populate `others.flooring_notes`.
 - Imperial-style joinery selection sheets must use page-top section titles as authoritative section boundaries, keep continuation pages with the current section until the next section title, and stop extraction at `CLIENT NAME / SIGNATURE / SIGNED DATE` footer blocks.
 - Imperial section parsing must treat obvious in-section row labels such as `ISLAND CABINETRY COLOUR`, `GPO'S`, `BIN`, `HAMPER`, `HANGING RAIL`, `MIRRORED SHAVING CABINET`, and `EXTRA TOP IN ...` as row boundaries even when they are not final business fields, so preceding benchtop, floating-shelf, handle, and cabinetry rows do not continue through them.
 - Imperial OCR-glued lines must not split inside ordinary words such as `CABINETRY`; inline marker detection should only split at real row starts or glued lowercase-to-uppercase row transitions.
 - Imperial `Hinges & Drawer Runners` rows must recover `Soft Close` even when OCR glues `Floor Type & Kick refacing required` into the same line or reorders the line fragments.
-- After OpenAI merge, Imperial room-level joinery fields must be rebuilt from the builder-specific heuristic section parser so room cards keep same-room, same-section, same-row ownership even when AI proposes broader or noisier field spans.
+- Imperial room-level joinery fields must be rebuilt from the builder-specific heuristic section parser and row-local reconstruction so room cards keep same-room, same-section, same-row ownership even when OCR or layout extraction produces broader or noisier spans.
 - Imperial continuation must also stop when a later page switches into non-joinery full-page headings such as `APPLIANCES` or `SINKWARE & TAPWARE`.
 - Imperial-style non-room sections such as `FEATURE TALL DOORS` must be preserved separately from rooms and must never be merged into the surrounding kitchen or pantry room output.
 - Imperial accessory lists must be deduplicated within the same room so repeated `Accessories` rows do not render multiple times with the same value.
@@ -206,10 +220,10 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 
 ### 4.9 Run History
 - The Job page run history must refresh automatically while parsing is active.
-- Run messages should show real worker progress such as loading files, heuristic extraction, OpenAI request, merge/fallback, and snapshot save.
+- Run messages should show real worker progress such as loading files, heuristic extraction, Clarendon polish, Docling structure, official resource lookup, and snapshot save.
 - Clarendon runs should expose a dedicated `Clarendon polish` stage in Run History when the deterministic post-polish step executes.
 - Run stages should also show official resource work such as model lookup, spec/manual discovery, and official size extraction.
-- Run metadata must also show the parser strategy, worker PID, and app build ID that handled the run.
+- Run metadata must also show actual parse `Duration`, `Worker / Build`, and an `Open Result` action for succeeded spec runs.
 - Only one worker should actively lease the queue at a time, so stale local processes cannot race newer code on queued jobs.
 
 ### 4.10 Drawing Foundation
@@ -315,9 +329,9 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 ## 7. Acceptance Criteria
 - User can log in, create Builders, upload template files, create Jobs, upload files, trigger extraction, review results, save edits, and export files.
 - User can open a dedicated single-job raw Spec List page and export it to Excel.
-- User can tell from the Job page whether the latest extraction used heuristic parsing only, OpenAI merge, or OpenAI fallback.
+- User can tell from the Job page which runtime strategy produced the latest extraction, including heuristic-only or selective Docling.
 - User can tell from the Job page which global extraction profile, worker PID, and build ID generated the latest snapshot.
-- Clarendon jobs use an additional deterministic post-polish step so repeated parses keep the stable 6-room structure while stripping handle-location noise, fixture line breaks, and noisy field spillover.
+- Clarendon jobs use an additional deterministic post-polish step so repeated parses keep source-driven room ownership from the `Drawings and Colours` master while stripping handle-location noise, fixture line breaks, and noisy field spillover.
 - Clarendon jobs support both the original `37016` schedule family and the denser single-line `handleless / mirror splashback / laminate` family, with the same compact-summary output style.
 - Imperial jobs use title-driven section parsing so kitchen, pantry, laundry, bar, bath/ensuite, and other selection-sheet sections stay isolated, footer/signature blocks are ignored, and `FEATURE TALL DOORS` is shown separately from room cards.
 - The completion workflow for confirmed changes includes deployment to `spec.lxtransport.online`, successful service restarts, and live verification on the affected page or job.

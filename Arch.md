@@ -36,7 +36,11 @@
 - Static asset links include a file-version query string so browser caches do not hold stale layouts after CSS updates
 - Form-based actions with CSRF token checks
 - The Jobs list keeps the left navigation visible, but the Job Workspace and Raw Spec List pages render the same shell with a client-side collapsible navigation rail that starts hidden on each visit.
-- The Jobs list `Open` action uses a new browser tab, and dense tables switch to a stacked card-style presentation below roughly `1280px` so 1080p half-screen layouts stay readable without horizontal scrolling.
+- The Jobs list `Open` action is a button-styled control that opens each job in a new browser tab.
+- The Jobs list supports `Created` and `Last Updated` sorting while preserving the current search filter.
+- The Job Workspace run history shows actual `Duration`, separate `Worker / Build` metadata, and per-run actions such as `Open Result` for succeeded spec runs with stored result JSON.
+- The app exposes a read-only historical spec result route at `/jobs/{job_id}/runs/{run_id}/spec-list`; it renders stored run JSON, does not mutate the latest snapshot, and does not allow export or PDF QA from the historical view.
+- Dense tables switch to a stacked card-style presentation below roughly `1280px` so 1080p half-screen layouts stay readable without horizontal scrolling.
 
 ### 3.2 Persistence
 - SQLite tables:
@@ -68,37 +72,37 @@
 1. Read uploaded files from job folders.
 2. Extract `raw_text` from PDF or DOCX and keep it alongside a normalized `text` copy.
 3. Build a lightweight page-layout object for every spec page, including `page_type`, `section_label`, `room_label`, `room_blocks`, and `rows`.
-4. Escalate joinery schedules, colour schedules, sinkware/tapware pages, appliance tables, and OCR-glued or order-reversed pages into the heavy OpenAI vision layout path.
-5. Replace each page's working text with layout-normalized text so later parsers read row-local boundaries instead of free-flow OCR order.
-6. Run heuristic extraction into canonical schema, including explicit appliance model parsing from labeled rows.
+4. Run the speed-first builder policy:
+   - `Clarendon`: heuristic-only
+   - `Imperial / Simonds / Evoca / Yellowwood`: `layout + row-local parser + selective Docling`
+   - default automatic `Heavy Vision`: disabled
+   - default automatic `AI merge`: disabled
+5. Apply `Docling` only to builder/page combinations that need structure recovery, such as grouped joinery schedules, cabinetry tables, vanity schedules, tiling schedules, and `Area / Item / Colour / Supplier` style pages. Docling runs per-page subset only and keeps OCR off by default.
+6. Run heuristic extraction into canonical schema, then rebuild final fields through `layout_rows -> row-fragment -> row-local mapping` so supplier, model, profile, note, and value text stay attached to the owning row.
 7. Enrich room rows with fixture fields (`sink_info`, `basin_info`, `tap_info`), split door-colour fields (`door_colours_overheads`, `door_colours_base`, `door_colours_tall`, `door_colours_island`, `door_colours_bar_back`), and derived bench-top fields (`bench_tops_wall_run`, `bench_tops_island`, `bench_tops_other`).
-8. For Yellowwood-style schedule PDFs, parse room sections page-by-page from joinery schedule pages instead of scanning the whole document blindly, so `Back Benchtops`, island bench fields, vanity colours, and cabinet-only materials are mapped from the correct pages.
-9. Remove plumbing fixtures from appliance rows so they only appear on room rows.
-10. If OpenAI is enabled, send consolidated layout-normalized text and template context for higher-quality structured output.
-   Default model target: `gpt-4.1-mini` unless an environment override is explicitly applied.
-9. Normalize OpenAI text output before JSON parsing so fenced JSON or small prefatory text does not trigger an unnecessary fallback.
-10. Apply the fixed `Global Conservative` profile for every Builder:
-  - heuristic room structure and cleaning stay primary
-  - OpenAI may fill missing fields and improve sparse evidence
-  - OpenAI must not introduce extra room splits or overwrite already-clean fields with noisier text
-  - room identity is source-driven for every builder, so only the same detected room merges across pages/files
-  - authoritative schedule labels are preserved as the display label, so rooms like `WALK-IN-PANTRY` and `MEALS ROOM` survive normalization without being shortened to generic pantry buckets
-  - for multi-file spec jobs, automatically pick one room-master file by schedule density and only let that file define the room set
-  - room material fields remain room-local, so supplement files can enrich fixtures/appliances but must not inject another room's material text into the current room
-  - grouped rooms such as `Vanities` still follow the same-room-only rule: grouped-room material fields come only from that grouped room's authoritative schedule section, while `vanity`/bathroom fixture pages may contribute fixture fields only
-  - room-master detection first normalizes glued schedule headings such as `KITCHEN COLOUR SCHEDULEBENCHTOP...` or `VANITIES COLOUR SCHEDULENOTE...` so the clean heading is extracted before room matching
-  - the room-master room set is precomputed before supplement files are parsed, so supplement-file ordering cannot accidentally create extra rooms
-  - composite supplement headings such as `Kitchen/Pantry/Family/Meals` are treated as room-like noise unless the room-master file also contains explicit room-specific schedule pages for those rooms
-11. Merge OpenAI output conservatively: keep the heuristic room set as the primary layout, merge room fields into that layout, and preserve heuristic appliance `model_no` values instead of replacing them with weaker guesses.
-12. For stable-hybrid room merges, prefer heuristic accessories and reject AI-only door-colour subgroup values that collapse to orientation notes instead of real material text.
-13. For Clarendon-only spec runs, apply a deterministic post-polish stage after source-driven room detection:
-  - rebuild stable room text from colour-schedule and fixture pages for each detected room
-  - prefer `page.raw_text` over vision-normalized `page.text` when rebuilding schedule overlays and address candidates
-  - prefer clean schedule-page values over OCR-noisy field fragments
-  - use same-room-only overlay selection for material fields, while allowing grouped-room fixture fallback only for sink/basin/tap enrichment
-  - only let generic `DOORS/PANELS` text fall back to `Base` when the same room section has no explicit overhead/base/island/bar-back cabinetry markers
-  - keep source-driven room ownership while replacing noisy field text with cleaner deterministic values
-14. For Imperial-only spec runs, apply a title-driven section parser before the generic cleanup stages:
+8. Remove plumbing fixtures from appliance rows so they only appear on room rows.
+9. Apply the fixed `Global Conservative` profile for every builder:
+  - room identity is source-driven
+  - field ownership is same-room-only, same-section-only, and same-row-or-row-fragment-only
+  - supplement files may enrich existing rooms only and must not create new rooms outside the room-master set
+  - `colour/material` and appliance placeholders use `original wording + light cleanup`, not semantic rewriting
+10. Clarendon-specific behavior:
+  - stays heuristic-only
+  - if a `Drawings and Colours` file exists, it is the deterministic room-name master
+  - final room names may only come from that master file
+  - AFC/supplement pages may enrich existing rooms only
+  - glued headers such as `VanitiesDate`, `LaundryDate`, and `TheatreDate` are normalized back to clean room titles
+  - deterministic post-polish prefers `raw_text` over vision-normalized `text`
+  - AFC `CARPET & MAIN FLOOR TILE` pages now act as room-local flooring overlays for existing master rooms such as `KITCHEN`, `BUTLERS PANTRY`, `THEATRE ROOM`, and `RUMPUS ROOM`
+11. Yellowwood-specific behavior:
+  - uses selective Docling for grouped schedule/table pages
+  - preserves the more specific spec-title room names such as `BED 1 ENSUITE VANITY` and `BED 1 WALK IN ROBE`
+  - retains rooms only when there is joinery/material evidence
+  - `robe` and `media` rooms remain only when they contain real material evidence such as `Polytec` or `Laminex`
+  - fixture-only wet-area parent rooms are merged into the corresponding vanity room instead of surviving as standalone rooms
+  - vanity-room plumbing cleanup trims shower/floor-waste/basin-waste and repeated heading tails out of accessory text so wet-area enrichment stays room-relevant
+  - non-wet-area `FLOORING` pages and wet-area `TILING SCHEDULE` pages enrich retained room cards as room-local flooring overlays, while contents-page flooring text is excluded from `others.flooring_notes`
+12. For Imperial-only spec runs, apply a title-driven section parser before the generic cleanup stages:
   - use the page-top `... JOINERY SELECTION SHEET` title as the authoritative section start
   - use the currently extractable title body as the authoritative room label, preserving values such as `WALK-BEHIND PANTRY`, `BENCH SEAT`, or `OFFICE` without shorthand aliases
   - use the title to identify the section, but do not discard same-page body text that appears before the title in extracted reading order
@@ -117,14 +121,14 @@
   - prefer builder-specific Imperial sink/tap overlay text over noisier AI fixture guesses when both are present
   - emit non-room sections such as `FEATURE TALL DOORS` into `special_sections[]` instead of merging them into nearby room cards
   - recover delayed Imperial handle lines that appear later in the same section while rejecting adjacent cabinet-colour rows as handle noise
-15. After AI merge, rebuild Imperial `rooms[]` and `special_sections[]` from the heuristic section parser before final cleaning so room-level fields remain tied to same-room same-row boundaries instead of inheriting broader AI guesses.
-16. Apply the fixed global cleaning rules after heuristic, merge, Clarendon post-polish, and Imperial section parsing so brand casing, door-colour cleanup, kitchen-only bench-top splitting, tall-cabinet capture, and soft-close normalization stay consistent across all builders.
-17. Record analysis metadata in the snapshot: mode, parser strategy, layout metadata (`layout_attempted`, `layout_succeeded`, `layout_mode`, `layout_pages`, `heavy_vision_pages`, `layout_note`), vision metadata (`vision_attempted`, `vision_succeeded`, `vision_pages`, `vision_page_count`, `vision_note`), and runtime identifiers (`worker_pid`, `app_build_id`).
-18. Normalize drawer and hinge states to `Soft Close`, `Not Soft Close`, or blank.
-19. Look up official appliance resources by `make + model_no`, first probing deterministic brand-site model URLs where supported and then falling back to search-based discovery; AEG, Westinghouse, and Fisher & Paykel now extract official dimensions from product pages when available, including JSON-like structured metadata.
-20. Extract an optional `site_address` from the authoritative source text and carry it in the snapshot for header display on the Job Workspace and Raw Spec List pages.
-21. Save the raw snapshot.
-22. Immediately generate or reset a `snapshot_verifications` row for the latest `raw_spec` snapshot with status `pending` and a field-level checklist derived from the extracted room/appliance fields.
+13. Apply the fixed global cleaning rules after heuristic parsing, Clarendon post-polish, Imperial section parsing, and row-local field reconstruction so brand casing, door-colour cleanup, kitchen-only bench-top splitting, tall-cabinet capture, and soft-close normalization stay consistent across all builders.
+14. Record analysis metadata in the snapshot: parser strategy, layout metadata, runtime identifiers, Docling metadata, and whether any manual OpenAI stage was attempted.
+15. Normalize drawer and hinge states to `Soft Close`, `Not Soft Close`, or blank.
+16. Look up official appliance resources by `make + model_no`, first probing deterministic brand-site model URLs where supported and then falling back to search-based discovery; AEG, Westinghouse, and Fisher & Paykel now extract official dimensions from product pages when available, including JSON-like structured metadata.
+17. Before final appliance storage, placeholder rows such as `As Above`, `By Client`, `N/A - By others`, and `N/A CLIENT TO CHECK` keep their original wording, but same-source placeholder rows are deduplicated away when a concrete model of the same appliance type already exists.
+18. Extract an optional `site_address` from the authoritative source text and carry it in the snapshot for header display on the Job Workspace and Raw Spec List pages.
+19. Save the raw snapshot.
+20. Immediately generate or reset a `snapshot_verifications` row for the latest `raw_spec` snapshot with status `pending` and a field-level checklist derived from the extracted room/appliance fields.
 
 ### 3.5 Review Pipeline
 1. Load latest raw snapshot.
@@ -175,8 +179,9 @@
 ### 3.8 Run History Refresh
 1. The Job page renders the run history as an htmx partial.
 2. The browser polls `/jobs/{job_id}/run-history` every few seconds.
-3. The worker updates `runs.stage` and `runs.message` at key checkpoints such as loading, heuristic extraction, Clarendon polish, OpenAI request, merge/fallback, official model lookup, spec/manual discovery, official size extraction, and saving.
+3. The worker updates `runs.stage` and `runs.message` at key checkpoints such as loading, heuristic extraction, Clarendon polish, Docling structure, official model lookup, spec/manual discovery, official size extraction, and saving.
 4. The partial replaces only the run-history card instead of reloading the full page.
+5. Completed runs display actual `Duration`, `Worker / Build`, and a read-only `Open Result` action for succeeded spec runs with stored result payloads.
 
 ### 3.9 Job Search
 1. `GET /jobs` accepts an optional `q` query string.
@@ -194,7 +199,8 @@
   - fixed Clarendon room compaction buckets such as `vanities` and preallocated rooms such as `theatre`/`rumpus` are no longer injected by layout stabilization
   - in multi-file spec jobs, supplement files cannot create new rooms; unmatched room-like sections are ignored and surfaced through warnings/diagnostics
   - when the room-master file already groups a room family such as `Vanities`, supplement bathroom/ensuite/powder vanity pages can enrich that grouped room without splitting it apart
-  - room-master scoring now prefers cabinetry colour-schedule files, especially `COLOURS AFC`-style Clarendon files that contain room-specific joinery labels such as `Overhead Cupboards`, `Base Cupboards & Drawers`, or `Floor Mounted Vanity`
+  - Clarendon now treats `Drawings and Colours` as the deterministic room-name master when present, and final room names are whitelisted to titles from that file
+  - Yellowwood keeps only rooms with joinery/material evidence and prefers specific joinery/spec titles over generalized parent labels
 
 ## 4. Canonical Schema
 

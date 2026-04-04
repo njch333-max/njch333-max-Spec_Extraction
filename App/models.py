@@ -60,6 +60,7 @@ class SnapshotVerification(BaseModel):
 class RoomRow(BaseModel):
     room_key: str = ""
     original_room_label: str = ""
+    room_name: str = ""
     bench_tops: list[str] = Field(default_factory=list)
     bench_tops_wall_run: str = ""
     bench_tops_island: str = ""

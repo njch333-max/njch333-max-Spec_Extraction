@@ -20,29 +20,37 @@
   - deterministic Westinghouse-style official product-page probing before search fallback
   - deterministic AEG Australia product-page probing on `aegaustralia.com.au`
   - Fisher & Paykel official product-page matching with official-size extraction from structured product metadata
-  - heuristic-first, vision-fallback page parsing for high-risk PDF pages, using rendered page images to recover section and row boundaries before final field mapping
-  - structure-first spec parsing for all builders, with lightweight page-layout analysis on every spec page and heavy OpenAI vision layout applied selectively to complex table pages
+  - structure-first spec parsing for all builders, with lightweight page-layout analysis on every spec page and a speed-first runtime that uses selective Docling only on hard schedule/table pages for selected builders
   - shared structure-first `spec` parsing entrypoint for all builders, so new builders no longer default back to the legacy room-section text scan as their main room-creation path
-  - layout diagnostics recorded per snapshot, including `layout_attempted`, `layout_succeeded`, `layout_mode`, `layout_pages`, `heavy_vision_pages`, and `layout_note`
+  - layout diagnostics recorded per snapshot, including `layout_attempted`, `layout_succeeded`, `layout_mode`, `layout_pages`, `layout_provider`, `docling_pages`, and `layout_note`
   - automatic field-level PDF QA records for every new `raw_spec` snapshot, stored separately from review data
   - dedicated `/jobs/{id}/pdf-qa` workflow with checklist save / pass / fail actions
   - raw-spec pages remain visible before signoff, but formal exports are now locked until the latest raw snapshot passes PDF QA
   - Job Workspace now shows a PDF QA status card, and Raw Snapshot pages show a clear pending-QA warning when the latest spec has not been signed off
   - Clarendon-only deterministic post-polish that rebuilds cleaner room text from schedule and fixture pages while preserving source-driven room ownership
+  - default runtime is now speed-first: all builders use `layout + row-local parser`, `Imperial / Simonds / Evoca / Yellowwood` may additionally use selective Docling, and automatic `Heavy Vision` / `AI merge` are disabled by default
   - job-page Parse buttons with clearer run-status wording
   - live-polling run history with granular worker stage messages
-  - extraction diagnostics showing heuristic/OpenAI mode
+  - extraction diagnostics showing the active runtime path, including heuristic-only vs selective Docling
   - global `37016`-style conservative parsing profile for all builders
   - source-driven room detection for all builders, with same-room-only merge behavior across pages/files
   - automatic `room master` selection for multi-file spec jobs, with supplement files limited to enriching rooms defined by the room-master document
-  - Clarendon room-master scoring now prefers cabinetry colour-schedule files such as `COLOURS AFC` when they contain room-specific joinery labels, instead of defaulting to broader signed-drawings files
+  - Clarendon now treats `Drawings and Colours` as the deterministic room-name master when that file exists, and AFC/supplement files may enrich those rooms only
   - glued room-schedule headings such as `KITCHEN COLOUR SCHEDULEBENCHTOP...` are now normalized before room-master extraction so noisy heading text no longer becomes a room name
+  - Clarendon glued headers such as `VanitiesDate`, `LaundryDate`, and `TheatreDate` now normalize back to clean room titles before room-master whitelisting
+  - Clarendon appliance placeholder rows such as `N/A CLIENT TO CHECK` now preserve source wording but are deduplicated away when the same source file already contains a concrete model for that appliance type
   - grouped room-master headings such as `Vanities` remain grouped while supplement bathroom/ensuite/powder fixture pages enrich that grouped room instead of creating extra room rows
   - grouped-room material ownership is now same-room-only, so `Vanities` benchtops and door colours can only come from the authoritative `VANITIES COLOUR SCHEDULE` section while grouped fixture fallback remains limited to basin/tap/sink details
   - supplement-file upload order no longer matters because the room-master room set is precomputed before supplement files are parsed
   - authoritative schedule labels such as `WALK-IN-PANTRY` and `MEALS ROOM` are now preserved as display labels instead of being shortened to generic pantry names
   - multi-file Clarendon parsing now keeps `BUTLERS PANTRY` and `WALK-IN-PANTRY` separate when the room-master schedule defines both
   - composite supplement headings such as `Kitchen/Pantry/Family/Meals` no longer create synthetic rooms; only explicit room-master schedule pages can add rooms like `MEALS ROOM`
+  - Yellowwood now uses selective Docling on grouped schedule/table pages while final field ownership remains row-local
+  - Yellowwood final room names now prefer concrete joinery/spec titles such as `BED 1 ENSUITE VANITY`, `BATHROOM VANITY`, `BED 1 WALK IN ROBE`, and `BED 2/3/4 ROBE`
+  - Yellowwood rooms without joinery/material evidence are dropped, and `robe` or `media` rooms remain only when they contain real material evidence such as `Polytec` or `Laminex`
+  - Yellowwood vanity wet-area cleanup now trims shower-floor-waste and repeated room-heading tails out of vanity accessory text instead of leaving those plumbing tails inside `Accessories`
+  - Clarendon AFC `CARPET & MAIN FLOOR TILE` pages now enrich existing room-master rooms with room-local flooring values instead of leaving those room-specific values blank or stranded in global notes
+  - Yellowwood `FLOORING` and `TILING SCHEDULE` pages now act as room-local flooring overlays for retained rooms such as `Kitchen`, robe rooms, and vanity rooms, while contents-page flooring lines are excluded from `others.flooring_notes`
   - Imperial builder parsing now uses page-top `... JOINERY SELECTION SHEET` titles as authoritative section boundaries, keeps continuation pages with the current section, and ignores signature/footer blocks during field extraction
   - Imperial room sections now also stop cleanly when later pages switch into non-joinery headings such as `APPLIANCES` or `SINKWARE & TAPWARE`, so office/joinery cards do not swallow appliance and tapware pages
   - Imperial room labels now preserve the currently extractable title body exactly, so names such as `WALK-BEHIND PANTRY`, `BENCH SEAT`, and `OFFICE` survive instead of collapsing to shortened room names
@@ -54,7 +62,6 @@
   - Imperial handle parsing now includes a delayed same-section recovery pass so footer-adjacent handle model lines can still populate `handles` without letting nearby cabinet-colour rows pollute the value
   - orientation-only notes such as `Vertical on Tall doors only` and `Horizontal on all` are now rejected as door-colour material values, so they do not populate `Tall` or `Island`
   - Imperial sink and tap room fields now prefer the builder-specific non-joinery overlay parser over noisier AI fixture guesses when both are present
-  - stable-hybrid room merges now ignore AI-only accessory leakage and reject AI-only orientation notes from populating `Tall` or `Island` door-colour splits
   - all room cards and exports now support a global `Tall` material field for tall cabinets / tall doors / tall panels when the source provides that split
   - room cards and exports now also support optional `Floating Shelf`, `LED`, ordered `Accessories`, and curated accessory `Others` rows
   - the raw Spec List summary now shows `Extraction duration`, and `Floating Shelf` materials also contribute to the `Material Summary -> Bench Tops` bucket
@@ -64,7 +71,9 @@
   - Clarendon schedule polish now prefers `raw_text` over vision-normalized `text`, so kitchen schedule notes such as `KICKBOARDS`, `BULKHEAD SHADOWLINE`, `HANDLE 1/2`, `DOOR HINGES`, and `DRAWER RUNNERS` survive even when vision restructuring rewrites the page text
   - Clarendon address extraction now uses page-header stop markers so `Site Address:` lines do not absorb nearby joinery fields such as `BENCHTOP`, `DOOR COLOUR`, or `THERMOLAMINATE NOTES`
   - Material Summary normalization now preserves meaningful `profile`, `style`, and `model no.` detail for `Door Colours` and `Handles` instead of collapsing some values to a bare supplier
-  - the Jobs list `Open` action now opens the target job in a new browser tab
+  - the Jobs list now shows `Created`, `Last Updated`, sorting controls for both timestamps, and a button-styled `Open` action that opens each job in a new tab
+  - Job Workspace run history now shows real `Duration`, separate `Worker / Build`, and an `Open Result` action for succeeded spec runs with stored result payloads
+  - succeeded spec runs now have a read-only historical result page at `/jobs/{job_id}/runs/{run_id}/spec-list`
   - the Job Workspace and Raw Spec List pages now start with the left navigation rail hidden and expose a client-side show/hide toggle, while the Jobs homepage keeps the rail visible
   - dense tables on the Jobs page, Job Workspace, Raw Spec List, Builders page, and Run History now collapse into stacked card-style rows below roughly `1280px` so 1080p half-screen windows remain readable without horizontal scrolling
   - Raw Snapshot room cards now collapse into a single-field-flow layout below roughly `1280px`, with wrapped long values and no fixed wide-table minimum widths, so half-screen 1080p windows do not require horizontal dragging
@@ -72,7 +81,6 @@
   - Imperial inline split logic now avoids splitting inside ordinary words such as `CABINETRY`, reducing false row breaks caused by OCR-glued all-caps text
   - Imperial `Hinges & Drawer Runners` rows now recover `Soft Close` even when OCR glues them to `Floor Type & Kick refacing required`
   - Imperial sink/tap pre-heading parsing now keeps local continuation lines such as finish/model notes while still resetting on explicit basin/tub labels, improving tap recovery without reintroducing cross-room sink contamination
-  - Imperial room cards are now rebuilt from the heuristic section parser after AI merge, so room-level benchtops, cabinetry colours, floating shelves, handles, and fixture text stay tied to same-room same-row boundaries instead of being re-polluted by broader AI guesses
   - Half-screen raw snapshot layout now explicitly removes fixed content minima and hides horizontal overflow so 1080p split-screen use can wrap long room values instead of forcing sideways dragging
   - snapshot and run metadata now record parser strategy, worker PID, and app build ID
   - single-worker lease guard to prevent stale local worker processes from racing newer code on queued jobs
@@ -91,7 +99,7 @@
   - cabinet-only colour filtering that excludes external paint / Colorbond / garage / door / window finish colours from room joinery output
   - kitchen-only split benchtop display on the raw Spec List page, with non-kitchen rooms collapsed back to one benchtop row
   - Material Summary bench-top normalization now keeps distinct thickness and edge/apron variants instead of collapsing `20mm` and `40mm` entries together
-  - heuristic-first room-layout merging so OpenAI can enrich fields without collapsing Yellowwood room sections
+  - Yellowwood grouped schedule pages now route through selective Docling while final field ownership stays row-local and source-driven
   - cleaned door-colour display that removes duplicated location suffixes and common OCR noise
   - plumbing fixtures filtered out of appliance presentation/export
   - auto-upload on file selection for spec and drawing files
@@ -143,10 +151,12 @@
 - Refine OCR fallback for image-heavy PDFs
 - Improve room-section detection for more builder formats
 - Improve official product URL lookup accuracy, size extraction coverage, and brand coverage
-- Continue tightening handle cleanup for AI-merged Yellowwood rows where verbose combined handle descriptions still appear
+- Continue tightening Yellowwood handle cleanup and wet-area plumbing merge purity where combined basin/tap/toilet text still leaks across row-local boundaries
+- Continue checking the latest Clarendon and Yellowwood reruns against source PDF and only mark PDF QA `passed` when the current live snapshot fully matches the source pages
+- Continue validating the new Clarendon and Yellowwood flooring overlays against source PDF so `job 1`, `job 23`, and `job 37` room-level flooring lands on the correct retained rooms
 - Continue tightening noisy field cleanup inside the fixed global conservative profile without reintroducing per-builder configuration
 - Continue tightening Clarendon field wording so kitchen/bathroom/laundry text stays close to the accepted `37016` readability standard without relying on manual snapshot restores or fixed room buckets
-- Continue refining room-master scoring for builders that use multiple spec files so the joinery schedule file consistently wins over appliance/fixture miscellany files
+- Continue removing residual Clarendon appliance/master OCR noise from jobs such as `job 1`, and continue merging multiline handle descriptions more cleanly on jobs such as `job 23`
 - Continue tightening grouped-room door-colour logic so `Vanities` only shows `Overheads` when the authoritative room section explicitly labels overhead cabinetry
 - Continue tightening supplement-file room mapping so only clearly related fixture pages enrich grouped rooms while unrelated finish/glazing notes stay ignored
 - Continue refining Imperial field cleanup for non-kitchen sections so `BAR`, `LAUNDRY`, and `BATH + ENSUITE` match the same high-confidence row-boundary quality as `KITCHEN`
@@ -157,6 +167,7 @@
 - Decide whether to add a global all-job Spec List index in a later phase
 - Continue validating parsing changes through fresh online reruns on the affected jobs instead of relying on older snapshots
 - Continue pushing the shared structure layer deeper into strict row-fragment field reconstruction so high-precision layout analysis also controls final field ownership, not just room/section boundaries
+- Complete PDF QA signoff for the current Clarendon and Yellowwood regression samples after each fresh live rerun, rather than treating raw output as accepted
 
 ## Risks
 - OCR fallback is currently warning-driven unless stronger OCR infrastructure or OpenAI vision is configured
@@ -219,7 +230,6 @@
   - all builders default to the global conservative profile
   - single-worker lease blocking a second owner
   - run-history rendering of parser strategy and runtime metadata
-  - stable-hybrid preservation of heuristic Clarendon room shape when OpenAI proposes extra room splits
 - UI coverage added for:
   - retired Builder rules routes redirect to `/builders`
   - Builders page no longer exposes a Cleaning Rules button
@@ -236,6 +246,11 @@
   - live OpenAI-stage message rendering
   - Clarendon polish stage rendering
   - official-size stage rendering
+- Jobs/Workspace UI coverage added for:
+  - `Created` / `Last Updated` sorting controls on `/jobs`
+  - button-styled `Open` action on `/jobs`
+  - `Duration` and `Worker / Build` rendering on run history
+  - read-only historical spec result pages backed by stored run payloads
 - Clarendon deterministic-polish coverage added for:
   - clean kitchen wall-run / island benchtop reconstruction
   - stable source-driven room field rebuilding from schedule and fixture pages, without forcing pantry/vanities/theatre/rumpus buckets
@@ -252,6 +267,14 @@
   - dense single-line schedule pages with `Mirror Splashback`
   - `Square Edge Handleless` extraction into `handles`
   - single-line kitchen benchtop splitting into wall-run and island values without pulling door/kickboard text into the benchtop field
+  - `Drawings and Colours` room-master selection ahead of AFC files
+  - glued room headers such as `VanitiesDate`, `LaundryDate`, and `TheatreDate`
+- Yellowwood coverage added for:
+  - selective Docling on grouped schedule/table pages
+  - `Island Bench Top` recovery from grouped kitchen schedule rows
+  - removal of pseudo-room names such as pantry cell content
+  - preference for concrete room titles such as `BED 1 ENSUITE VANITY` and `BED 3 ROBE`
+  - dropping rooms without joinery/material evidence while preserving real robe/media rooms when they contain material evidence
 - Imperial parsing coverage added for:
   - page-top section-title detection and continuation-page handling
   - footer/signature exclusion

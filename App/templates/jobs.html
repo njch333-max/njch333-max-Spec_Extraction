@@ -44,10 +44,17 @@
       <span>Search Job No.</span>
       <input type="search" name="q" value="{{ job_query or '' }}" placeholder="Enter full or partial job no.">
     </label>
+    <input type="hidden" name="sort" value="{{ job_sort or 'created_desc' }}">
     <button type="submit" class="primary-button">Search</button>
     {% if job_query %}
-    <a href="/jobs" class="ghost-button text-link">Clear</a>
+    <a href="/jobs?sort={{ job_sort or 'created_desc' }}" class="ghost-button text-link">Clear</a>
     {% endif %}
+  </form>
+  <form method="get" action="/jobs" class="inline-form search-form">
+    <input type="hidden" name="q" value="{{ job_query or '' }}">
+    <span>Sort by</span>
+    <button type="submit" name="sort" value="created_desc" class="{{ 'primary-button' if (job_sort or 'created_desc') == 'created_desc' else 'ghost-button' }}">Created</button>
+    <button type="submit" name="sort" value="updated_desc" class="{{ 'primary-button' if (job_sort or 'created_desc') == 'updated_desc' else 'ghost-button' }}">Last Updated</button>
   </form>
   <div class="table-wrap">
     <table class="table-cardify">
@@ -60,6 +67,7 @@
           <th>Drawings</th>
           <th>Rooms</th>
           <th>Created</th>
+          <th>Last Updated</th>
           <th>Actions</th>
         </tr>
       </thead>
@@ -73,6 +81,7 @@
           <td data-label="Drawings">{{ job.drawing_file_count }}</td>
           <td data-label="Rooms">{{ job.room_count if job.room_count != "" else "-" }}</td>
           <td data-label="Created">{{ job.created_at }}</td>
+          <td data-label="Last Updated">{{ job.updated_at }}</td>
           <td data-label="Actions" class="actions">
             <a href="/jobs/{{ job.id }}" class="ghost-button" target="_blank" rel="noopener">Open</a>
             <form method="post" action="/jobs/{{ job.id }}/delete" onsubmit="return confirm('Delete job {{ job.job_no }} and all server files?');">
@@ -82,7 +91,7 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="8" class="empty-cell">{{ "No jobs matched the current search." if job_query else "No jobs created yet." }}</td></tr>
+        <tr><td colspan="9" class="empty-cell">{{ "No jobs matched the current search." if job_query else "No jobs created yet." }}</td></tr>
         {% endfor %}
       </tbody>
     </table>

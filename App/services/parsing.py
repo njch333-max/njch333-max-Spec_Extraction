@@ -28,6 +28,7 @@ ROOM_ALIASES: dict[str, list[str]] = {
     "study_desk": ["study desk"],
     "meals_room": ["meals room"],
     "rumpus": ["rumpus"],
+    "rumpus_desk": ["rumpus desk", "rumpus - desk"],
     "office": ["office"],
     "make_up_desk": ["make up desk", "makeup desk"],
     "dining_banquette": ["dining banquette"],
@@ -490,6 +491,7 @@ ROOM_SCHEDULE_PATTERNS = (
     r"make(?:\s+up|up)\s+desk",
     r"dining banquette",
     r"alfresco",
+    r"rumpus\s*-\s*desk",
     r"robe(?:s)?",
     r"wir",
     r"theatre(?:\s+room)?",
@@ -693,6 +695,9 @@ def source_room_label(label: str, fallback_key: str = "") -> str:
     if not text:
         return "Room"
     text = re.sub(r"(?i)\bbathoom\b", "bathroom", text)
+    detailed_match = _extract_detailed_room_heading(text)
+    if detailed_match:
+        return detailed_match
     for pattern in ROOM_HEADING_PREFIX_NOISE_PATTERNS:
         previous = None
         while text and previous != text:
@@ -725,6 +730,30 @@ def source_room_label(label: str, fallback_key: str = "") -> str:
     if not text and fallback_key:
         return fallback_key.replace("_", " ").title()
     return text or "Room"
+
+
+def _extract_detailed_room_heading(text: str) -> str:
+    normalized = normalize_space(text)
+    if not normalized:
+        return ""
+    reverse_robe_match = re.search(r"(?i)\bROBE\s+FIT\s+OUT\s+TO\s+BED\s+(\d+)\b", normalized)
+    if reverse_robe_match:
+        return f"BED {reverse_robe_match.group(1)} ROBE"
+    patterns: tuple[tuple[str, str | None], ...] = (
+        (r"(?i)\b(BED\s*\d+\s+ENSUITE\s+VANITY)\b", None),
+        (r"(?i)\b(BATH(?:ROOM|OOM)\s+VANITY)\b", "BATHROOM VANITY"),
+        (r"(?i)\b(BED\s*\d+\s+WALK[- ]IN[- ]ROBE)\b", None),
+        (r"(?i)\b(BED\s*\d+\s+ROBE)\b", None),
+        (r"(?i)\b(THEATRE\s+ROOM)\b", "THEATRE ROOM"),
+    )
+    for pattern, replacement in patterns:
+        match = re.search(pattern, normalized)
+        if not match:
+            continue
+        if replacement:
+            return replacement
+        return normalize_space(match.group(1)).replace("-", " ").upper()
+    return ""
 
 
 def _extract_embedded_schedule_room_heading(text: str) -> str:
@@ -906,6 +935,26 @@ def _should_stop_field_continuation(prefix: str, next_line: str) -> bool:
         return True
     if _looks_like_strict_appliance_label(text):
         return True
+    if prefix in {"Sink Type/Model", "Sink Type", "Drop in Tub", "Sink"} and re.match(
+        r"(?i)^(?:Sink Mixer|Pull-?Out Mixer|Basin Mixer|Vanity Tap Style|Tap Type|Tap Style|Mixer|Basin(?:\s+Waste)?|Bottle Trap|Toilet(?:\s+Roll Holder)?|Shower\b|Bath\b|Floor Waste\b|Mirror\b)",
+        text,
+    ):
+        return True
+    if prefix in {"Vanity Inset Basin", "Basin"} and re.match(
+        r"(?i)^(?:Basin Waste|Bottle Trap|Toilet(?:\s+Roll Holder)?|Sink(?:\s+Mixer|\s+Waste)?|Pull-?Out Mixer|Vanity Tap Style|Tap Type|Tap Style|Mixer|Shower\b|Bath\b|Floor Waste\b|Mirror\b)",
+        text,
+    ):
+        return True
+    if prefix in {"Vanity Tap Style", "Tap Type", "Tap Style", "Sink Mixer", "Pull-Out Mixer", "Mixer"} and re.match(
+        r"(?i)^(?:Basin Waste|Bottle Trap|Toilet(?:\s+Roll Holder)?|Shower\b|Bath\b|Floor Waste\b|Mirror\b|Sink Waste\b)",
+        text,
+    ):
+        return True
+    if prefix in {"Overhead Cupboards", "Upper Cabinetry Colour + Tall Cabinets", "Upper Cabinetry Colour"} and re.match(
+        r"(?i)^(?:\*?\s*to builders\b|bulkhead above\b)",
+        text,
+    ):
+        return False
     if prefix in {"Toe Kick", "Kickboard", "Island Bench Kickboard"} and re.match(r"(?i)^Pantry\b.*\bshelves\b", text):
         return True
     if prefix in {"Bulkheads", "Bulkhead", "Overhead Cupboards"} and re.match(r"(?i)^Island Bench(?:\b| )", text):
@@ -921,6 +970,16 @@ def _should_stop_field_continuation(prefix: str, next_line: str) -> bool:
     return True
 
 
+def _field_prefix_match(line: str, prefix: str) -> re.Match[str] | None:
+    if prefix == "Sink":
+        pattern = rf"^{re.escape(prefix)}(?!\s*(?:Mixer|Waste)\b)(?:\s*\d+)?\b"
+    elif prefix == "Basin":
+        pattern = rf"^{re.escape(prefix)}(?!\s*(?:Waste|Mixer)\b)(?:\s*\d+)?\b"
+    else:
+        pattern = rf"^{re.escape(prefix)}(?:\s*\d+)?\b"
+    return re.match(pattern, line, re.IGNORECASE)
+
+
 def _looks_like_joinery_schedule_page(text: str) -> bool:
     lowered = normalize_space(text).lower()
     return any(hint in lowered for hint in JOINERY_PAGE_HINTS)
@@ -928,7 +987,7 @@ def _looks_like_joinery_schedule_page(text: str) -> bool:
 
 def _inject_schedule_heading_breaks(text: str) -> str:
     normalized = re.sub(
-        rf"(?i)({ROOM_SCHEDULE_PATTERN})\s+colour\s+schedule(?=\s|[A-Z]|$)",
+        rf"(?i)({ROOM_SCHEDULE_PATTERN})\s+(?:joinery\s+)?colour\s+schedule(?=\s|[A-Z]|$)",
         lambda match: f"\n{normalize_space(match.group(0))}\n",
         text,
     )
@@ -1494,6 +1553,39 @@ def _layout_section_seed(
     }
 
 
+def _room_label_specificity_score(label: str) -> tuple[int, int]:
+    text = normalize_space(label)
+    lowered = text.lower()
+    score = 0
+    if re.search(r"\bbed\s*\d+\b", lowered):
+        score += 100
+    if "vanity" in lowered:
+        score += 40
+    if "walk in robe" in lowered:
+        score += 35
+    elif re.search(r"\brobe\b", lowered):
+        score += 25
+    if "theatre room" in lowered:
+        score += 20
+    if "bathroom" in lowered or "ensuite" in lowered:
+        score += 15
+    if "fit out" in lowered:
+        score -= 5
+    return score, len(text)
+
+
+def _prefer_more_specific_room_label(existing_label: str, new_label: str) -> str:
+    existing = normalize_space(existing_label)
+    new = normalize_space(new_label)
+    if not existing:
+        return new
+    if not new:
+        return existing
+    if _room_label_specificity_score(new) >= _room_label_specificity_score(existing):
+        return new
+    return existing
+
+
 def _append_section(sections: list[dict[str, Any]], section: dict[str, Any]) -> None:
     for existing in sections:
         if (
@@ -1511,7 +1603,10 @@ def _append_section(sections: list[dict[str, Any]], section: dict[str, Any]) -> 
             existing.setdefault("text_parts", []).extend(section.get("text_parts", []))
             existing["text"] = normalize_space("\n".join(existing.get("text_parts", [])))
             if section.get("original_section_label"):
-                existing["original_section_label"] = str(section.get("original_section_label", ""))
+                existing["original_section_label"] = _prefer_more_specific_room_label(
+                    str(existing.get("original_section_label", "") or ""),
+                    str(section.get("original_section_label", "") or ""),
+                )
             return
     sections.append(section)
 
@@ -1539,7 +1634,7 @@ def _yellowwood_page_room_hint(raw_page_text: str) -> str:
             continue
         if _looks_like_structured_room_noise(candidate):
             continue
-        if re.search(r"(?i)\b(?:excluding|x\d+\b|shelves?|melamine|cupboards?|drawers?|handles?)\b", line):
+        if re.search(r"(?i)\b(?:excluding|x\d+\b|shelves?|melamine|cupboards?|drawers?|doors?|handles?)\b", line):
             continue
         if len(candidate.split()) > 4:
             continue
@@ -1561,6 +1656,7 @@ def _yellowwood_should_inherit_previous_room(label: str) -> bool:
             "shelves",
             "cupboards",
             "drawers",
+            "pantry door",
             "handless lip pull",
             "matt black",
         )
@@ -1570,11 +1666,12 @@ def _yellowwood_should_inherit_previous_room(label: str) -> bool:
 def _normalize_yellowwood_layout_room_label(candidate: str, raw_page_text: str, previous_room_label: str) -> str:
     cleaned = _clean_layout_room_label(candidate, candidate)
     page_hint = _yellowwood_page_room_hint(raw_page_text)
-    if _yellowwood_should_inherit_previous_room(cleaned or candidate):
+    if _yellowwood_should_inherit_previous_room(candidate or cleaned):
         if page_hint:
             return page_hint
         if previous_room_label:
             return previous_room_label
+        return ""
     if cleaned:
         return cleaned
     if page_hint:
@@ -1594,7 +1691,12 @@ def _yellowwood_room_heading_label(line: str) -> str:
     prefix_heading = _extract_room_prefix_label(text)
     if prefix_heading:
         candidate = _clean_layout_room_label(prefix_heading, prefix_heading)
-        if candidate and _looks_like_plausible_room_label(candidate) and not _looks_like_structured_room_noise(candidate):
+        if (
+            candidate
+            and _looks_like_plausible_room_label(candidate)
+            and not _looks_like_structured_room_noise(candidate)
+            and not re.search(r"(?i)\b(?:excluding|x\d+\b|shelves?|melamine|cupboards?|drawers?|doors?|handles?)\b", text)
+        ):
             return candidate
     if not re.fullmatch(r"[A-Z0-9 &'()/.-]{2,}", text):
         return ""
@@ -1606,7 +1708,7 @@ def _yellowwood_room_heading_label(line: str) -> str:
         return ""
     if not _looks_like_plausible_room_label(candidate) or _looks_like_structured_room_noise(candidate):
         return ""
-    if re.search(r"(?i)\b(?:excluding|x\d+\b|shelves?|melamine|cupboards?|drawers?)\b", text):
+    if re.search(r"(?i)\b(?:excluding|x\d+\b|shelves?|melamine|cupboards?|drawers?|doors?|handles?)\b", text):
         return ""
     return candidate
 
@@ -1646,9 +1748,10 @@ def _yellowwood_has_material_evidence(text: str) -> bool:
         return False
     return bool(
         re.search(
-            r"(?i)\b(?:polytec|laminex|ydl|caesarstone|smartstone|wk stone|national tiles|flooring xtra|highgrove|handle house|"
-            r"woodmatt|thermolaminate|thermolaminated|melamine|laminate|vinyl|hybrid flooring|carpet|stone|polished|matt|gloss|"
-            r"natural finish|profile|board colour|standard white|colour:)\b",
+            r"(?i)\b(?:polytec|laminex|ydl|caesarstone|smartstone|wk stone|woodmatt|thermolaminate|thermolaminated|"
+            r"melamine|laminate|board colour|standard white|classic white|natural finish|yellowwood supplier|"
+            r"as supplied by cabinetmaker|floor mounted vanity|back benchtops?|benchtop|"
+            r"base cupboards?\s*&\s*drawers?|overhead cupboards?|kickboard|floating shelves?)\b",
             normalized,
         )
     )
@@ -1737,6 +1840,18 @@ def _yellowwood_should_keep_section(section: dict[str, Any]) -> bool:
     return _yellowwood_has_room_content_evidence(text)
 
 
+def _yellowwood_is_ignored_fit_out_heading(line: str) -> bool:
+    text = normalize_space(line)
+    if not text:
+        return False
+    return bool(
+        re.match(
+            r"(?i)^(?:laundry|passage)\s+linen\s+fit\s+out\b",
+            text,
+        )
+    )
+
+
 def _collect_yellowwood_text_room_sections_for_document(document: dict[str, object]) -> list[dict[str, Any]]:
     raw_document = _clone_document_for_raw_room_detection(document)
     file_name = str(raw_document.get("file_name", "") or "")
@@ -1762,13 +1877,39 @@ def _collect_yellowwood_text_room_sections_for_document(document: dict[str, obje
         current_label = ""
         current_key = ""
         current_lines: list[str] = []
-        headings_in_page = [label for line in page_lines if (label := _yellowwood_room_heading_label(line))]
+        def _yellowwood_heading_at(index: int) -> tuple[str, int, str]:
+            line = normalize_space(page_lines[index]) if index < len(page_lines) else ""
+            if not line:
+                return "", 1, ""
+            combined_text = line
+            heading_label = _yellowwood_room_heading_label(line)
+            consumed = 1
+            if not heading_label and index + 1 < len(page_lines):
+                next_line = normalize_space(page_lines[index + 1])
+                if re.fullmatch(r"(?i)BED\s+\d+", line) and next_line:
+                    combined_candidate = normalize_space(f"{line} {next_line}")
+                    combined_heading = _yellowwood_room_heading_label(combined_candidate)
+                    if combined_heading:
+                        heading_label = combined_heading
+                        combined_text = combined_candidate
+                        consumed = 2
+            return heading_label, consumed, combined_text
+
+        headings_in_page = [label for index in range(len(page_lines)) if (label := _yellowwood_heading_at(index)[0])]
+        first_heading_index = next(
+            (index for index in range(len(page_lines)) if _yellowwood_heading_at(index)[0]),
+            len(page_lines),
+        )
         inherited_page_room = bool(
             previous_page_room_key
             and not headings_in_page
             and _looks_like_joinery_schedule_page(raw_page_text)
         )
         if inherited_page_room:
+            current_label = previous_page_room_label
+            current_key = previous_page_room_key
+            current_lines = [previous_page_room_label]
+        elif previous_page_room_key and first_heading_index > 0 and _looks_like_joinery_schedule_page(raw_page_text):
             current_label = previous_page_room_label
             current_key = previous_page_room_key
             current_lines = [previous_page_room_label]
@@ -1800,16 +1941,24 @@ def _collect_yellowwood_text_room_sections_for_document(document: dict[str, obje
             current_key = ""
             current_lines = []
 
-        for line in page_lines:
-            heading_label = _yellowwood_room_heading_label(line)
+        index = 0
+        while index < len(page_lines):
+            line = page_lines[index]
+            if _yellowwood_is_ignored_fit_out_heading(line):
+                flush()
+                index += 1
+                continue
+            heading_label, consumed, heading_text = _yellowwood_heading_at(index)
             if heading_label:
                 flush()
                 current_label = _clean_layout_room_label(heading_label, heading_label) or heading_label
                 current_key = source_room_key(current_label)
-                current_lines = [line]
+                current_lines = [heading_text or line]
+                index += consumed
                 continue
             if current_key:
                 current_lines.append(line)
+            index += 1
         flush()
         previous_page_room_label = page_last_room_label
         previous_page_room_key = page_last_room_key
@@ -1945,7 +2094,7 @@ def _collect_layout_sections_for_document(document: dict[str, object]) -> list[d
                 file_name=file_name,
                 page_no=page_no,
                 section_label=section_label,
-                room_label=block_label or room_label,
+                room_label=block_label if _is_yellowwood_builder(builder_name) else (block_label or room_label),
                 rows=block_rows,
                 page_type=page_type,
                 raw_page_text=raw_page_text,
@@ -5445,7 +5594,11 @@ def _parse_spec_documents_structure_first(
                 source_file=file_name,
             )
             if is_room_master:
-                row.original_room_label = original_room_label
+                row.original_room_label = (
+                    _prefer_more_specific_room_label(row.original_room_label, original_room_label)
+                    if _is_yellowwood_builder(builder_name)
+                    else original_room_label
+                )
                 row.source_file = file_name
             section_pages = [
                 {"page_no": page_no, "text": text}
@@ -5588,7 +5741,11 @@ def parse_documents(
                 source_file=file_name,
             )
             if is_room_master:
-                row.original_room_label = original_room_label
+                row.original_room_label = (
+                    _prefer_more_specific_room_label(row.original_room_label, original_room_label)
+                    if _is_yellowwood_builder(builder_name)
+                    else original_room_label
+                )
                 row.source_file = file_name
             _merge_room_section_into_row(
                 row,
@@ -5645,7 +5802,7 @@ def _merge_room_section_into_row(
     if allow_material_fields:
         generic_bench_tops = _collect_field(lines, ["Bench Tops", "Benchtop"])
         wall_run_bench_top = _first_value(_collect_field(lines, ["Back Benchtops", "Wall Run Bench Top"]))
-        island_bench_top = _first_value(_collect_field(lines, ["Island Benchtop", "Island Bench Top"]))
+        island_bench_top = _first_value(_collect_island_benchtop_values(lines))
         row.bench_tops_wall_run = _merge_text(row.bench_tops_wall_run, wall_run_bench_top)
         row.bench_tops_island = _merge_text(row.bench_tops_island, island_bench_top)
         row.bench_tops_other = _merge_text(row.bench_tops_other, " | ".join(generic_bench_tops))
@@ -5678,10 +5835,13 @@ def _merge_room_section_into_row(
         if not _has_explicit_door_group_markers(row):
             _apply_door_colour_groups(row, row.door_panel_colours)
         row.toe_kick = _merge_lists(row.toe_kick, _collect_field(lines, ["Toe Kick", "Kickboard", "Island Bench Kickboard"]))
-        row.bulkheads = _merge_lists(row.bulkheads, _collect_field(lines, ["Bulkheads", "Bulkhead"]))
-        row.handles = _merge_lists(row.handles, _clean_handle_entries(_collect_field(lines, ["Handles", "Handle", "Base Cabinet Handles", "Overhead Handles"])))
+        row.bulkheads = _merge_lists(row.bulkheads, _collect_explicit_bulkhead_values(lines))
+        row.handles = _merge_lists(
+            row.handles,
+            _clean_handle_entries(_collect_field(lines, ["Handles", "Handle", "Base Cabinet Handles", "Overhead Handles", "Pantry Door Handles"])),
+        )
         row.floating_shelf = _merge_text(row.floating_shelf, _first_value(_collect_field(lines, ["Floating Shelves", "Floating Shelf"])))
-        if _collect_field(lines, ["LED Strip Lighting", "LED Lighting", "LED"]):
+        if _has_explicit_led_field(lines):
             row.led = "Yes"
         row.accessories = _merge_lists(row.accessories, _collect_field(lines, ["Accessories", "Accessory"]))
         row.other_items = _merge_other_items(
@@ -5813,7 +5973,7 @@ def _collect_field(lines: list[str], prefixes: list[str]) -> list[str]:
     values: list[str] = []
     for index, line in enumerate(lines):
         for prefix in prefixes:
-            match = re.match(rf"^{re.escape(prefix)}(?:\s*\d+)?\b", line, re.IGNORECASE)
+            match = _field_prefix_match(line, prefix)
             if match:
                 parts: list[str] = []
                 initial_value = line[match.end() :].strip(" :-")
@@ -5834,6 +5994,50 @@ def _collect_field(lines: list[str], prefixes: list[str]) -> list[str]:
                     values.append(value)
                 break
     return values
+
+
+def _collect_island_benchtop_values(lines: list[str]) -> list[str]:
+    values = _collect_field(lines, ["Island Benchtop", "Island Bench Top", "Island Bench"])
+    filtered: list[str] = []
+    for value in values:
+        text = normalize_space(value)
+        if not text:
+            continue
+        if re.match(r"(?i)^(?:\+?\s*end panels?|base cupboards?\s*&\s*drawers?|kickboards?|bar back)\b", text):
+            continue
+        filtered.append(text)
+    return _unique(filtered)
+
+
+def _collect_explicit_bulkhead_values(lines: list[str]) -> list[str]:
+    values: list[str] = []
+    for value in _collect_field(lines, ["Bulkheads", "Bulkhead"]):
+        text = normalize_space(value)
+        if not text:
+            continue
+        if re.match(r"(?i)^(?:above\b|to builders\b)", text):
+            continue
+        values.append(text)
+    return _unique(values)
+
+
+def _has_explicit_led_field(lines: list[str]) -> bool:
+    for index, line in enumerate(lines):
+        text = normalize_space(line)
+        match = re.match(r"(?i)^LED(?:'?S)?(?:\s+STRIP\s+LIGHTING|\s+LIGHTING)?\b", text)
+        if not match:
+            continue
+        tail = normalize_space(text[match.end() :].strip(" :-"))
+        if tail:
+            if re.search(r"(?i)\b(?:topmount|installed?|instal)\b", tail):
+                continue
+            return True
+        if index + 1 < len(lines) and not _looks_like_field_label(lines[index + 1]):
+            continuation = normalize_space(lines[index + 1])
+            if re.search(r"(?i)\b(?:topmount|installed?|instal)\b", continuation):
+                continue
+            return True
+    return False
 
 
 def _extract_soft_close(lines: list[str], keyword: str) -> str:
@@ -6178,7 +6382,7 @@ def _extract_appliance_placeholder_model(text: str) -> str:
     if not normalized:
         return ""
     placeholder_patterns = (
-        r"(?i)\bn\s*/\s*a(?:\s*-\s*by others)?\b",
+        r"(?i)\bn\s*/\s*a(?:\s*-\s*by others)?(?:\s+client\s+to\s+check)?\b",
         r"(?i)\bleave standard space by client\b",
         r"(?i)\bprovide space only\b",
         r"(?i)\bas above(?:\s+by client)?\b",
@@ -6214,8 +6418,10 @@ def _looks_like_appliance_placeholder_model(text: str) -> bool:
     return any(
         token in lowered
         for token in (
+            "n/a",
             "as above",
             "by client",
+            "client to check",
             "provide space only",
             "leave standard space",
             "by builder",
@@ -6427,6 +6633,186 @@ def _extract_global_value(text: str, label: str) -> str:
     return normalize_space(match.group(1))[:160] if match else ""
 
 
+def _looks_like_flooring_overlay_value(value: str) -> bool:
+    lowered = normalize_space(value).lower()
+    if not lowered:
+        return False
+    return bool(
+        re.search(
+            r"\b(?:tiled?|tiles?|carpet|hybrid flooring|timber|vinyl|laminate|floor tile|concrete)\b",
+            lowered,
+        )
+    )
+
+
+def _clean_flooring_overlay_text(value: str) -> str:
+    cleaned = normalize_space(str(value or "")).strip(" -|;,")
+    cleaned = re.sub(r"(?i)\btiles refer to [\"“”'`]?tiling[\"“”'`]? section below\b", "", cleaned)
+    cleaned = normalize_space(cleaned).strip(" -|;,")
+    return cleaned
+
+
+def _merge_room_flooring_overlay(overlays: dict[str, dict[str, Any]], room_key: str, value: str) -> None:
+    normalized_value = _clean_flooring_overlay_text(value)
+    if not room_key or not normalized_value:
+        return
+    overlay = overlays.setdefault(room_key, _blank_overlay())
+    overlay["flooring"] = _merge_text(str(overlay.get("flooring", "") or ""), normalized_value)
+
+
+def _clarendon_flooring_targets(area_label: str, overlays: dict[str, dict[str, Any]]) -> list[str]:
+    normalized = normalize_space(area_label).lower()
+    collapsed = re.sub(r"[^a-z0-9]+", "", normalized)
+    if "kitchenpantryfamilymeals" in collapsed:
+        targets = [source_room_key("KITCHEN"), "butlers_pantry"]
+        if "walk_in_pantry" in overlays:
+            targets.append("walk_in_pantry")
+        return _unique(targets)
+    if re.search(r"\btheatre\b", normalized):
+        return [source_room_key("THEATRE ROOM")]
+    if re.search(r"\brumpus\b", normalized):
+        return [source_room_key("RUMPUS ROOM")]
+    if re.search(r"(?i)\b(?:wir/?s?|robes?)\b", area_label):
+        return [
+            key
+            for key in overlays
+            if re.search(r"(?:^|_)(?:wir|robe)(?:_|$)", key)
+        ]
+    return []
+
+
+def _collect_clarendon_flooring_overlays(
+    overlays: dict[str, dict[str, Any]],
+    documents: list[dict[str, object]],
+) -> None:
+    for document in documents:
+        for page in document.get("pages", []):
+            text = str(page.get("raw_text") or page.get("text") or "")
+            upper = text.upper()
+            if "CARPET & MAIN FLOOR" not in upper or "TILE" not in upper:
+                continue
+            for raw_line in text.splitlines():
+                line = normalize_space(raw_line)
+                if not line or ":" not in line:
+                    continue
+                area_label, flooring_value = [normalize_space(part) for part in line.split(":", 1)]
+                if not _looks_like_flooring_overlay_value(flooring_value):
+                    continue
+                for room_key in _clarendon_flooring_targets(area_label, overlays):
+                    _merge_room_flooring_overlay(overlays, room_key, flooring_value)
+
+
+def _extract_flooring_block_from_text(text: str, area_pattern: str, stop_patterns: tuple[str, ...]) -> str:
+    normalized = normalize_space(text)
+    if not normalized:
+        return ""
+    stop_union = "|".join(stop_patterns)
+    match = re.search(
+        rf"(?is)\b{area_pattern}\b\s+(?P<value>.+?)(?=\b(?:{stop_union})\b|$)",
+        normalized,
+    )
+    if not match:
+        return ""
+    return _clean_flooring_overlay_text(match.group("value"))
+
+
+def _extract_floor_tile_block_from_text(text: str, area_pattern: str, stop_patterns: tuple[str, ...]) -> str:
+    normalized = normalize_space(text)
+    if not normalized:
+        return ""
+    area_match = re.search(rf"(?is)\b{area_pattern}\b", normalized)
+    if not area_match:
+        return ""
+    trailing = normalized[area_match.end() :]
+    stop_union = "|".join(stop_patterns)
+    floor_match = re.search(
+        rf"(?is)\bFloor Tile\b\s+(?P<value>.+?)(?=\b(?:{stop_union})\b|$)",
+        trailing,
+    )
+    if not floor_match:
+        return ""
+    return _clean_flooring_overlay_text(f"Floor Tile {floor_match.group('value')}")
+
+
+def _collect_yellowwood_flooring_overlays(
+    overlays: dict[str, dict[str, Any]],
+    documents: list[dict[str, object]],
+) -> None:
+    non_wet_areas: tuple[tuple[str, str], ...] = (
+        (r"KITCHEN\s*&\s*DINING", source_room_key("KITCHEN")),
+        (r"BED\s*1\s*\+\s*WIR", source_room_key("BED 1 WALK IN ROBE")),
+        (r"BED\s*2\s*\+\s*ROBE", source_room_key("BED 2 ROBE")),
+        (r"BED\s*3\s*\+\s*ROBE", source_room_key("BED 3 ROBE")),
+        (r"BED\s*4\s*\+\s*ROBE", source_room_key("BED 4 ROBE")),
+    )
+    non_wet_stops = (
+        r"MEDIA ROOM",
+        r"BED\s*1\s*\+\s*WIR",
+        r"BED\s*2\s*\+\s*ROBE",
+        r"BED\s*3\s*\+\s*ROBE",
+        r"BED\s*4\s*\+\s*ROBE",
+        r"LAUNDRY(?:\s+LINEN)?",
+        r"BED\s*1\s+ENSUITE",
+        r"BATHROOM",
+        r"WC",
+        r"PORCH",
+        r"ALFRESCO",
+        r"INTERNAL FINISHES",
+        r"JOINERY",
+    )
+    wet_area_targets: tuple[tuple[str, str], ...] = (
+        (r"BED\s*1\s+ENSUITE", source_room_key("BED 1 ENSUITE VANITY")),
+        (r"BATHROOM", source_room_key("BATHROOM VANITY")),
+    )
+    wet_area_stops = (
+        r"Wall Tile",
+        r"Splashback Tile",
+        r"Vanity Splashback",
+        r"Niche Tile",
+        r"Skirting",
+        r"LAUNDRY(?:\s*\(INC LINEN FLOOR\))?",
+        r"BATHROOM",
+        r"BED\s*1\s+ENSUITE",
+        r"WC",
+        r"PORCH",
+        r"ALFRESCO",
+    )
+    for document in documents:
+        for page in document.get("pages", []):
+            text = str(page.get("raw_text") or page.get("text") or "")
+            if not text or _yellowwood_looks_like_contents_noise(text):
+                continue
+            upper = text.upper()
+            if "OTHER THAN TILING TO WET AREAS" in upper:
+                for area_pattern, room_key in non_wet_areas:
+                    flooring_value = _extract_flooring_block_from_text(text, area_pattern, non_wet_stops)
+                    if flooring_value and _looks_like_flooring_overlay_value(flooring_value):
+                        _merge_room_flooring_overlay(overlays, room_key, flooring_value)
+            if "TILING SCHEDULE" in upper or "FLOOR TILE" in upper:
+                for area_pattern, room_key in wet_area_targets:
+                    flooring_value = _extract_floor_tile_block_from_text(text, area_pattern, wet_area_stops)
+                    if flooring_value and _looks_like_flooring_overlay_value(flooring_value):
+                        _merge_room_flooring_overlay(overlays, room_key, flooring_value)
+
+
+def _clear_room_specific_flooring_notes(snapshot: dict[str, Any]) -> None:
+    builder_name = normalize_space(str(snapshot.get("builder_name", "") or "")).lower()
+    others = snapshot.get("others")
+    if not isinstance(others, dict):
+        return
+    flooring_notes = normalize_space(str(others.get("flooring_notes", "") or ""))
+    if not flooring_notes:
+        return
+    if _is_yellowwood_builder(builder_name) and (
+        _yellowwood_looks_like_contents_noise(flooring_notes)
+        or re.search(r"(?i)\bother than tiling to wet areas\b", flooring_notes)
+    ):
+        others["flooring_notes"] = ""
+        return
+    if builder_name == "clarendon" and re.search(r"(?i)\bcarpet\s*&\s*main\s*floor\s*tile\b", flooring_notes):
+        others["flooring_notes"] = ""
+
+
 def _merge_lists(left: list[str], right: list[str]) -> list[str]:
     return _unique(left + right)
 
@@ -6466,9 +6852,9 @@ def enrich_snapshot_rooms(snapshot: dict[str, Any], documents: list[dict[str, ob
             row["led"] = "Yes" if row.get("led") else ""
             row["accessories"] = _clean_accessory_entries(_coerce_string_list(row.get("accessories", [])))
             row["other_items"] = _merge_other_items([], row.get("other_items", []))
-            row["sink_info"] = _clean_fixture_text(overlay.get("sink_info", "") or _string_value(row.get("sink_info", "")))
-            row["basin_info"] = _clean_fixture_text(overlay.get("basin_info", "") or _string_value(row.get("basin_info", "")))
-            row["tap_info"] = _clean_fixture_text(overlay.get("tap_info", "") or _string_value(row.get("tap_info", "")))
+            row["sink_info"] = _clean_room_fixture_text(overlay.get("sink_info", "") or _string_value(row.get("sink_info", "")), "sink")
+            row["basin_info"] = _clean_room_fixture_text(overlay.get("basin_info", "") or _string_value(row.get("basin_info", "")), "basin")
+            row["tap_info"] = _clean_room_fixture_text(overlay.get("tap_info", "") or _string_value(row.get("tap_info", "")), "tap")
             row["drawers_soft_close"] = merge_soft_close_values(row.get("drawers_soft_close", ""), "")
             row["hinges_soft_close"] = merge_soft_close_values(row.get("hinges_soft_close", ""), "")
             continue
@@ -6513,17 +6899,125 @@ def enrich_snapshot_rooms(snapshot: dict[str, Any], documents: list[dict[str, ob
         row["sink_info"] = _merge_text(_string_value(row.get("sink_info", "")), overlay.get("sink_info", ""))
         row["basin_info"] = _merge_text(_string_value(row.get("basin_info", "")), overlay.get("basin_info", ""))
         row["tap_info"] = _merge_text(_string_value(row.get("tap_info", "")), overlay.get("tap_info", ""))
+        if overlay.get("flooring"):
+            row["flooring"] = _string_value(overlay.get("flooring", ""))
         row["drawers_soft_close"] = merge_soft_close_values(row.get("drawers_soft_close", ""), "")
         row["hinges_soft_close"] = merge_soft_close_values(row.get("hinges_soft_close", ""), "")
     snapshot["rooms"] = rooms
     snapshot["appliances"] = [row for row in snapshot.get("appliances", []) if isinstance(row, dict) and not _is_room_fixture_appliance(row)]
+    _clear_room_specific_flooring_notes(snapshot)
     return apply_snapshot_cleaning_rules(snapshot, rule_flags=rule_flags)
+
+
+def _yellowwood_row_material_probe(row: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for key in (
+        "bench_tops_wall_run",
+        "bench_tops_island",
+        "bench_tops_other",
+        "door_colours_overheads",
+        "door_colours_base",
+        "door_colours_tall",
+        "door_colours_island",
+        "door_colours_bar_back",
+        "floating_shelf",
+    ):
+        value = normalize_space(str(row.get(key, "") or ""))
+        if value:
+            parts.append(value)
+    for list_key in ("bench_tops", "door_panel_colours", "toe_kick", "bulkheads"):
+        parts.extend(_coerce_string_list(row.get(list_key, [])))
+    evidence_snippet = normalize_space(str(row.get("evidence_snippet", "") or ""))
+    if evidence_snippet:
+        parts.append(evidence_snippet)
+    return normalize_space(" | ".join(part for part in parts if normalize_space(part)))
+
+
+def _yellowwood_should_keep_final_room(row: dict[str, Any]) -> bool:
+    label = source_room_label(
+        str(row.get("original_room_label", "") or row.get("room_name", "") or row.get("room_key", "")),
+        fallback_key=str(row.get("room_key", "")),
+    )
+    if not label or label == "Room":
+        return False
+    if _looks_like_spec_room_label_noise(label):
+        return False
+    if not _yellowwood_is_supported_room_label(label):
+        return False
+    return _yellowwood_has_material_evidence(_yellowwood_row_material_probe(row))
+
+
+def _yellowwood_wet_area_tail_markers() -> tuple[str, ...]:
+    return (
+        r"\bShower Floor Waste\b",
+        r"\bShower on Rail\b",
+        r"\bShower Mixer\b",
+        r"\bBath(?: Mixer| Spout| Waste)?\b",
+        r"\bSink Mixer\b",
+        r"\bBasin(?: Waste)?\b",
+        r"\bBED\s*\d+\s+ENSUITE\b",
+        r"\bBATHROOM\b",
+    )
+
+
+def _yellowwood_filter_accessories(row: dict[str, Any]) -> list[str]:
+    filtered: list[str] = []
+    room_label = source_room_label(
+        str(row.get("original_room_label", "") or row.get("room_name", "") or row.get("room_key", "")),
+        fallback_key=str(row.get("room_key", "")),
+    )
+    is_vanity_room = "vanity" in room_label.lower()
+    drop_prefixes = (
+        "shower floor waste",
+        "shower on rail",
+        "shower mixer",
+        "bath mixer",
+        "bath spout",
+        "bath waste",
+        "sink mixer",
+        "basin waste",
+    )
+    for value in _coerce_string_list(row.get("accessories", [])):
+        cleaned = normalize_space(value)
+        if is_vanity_room and cleaned:
+            cleaned = _trim_fixture_text_at_markers(cleaned, _yellowwood_wet_area_tail_markers())
+        lowered = cleaned.lower()
+        if not cleaned or any(lowered.startswith(prefix) for prefix in drop_prefixes):
+            continue
+        filtered.append(cleaned)
+    return filtered
+
+
+def _yellowwood_filter_other_items(row: dict[str, Any]) -> list[dict[str, str]]:
+    filtered: list[dict[str, str]] = []
+    tap_present = bool(normalize_space(str(row.get("tap_info", "") or "")))
+    room_label = source_room_label(
+        str(row.get("original_room_label", "") or row.get("room_name", "") or row.get("room_key", "")),
+        fallback_key=str(row.get("room_key", "")),
+    )
+    is_vanity_room = "vanity" in room_label.lower()
+    for item in _merge_other_items([], row.get("other_items", [])):
+        label = normalize_space(str(item.get("label", "") or ""))
+        value = normalize_space(str(item.get("value", "") or ""))
+        if is_vanity_room and value:
+            value = _trim_fixture_text_at_markers(value, _yellowwood_wet_area_tail_markers())
+        if not label or not value:
+            continue
+        if tap_present and label.lower() in {"mixer", "pull-out mixer", "sink mixer", "basin mixer"}:
+            continue
+        filtered.append({"label": label, "value": value})
+    return filtered
 
 
 def apply_snapshot_cleaning_rules(snapshot: dict[str, Any], rule_flags: Any = None) -> dict[str, Any]:
     flags = cleaning_rules.normalize_rule_flags(rule_flags)
     cleaned = dict(snapshot)
     cleaned["rooms"] = [_apply_room_cleaning_rules(dict(row), flags) for row in snapshot.get("rooms", []) if isinstance(row, dict)]
+    if _is_yellowwood_builder(str(cleaned.get("builder_name", ""))):
+        for row in cleaned["rooms"]:
+            row["accessories"] = _yellowwood_filter_accessories(row)
+            row["other_items"] = _yellowwood_filter_other_items(row)
+        cleaned["rooms"] = [row for row in cleaned["rooms"] if _yellowwood_should_keep_final_room(row)]
     cleaned["special_sections"] = [
         _apply_special_section_cleaning_rules(dict(row), flags)
         for row in snapshot.get("special_sections", [])
@@ -6551,6 +7045,7 @@ def _apply_room_cleaning_rules(row: dict[str, Any], rule_flags: dict[str, bool])
     row["has_explicit_island"] = bool(row.get("has_explicit_island", False))
     row["has_explicit_bar_back"] = bool(row.get("has_explicit_bar_back", False))
     row["original_room_label"] = _display_rule_text(row.get("original_room_label", ""), rule_flags)
+    row["room_name"] = row["original_room_label"] or _display_rule_text(row.get("room_name", ""), rule_flags)
     row["bench_tops"] = _normalize_text_list(row.get("bench_tops", []), rule_flags)
     row["toe_kick"] = _normalize_text_list(row.get("toe_kick", []), rule_flags)
     row["bulkheads"] = _normalize_text_list(row.get("bulkheads", []), rule_flags)
@@ -6566,9 +7061,9 @@ def _apply_room_cleaning_rules(row: dict[str, Any], rule_flags: dict[str, bool])
         for item in _merge_other_items([], row.get("other_items", []))
         if _display_rule_text(item.get("label", ""), rule_flags) and _display_rule_text(item.get("value", ""), rule_flags)
     ]
-    row["sink_info"] = _clean_fixture_text(_display_rule_text(row.get("sink_info", ""), rule_flags))
-    row["basin_info"] = _clean_fixture_text(_display_rule_text(row.get("basin_info", ""), rule_flags))
-    row["tap_info"] = _clean_fixture_text(_display_rule_text(row.get("tap_info", ""), rule_flags))
+    row["sink_info"] = _clean_room_fixture_text(_display_rule_text(row.get("sink_info", ""), rule_flags), "sink")
+    row["basin_info"] = _clean_room_fixture_text(_display_rule_text(row.get("basin_info", ""), rule_flags), "basin")
+    row["tap_info"] = _clean_room_fixture_text(_display_rule_text(row.get("tap_info", ""), rule_flags), "tap")
     row["splashback"] = _display_rule_text(row.get("splashback", ""), rule_flags)
     row["flooring"] = _display_rule_text(row.get("flooring", ""), rule_flags)
     row["drawers_soft_close"] = normalize_soft_close_value(row.get("drawers_soft_close", ""), keyword="drawer") or normalize_soft_close_value(row.get("drawers_soft_close", ""))
@@ -6935,6 +7430,7 @@ def _collect_room_overlays(
     builder_name: str = "",
 ) -> dict[str, dict[str, str]]:
     overlays: dict[str, dict[str, str]] = {}
+    normalized_builder = normalize_space(builder_name).lower()
     for document in documents:
         file_name = str(document.get("file_name", ""))
         full_text = "\n\n".join(
@@ -6954,40 +7450,13 @@ def _collect_room_overlays(
             lines = _section_lines(section)
             section_page_type = normalize_space(str(section.get("page_type", "") or "")).lower().replace(" ", "_")
             section_material_allowed = material_allowed and section_page_type in {"", "joinery"}
-            overlay = overlays.setdefault(
-                room_key,
-                {
-                    "bench_tops_wall_run": "",
-                    "bench_tops_island": "",
-                    "bench_tops_other": "",
-                    "floating_shelf": "",
-                    "toe_kick": [],
-                    "bulkheads": [],
-                    "handles": [],
-                    "door_colours_overheads": "",
-                    "door_colours_base": "",
-                    "door_colours_tall": "",
-                    "door_colours_island": "",
-                    "door_colours_bar_back": "",
-                    "has_explicit_overheads": False,
-                    "has_explicit_base": False,
-                    "has_explicit_tall": False,
-                    "has_explicit_island": False,
-                    "has_explicit_bar_back": False,
-                    "led": "",
-                    "accessories": [],
-                    "other_items": [],
-                    "sink_info": "",
-                    "basin_info": "",
-                    "tap_info": "",
-                },
-            )
+            overlay = overlays.setdefault(room_key, _blank_overlay())
             if section_material_allowed:
                 generic_bench_tops = _collect_field(lines, ["Bench Tops", "Benchtop"])
                 explicit_bench_values = _unique(
                     [
                         *(f"Back Benchtops {value}" for value in _collect_field(lines, ["Back Benchtops", "Wall Run Bench Top"])),
-                        *(f"Island Benchtop {value}" for value in _collect_field(lines, ["Island Benchtop", "Island Bench Top"])),
+                        *(f"Island Benchtop {value}" for value in _collect_island_benchtop_values(lines)),
                     ]
                 )
                 benchtop_groups = _split_benchtop_groups(generic_bench_tops + explicit_bench_values)
@@ -7023,14 +7492,14 @@ def _collect_room_overlays(
                 )
                 overlay["bulkheads"] = _merge_lists(
                     _coerce_string_list(overlay.get("bulkheads", [])),
-                    _collect_field(lines, ["Bulkheads", "Bulkhead"]),
+                    _collect_explicit_bulkhead_values(lines),
                 )
                 overlay["handles"] = _merge_lists(
                     _coerce_string_list(overlay.get("handles", [])),
                     _clean_handle_entries(_collect_field(lines, ["Handles", "Handle", "Base Cabinet Handles", "Overhead Handles", "Pantry Door Handles"])),
                 )
                 overlay["floating_shelf"] = _merge_text(overlay["floating_shelf"], _first_value(_collect_field(lines, ["Floating Shelves", "Floating Shelf"])))
-                if _collect_field(lines, ["LED Strip Lighting", "LED Lighting", "LED"]):
+                if _has_explicit_led_field(lines):
                     overlay["led"] = "Yes"
                 overlay["accessories"] = _merge_lists(_coerce_string_list(overlay.get("accessories", [])), _collect_field(lines, ["Accessories", "Accessory"]))
                 overlay["other_items"] = _merge_other_items(
@@ -7047,6 +7516,10 @@ def _collect_room_overlays(
                 overlay["tap_info"],
                 _first_value(_collect_field(lines, ["Vanity Tap Style", "Tap Type", "Tap Style", "Sink Mixer", "Pull-Out Mixer", "Mixer"])),
             )
+    if normalized_builder == "clarendon":
+        _collect_clarendon_flooring_overlays(overlays, documents)
+    elif _is_yellowwood_builder(builder_name):
+        _collect_yellowwood_flooring_overlays(overlays, documents)
     return overlays
 
 
@@ -7138,6 +7611,7 @@ def _blank_overlay() -> dict[str, Any]:
         "sink_info": "",
         "basin_info": "",
         "tap_info": "",
+        "flooring": "",
     }
 
 
@@ -7337,7 +7811,21 @@ def _clean_handle_entries(values: list[str]) -> list[str]:
         if any(lowered != other.lower() and lowered in other.lower() for other in unique_entries):
             continue
         filtered.append(entry)
-    return filtered
+    merged_fragments: list[str] = []
+    index = 0
+    while index < len(filtered):
+        entry = filtered[index]
+        if (
+            index + 1 < len(filtered)
+            and entry.rstrip().endswith("/")
+            and re.match(r"(?i)^(?:doors|drawers)\s*-", filtered[index + 1])
+        ):
+            merged_fragments.append(normalize_space(f"{entry.rstrip()}{filtered[index + 1]}"))
+            index += 2
+            continue
+        merged_fragments.append(entry)
+        index += 1
+    return _unique(merged_fragments)
 
 
 def _clean_accessory_entries(values: list[str]) -> list[str]:
@@ -7385,6 +7873,13 @@ def _clean_door_colour_value(value: Any) -> str:
     text = re.sub(rf"(?i)(?<=\w)\s+(?:{token_pattern}).*$", "", text)
     text = re.sub(rf"(?i)\s*\((?:{token_pattern}).*$", "", text)
     text = re.sub(r"\s*\([^)]*$", "", text)
+    if re.match(r"(?i)^\*?\s*to builders\b", text):
+        material_match = re.search(
+            r"(?i)\b(?:polytec|laminex|caesarstone|smartstone|wk stone|ydl|melamine|laminate|thermolaminate|classic white|natural finish|white melamine)\b",
+            text,
+        )
+        if material_match:
+            text = text[material_match.start() :]
     text = re.sub(r"\s{2,}", " ", text)
     text = text.strip(" -;,")
     orientation_text = normalize_space(re.sub(r"(?i)\b(?:polytec|laminex|caesarstone|smartstone|wk stone)\b", "", text)).strip(" -;,")
@@ -7487,7 +7982,7 @@ def _split_door_colour_groups(values: list[str]) -> dict[str, str]:
             if any(token in lowered for token in ["upper", "overhead"]):
                 grouped["door_colours_overheads"].append(cleaned)
                 matched = True
-            if any(token in lowered for token in ["tall cabinetry", "tall cabinet", "tall cabinets", "tall door", "tall doors", "tall panel", "tall panels"]):
+            if any(token in lowered for token in ["tall cabinetry", "tall cabinet", "tall cabinets", "tall door", "tall doors", "tall panel", "tall panels", "tall open shelf", "tall open shelves"]):
                 grouped["door_colours_tall"].append(cleaned)
                 matched = True
             if "base" in lowered and "island" not in lowered:
@@ -7966,6 +8461,84 @@ def _clean_fixture_text(value: Any) -> str:
     return normalize_brand_casing_text(text)
 
 
+def _trim_fixture_text_at_markers(text: str, markers: tuple[str, ...]) -> str:
+    trimmed = normalize_space(text)
+    for marker in markers:
+        match = re.search(marker, trimmed, re.IGNORECASE)
+        if match and match.start() > 0:
+            trimmed = normalize_space(trimmed[: match.start()])
+            break
+    return trimmed.strip(" -;,")
+
+
+def _clean_room_fixture_text(value: Any, kind: str) -> str:
+    text = _clean_fixture_text(value)
+    if not text:
+        return ""
+    if kind == "sink":
+        if re.match(r"(?i)^(?:sink mixer|pull-?out mixer|basin mixer|mixer)\b", text):
+            return ""
+        text = _trim_fixture_text_at_markers(
+            text,
+            (
+                r"\bBasin Waste\b",
+                r"\bWaste\b",
+                r"\bBottle Trap\b",
+                r"\bToilet Roll Holder\b",
+                r"\bToilet Suite\b",
+                r"\bToilet\b",
+                r"\bFloor Waste\b",
+                r"\bHand Towel Rail\b",
+                r"\bTowel Rail\b",
+                r"\bRobe Hook\b",
+                r"\bShower\b",
+                r"\bBath\b",
+                r"\bMirror\b",
+            ),
+        )
+    elif kind == "basin":
+        if re.match(r"(?i)^(?:waste\b|pop up waste\b|bottle trap\b|mixer\b|sink mixer\b|pull-?out mixer\b|tap\b)", text):
+            return ""
+        text = _trim_fixture_text_at_markers(
+            text,
+            (
+                r"\bBasin Waste\b",
+                r"\bWaste\b",
+                r"\bBottle Trap\b",
+                r"\bToilet Roll Holder\b",
+                r"\bToilet Suite\b",
+                r"\bToilet\b",
+                r"\bFloor Waste\b",
+                r"\bHand Towel Rail\b",
+                r"\bTowel Rail\b",
+                r"\bRobe Hook\b",
+                r"\bShower\b",
+                r"\bBath\b",
+                r"\bMirror\b",
+            ),
+        )
+    elif kind == "tap":
+        if re.match(r"(?i)^(?:basin waste\b|bottle trap\b|toilet(?: roll holder)?\b|floor waste\b|mirror\b)", text):
+            return ""
+        text = _trim_fixture_text_at_markers(
+            text,
+            (
+                r"\bBasin Waste\b",
+                r"\bWaste\b",
+                r"\bBottle Trap\b",
+                r"\bToilet Roll Holder\b",
+                r"\bToilet Suite\b",
+                r"\bToilet\b",
+                r"\bFloor Waste\b",
+                r"\bHand Towel Rail\b",
+                r"\bTowel Rail\b",
+                r"\bRobe Hook\b",
+                r"\bMirror\b",
+            ),
+        )
+    return text.strip(" -;,")
+
+
 def _format_fixture_mapping(entry: dict[str, Any]) -> str:
     parts: list[str] = []
     for key in ("sink_type", "basin_type", "tap_type", "type", "sink", "basin", "tap", "description", "value"):
@@ -8016,10 +8589,20 @@ def _dedupe_appliances(rows: list[ApplianceRow]) -> list[ApplianceRow]:
         for row in result
         if row.source_file and row.model_no and not _looks_like_appliance_placeholder_model(row.model_no)
     }
+    typed_with_concrete_model = {
+        row.appliance_type.lower()
+        for row in result
+        if row.appliance_type and row.model_no and not _looks_like_appliance_placeholder_model(row.model_no)
+    }
     for row in result:
         typed_make = (row.appliance_type.lower(), row.make.lower())
         if row.make and not row.model_no and typed_make in typed_make_with_model:
             continue
+        if row.model_no and _looks_like_drawing_dimension_noise_model(row.model_no):
+            if typed_make in typed_make_with_model or (
+                row.source_file and (row.source_file.lower(), row.appliance_type.lower()) in typed_source_with_concrete_model
+            ) or row.appliance_type.lower() in typed_with_concrete_model:
+                continue
         if (
             row.source_file
             and row.model_no
@@ -8038,3 +8621,20 @@ def _dedupe_appliances(rows: list[ApplianceRow]) -> list[ApplianceRow]:
                 continue
         filtered.append(row)
     return filtered
+
+
+def _looks_like_drawing_dimension_noise_model(text: str) -> bool:
+    model = normalize_space(str(text or "")).upper()
+    if len(model) < 16:
+        return False
+    if "/" in model or "-" in model:
+        return False
+    digit_count = sum(char.isdigit() for char in model)
+    alpha_count = sum(char.isalpha() for char in model)
+    if digit_count < 10 or alpha_count > 8:
+        return False
+    if re.search(r"(?:\d{3,4}[A-Z]{0,3}){3,}", model):
+        return True
+    if re.search(r"\d{5,}[A-Z]{1,3}\d{5,}", model):
+        return True
+    return False
