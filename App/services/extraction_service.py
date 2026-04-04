@@ -3595,7 +3595,7 @@ def _try_openai(
             "Extract cabinet and appliance information into JSON. "
             "Return JSON only with keys: rooms, special_sections, appliances, others, warnings. "
             "Room rows must include room_key, original_room_label, bench_tops, door_panel_colours, toe_kick, bulkheads, handles, "
-            "drawers_soft_close, hinges_soft_close, splashback, flooring, floating_shelf, led, led_note, accessories, other_items, door_colours_overheads, door_colours_base, door_colours_tall, door_colours_island, door_colours_bar_back, "
+            "drawers_soft_close, hinges_soft_close, splashback, flooring, floating_shelf, shelf, led, led_note, accessories, other_items, door_colours_overheads, door_colours_base, door_colours_tall, door_colours_island, door_colours_bar_back, "
             "sink_info, basin_info, tap_info, source_file, page_refs, evidence_snippet, confidence. "
             "Special sections, when present, must include section_key, original_section_label, fields, source_file, page_refs, evidence_snippet, confidence. "
             "Appliance rows must include appliance_type, make, model_no, product_url, spec_url, manual_url, website_url, overall_size, source_file, page_refs, evidence_snippet, confidence, "
@@ -3961,7 +3961,7 @@ def _find_best_room_match(base_row: dict[str, Any], ai_rows: list[dict[str, Any]
 
 def _merge_single_room(base_row: dict[str, Any], ai_row: dict[str, Any], stable_hybrid: bool = False) -> dict[str, Any]:
     merged = dict(base_row)
-    for field_name in ("room_key", "original_room_label", "splashback", "flooring", "floating_shelf", "led", "led_note", "sink_info", "basin_info", "tap_info", "source_file", "page_refs", "evidence_snippet"):
+    for field_name in ("room_key", "original_room_label", "splashback", "flooring", "floating_shelf", "shelf", "led", "led_note", "sink_info", "basin_info", "tap_info", "source_file", "page_refs", "evidence_snippet"):
         if not merged.get(field_name) and ai_row.get(field_name):
             merged[field_name] = ai_row[field_name]
     for field_name in ("bench_tops", "door_panel_colours", "toe_kick", "bulkheads", "handles", "accessories"):
@@ -4044,6 +4044,7 @@ CLARENDON_RAW_SCALAR_FIELDS: tuple[str, ...] = (
     "door_colours_island",
     "door_colours_bar_back",
     "floating_shelf",
+    "shelf",
     "sink_info",
     "basin_info",
     "tap_info",
@@ -4147,6 +4148,7 @@ IMPERIAL_RAW_SCALAR_FIELDS: tuple[str, ...] = (
     "door_colours_island",
     "door_colours_bar_back",
     "floating_shelf",
+    "shelf",
     "sink_info",
     "basin_info",
     "tap_info",
@@ -4859,6 +4861,7 @@ def _blank_generic_layout_overlay() -> dict[str, Any]:
         "toe_kick": [],
         "handles": [],
         "floating_shelf": "",
+        "shelf": "",
         "has_floating_shelf_block": False,
         "sink_info": "",
         "tap_info": "",
@@ -4893,6 +4896,7 @@ def _merge_generic_layout_overlay(left: dict[str, Any], right: dict[str, Any]) -
         "door_colours_island": "material",
         "door_colours_bar_back": "material",
         "floating_shelf": "material",
+        "shelf": "material",
         "sink_info": "fixture",
         "tap_info": "fixture",
         "basin_info": "fixture",
@@ -7144,6 +7148,7 @@ def _blank_clarendon_overlay() -> dict[str, Any]:
         "bench_tops_other": "",
         "bench_tops": [],
         "floating_shelf": "",
+        "shelf": "",
         "door_panel_colours": [],
         "door_colours_overheads": "",
         "door_colours_base": "",
@@ -7182,6 +7187,7 @@ def _merge_clarendon_overlay(target: dict[str, Any], candidate: dict[str, Any]) 
         "bench_tops_island",
         "bench_tops_other",
         "floating_shelf",
+        "shelf",
         "door_colours_overheads",
         "door_colours_base",
         "door_colours_island",
@@ -7934,6 +7940,7 @@ def _clarendon_overlay_has_material_content(overlay: dict[str, Any]) -> bool:
         "bench_tops_other",
         "bench_tops",
         "floating_shelf",
+        "shelf",
         "door_panel_colours",
         "door_colours_overheads",
         "door_colours_base",
@@ -7941,14 +7948,7 @@ def _clarendon_overlay_has_material_content(overlay: dict[str, Any]) -> bool:
         "door_colours_bar_back",
         "toe_kick",
         "bulkheads",
-        "handles",
-        "led",
-        "led_note",
-        "accessories",
-        "other_items",
         "splashback",
-        "drawers_soft_close",
-        "hinges_soft_close",
     )
     for key in material_keys:
         value = overlay.get(key, "")

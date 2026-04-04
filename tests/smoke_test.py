@@ -1895,9 +1895,11 @@ class SmokeTest(unittest.TestCase):
                             "Tap Type: PHOENIX Nostalgia Sink Mixer NS714-62\n"
                             "Cooktop: Westinghouse WHC943BD 90cm\n"
                             "Butler's Pantry\n"
+                            "Door Colour - Polytec Classic White Matt\n"
                             "Sink Type/Model: PARISI Quadro Single Bowl (PK4444)\n"
                             "Tap Type: PHOENIX Nostalgia Sink Mixer NS738-62\n"
                             "Vanities\n"
+                            "Door Colour - Polytec Soft Walnut Matt\n"
                             "Vanity Inset Basin JOHNSON SUISSE Emilia Rectangular Undercounter Basin (JBSE250.PW6)\n"
                             "Vanity Tap Style: PHOENIX Nostalgia Basin Mixer NS748-62\n"
                         ),
@@ -1948,7 +1950,7 @@ class SmokeTest(unittest.TestCase):
     def test_build_spec_snapshot_accepts_fenced_openai_json(self) -> None:
         openai_payload = {
             "output_text": """```json
-{"rooms":[{"room_key":"kitchen","original_room_label":"Kitchen"}],"appliances":[],"others":{},"warnings":[]}
+{"rooms":[{"room_key":"kitchen","original_room_label":"Kitchen","door_colours_base":"Polytec Classic White Matt"}],"appliances":[],"others":{},"warnings":[]}
 ```"""
         }
         with (
@@ -3976,17 +3978,37 @@ class SmokeTest(unittest.TestCase):
             "LED's (BED 2) As per drawings",
         )
 
-    def test_yellowwood_material_probe_uses_evidence_snippet_for_real_robe_rooms(self) -> None:
+    def test_promote_conditional_shelf_field_uses_explicit_shelf_material_only(self) -> None:
         row = {
             "room_key": "bed_3_robe",
             "original_room_label": "BED 3 ROBE",
-            "bench_tops": [],
-            "door_panel_colours": [],
-            "toe_kick": [],
-            "bulkheads": [],
             "evidence_snippet": "BED 3 ROBE FIT OUT White Melamine Yellowwood supplier",
+            "other_items": [{"label": "RAIL", "value": "Open Shelving White Melamine"}],
         }
+        parsing_module._promote_conditional_shelf_field(row)
+        self.assertEqual(row["shelf"], "White Melamine")
+        self.assertEqual(row["other_items"], [])
         self.assertTrue(parsing_module._yellowwood_should_keep_final_room(row))
+
+    def test_promote_conditional_shelf_field_keeps_blank_shelf_for_rail_only_rows(self) -> None:
+        row = {
+            "room_key": "bed_3_robe",
+            "original_room_label": "BED 3 ROBE",
+            "evidence_snippet": "BED 3 ROBE FIT OUT hanging rail",
+            "other_items": [{"label": "RAIL", "value": "Oval wardrobe tube in black"}],
+        }
+        parsing_module._promote_conditional_shelf_field(row)
+        self.assertEqual(row["shelf"], "")
+        self.assertEqual(row["other_items"], [{"label": "RAIL", "value": "Oval wardrobe tube in black"}])
+        self.assertFalse(parsing_module._yellowwood_should_keep_final_room(row))
+
+    def test_extract_explicit_shelf_material_trims_following_schedule_noise(self) -> None:
+        self.assertEqual(
+            parsing_module._extract_explicit_shelf_material_from_text(
+                "Open Shelving White Melamine As supplied by builder INTERNAL FINISHES TILING SCHEDULE REFER TO NATIONAL TILES"
+            ),
+            "White Melamine",
+        )
 
     def test_yellowwood_material_driven_rooms_keep_real_media_and_robe_when_joinery_material_exists(self) -> None:
         media_section = {
@@ -4077,12 +4099,107 @@ class SmokeTest(unittest.TestCase):
             "source_documents": [],
             "analysis": {"mode": "heuristic_only"},
         }
-        cleaned = parsing_module.apply_snapshot_cleaning_rules(snapshot)
+        cleaned = parsing_module._apply_builder_material_room_gate(
+            parsing_module.apply_snapshot_cleaning_rules(snapshot)
+        )
         kept = {row["original_room_label"] for row in cleaned["rooms"]}
         self.assertIn("KITCHEN", kept)
         self.assertIn("BED 1 ENSUITE VANITY", kept)
         self.assertNotIn("MEDIA ROOM", kept)
         self.assertNotIn("LAUNDRY", kept)
+        self.assertNotIn("BED 1 ENSUITE", kept)
+
+    def test_apply_builder_material_room_gate_keeps_room_when_shelf_is_only_material_evidence(self) -> None:
+        snapshot = {
+            "builder_name": "Yellowwood",
+            "rooms": [
+                {
+                    "room_key": "bed_2_robe",
+                    "original_room_label": "BED 2 ROBE FIT OUT",
+                    "shelf": "White Melamine",
+                },
+                {
+                    "room_key": "ground_floor_powder_room",
+                    "original_room_label": "GROUND FLOOR POWDER ROOM",
+                    "flooring": "Floor Tile Regina Grey Matt",
+                    "tap_info": "Basin Mixer",
+                },
+            ],
+        }
+        gated = parsing_module._apply_builder_material_room_gate(snapshot)
+        kept = {row["original_room_label"] for row in gated["rooms"]}
+        self.assertIn("BED 2 ROBE FIT OUT", kept)
+        self.assertNotIn("GROUND FLOOR POWDER ROOM", kept)
+
+    def test_yellowwood_cleanup_splashback_text_drops_tiling_referral_noise_for_kitchen_and_powder(self) -> None:
+        self.assertEqual(
+            parsing_module._yellowwood_cleanup_splashback_text("Tile Refer to Tiling section below N/A", "kitchen"),
+            "",
+        )
+        self.assertEqual(
+            parsing_module._yellowwood_cleanup_splashback_text("Tile Refer to ※Tiling§ section below N/A", "kitchen"),
+            "",
+        )
+        self.assertEqual(
+            parsing_module._yellowwood_cleanup_splashback_text(
+                "* Como Beige Matt Unrectified 450x450mm Lay Pattern: Square Grout: Mapei 130 Jasmine",
+                "ground_floor_powder_room",
+            ),
+            "",
+        )
+
+    def test_yellowwood_normalize_kitchen_material_fields_promotes_wall_run_and_fills_overheads(self) -> None:
+        row = {
+            "room_key": "kitchen",
+            "bench_tops_wall_run": "",
+            "bench_tops_island": "Only 40mm YDL Aurum White Polished",
+            "bench_tops_other": "40mm YDL Classic White Polished | Only 40mm YDL Aurum White Polished",
+            "door_colours_base": "Polytec Blossom White Matt",
+            "door_colours_overheads": "",
+            "has_explicit_overheads": True,
+        }
+        parsing_module._yellowwood_normalize_kitchen_material_fields(row)
+        self.assertEqual(row["bench_tops_wall_run"], "40mm YDL Classic White Polished")
+        self.assertEqual(row["bench_tops_other"], "")
+        self.assertEqual(row["door_colours_overheads"], "Polytec Blossom White Matt")
+
+    def test_enrich_snapshot_rooms_reapplies_yellowwood_finalizer_after_shared_cleaning(self) -> None:
+        snapshot = {
+            "job_no": "39024",
+            "builder_name": "Yellowwood",
+            "source_kind": "spec",
+            "generated_at": "2026-04-04T10:00:00+10:00",
+            "rooms": [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "bench_tops": [],
+                    "bench_tops_wall_run": "",
+                    "bench_tops_island": "Only 40mm YDL Aurum White Polished",
+                    "bench_tops_other": "40mm YDL Classic White Polished | Only 40mm YDL Aurum White Polished",
+                    "door_panel_colours": ["Polytec 每 Blossom White Matt"],
+                    "door_colours_base": "Polytec 每 Blossom White Matt",
+                    "door_colours_overheads": "",
+                    "has_explicit_overheads": True,
+                    "toe_kick": [],
+                    "bulkheads": [],
+                    "handles": [],
+                    "splashback": "Tile Refer to ※Tiling§ section below N/A",
+                }
+            ],
+            "appliances": [],
+            "others": {},
+            "warnings": [],
+            "source_documents": [],
+            "analysis": {"mode": "structure_first"},
+        }
+        enriched = parsing_module.enrich_snapshot_rooms(snapshot, [])
+        kitchen = enriched["rooms"][0]
+        self.assertEqual(kitchen["bench_tops_wall_run"], "40mm YDL Classic White Polished")
+        self.assertEqual(kitchen["bench_tops_other"], "")
+        self.assertEqual(kitchen["door_colours_base"], "Polytec Blossom White Matt")
+        self.assertEqual(kitchen["door_colours_overheads"], "Polytec Blossom White Matt")
+        self.assertEqual(kitchen["splashback"], "")
 
     def test_apply_snapshot_cleaning_rules_purifies_yellowwood_wet_area_fixtures(self) -> None:
         snapshot = {
@@ -4331,11 +4448,11 @@ class SmokeTest(unittest.TestCase):
             "source_kind": "spec",
             "generated_at": "2026-04-04T00:00:00+10:00",
             "rooms": [
-                {"room_key": "kitchen", "original_room_label": "KITCHEN", "flooring": ""},
-                {"room_key": "butlers_pantry", "original_room_label": "BUTLERS PANTRY", "flooring": ""},
-                {"room_key": "theatre", "original_room_label": "THEATRE ROOM", "flooring": ""},
-                {"room_key": "rumpus_room", "original_room_label": "RUMPUS ROOM", "flooring": ""},
-                {"room_key": "rumpus_desk", "original_room_label": "RUMPUS - DESK", "flooring": ""},
+                {"room_key": "kitchen", "original_room_label": "KITCHEN", "flooring": "", "door_colours_base": "Polytec Classic White Matt"},
+                {"room_key": "butlers_pantry", "original_room_label": "BUTLERS PANTRY", "flooring": "", "door_colours_base": "Polytec Classic White Matt"},
+                {"room_key": "theatre", "original_room_label": "THEATRE ROOM", "flooring": "", "door_colours_base": "Polytec Classic White Matt"},
+                {"room_key": "rumpus_room", "original_room_label": "RUMPUS ROOM", "flooring": "", "door_colours_base": "Polytec Classic White Matt"},
+                {"room_key": "rumpus_desk", "original_room_label": "RUMPUS - DESK", "flooring": "", "door_colours_tall": "Laminex Classic White"},
                 {"room_key": "laundry", "original_room_label": "LAUNDRY", "flooring": ""},
             ],
             "appliances": [],
@@ -4368,7 +4485,7 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(rooms["theatre"]["flooring"], "CARPET")
         self.assertEqual(rooms["rumpus_room"]["flooring"], "CARPET")
         self.assertEqual(rooms["rumpus_desk"]["flooring"], "")
-        self.assertEqual(rooms["laundry"]["flooring"], "")
+        self.assertNotIn("laundry", rooms)
         self.assertEqual(enriched["others"]["flooring_notes"], "")
 
     def test_clear_room_specific_flooring_notes_drops_disclaimer_and_global_tile_range_noise(self) -> None:
@@ -4411,8 +4528,7 @@ class SmokeTest(unittest.TestCase):
         }
         enriched = parsing_module.enrich_snapshot_rooms(snapshot, [])
         rooms = {row["room_key"]: row for row in enriched["rooms"]}
-        self.assertEqual(rooms["rumpus_room"]["door_colours_tall"], "")
-        self.assertFalse(rooms["rumpus_room"]["has_explicit_tall"])
+        self.assertNotIn("rumpus_room", rooms)
         self.assertIn("TALL OPEN SHELVES", rooms["rumpus_desk"]["door_colours_tall"])
         self.assertTrue(rooms["rumpus_desk"]["has_explicit_tall"])
 
@@ -4974,6 +5090,7 @@ class SmokeTest(unittest.TestCase):
                 {
                     "room_key": "vanities",
                     "original_room_label": "VANITIES",
+                    "door_colours_base": "Polytec Soft Walnut Matt",
                     "accessories": [
                         "LINCOLN SENTRY 7104019 CENTRE PILLAR, CHROME",
                         "LINCOLN SENTRY 7104020 FINISTA END PILLAR, CHROME",
@@ -4982,6 +5099,7 @@ class SmokeTest(unittest.TestCase):
                 {
                     "room_key": "laundry",
                     "original_room_label": "LAUNDRY",
+                    "bench_tops_other": "Polytec Argento Stone Matt Finish - 21MM Tightform Edge Laminate",
                     "accessories": [],
                 },
             ],
@@ -5290,6 +5408,21 @@ class SmokeTest(unittest.TestCase):
             "Polytec Boston Oak Woodmatt 33mm pencil round edge",
             [entry["text"] for entry in summary["bench_tops"]["entries"]],
         )
+
+    def test_material_summary_includes_shelf_material(self) -> None:
+        summary = _build_material_summary(
+            {
+                "rooms": [
+                    {
+                        "room_key": "bed_2_robe",
+                        "original_room_label": "BED 2 ROBE FIT OUT",
+                        "bench_tops_other": "",
+                        "shelf": "White Melamine",
+                    }
+                ]
+            }
+        )
+        self.assertIn("White Melamine", [entry["text"] for entry in summary["shelves"]["entries"]])
 
     def test_material_summary_includes_room_labels_for_shared_values(self) -> None:
         summary = _build_material_summary(
@@ -6647,6 +6780,7 @@ class SmokeTest(unittest.TestCase):
                         "bench_tops": ["Caesarstone Organic White 20mm with 40mm Double Mitred Pencil Round Edge"],
                         "bench_tops_other": "Caesarstone Organic White 20mm with 40mm Double Mitred Pencil Round Edge",
                         "floating_shelf": "Polytec Boston Oak Woodmatt 33mm pencil round edge",
+                        "shelf": "White Melamine",
                         "door_panel_colours": [],
                         "door_colours_overheads": "Polytec Valla Profile Door in Boston Oak Woodmatt EM0",
                         "door_colours_base": "Polytec Ascot Profile Door in Gossamer White Smooth EM0",
@@ -6699,6 +6833,7 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("2026-03-24 20:00 AEST", response.text)
         self.assertIn("Extraction duration:</strong> 2m 5s", response.text)
         self.assertIn("<strong>Floating Shelf</strong>", response.text)
+        self.assertIn("<strong>Shelf</strong>", response.text)
         self.assertIn("<strong>LED</strong>", response.text)
         self.assertIn("<strong>LED Note</strong>", response.text)
         self.assertIn("LED STRIP LIGHTING - Warm white strip light", response.text)
@@ -6719,6 +6854,7 @@ class SmokeTest(unittest.TestCase):
                     "original_room_label": "KITCHEN",
                     "bench_tops": ["Caesarstone Organic White 20mm with 40mm Double Mitred Pencil Round Edge"],
                     "floating_shelf": "Polytec Boston Oak Woodmatt 33mm pencil round edge",
+                    "shelf": "White Melamine",
                     "door_panel_colours": [],
                     "door_colours_overheads": "Polytec Valla Profile Door in Boston Oak Woodmatt EM0",
                     "door_colours_base": "Polytec Ascot Profile Door in Gossamer White Smooth EM0",
@@ -6763,6 +6899,7 @@ class SmokeTest(unittest.TestCase):
         headers = [cell.value for cell in next(rooms_sheet.iter_rows(min_row=1, max_row=1))]
         self.assertIn("door_colours_tall", headers)
         self.assertIn("floating_shelf", headers)
+        self.assertIn("shelf", headers)
         self.assertIn("led_note", headers)
         self.assertIn("accessories", headers)
         self.assertIn("other_items", headers)
@@ -9528,6 +9665,36 @@ class SmokeTest(unittest.TestCase):
                 "Shower Rail / Rose Shower Screen Shower Screen Colour"
             )
         )
+
+    def test_snapshot_verification_checklist_includes_shelf_field(self) -> None:
+        builder_id = store.create_builder("Yellowwood", "yellowwood", "")
+        job_id = store.create_job("38124", builder_id, "Shelf QA", "")
+        store.upsert_snapshot(
+            job_id,
+            "raw_spec",
+            {
+                "job_no": "38124",
+                "builder_name": "Yellowwood",
+                "source_kind": "spec",
+                "generated_at": "2026-04-04T12:00:00+10:00",
+                "analysis": {"mode": "docling", "parser_strategy": "global_conservative"},
+                "rooms": [
+                    {
+                        "room_key": "bed_2_robe",
+                        "original_room_label": "BED 2 ROBE FIT OUT",
+                        "shelf": "White Melamine",
+                    }
+                ],
+                "appliances": [],
+                "others": {},
+                "warnings": [],
+                "source_documents": [],
+            },
+        )
+        verification = store.get_job_snapshot_verification(job_id, "raw_spec")
+        self.assertIsNotNone(verification)
+        fields = {item["field_name"] for item in verification["checklist"]}
+        self.assertIn("shelf", fields)
 
     def _mark_raw_spec_qa_passed(self, job_id: int) -> None:
         verification = store.get_job_snapshot_verification(job_id, "raw_spec")

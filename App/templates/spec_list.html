@@ -183,6 +183,9 @@
         {% if row.floating_shelf %}
         <div class="room-field-row"><strong>Floating Shelf</strong><span>{{ row.floating_shelf }}</span></div>
         {% endif %}
+        {% if row.shelf %}
+        <div class="room-field-row"><strong>Shelf</strong><span>{{ row.shelf }}</span></div>
+        {% endif %}
         {% if row.show_led %}
         <div class="room-field-row"><strong>LED</strong><span>{{ row.led }}</span></div>
         {% if row.led_note %}
@@ -363,6 +366,17 @@
         <li>{{ item.display_text }}</li>
         {% else %}
         <li class="muted">No bench tops found.</li>
+        {% endfor %}
+      </ul>
+    </article>
+    <article class="summary-card">
+      <h4>{{ material_summary.shelves.label }}</h4>
+      <p class="muted">{{ material_summary.shelves.count }} distinct item{{ "" if material_summary.shelves.count == 1 else "s" }}</p>
+      <ul class="summary-list">
+        {% for item in material_summary.shelves.entries %}
+        <li>{{ item.display_text }}</li>
+        {% else %}
+        <li class="muted">No shelves found.</li>
         {% endfor %}
       </ul>
     </article>

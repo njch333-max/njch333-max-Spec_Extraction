@@ -781,6 +781,7 @@ def _flatten_rooms(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
                 "bulkheads": _display_value(row.get("bulkheads", [])),
                 "handles": _display_value(row.get("handles", [])),
                 "floating_shelf": _display_value(row.get("floating_shelf", "")),
+                "shelf": _display_value(row.get("shelf", "")),
                 "led": "Yes" if str(_display_value(row.get("led", ""))).strip().lower() == "yes" else "No",
                 "show_led": str(_display_value(row.get("led", ""))).strip().lower() == "yes",
                 "led_note": _display_value(row.get("led_note", "")),
@@ -1436,6 +1437,12 @@ def _build_material_summary(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
                 row.get("bench_tops_other", ""),
                 row.get("floating_shelf", ""),
             ],
+            _normalize_benchtop_summary_value,
+        ),
+        "shelves": _material_bucket_with_rooms(
+            "Shelves",
+            rooms,
+            lambda row: [row.get("shelf", "")],
             _normalize_benchtop_summary_value,
         ),
     }

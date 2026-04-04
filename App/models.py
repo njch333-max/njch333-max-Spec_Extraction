@@ -66,6 +66,7 @@ class RoomRow(BaseModel):
     bench_tops_island: str = ""
     bench_tops_other: str = ""
     floating_shelf: str = ""
+    shelf: str = ""
     door_panel_colours: list[str] = Field(default_factory=list)
     door_colours_overheads: str = ""
     door_colours_base: str = ""

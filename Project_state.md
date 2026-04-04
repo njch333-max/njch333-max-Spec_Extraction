@@ -64,7 +64,8 @@
   - orientation-only notes such as `Vertical on Tall doors only` and `Horizontal on all` are now rejected as door-colour material values, so they do not populate `Tall` or `Island`
   - Imperial sink and tap room fields now prefer the builder-specific non-joinery overlay parser over noisier AI fixture guesses when both are present
   - all room cards and exports now support a global `Tall` material field for tall cabinets / tall doors / tall panels when the source provides that split
-  - room cards and exports now also support optional `Floating Shelf`, explicit `LED Yes/No`, dedicated `LED Note`, ordered `Accessories`, and curated accessory `Others` rows
+- room cards and exports now also support optional `Floating Shelf`, conditional `Shelf`, explicit `LED Yes/No`, dedicated `LED Note`, ordered `Accessories`, and curated accessory `Others` rows
+- final room retention is now gated by true material evidence across builders; plumbing-only, flooring-only, handle-only, LED-only, and accessory-only rooms are dropped after builder finalization
   - the raw Spec List summary now shows `Extraction duration`, and `Floating Shelf` materials also contribute to the `Material Summary -> Bench Tops` bucket
   - the Job page temporarily hides the Review cards while the review UX is being redesigned, without removing the backend review model
   - all user-facing timestamps are now rendered in fixed Brisbane time (`YYYY-MM-DD HH:mm AEST`) across job lists, uploads, run history, export tables, and spec-list summary
