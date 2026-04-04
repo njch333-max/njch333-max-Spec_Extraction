@@ -6905,13 +6905,13 @@ def _polish_generic_layout_room(row: dict[str, Any], overlay: dict[str, Any]) ->
     elif overlay.get("handles"):
         polished["handles"] = _merge_generic_handle_entries([], parsing._coerce_string_list(overlay.get("handles", [])))
     if overlay.get("has_accessories_block") and overlay.get("accessories"):
-        polished["accessories"] = list(overlay.get("accessories", []))
+        polished["accessories"] = _merge_list_field(polished.get("accessories", []), overlay.get("accessories", []))
     elif overlay.get("has_accessories_block"):
         polished["accessories"] = []
     elif overlay.get("accessories"):
-        polished["accessories"] = overlay["accessories"]
+        polished["accessories"] = _merge_list_field(polished.get("accessories", []), overlay.get("accessories", []))
     if overlay.get("other_items"):
-        polished["other_items"] = overlay["other_items"]
+        polished["other_items"] = parsing._merge_other_items(polished.get("other_items", []), overlay.get("other_items", []))
     if overlay.get("has_sink_block") and overlay.get("sink_info"):
         polished["sink_info"] = overlay.get("sink_info", "")
     elif overlay.get("has_sink_block") and (

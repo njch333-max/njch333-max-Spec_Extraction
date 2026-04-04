@@ -8221,6 +8221,37 @@ class SmokeTest(unittest.TestCase):
             ],
         )
 
+    def test_shared_generic_polish_merges_existing_yellowwood_bath_items_with_overlay(self) -> None:
+        row = {
+            "room_key": "bathroom",
+            "original_room_label": "BATHROOM VANITY",
+            "other_items": [
+                {"label": "BATH", "value": "Eden Freestanding Back to Wall Bath with Overflow Gloss White"},
+                {"label": "BATH MIXER", "value": "Spin Mixer Set Chrome Highgrove"},
+                {"label": "BATH SPOUT", "value": "Spin In Wall Bath Spout 220mm Chrome Highgrove"},
+                {"label": "BATH WASTE", "value": "Turn Down waste Without Overflow Chrome 40x60mm Highgrove"},
+            ],
+            "accessories": ["Toilet Roll Holder - Spin Toilet Roll Holder Chrome Highgrove"],
+        }
+        overlay = {
+            "other_items": [{"label": "Shower Mixer", "value": "Spin Mixer Set Chrome Highgrove"}],
+            "has_accessories_block": True,
+            "accessories": ["Towel Rail - Spin Double Towel Rail Chrome 600mm Highgrove"],
+        }
+        polished = extraction_service._polish_generic_layout_room(row, overlay)
+        other_labels = {item["label"] for item in polished["other_items"]}
+        self.assertEqual(
+            other_labels,
+            {"BATH", "BATH MIXER", "BATH SPOUT", "BATH WASTE", "Shower Mixer"},
+        )
+        self.assertEqual(
+            polished["accessories"],
+            [
+                "Toilet Roll Holder - Spin Toilet Roll Holder Chrome Highgrove",
+                "Towel Rail - Spin Double Towel Rail Chrome 600mm Highgrove",
+            ],
+        )
+
     def test_shared_generic_polish_clears_noisy_fixture_fields_when_layout_blocks_exist(self) -> None:
         row = {
             "room_key": "kitchen",

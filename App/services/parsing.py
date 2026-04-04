@@ -6802,6 +6802,43 @@ def _build_yellowwood_overlay_text(
     return "\n".join(page_texts)
 
 
+def _build_yellowwood_overlay_lines(
+    document: dict[str, object],
+    page_filter: Callable[[str], bool] | None = None,
+) -> list[str]:
+    lines: list[str] = []
+    for page in sorted(document.get("pages", []), key=lambda item: int(item.get("page_no", 0) or 0)):
+        text = str(page.get("raw_text") or page.get("text") or "")
+        if not text or _yellowwood_looks_like_contents_noise(text):
+            continue
+        upper = text.upper()
+        if page_filter and not page_filter(upper):
+            continue
+        cleaned = _clean_yellowwood_overlay_source_text(text)
+        if not cleaned:
+            continue
+        lines.extend(normalize_space(line) for line in cleaned.splitlines() if normalize_space(line))
+    return lines
+
+
+def _extract_area_block_from_lines(lines: list[str], area_pattern: str, header_patterns: tuple[str, ...]) -> str:
+    if not lines:
+        return ""
+    start_index = -1
+    for index, line in enumerate(lines):
+        if re.fullmatch(rf"(?i){area_pattern}", line):
+            start_index = index
+            break
+    if start_index < 0:
+        return ""
+    collected: list[str] = []
+    for line in lines[start_index + 1 :]:
+        if any(re.fullmatch(rf"(?i){pattern}", line) for pattern in header_patterns):
+            break
+        collected.append(line)
+    return normalize_space(" ".join(collected))
+
+
 def _collect_yellowwood_flooring_overlays(
     overlays: dict[str, dict[str, Any]],
     documents: list[dict[str, object]],
@@ -6878,6 +6915,14 @@ def _collect_yellowwood_fixture_overlays(
         r"KITCHEN",
         r"APPLIANCES",
     )
+    area_headers = (
+        r"BED\s*1\s+ENSUITE",
+        r"BATHROOM",
+        r"WC",
+        r"LAUNDRY",
+        r"KITCHEN",
+        r"APPLIANCES",
+    )
     bath_stops = (
         r"Bath Waste",
         r"Bath Mixer",
@@ -6931,23 +6976,23 @@ def _collect_yellowwood_fixture_overlays(
         r"Shower Floor Waste",
     )
     for document in documents:
-        combined_text = _build_yellowwood_overlay_text(
+        combined_lines = _build_yellowwood_overlay_lines(
             document,
             page_filter=lambda upper: (
                 "BATHWARE & FIXTURES" in upper
-                or "BATH " in upper
+                or "SINK MIXER" in upper
+                or "BASIN WASTE" in upper
+                or "TOILET ROLL HOLDER" in upper
+                or "SHOWER FLOOR WASTE" in upper
                 or "BATH MIXER" in upper
                 or "BATH SPOUT" in upper
                 or "BATH WASTE" in upper
-                or "BASIN " in upper
-                or "SHOWER " in upper
-                or "TOILET " in upper
             ),
         )
-        if not combined_text:
+        if not combined_lines:
             continue
         for area_pattern, room_key in area_targets:
-            block = _extract_area_block_from_text(combined_text, area_pattern, area_stops)
+            block = _extract_area_block_from_lines(combined_lines, area_pattern, area_headers)
             if not block:
                 continue
             overlay = overlays.setdefault(room_key, _blank_overlay())
