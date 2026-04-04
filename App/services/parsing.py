@@ -7365,7 +7365,12 @@ def _finalize_grouped_row_builder_rooms(
     overlays: dict[str, dict[str, Any]],
     documents: list[dict[str, object]],
 ) -> None:
-    return
+    grouped_splashback = _extract_grouped_builder_splashback_value(documents)
+    for row in rooms:
+        _remove_duplicate_benchtop_other_parts(row)
+        room_key = normalize_room_key(str(row.get("room_key", "") or ""))
+        if grouped_splashback and room_key in {"kitchen", "laundry"} and not normalize_space(str(row.get("splashback", "") or "")):
+            row["splashback"] = grouped_splashback
 
 
 def _yellowwood_row_probe_text(row: dict[str, Any]) -> str:
@@ -7532,6 +7537,30 @@ def _yellowwood_cleanup_handles(row: dict[str, Any]) -> list[str]:
 
 
 def _yellowwood_remove_island_duplication(row: dict[str, Any]) -> None:
+    wall_run = normalize_space(str(row.get("bench_tops_wall_run", "") or ""))
+    island = normalize_space(str(row.get("bench_tops_island", "") or ""))
+    other = normalize_space(str(row.get("bench_tops_other", "") or ""))
+    if not other:
+        return
+    protected_signatures = {
+        _material_signature(normalize_space(re.sub(r"(?i)^only\s+", "", value)))
+        for value in (wall_run, island)
+        if normalize_space(re.sub(r"(?i)^only\s+", "", value))
+    }
+    protected_values = [value for value in (wall_run, island) if value]
+    parts = [normalize_space(part) for part in other.split("|") if normalize_space(part)]
+    kept: list[str] = []
+    for part in parts:
+        part_probe = normalize_space(re.sub(r"(?i)^only\s+", "", part))
+        if any(value.lower() in part.lower() for value in protected_values):
+            continue
+        if protected_signatures and _material_signature(part_probe) in protected_signatures:
+            continue
+        kept.append(part)
+    row["bench_tops_other"] = " | ".join(_unique(kept))
+
+
+def _remove_duplicate_benchtop_other_parts(row: dict[str, Any]) -> None:
     wall_run = normalize_space(str(row.get("bench_tops_wall_run", "") or ""))
     island = normalize_space(str(row.get("bench_tops_island", "") or ""))
     other = normalize_space(str(row.get("bench_tops_other", "") or ""))
@@ -9162,9 +9191,43 @@ def _clean_handle_entries(values: list[str]) -> list[str]:
             merged_fragments.append(normalize_space(f"{entry.rstrip()}{filtered[index + 1]}"))
             index += 2
             continue
-        merged_fragments.append(entry)
+        merged_fragments.append(_repair_handle_fragment(entry))
         index += 1
     return _unique(merged_fragments)
+
+
+def _repair_handle_fragment(value: str) -> str:
+    text = normalize_space(str(value or ""))
+    if not text:
+        return ""
+    if re.search(r"(?i)\(laid vertical to doors\s*&\s*horizontal to$", text):
+        return f"{text} Drawers)"
+    if re.search(r"(?i)\bhorizontal to$", text):
+        return f"{text} Drawers)"
+    return text
+
+
+def _extract_grouped_builder_splashback_value(documents: list[dict[str, object]]) -> str:
+    combined_pages: list[str] = []
+    for document in documents:
+        for page in sorted(document.get("pages", []), key=lambda item: int(item.get("page_no", 0) or 0)):
+            text = normalize_space(str(page.get("raw_text") or page.get("text") or ""))
+            if not text:
+                continue
+            if "KITCHEN & LAUNDRY SPLASHBACK" in text.upper():
+                combined_pages.append(text)
+    if not combined_pages:
+        return ""
+    combined = normalize_space(" ".join(combined_pages))
+    match = re.search(
+        r"(?is)\bKitchen\s*&\s*Laundry\s+Splashback\s+(?P<value>.+?)\s+(?:Bathroom\s+Full\s+Height\s+Wall\s+Tiles|Ensuite\s+Full\s+Height\s+Wall\s+Tiles|Page\s+\d+\s+of\s+\d+|$)",
+        combined,
+    )
+    if not match:
+        return ""
+    value = normalize_space(match.group("value"))
+    value = re.sub(r"(?i)\bNot Applicable\b.*$", "", value).strip(" -;,")
+    return value
 
 
 def _clean_accessory_entries(values: list[str]) -> list[str]:

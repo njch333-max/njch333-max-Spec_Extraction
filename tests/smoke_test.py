@@ -9752,6 +9752,43 @@ class SmokeTest(unittest.TestCase):
             "Spin Gun Metal Tall Basin Mixer (SP110-GM) - Centre of Basin",
         )
 
+    def test_remove_duplicate_benchtop_other_parts(self) -> None:
+        row = {
+            "bench_tops_wall_run": "20mm Quantum Quartz - Champagne - Arissed",
+            "bench_tops_island": "40mm Quantum Quartz - Champagne - Arissed",
+            "bench_tops_other": "20mm Quantum Quartz - Champagne - Arissed | 40mm Quantum Quartz - Champagne - Arissed",
+        }
+        parsing_module._remove_duplicate_benchtop_other_parts(row)
+        self.assertEqual(row["bench_tops_other"], "")
+
+    def test_repair_handle_fragment_restores_drawers_suffix(self) -> None:
+        self.assertEqual(
+            parsing_module._repair_handle_fragment(
+                "C79 Mainz Cabinet 128mm Polished Stainless Steel (Laid Vertical to Doors & Horizontal to"
+            ),
+            "C79 Mainz Cabinet 128mm Polished Stainless Steel (Laid Vertical to Doors & Horizontal to Drawers)",
+        )
+
+    def test_extract_grouped_builder_splashback_value(self) -> None:
+        documents = [
+            {
+                "pages": [
+                    {
+                        "page_no": 15,
+                        "text": (
+                            "23 TILING / HARD FLOORING "
+                            "Kitchen & Laundry Splashback Champagne Quantum Zero Stone Splashback "
+                            "Bathroom Full Height Wall Tiles No (Builders Standard Height)"
+                        ),
+                    }
+                ]
+            }
+        ]
+        self.assertEqual(
+            parsing_module._extract_grouped_builder_splashback_value(documents),
+            "Champagne Quantum Zero Stone Splashback",
+        )
+
     def test_clean_room_fixture_text_strips_shower_screen_and_pop_up_tail_from_basin_mixer(self) -> None:
         self.assertEqual(
             parsing_module._clean_room_fixture_text(
