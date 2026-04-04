@@ -7597,6 +7597,8 @@ def _yellowwood_normalize_vanity_material_fields(row: dict[str, Any]) -> None:
         row["bench_tops_other"] = " | ".join(_unique([part for part in benchtop_parts if part]))
         for vanity_value in _unique(vanity_parts):
             row["door_colours_base"] = _merge_clean_group_text(row.get("door_colours_base", ""), vanity_value, cleaner=_clean_door_colour_value)
+        row["bench_tops"] = _rebuild_benchtop_entries(row)
+        row["door_panel_colours"] = _rebuild_door_panel_colours(row)
     toe_kick_values = []
     for value in _coerce_string_list(row.get("toe_kick", [])):
         cleaned = normalize_space(value)
@@ -8113,6 +8115,8 @@ def _has_joinery_material_keyword(text: str) -> bool:
 def _extract_explicit_shelf_material_from_text(text: Any) -> str:
     normalized = normalize_space(text)
     if not normalized:
+        return ""
+    if re.search(r"(?i)\bno\s+shelf(?:ing)?\b", normalized):
         return ""
     lowered = normalized.lower()
     if "floating shelf" in lowered or "floating shelving" in lowered:
@@ -9200,6 +9204,8 @@ def _clean_door_colour_value(value: Any) -> str:
     if re.fullmatch(r"(?i)(?:not applicable|n/?a)(?:\s+manufacturer)?(?:\s+colour\s*&\s*finish)?", text.strip(" -;,") or ""):
         return ""
     text = normalize_brand_casing_text(text)
+    text = re.sub(r"(?i)\bManufacturer\b\s+", "", text)
+    text = re.sub(r"(?i)\bColour\s*&\s*Finish\b\s+", "", text)
     text = re.sub(r"[每]+", " ", text)
     text = re.sub(r"(?<=\w)\?(?=\w)", " ", text)
     text = re.sub(r"(?<=\w)\s*[^\w\s/&()'.,:-]+\s*(?=\w)", " ", text)
@@ -9811,10 +9817,34 @@ def _trim_fixture_text_at_markers(text: str, markers: tuple[str, ...]) -> str:
     return trimmed.strip(" -;,")
 
 
+def _strip_grouped_fixture_property_noise(text: str) -> str:
+    parts = _split_group_entries(text)
+    if not parts:
+        return normalize_space(text).strip(" -;,#")
+    cleaned_parts: list[str] = []
+    for part in parts:
+        probe = normalize_space(part)
+        if not probe:
+            continue
+        if re.match(r"(?i)^#\s*$", probe):
+            continue
+        probe = re.sub(r"(?i)\bManufacturer\b\s+", "", probe)
+        probe = re.sub(r"(?i)\bColour\s*&\s*Finish\b\s+", "", probe)
+        probe = re.sub(r"(?i)^(?:Model|Type|Range|Profile)\b\s+", "", probe)
+        probe = re.sub(r"(?i)\bLocation\b\s+", "", probe)
+        probe = re.sub(r"(?i)\b(?:Model|Type|Range|Profile)\b(?:\s*#)?\s*$", "", probe)
+        probe = normalize_space(probe).strip(" -;,#")
+        if not probe:
+            continue
+        cleaned_parts.append(probe)
+    return _collapse_pipe_text_variants(" | ".join(cleaned_parts))
+
+
 def _clean_room_fixture_text(value: Any, kind: str) -> str:
     text = _clean_fixture_text(value)
     if not text:
         return ""
+    text = _strip_grouped_fixture_property_noise(text)
     text = re.sub(r"(?i)\bonly\s+refer\s+to\s+[\"“”'`]?plumbing[\"“”'`]? section below\b", "", text)
     text = normalize_space(re.sub(r"(?i)\bn/?a\b", "", text)).strip(" -;,")
     if not text:
@@ -9852,11 +9882,11 @@ def _clean_room_fixture_text(value: Any, kind: str) -> str:
     if kind == "sink":
         if re.match(r"(?i)^(?:sink mixer|pull-?out mixer|basin mixer|mixer)\b", text):
             return ""
-        text = _trim_fixture_text_at_markers(text, wet_area_tail_markers + (r"\bBath\b",))
+        text = _trim_fixture_text_at_markers(text, wet_area_tail_markers + (r"\bBath\b", r"\bTapware\b", r"\b(?:Sink\s+)?Mixer\b"))
     elif kind == "basin":
         if re.match(r"(?i)^(?:waste\b|pop up waste\b|bottle trap\b|mixer\b|sink mixer\b|pull-?out mixer\b|tap\b)", text):
             return ""
-        text = _trim_fixture_text_at_markers(text, wet_area_tail_markers + (r"\bBath\b",))
+        text = _trim_fixture_text_at_markers(text, wet_area_tail_markers + (r"\bBath\b", r"\b(?:Sink\s+)?Mixer\b"))
         if text.lower().endswith(" basin") and " basin " in text[:-6].lower():
             text = text[:-6].rstrip(" -;,")
     elif kind == "tap":

@@ -4026,6 +4026,14 @@ class SmokeTest(unittest.TestCase):
             "White Melamine",
         )
 
+    def test_extract_explicit_shelf_material_ignores_no_shelf_underbench_noise(self) -> None:
+        self.assertEqual(
+            parsing_module._extract_explicit_shelf_material_from_text(
+                "No shelf to cupboard underneath trough & washing machine taps located inside cupboards Manufacturer Quantum Quartz Colour Champagne"
+            ),
+            "",
+        )
+
     def test_promote_conditional_shelf_field_drops_prepopulated_handle_noise(self) -> None:
         row = {
             "room_key": "kitchen",
@@ -4105,6 +4113,10 @@ class SmokeTest(unittest.TestCase):
         row = {
             "room_key": "bathroom_vanity",
             "original_room_label": "BATHROOM VANITY",
+            "bench_tops": [
+                "20mm YDL Classic White Polished",
+                "20mm YDL Classic White Polished Wall Hung Vanity Polytec Jamaican Walnut Matt (Vertical Grain Direction)",
+            ],
             "bench_tops_other": (
                 "20mm YDL Classic White Polished | "
                 "20mm YDL Classic White Polished Wall Hung Vanity Polytec Jamaican Walnut Matt (Vertical Grain Direction)"
@@ -4115,6 +4127,8 @@ class SmokeTest(unittest.TestCase):
         parsing_module._yellowwood_normalize_vanity_material_fields(row)
         self.assertEqual(row["bench_tops_other"], "20mm YDL Classic White Polished")
         self.assertEqual(row["door_colours_base"], "Polytec Jamaican Walnut Matt (Vertical Grain Direction)")
+        self.assertEqual(row["bench_tops"], ["20mm YDL Classic White Polished"])
+        self.assertEqual(row["door_panel_colours"], ["Polytec Jamaican Walnut Matt (Vertical Grain Direction)"])
 
     def test_yellowwood_filter_other_items_drops_plumbing_noise_for_pantry_fitout_rooms(self) -> None:
         row = {
@@ -4303,6 +4317,12 @@ class SmokeTest(unittest.TestCase):
         }
         parsing_module._clear_room_specific_splashback_notes(snapshot)
         self.assertEqual(snapshot["others"]["splashback_notes"], "")
+
+    def test_clean_door_colour_value_strips_grouped_property_labels(self) -> None:
+        self.assertEqual(
+            parsing_module._clean_door_colour_value("Manufacturer Polytec Colour & Finish Belgian Oak Matt"),
+            "Polytec Belgian Oak Matt",
+        )
 
     def test_yellowwood_normalize_kitchen_material_fields_promotes_wall_run_and_fills_overheads(self) -> None:
         row = {
@@ -9691,6 +9711,22 @@ class SmokeTest(unittest.TestCase):
                 "tap",
             ),
             "Alder - Samm - Wall Basin/Bath Mixer Set Backplate - 220mm - Matt Black",
+        )
+
+    def test_clean_room_fixture_text_strips_grouped_property_segments_from_sink_and_tap(self) -> None:
+        self.assertEqual(
+            parsing_module._clean_room_fixture_text(
+                "Burazzo 450mm Gun Metal Single Bowl Sink (BU454525S-GM) ($370) | Model Burazzo 450mm Gun Metal Single Bowl Sink (BU454525S-GM) ($370) Type #",
+                "sink",
+            ),
+            "Burazzo 450mm Gun Metal Single Bowl Sink (BU454525S-GM) ($370)",
+        )
+        self.assertEqual(
+            parsing_module._clean_room_fixture_text(
+                "Zara Gun Metal Pull-Out (ZA120-GM) - Centre of Sink | Type Zara Gun Metal Pull-Out (ZA120-GM) Location Centre of Sink",
+                "tap",
+            ),
+            "Zara Gun Metal Pull-Out (ZA120-GM) - Centre of Sink",
         )
 
     def test_clean_room_fixture_text_prefers_basin_mixer_over_blacklisted_in_wall_mixer_prefix(self) -> None:
