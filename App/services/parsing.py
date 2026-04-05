@@ -10739,7 +10739,7 @@ def _clean_room_fixture_text(value: Any, kind: str) -> str:
                 else:
                     text = normalize_space(text[basin_mixer_match.start() :])
                 basin_bath_combo = bool(re.search(r"(?i)\b(?:wall\s+)?basin\s*/\s*bath mixer\b", text))
-        tap_markers: list[str] = list(wet_area_tail_markers)
+        tap_markers: list[str] = [marker for marker in wet_area_tail_markers if marker != r"\bHandle\b"]
         if not basin_bath_combo:
             tap_markers.append(r"\bBath\b")
         text = _trim_fixture_text_at_markers(

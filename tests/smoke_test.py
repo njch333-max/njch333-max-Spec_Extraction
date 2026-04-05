@@ -10174,6 +10174,15 @@ class SmokeTest(unittest.TestCase):
             "Alder - Samm - Wall Basin/Bath Mixer Set Backplate - 220mm - Matt Black",
         )
 
+    def test_clean_room_fixture_text_preserves_twin_handle_sink_mixer_wording(self) -> None:
+        self.assertEqual(
+            parsing_module._clean_room_fixture_text(
+                "Phoenix Nostalgia Twin Handle Sink Mixer 230mm Shepherds Crook NS714-62 Chrome & White",
+                "tap",
+            ),
+            "Phoenix Nostalgia Twin Handle Sink Mixer 230mm Shepherds Crook NS714-62 Chrome & White",
+        )
+
     def test_clean_room_fixture_text_strips_grouped_property_segments_from_sink_and_tap(self) -> None:
         self.assertEqual(
             parsing_module._clean_room_fixture_text(
