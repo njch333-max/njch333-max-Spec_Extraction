@@ -99,6 +99,7 @@
   - deterministic post-polish prefers `raw_text` over vision-normalized `text`
   - AFC `CARPET & MAIN FLOOR TILE` pages now act as room-local flooring overlays for existing master rooms such as `KITCHEN`, `BUTLERS PANTRY`, `THEATRE ROOM`, and `RUMPUS ROOM`
   - Clarendon flooring overlay is strict-PDF-only: broad AFC labels such as `WIL/Linen/s Ground Floor` must not be inferred back into `LAUNDRY`
+  - Clarendon fixture cleanup must preserve full tap wording when the source contains valid names such as `Twin Handle Sink Mixer`; generic wet-area cleanup markers must not truncate legitimate tap model text
 12. Yellowwood-specific behavior:
   - uses selective Docling for grouped schedule/table pages
   - preserves the more specific spec-title room names such as `PANTRY`, `BED 1 MASTER ENSUITE VANITY`, `GROUND FLOOR POWDER ROOM`, `UPPER-LEVEL POWDER ROOM`, `BED 1 MASTER WALK IN ROBE FIT OUT`, and `BED 2/3/4/5 ROBE FIT OUT`
@@ -139,6 +140,7 @@
   - prefer builder-specific Imperial sink/tap overlay text over noisier AI fixture guesses when both are present
   - emit non-room sections such as `FEATURE TALL DOORS` into `special_sections[]` instead of merging them into nearby room cards
   - recover delayed Imperial handle lines that appear later in the same section while rejecting adjacent cabinet-colour rows as handle noise
+  - semantic sinkware parsing now ignores unrelated pre-heading basin/tub noise, keeps `UNDERMOUNT` / similar mounting suffixes attached to the correct sink item, and shares generic taphole notes only across the relevant sink cluster
 14. Apply the fixed global cleaning rules after heuristic parsing, builder-finalizer cleanup, Imperial section parsing, and row-local field reconstruction so brand casing, door-colour cleanup, kitchen-only bench-top splitting, tall-cabinet capture, and soft-close normalization stay consistent across all builders.
 15. Record analysis metadata in the snapshot: parser strategy, layout metadata, runtime identifiers, Docling metadata, and whether any manual OpenAI stage was attempted.
 16. Normalize drawer and hinge states to `Soft Close`, `Not Soft Close`, or blank.

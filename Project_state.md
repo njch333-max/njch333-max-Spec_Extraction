@@ -138,12 +138,16 @@
 - The production stack is running through `nginx + systemd + uvicorn`, with `spec-extraction-web.service` and `spec-extraction-worker.service` active on the server.
 - HTTPS for `spec.lxtransport.online` is now issued by Certbot and terminates correctly at Nginx.
 - The current live PDF QA state for the active 11-job regression matrix is:
-  - `passed`: `job 24`, `job 34`, `job 37`, `job 38`, `job 39`
-  - `failed`: `job 1`, `job 19`, `job 23`, `job 25`, `job 35`, `job 36`
-- The latest Yellowwood/Evoca live reruns now also include:
+  - `passed`: `job 1`, `job 19`, `job 23`, `job 24`, `job 25`, `job 34`, `job 35`, `job 36`, `job 37`, `job 38`, `job 39`
+- The latest live reruns now also include:
   - Yellowwood kitchen `Shelf` is suppressed unless the same room has explicit shelf-source wording
   - Yellowwood handle strings with a prefixed pantry/base note are reformatted into a cleaner handle value instead of leaving the note in front of the model
   - grouped-row builders such as Evoca now re-run benchtop-other dedupe after display cleaning, preventing wall-run/island values from being reintroduced into `bench_tops_other`
+  - Clarendon `door_colours_overheads` is recovered when the schedule explicitly labels upper/overhead cabinetry, without leaking generic door colour into `Overheads`
+  - Clarendon tap cleanup preserves full source wording such as `Twin Handle Sink Mixer` instead of truncating valid model names at the word `Handle`
+  - Imperial appliance dedupe now keeps `N / A - By others` dishwasher placeholders and merges make-bearing/noisy oven rows into clean `Westinghouse + WVE6516DD` output
+  - Imperial sinkware semantic parsing now keeps laundry / powder / ensuite ownership separated while preserving sink mounting details such as `UNDERMOUNT`
+  - Simonds grouped-row recovery now restores clean benchtop/shelf/sink/tap/handle values for `Study`, `Butlers/WIP`, `Laundry`, `Bathroom`, `Powder`, and `Rumpus`
 
 ## Current Goals
 1. Keep Builder and Job flows stable while iterating extraction quality
@@ -176,21 +180,17 @@
 - Improve room-section detection for more builder formats
 - Improve official product URL lookup accuracy, size extraction coverage, and brand coverage
 - Continue checking the new `LED Note` rollout on live reruns so true LED evidence such as `LED STRIP LIGHTING`, `LED LIGHTING`, or `LED's As per drawings` lands on the right room without reintroducing false positives from sinkware noise such as `LED Topmount` or `LED UNDERMOUTNED`
-- Complete the active 5-builder core / 10-job PDF-QA matrix:
+- Keep the active 5-builder core / 11-job PDF-QA matrix green after future parser changes:
   - `Clarendon`: `job 1`, `job 23`, `job 25`
-  - `Yellowwood`: `job 37`
+  - `Yellowwood`: `job 24`, `job 37`
   - `Imperial`: `job 34`, `job 35`, `job 36`, `job 38`
   - `Simonds`: `job 19`
   - `Evoca`: `job 39`
-- Continue checking the latest Clarendon and Yellowwood reruns against source PDF and only mark PDF QA `passed` when the current live snapshot fully matches the source pages
-- Continue validating the new Clarendon and Yellowwood flooring overlays against source PDF so `job 1`, `job 23`, and `job 37` room-level flooring lands on the correct retained rooms
 - Continue validating the new builder-finalizer split on Yellowwood-heavy grouped schedule jobs such as `job 24`, especially pantry/WIP suppression, robe-fit-out title preservation, powder-room separation, kitchen plumbing reinjection, and vanity-room plumbing cleanup
 - Continue tightening noisy field cleanup inside the fixed global conservative profile without reintroducing per-builder configuration
-- Continue tightening Clarendon field wording so kitchen/bathroom/laundry text stays close to the accepted `37016` readability standard without relying on manual snapshot restores or fixed room buckets
-- Continue removing residual Clarendon appliance/master OCR noise from jobs such as `job 1`, and continue merging multiline handle descriptions more cleanly on jobs such as `job 23`
 - Continue tightening grouped-room door-colour logic so `Vanities` only shows `Overheads` when the authoritative room section explicitly labels overhead cabinetry
 - Continue tightening supplement-file room mapping so only clearly related fixture pages enrich grouped rooms while unrelated finish/glazing notes stay ignored
-- Continue refining Imperial field cleanup for non-kitchen sections so `BAR`, `LAUNDRY`, and `BATH + ENSUITE` match the same high-confidence row-boundary quality as `KITCHEN`
+- Continue refining Imperial field cleanup for non-kitchen sections so `BAR`, `LAUNDRY`, and `BATH + ENSUITE` stay at the same high-confidence row-boundary quality as `KITCHEN`
 - Continue validating Imperial title/body preservation on more templates where the extracted title appears after the body text in PDF reading order
 - Extend deterministic model-page probing beyond the currently supported appliance brand patterns
 - Expand model-number coverage for more appliance naming patterns beyond the current explicit rules

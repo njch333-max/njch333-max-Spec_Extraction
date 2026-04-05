@@ -1554,9 +1554,10 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(appliances["Rangehood"]["model_no"], "GG-6C")
         self.assertEqual(appliances["Cooktop"]["make"], "Westinghouse")
         self.assertEqual(appliances["Cooktop"]["model_no"], "WHI643BE")
+        self.assertEqual(appliances["Oven"]["make"], "Westinghouse")
         self.assertEqual(appliances["Oven"]["model_no"], "WVE6516DD")
-        if dishwasher_rows:
-            self.assertEqual(dishwasher_rows[0]["model_no"], "N / A - By others")
+        self.assertEqual(len(dishwasher_rows), 1)
+        self.assertEqual(dishwasher_rows[0]["model_no"], "N / A - By others")
 
     def test_clarendon_reference_polish_rebuilds_clean_room_fields(self) -> None:
         snapshot = {

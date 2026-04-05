@@ -6650,10 +6650,14 @@ def _looks_like_appliance_placeholder_model(text: str) -> bool:
     lowered = normalize_space(text).lower()
     if not lowered:
         return False
+    compact = re.sub(r"[\s/.-]+", "", lowered)
+    if compact.startswith("na") and "byothers" in compact:
+        return True
     return any(
         token in lowered
         for token in (
             "n/a",
+            "n / a",
             "as above",
             "by client",
             "client to check",
@@ -6662,6 +6666,19 @@ def _looks_like_appliance_placeholder_model(text: str) -> bool:
             "by builder",
         )
     )
+
+
+def _appliance_model_suffix_candidate(text: str) -> str:
+    model = normalize_space(str(text or "")).strip(" -;,").upper()
+    if not model:
+        return ""
+    match = re.search(r"\b([A-Z]{1,4}\d[A-Z0-9-]{2,})\b$", model)
+    if not match:
+        return ""
+    candidate = match.group(1).upper()
+    if _valid_model_candidate(candidate, allow_numeric=True):
+        return candidate
+    return ""
 
 
 def _looks_like_noisy_appliance_model(text: str, appliance_type: str = "") -> bool:
@@ -10788,6 +10805,45 @@ def _dedupe_appliances(rows: list[ApplianceRow]) -> list[ApplianceRow]:
                 inferred_make = model_to_make.get(row.model_no.lower(), "")
                 if inferred_make:
                     row.make = inferred_make
+    typed_source_make_options: dict[tuple[str, str], set[str]] = {}
+    for row in result:
+        if not row.source_file or not row.appliance_type or not row.make:
+            continue
+        key = (row.source_file.lower(), row.appliance_type.lower())
+        typed_source_make_options.setdefault(key, set()).add(row.make)
+    typed_source_single_make = {
+        key: next(iter(makes))
+        for key, makes in typed_source_make_options.items()
+        if len(makes) == 1
+    }
+    typed_source_explicit_make = {
+        (row.source_file.lower(), row.appliance_type.lower(), explicit_model.lower()): row.make
+        for row in result
+        if row.source_file
+        and row.appliance_type
+        and row.make
+        and (
+            explicit_model := (
+                _extract_explicit_appliance_model(row.evidence_snippet or "")
+                or _appliance_model_suffix_candidate(row.model_no)
+            )
+        )
+    }
+    if typed_source_explicit_make:
+        for row in result:
+            if row.make or not row.source_file or not row.appliance_type or not row.model_no:
+                continue
+            inferred_make = typed_source_explicit_make.get(
+                (row.source_file.lower(), row.appliance_type.lower(), row.model_no.lower()),
+                "",
+            )
+            if not inferred_make:
+                inferred_make = typed_source_single_make.get(
+                    (row.source_file.lower(), row.appliance_type.lower()),
+                    "",
+                )
+            if inferred_make:
+                row.make = inferred_make
     typed_make_with_model = {
         (row.appliance_type.lower(), row.make.lower())
         for row in result

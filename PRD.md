@@ -102,6 +102,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Clarendon polish and address extraction must prefer `raw_text` from the source PDF whenever it is present; vision-normalized `text` is only a fallback and must not erase schedule-note fields such as `KICKBOARDS`, `BULKHEAD SHADOWLINE`, `HANDLE 1/2`, `DOOR HINGES`, or `DRAWER RUNNERS`.
 - Clarendon address extraction must use page-header stop markers so `Site Address:` lines do not absorb nearby joinery body text such as `BENCHTOP`, `DOOR COLOUR`, `HANDLE`, or `THERMOLAMINATE NOTES`.
 - Clarendon AFC pages such as `CARPET & MAIN FLOOR TILE` must be parsed as room-local flooring overlays. Their area labels should enrich only clearly matching master rooms like `KITCHEN`, `BUTLERS PANTRY`, `THEATRE ROOM`, and `RUMPUS ROOM` without creating synthetic AFC-only rooms or inferred `LAUNDRY` flooring from broad labels such as `WIL/Linen/s Ground Floor`.
+- Clarendon fixture cleanup must preserve legitimate tap wording such as `Twin Handle Sink Mixer`; generic wet-area cleanup markers must not truncate valid tap model names just because they contain words like `Handle`.
 - Appliance parsing must prefer explicit `model_no` values from labeled rows or table columns and must not use brand-only words or generic notes as model numbers.
 - Appliance placeholders such as `As Above`, `By Client`, `N/A - By others`, or `N/A CLIENT TO CHECK` should keep their source wording, but placeholder-only rows should be deduplicated away when the same source file already contains a concrete model for that appliance type.
 - Sink, basin, and tap selections must be captured as room-level fixture fields instead of appliance rows.
@@ -145,6 +146,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Imperial continuation must also stop when a later page switches into non-joinery full-page headings such as `APPLIANCES` or `SINKWARE & TAPWARE`.
 - Imperial-style non-room sections such as `FEATURE TALL DOORS` must be preserved separately from rooms and must never be merged into the surrounding kitchen or pantry room output.
 - Imperial accessory lists must be deduplicated within the same room so repeated `Accessories` rows do not render multiple times with the same value.
+- Imperial sinkware semantic parsing must ignore unrelated pre-heading basin/tub noise, keep mounting suffixes such as `UNDERMOUNT` attached to the correct sink row, and apply generic taphole notes to the correct sink cluster without cross-room leakage.
 - Orientation-only notes such as `Vertical on Tall doors only` or `Horizontal on all` must not be treated as room-material values.
 - Imperial fixture overlay pages should be preferred over AI guesses for sink, basin, and tap text whenever the builder-specific overlay parser can read a cleaner local value.
 - Under the conservative merge profile, accessory lists and door-colour subgroup values should prefer clean heuristic output over noisier AI-only guesses when the AI result appears to come from another row or section.
