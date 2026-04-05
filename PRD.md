@@ -138,7 +138,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - For Yellowwood vanity rooms, wet-area plumbing enrichment must stay room-relevant: only `Basin`, `Basin Mixer`, `Flooring`, and joinery/material fields may survive. Blacklisted wet-area items such as towel rails, toilet-roll holders, toilets, shower items, bath items, floor waste, basin waste, and bottle traps must be removed from final room output.
 - For Yellowwood, non-wet-area `FLOORING` pages and wet-area `TILING SCHEDULE` pages must enrich the retained room cards as room-local overlays. Room flooring should land on `Kitchen`, robe rooms, and vanity rooms when the schedule area labels match, and contents-page flooring lines must never populate `others.flooring_notes`.
 - For Yellowwood kitchens, builder-specific finalization must keep wall-run, island, and other benchtops separate, preserve `Overhead Cupboards`, treat `*To Bulkhead*` text as a note rather than a bulkhead material value, and repopulate kitchen `Sink` / `Tap` from the plumbing overlay when the joinery page itself is sparse.
-- Imperial-style joinery selection sheets must use page-top section titles as authoritative section boundaries, keep continuation pages with the current section until the next section title, and stop extraction at `CLIENT NAME / SIGNATURE / SIGNED DATE` footer blocks.
+- Imperial-style joinery selection sheets must use page-top section titles as authoritative section boundaries, keep continuation pages with the current section until the next section title, and stop extraction at footer section-break markers such as `CLIENT NAME / SIGNATURE / SIGNED DATE`, their glued variants like `CLIENT NAME: SIGNATURE: SIGNED DATE:` or `CLIENTNAMESIGNATURESIGNEDDATE`, and related footer noise such as `NOTESSUPPLIER`.
 - Imperial section parsing must treat obvious in-section row labels such as `ISLAND CABINETRY COLOUR`, `GPO'S`, `BIN`, `HAMPER`, `HANGING RAIL`, `MIRRORED SHAVING CABINET`, and `EXTRA TOP IN ...` as row boundaries even when they are not final business fields, so preceding benchtop, floating-shelf, handle, and cabinetry rows do not continue through them.
 - Imperial OCR-glued lines must not split inside ordinary words such as `CABINETRY`; inline marker detection should only split at real row starts or glued lowercase-to-uppercase row transitions.
 - Imperial `Hinges & Drawer Runners` rows must recover `Soft Close` even when OCR glues `Floor Type & Kick refacing required` into the same line or reorders the line fragments.
@@ -237,9 +237,11 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - `Material Summary -> Bench Tops` must preserve full material, thickness, and edge/apron/waterfall details while stripping only location suffixes such as `to cooktop run`, `to island bench`, or `to powder room 2`.
 - `Material Summary -> Bench Tops` must also include floating-shelf materials when the room card captures a `Floating Shelf` material.
 - `Material Summary -> Door Colours` and `Material Summary -> Handles` must preserve real `profile`, `style`, `model no.`, and handle-family descriptions; normalization may trim pure installation-location tails, but it must not collapse a value to a bare supplier name.
+- Grouped vanity titles such as `VANITIES` must sort into the same room-priority band as `Bathroom / Ensuite / Powder`, ahead of robe, rumpus, and generic rooms.
 - Appliance rows on the page must expose a clickable official `Product` link and allow long URLs to wrap across multiple lines.
 - The page must also render a `Special Sections` area for non-room joinery sections such as `FEATURE TALL DOORS`.
 - The page must show `Extraction duration` in `Snapshot Summary`.
+- Shared UI pages should render at a tighter visual density, roughly 75% of the earlier default, by shrinking application-level fonts and spacing in CSS rather than relying on browser zoom.
 
 ### 4.8 Upload UX
 - Job detail uploads should start automatically as soon as files are selected.

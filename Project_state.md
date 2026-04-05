@@ -64,7 +64,7 @@
   - Clarendon AFC `CARPET & MAIN FLOOR TILE` pages now enrich existing room-master rooms with strict-PDF room-local flooring values instead of leaving those room-specific values blank or stranded in global notes
   - Broad AFC area labels such as `WIL/Linen/s Ground Floor` no longer backfill inferred `LAUNDRY` flooring on Clarendon jobs unless the PDF explicitly uses a laundry room label
   - Yellowwood `FLOORING` and `TILING SCHEDULE` pages now act as room-local flooring overlays for retained rooms such as `Kitchen`, robe rooms, and vanity rooms, while contents-page flooring lines are excluded from `others.flooring_notes`
-  - Imperial builder parsing now uses page-top `... JOINERY SELECTION SHEET` titles as authoritative section boundaries, keeps continuation pages with the current section, and ignores signature/footer blocks during field extraction
+  - Imperial builder parsing now uses page-top `... JOINERY SELECTION SHEET` titles as authoritative section boundaries, keeps continuation pages with the current section, and ignores signature/footer blocks during field extraction, including glued footer markers such as `CLIENT NAME: SIGNATURE: SIGNED DATE:` / `CLIENTNAMESIGNATURESIGNEDDATE` and related footer noise such as `NOTESSUPPLIER`
   - Imperial room sections now also stop cleanly when later pages switch into non-joinery headings such as `APPLIANCES` or `SINKWARE & TAPWARE`, so office/joinery cards do not swallow appliance and tapware pages
   - Imperial room labels now preserve the currently extractable title body exactly, so names such as `WALK-BEHIND PANTRY`, `BENCH SEAT`, and `OFFICE` survive instead of collapsing to shortened room names
   - Imperial non-room sections such as `FEATURE TALL DOORS` are preserved as `special_sections` instead of being merged into nearby room cards
@@ -78,6 +78,7 @@
   - all room cards and exports now support a global `Tall` material field for tall cabinets / tall doors / tall panels when the source provides that split
 - room cards and exports now also support optional `Floating Shelf`, conditional `Shelf`, explicit `LED Yes/No`, dedicated `LED Note`, ordered `Accessories`, and curated accessory `Others` rows
 - final room retention is now gated by true material evidence across builders; plumbing-only, flooring-only, handle-only, LED-only, and accessory-only rooms are dropped after builder finalization
+- spec-list room cards now sort grouped vanity titles such as `VANITIES` into the same high-priority vanity bucket as `BATHROOM / ENSUITE / POWDER`, and the shared web UI now renders at a tighter ~75% visual density across jobs, builders, QA, and spec-list pages
   - the raw Spec List summary now shows `Extraction duration`, and `Floating Shelf` materials also contribute to the `Material Summary -> Bench Tops` bucket
   - the Job page temporarily hides the Review cards while the review UX is being redesigned, without removing the backend review model
   - all user-facing timestamps are now rendered in fixed Brisbane time (`YYYY-MM-DD HH:mm AEST`) across job lists, uploads, run history, export tables, and spec-list summary

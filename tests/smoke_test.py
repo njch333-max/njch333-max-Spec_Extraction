@@ -5780,7 +5780,7 @@ class SmokeTest(unittest.TestCase):
             [entry["text"] for entry in summary["bench_tops"]["entries"]],
         )
 
-    def test_material_summary_includes_shelf_material(self) -> None:
+    def test_material_summary_omits_shelf_bucket(self) -> None:
         summary = _build_material_summary(
             {
                 "rooms": [
@@ -5793,7 +5793,44 @@ class SmokeTest(unittest.TestCase):
                 ]
             }
         )
-        self.assertIn("White Melamine", [entry["text"] for entry in summary["shelves"]["entries"]])
+        self.assertNotIn("shelves", summary)
+
+    def test_flatten_rooms_sorts_by_priority_keywords(self) -> None:
+        rows = _flatten_rooms(
+            {
+                "rooms": [
+                    {"room_key": "office", "original_room_label": "OFFICE"},
+                    {"room_key": "rumpus", "original_room_label": "RUMPUS ROOM"},
+                    {"room_key": "bed_2_robe", "original_room_label": "BED 2 ROBE FIT OUT"},
+                    {"room_key": "laundry_chute", "original_room_label": "LAUNDRY CHUTE"},
+                    {"room_key": "powder", "original_room_label": "GROUND FLOOR POWDER ROOM"},
+                    {"room_key": "vanities", "original_room_label": "VANITIES"},
+                    {"room_key": "laundry", "original_room_label": "LAUNDRY"},
+                    {"room_key": "bar", "original_room_label": "BAR"},
+                    {"room_key": "wip", "original_room_label": "WIP"},
+                    {"room_key": "pantry", "original_room_label": "BUTLERS PANTRY"},
+                    {"room_key": "linen", "original_room_label": "LINEN CUPBOARD"},
+                    {"room_key": "kitchen", "original_room_label": "KITCHEN"},
+                ]
+            }
+        )
+        self.assertEqual(
+            [row["original_room_label"] for row in rows],
+            [
+                "KITCHEN",
+                "BUTLERS PANTRY",
+                "WIP",
+                "BAR",
+                "LAUNDRY",
+                "LAUNDRY CHUTE",
+                "GROUND FLOOR POWDER ROOM",
+                "VANITIES",
+                "BED 2 ROBE FIT OUT",
+                "RUMPUS ROOM",
+                "LINEN CUPBOARD",
+                "OFFICE",
+            ],
+        )
 
     def test_material_summary_includes_room_labels_for_shared_values(self) -> None:
         summary = _build_material_summary(
@@ -6214,6 +6251,145 @@ class SmokeTest(unittest.TestCase):
         self.assertNotIn("PANTRY", response.text)
         self.assertIn("Export Disabled", response.text)
         self.assertIn("Open Latest Spec List", response.text)
+
+    def test_spec_list_page_reorders_sections_and_uses_compact_notes(self) -> None:
+        builder_id = store.create_builder("Clarendon", "clarendon", "")
+        job_id = store.create_job("38901", builder_id, "Spec List Layout", "")
+        store.upsert_snapshot(
+            job_id,
+            "raw_spec",
+            {
+                "job_no": "38901",
+                "builder_name": "Clarendon",
+                "source_kind": "spec",
+                "generated_at": "2026-04-05T10:00:00+10:00",
+                "analysis": {
+                    "mode": "heuristic_only",
+                    "parser_strategy": "global_conservative",
+                    "note": "analysis note",
+                    "layout_note": "layout note",
+                    "docling_note": "docling note",
+                    "vision_note": "vision note",
+                },
+                "rooms": [
+                    {"room_key": "office", "original_room_label": "OFFICE", "bench_tops_other": "20mm Stone"},
+                    {"room_key": "wip", "original_room_label": "WIP", "bench_tops_other": "White Melamine"},
+                    {"room_key": "laundry_chute", "original_room_label": "LAUNDRY CHUTE", "bench_tops_other": "Laminate"},
+                    {"room_key": "laundry", "original_room_label": "LAUNDRY", "bench_tops_other": "Laminate"},
+                    {"room_key": "powder", "original_room_label": "POWDER ROOM", "bench_tops_other": "Stone"},
+                    {"room_key": "pantry", "original_room_label": "BUTLERS PANTRY", "bench_tops_other": "Polytec"},
+                    {
+                        "room_key": "kitchen",
+                        "original_room_label": "KITCHEN",
+                        "bench_tops_wall_run": "20mm Stone",
+                        "bench_tops_island": "40mm Stone",
+                        "shelf": "White Melamine",
+                    },
+                ],
+                "appliances": [],
+                "special_sections": [],
+                "others": {"flooring_notes": "Hybrid"},
+                "warnings": ["warning"],
+                "source_documents": [{"file_name": "spec.pdf", "role": "spec", "page_count": "10"}],
+            },
+        )
+        client = TestClient(app)
+        self._login(client)
+        response = client.get(f"/jobs/{job_id}/spec-list")
+        self.assertEqual(response.status_code, 200)
+        self.assertLess(response.text.index("Material Summary"), response.text.index("Rooms"))
+        self.assertLess(response.text.index("Rooms"), response.text.index("Snapshot Summary"))
+        self.assertLess(response.text.index("Snapshot Summary"), response.text.index("Source Documents"))
+        self.assertIn("note-grid", response.text)
+        self.assertIn("subcard subcard-note", response.text)
+        self.assertNotIn("<h4>Shelves</h4>", response.text)
+        self.assertLess(response.text.index("<h4>KITCHEN</h4>"), response.text.index("<h4>BUTLERS PANTRY</h4>"))
+        self.assertLess(response.text.index("<h4>BUTLERS PANTRY</h4>"), response.text.index("<h4>WIP</h4>"))
+        self.assertLess(response.text.index("<h4>LAUNDRY</h4>"), response.text.index("<h4>LAUNDRY CHUTE</h4>"))
+        self.assertLess(response.text.index("<h4>POWDER ROOM</h4>"), response.text.index("<h4>OFFICE</h4>"))
+
+    def test_spec_list_page_sorts_vanities_before_rumpus_and_other_rooms(self) -> None:
+        builder_id = store.create_builder("Clarendon", "clarendon", "")
+        job_id = store.create_job("38903", builder_id, "Vanities Sort", "")
+        store.upsert_snapshot(
+            job_id,
+            "raw_spec",
+            {
+                "job_no": "38903",
+                "builder_name": "Clarendon",
+                "source_kind": "spec",
+                "generated_at": "2026-04-05T10:00:00+10:00",
+                "analysis": {"mode": "heuristic_only", "parser_strategy": "global_conservative"},
+                "rooms": [
+                    {"room_key": "office", "original_room_label": "OFFICE", "bench_tops_other": "Desk"},
+                    {"room_key": "rumpus", "original_room_label": "RUMPUS ROOM", "bench_tops_other": "Stone"},
+                    {"room_key": "vanities", "original_room_label": "VANITIES", "bench_tops_other": "Stone"},
+                    {"room_key": "kitchen", "original_room_label": "KITCHEN", "bench_tops_other": "Stone"},
+                ],
+                "appliances": [],
+                "special_sections": [],
+                "others": {},
+                "warnings": [],
+                "source_documents": [],
+            },
+        )
+        client = TestClient(app)
+        self._login(client)
+        response = client.get(f"/jobs/{job_id}/spec-list")
+        self.assertEqual(response.status_code, 200)
+        self.assertLess(response.text.index("<h4>VANITIES</h4>"), response.text.index("<h4>RUMPUS ROOM</h4>"))
+        self.assertLess(response.text.index("<h4>VANITIES</h4>"), response.text.index("<h4>OFFICE</h4>"))
+
+    def test_historical_spec_list_page_uses_same_room_priority_sort(self) -> None:
+        builder_id = store.create_builder("Yellowwood", "yellowwood", "")
+        job_id = store.create_job("38902", builder_id, "Historical Sort", "")
+        store.upsert_snapshot(
+            job_id,
+            "raw_spec",
+            {
+                "job_no": "38902",
+                "builder_name": "Yellowwood",
+                "source_kind": "spec",
+                "generated_at": "2026-04-05T10:00:00+10:00",
+                "analysis": {"mode": "layout_docling", "parser_strategy": "room_local"},
+                "rooms": [{"room_key": "office", "original_room_label": "OFFICE"}],
+                "appliances": [],
+                "others": {},
+                "warnings": [],
+                "source_documents": [],
+            },
+        )
+        run_id = store.create_run(job_id, "spec")
+        historical_payload = {
+            "job_no": "38902",
+            "builder_name": "Yellowwood",
+            "source_kind": "spec",
+            "generated_at": "2026-04-05T11:00:00+10:00",
+            "analysis": {"mode": "layout_docling", "parser_strategy": "room_local"},
+            "rooms": [
+                {"room_key": "office", "original_room_label": "OFFICE", "bench_tops_other": "Desk top"},
+                {"room_key": "powder", "original_room_label": "POWDER ROOM", "bench_tops_other": "Stone"},
+                {"room_key": "kitchen", "original_room_label": "KITCHEN", "bench_tops_other": "Stone"},
+                {"room_key": "wip", "original_room_label": "WIP", "bench_tops_other": "White Melamine"},
+            ],
+            "appliances": [],
+            "others": {},
+            "warnings": [],
+            "source_documents": [],
+        }
+        with store.connect() as conn:
+            conn.execute(
+                "UPDATE runs SET status = 'succeeded', started_at = ?, finished_at = ?, result_json = ? WHERE id = ?",
+                ("2026-04-05T01:00:00+00:00", "2026-04-05T01:00:45+00:00", json.dumps(historical_payload), run_id),
+            )
+        client = TestClient(app)
+        self._login(client)
+        response = client.get(f"/jobs/{job_id}/runs/{run_id}/spec-list")
+        self.assertEqual(response.status_code, 200)
+        self.assertLess(response.text.index("Material Summary"), response.text.index("Rooms"))
+        self.assertLess(response.text.index("<h4>KITCHEN</h4>"), response.text.index("<h4>WIP</h4>"))
+        self.assertLess(response.text.index("<h4>WIP</h4>"), response.text.index("<h4>POWDER ROOM</h4>"))
+        self.assertLess(response.text.index("<h4>POWDER ROOM</h4>"), response.text.index("<h4>OFFICE</h4>"))
 
     def test_jobs_page_renders_open_as_button(self) -> None:
         builder_id = store.create_builder("Clarendon", "clarendon", "")
@@ -8428,6 +8604,195 @@ class SmokeTest(unittest.TestCase):
             dining["handles"],
             ["ABI Interiors - Rappana Cabinetry Pull 50mm Brushed Copper - SUPPLIED BY CLIENT Installed Horizontally"],
         )
+
+    def test_imperial_title_prefix_rejects_glued_section_break_markers(self) -> None:
+        self.assertFalse(parsing_module._looks_like_imperial_title_prefix("NOTESSUPPLIER"))
+        self.assertFalse(parsing_module._looks_like_imperial_title_prefix("CLIENTNAME"))
+        self.assertFalse(parsing_module._looks_like_imperial_title_prefix("SIGNEDDATE"))
+
+    def test_imperial_collect_page_fields_splits_combined_cabinetry_row(self) -> None:
+        page_text = (
+            "KITCHEN JOINERY SELECTION SHEET\n"
+            "BENCHTOP + WFALL END Caesarstone Alpine Mist 20mm Pencil Round\n"
+            "BASE + OVERHEAD + OPEN OVERHEADS + TALLS\n"
+            "Polytec\n"
+            "Classic White Matt Polytec\n"
+            "SPLASHBACK Tiles by client Installed By Client\n"
+        )
+        result = parsing_module._imperial_collect_page_fields(page_text)
+        self.assertEqual(result["overrides"]["base"], "Polytec - Classic White Matt")
+        self.assertEqual(result["overrides"]["upper"], "Polytec - Classic White Matt")
+        self.assertEqual(result["overrides"]["upper_tall"], "Polytec - Classic White Matt")
+
+    def test_imperial_extract_appliances_keeps_freestanding_stove_separate_from_rangehood(self) -> None:
+        text = (
+            "APPLIANCES\n"
+            "FREESTANDING STOVE (KITCHEN) Westinghouse WFE9515SD\n"
+            "FRIDGE (KITCHEN) Fisher & Paykel RF505ANUX1\n"
+            "RANGEHOOD (KITCHEN) Westinghouse WRJ600UCS\n"
+        )
+        rows = parsing_module._extract_appliances(
+            text,
+            "imperial-compact.pdf",
+            [{"page_no": 4, "raw_text": text, "text": text}],
+        )
+        by_type = {row.appliance_type: row for row in rows}
+        self.assertIn("Freestanding Stove", by_type)
+        self.assertIn("Rangehood", by_type)
+        self.assertIn("Fridge", by_type)
+        self.assertEqual(by_type["Freestanding Stove"].model_no, "WFE9515SD")
+        self.assertEqual(by_type["Rangehood"].model_no, "WRJ600UCS")
+
+    def test_imperial_compact_non_joinery_overlay_recovers_kitchen_and_laundry_sink_tap(self) -> None:
+        documents = [
+            {
+                "file_name": "imperial-compact.pdf",
+                "role": "spec",
+                "pages": [
+                    {
+                        "page_no": 10,
+                        "raw_text": (
+                            "SINKWARE & TAPWARE\n"
+                            "TAPWARE (KITCHEN) ABEY SUPPLIED BY IMPERIAL Taphole location: Centred to back Top Mounted Installed by Client\n"
+                            "SINKWARE (KITCHEN) ABEY LUA130 Lucia Large Single Bowl + removable drainer DTA16 "
+                            "Installed by Client ABEY 304 Gooseneck Pull Out with Dual Spray Function Kitchen Mixer KTA014-B - Matt Black\n"
+                        ),
+                        "text": "",
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 11,
+                        "raw_text": (
+                            "SINKWARE & TAPWARE\n"
+                            "TAPWARE (LAUNDRY) Laundry Tap - ABEY 3K4-B Lucia Goose Sidelever Mixer - Matt Black\n"
+                            "SINKWARE (LAUNDRY) Abey Laundry Sink - LT120 45 Litre Single Bowl with Overflow. (250mm deep)\n"
+                        ),
+                        "text": "",
+                        "needs_ocr": False,
+                    },
+                ],
+            }
+        ]
+        overlays = parsing_module._collect_imperial_room_overlays(documents)
+        self.assertIn("ABEY LUA130", overlays["kitchen"]["sink_info"])
+        self.assertIn("KTA014-B", overlays["kitchen"]["tap_info"])
+        self.assertIn("LT120", overlays["laundry"]["sink_info"])
+        self.assertIn("3K4-B", overlays["laundry"]["tap_info"])
+
+    def test_finalize_imperial_rooms_splits_laundry_and_storage_nook(self) -> None:
+        room = {
+            "room_key": "laundry",
+            "room_name": "NOTESSUPPLIER LAUNDRY + STORAGE NOOK",
+            "original_room_label": "NOTESSUPPLIER LAUNDRY + STORAGE NOOK",
+            "bench_tops": [],
+            "bench_tops_wall_run": "",
+            "bench_tops_island": "",
+            "bench_tops_other": "",
+            "door_panel_colours": [],
+            "door_colours_overheads": "",
+            "door_colours_base": "",
+            "door_colours_tall": "",
+            "door_colours_island": "",
+            "door_colours_bar_back": "",
+            "toe_kick": [],
+            "bulkheads": [],
+            "handles": [],
+            "floating_shelf": "",
+            "shelf": "",
+            "sink_info": "",
+            "basin_info": "",
+            "tap_info": "",
+            "drawers_soft_close": "",
+            "hinges_soft_close": "",
+            "splashback": "",
+            "flooring": "",
+            "led": "",
+            "led_note": "",
+            "accessories": [],
+            "other_items": [],
+            "source_file": "imperial-compact.pdf",
+            "page_refs": "6, 7",
+            "evidence_snippet": "NOTESSUPPLIER LAUNDRY + STORAGE NOOK",
+            "confidence": 0.7,
+            "has_explicit_overheads": False,
+            "has_explicit_base": False,
+            "has_explicit_tall": False,
+            "has_explicit_island": False,
+            "has_explicit_bar_back": False,
+        }
+        overlays = {
+            "laundry": {
+                **parsing_module._blank_overlay(),
+                "sink_info": "Abey Laundry Sink - LT120 45 Litre Single Bowl with Overflow",
+                "tap_info": "Laundry Tap - ABEY 3K4-B Lucia Goose Sidelever Mixer - Matt Black",
+            }
+        }
+        documents = [
+            {
+                "file_name": "imperial-compact.pdf",
+                "role": "spec",
+                "pages": [
+                    {
+                        "page_no": 6,
+                        "raw_text": (
+                            "LAUNDRY + STORAGE NOOK JOINERY SELECTION SHEET\n"
+                            "LAUNDRY\n"
+                            "BENCHTOP\n"
+                            "Polytec\n"
+                            "Boston Oak Woodmatt\n"
+                            "33mm\n"
+                            "Tight form edge\n"
+                            "LAUNDRY\n"
+                            "BASE CABINETRY COLOUR\n"
+                            "Polytec\n"
+                            "Boston Oak\n"
+                            "Woodmatt\n"
+                            "LAUNDRY\n"
+                            "SPLASHBACK Tiles by client Installed By Client\n"
+                        ),
+                        "text": "",
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 7,
+                        "raw_text": (
+                            "LAUNDRY + STORAGE NOOK JOINERY SELECTION SHEET\n"
+                            "STORAGE NOOK\n"
+                            "OPEN CABINETRY + DRAWER COLOUR\n"
+                            "Polytec\n"
+                            "Boston Oak\n"
+                            "Woodmatt\n"
+                            "STORAGE NOOK\n"
+                            "HANDLES - BASE DRAWER\n"
+                            "Allegra 3750 192 MB\n"
+                            "Installed Horizontally - DRAWER\n"
+                            "LAUNDRY\n"
+                            "KICKBOARDS\n"
+                            "Polytec\n"
+                            "Boston Oak\n"
+                            "Woodmatt\n"
+                            "LAUNDRY\n"
+                            "HANDLES\n"
+                            "Allegra 3750 128 MB\n"
+                            "Installed Vertically\n"
+                        ),
+                        "text": "",
+                        "needs_ocr": False,
+                    },
+                ],
+            }
+        ]
+        rooms = [room]
+        parsing_module._finalize_imperial_rooms(rooms, overlays, documents)
+        rooms_by_key = {row["room_key"]: row for row in rooms}
+        self.assertIn("laundry", rooms_by_key)
+        self.assertIn("storage_nook", rooms_by_key)
+        self.assertEqual(rooms_by_key["laundry"]["original_room_label"], "LAUNDRY")
+        self.assertEqual(rooms_by_key["storage_nook"]["original_room_label"], "STORAGE NOOK")
+        self.assertIn("Boston Oak", rooms_by_key["laundry"]["door_colours_base"])
+        self.assertIn("Boston Oak", rooms_by_key["storage_nook"]["door_colours_base"])
+        self.assertIn("LT120", rooms_by_key["laundry"]["sink_info"])
+        self.assertIn("3K4-B", rooms_by_key["laundry"]["tap_info"])
 
     def test_job_detail_and_spec_list_titles_show_snapshot_site_address(self) -> None:
         builder_id = store.create_builder("Imperial", "imperial", "")
