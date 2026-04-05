@@ -4089,16 +4089,27 @@ class SmokeTest(unittest.TestCase):
         parsing_module._promote_conditional_shelf_field(row)
         self.assertEqual(row["shelf"], "")
 
-    def test_promote_conditional_shelf_field_keeps_clean_material_phrase(self) -> None:
+    def test_promote_conditional_shelf_field_keeps_pantry_shelf_with_open_shelving_evidence(self) -> None:
         row = {
             "room_key": "pantry",
             "original_room_label": "PANTRY",
             "shelf": "White Melamine",
-            "evidence_snippet": "",
+            "evidence_snippet": "PANTRY WIP Open Shelving X4 Shelves White Melamine",
             "other_items": [],
         }
         parsing_module._promote_conditional_shelf_field(row)
         self.assertEqual(row["shelf"], "White Melamine")
+
+    def test_promote_conditional_shelf_field_clears_main_room_shelf_even_when_shelf_edges_are_present(self) -> None:
+        row = {
+            "room_key": "kitchen",
+            "original_room_label": "KITCHEN",
+            "shelf": "White Melamine",
+            "evidence_snippet": "KITCHEN CARCASS & SHELF EDGES - STANDARD WHITE",
+            "other_items": [],
+        }
+        parsing_module._promote_conditional_shelf_field(row)
+        self.assertEqual(row["shelf"], "")
 
     def test_promote_conditional_shelf_field_keeps_robe_fit_out_room_when_material_precedes_shelf(self) -> None:
         row = {
@@ -4118,7 +4129,7 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(row["other_items"], [])
         self.assertTrue(parsing_module._yellowwood_should_keep_final_room(row))
 
-    def test_promote_conditional_shelf_field_keeps_explicit_shelf_material_while_dropping_kickboard_noise(self) -> None:
+    def test_promote_conditional_shelf_field_clears_non_shelf_room_even_when_evidence_mentions_shelves(self) -> None:
         row = {
             "room_key": "kitchen",
             "original_room_label": "Kitchen",
@@ -4127,7 +4138,24 @@ class SmokeTest(unittest.TestCase):
             "other_items": [],
         }
         parsing_module._promote_conditional_shelf_field(row)
-        self.assertEqual(row["shelf"], "White Melamine")
+        self.assertEqual(row["shelf"], "")
+
+    def test_extract_explicit_shelf_material_from_text_ignores_carcass_and_shelf_edges(self) -> None:
+        self.assertEqual(
+            parsing_module._extract_explicit_shelf_material_from_text("CARCASS & SHELF EDGES - STANDARD WHITE"),
+            "",
+        )
+
+    def test_promote_conditional_shelf_field_clears_open_faced_shelves_from_main_room(self) -> None:
+        row = {
+            "room_key": "laundry",
+            "original_room_label": "LAUNDRY",
+            "shelf": "Melamine - Boston Oak Woodmatt",
+            "evidence_snippet": "OPEN FACED SHELVES Melamine - Boston Oak Woodmatt",
+            "other_items": [],
+        }
+        parsing_module._promote_conditional_shelf_field(row)
+        self.assertEqual(row["shelf"], "")
 
     def test_yellowwood_normalize_vanity_material_fields_splits_vanity_material_from_benchtop(self) -> None:
         row = {

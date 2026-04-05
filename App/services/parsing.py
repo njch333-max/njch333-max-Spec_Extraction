@@ -7996,6 +7996,7 @@ def _imperial_finalize_material_field_text(value: Any, *, drop_note_lines: bool)
     ):
         current = re.sub(r"(?i)\b\d+\s*mm\s+(?=(?:Polytec|Laminex|Thermolaminated|Profile))", "", current)
     current = re.sub(r"(?i)\bBulkhead:.*?(?=(?:Polytec|Laminex|Thermolaminated|Classic White|Prime Oak|Boston Oak|Calcutta|$))", "", current)
+    current = re.sub(r"(?i)\bOPEN\s+FACED\s+SHELVES?\b.*$", "", current)
     current = re.sub(r"(?i)\+\s*TALL\s+CABINETS?\s*-\s*", "", current)
     current = re.sub(r"(?i)\bNOTE:\b.*$", "", current).strip(" -;,")
     current = re.sub(r"(?i)\bFEATURE\b$", "", current).strip(" -;,")
@@ -9076,6 +9077,8 @@ def _is_placeholder_material_value(text: Any) -> bool:
 def _room_material_evidence_values(row: dict[str, Any]) -> list[str]:
     values: list[str] = []
     for key in ROOM_MATERIAL_EVIDENCE_SCALAR_FIELDS:
+        if key == "shelf" and not _room_allows_shelf_field(row):
+            continue
         text = normalize_space(str(row.get(key, "") or ""))
         if text and not _is_placeholder_material_value(text):
             values.append(text)
@@ -9167,9 +9170,19 @@ def _yellowwood_cleanup_handles(row: dict[str, Any]) -> list[str]:
             remainder = normalize_space(prefixed_note_match.group(2))
             if note and remainder:
                 text = f"{remainder} ({note})"
+        text = _trim_fixture_text_at_markers(
+            text,
+            (
+                r"\bBED\s*\d+(?:\s*,\s*\d+)*\s*ROBE\s+FIT\s+OUT\b",
+                r"\bWALK\s+IN\s+ROBE\s+FIT\s+OUT\b",
+                r"\bUPPER[- ]FLOOR\s+WC\b",
+                r"\bREMOVED\s+BY\s+CLIENT\b",
+            ),
+        )
         if text.startswith("House "):
             text = f"Handle {text}"
-        cleaned.append(text)
+        if text:
+            cleaned.append(text)
     if len(cleaned) >= 2 and cleaned[0].lower().startswith("handle house") and not cleaned[1].lower().startswith("handle house"):
         merged = normalize_space(f"{cleaned[0]} {cleaned[1]}")
         cleaned = [merged, *cleaned[2:]]
@@ -9229,6 +9242,21 @@ def _yellowwood_normalize_kitchen_material_fields(row: dict[str, Any]) -> None:
         return
     for key in ("door_colours_overheads", "door_colours_base", "door_colours_tall", "door_colours_island", "door_colours_bar_back"):
         row[key] = _clean_door_colour_value(row.get(key, ""))
+    row["door_colours_bar_back"] = normalize_space(re.sub(r"(?i)^only\s+", "", str(row.get("door_colours_bar_back", "") or "")))
+    row["bench_tops_wall_run"] = _clean_benchtop_segment(str(row.get("bench_tops_wall_run", "") or ""))
+    row["bench_tops_island"] = _clean_benchtop_segment(str(row.get("bench_tops_island", "") or ""))
+    other_parts = [
+        _clean_benchtop_segment(part)
+        for part in [normalize_space(part) for part in str(row.get("bench_tops_other", "") or "").split("|") if normalize_space(part)]
+    ]
+    row["bench_tops_other"] = " | ".join(_unique([part for part in other_parts if part]))
+    cleaned_kicks: list[str] = []
+    for value in _coerce_string_list(row.get("toe_kick", [])):
+        cleaned = _clean_door_colour_value(value) or normalize_space(value)
+        cleaned = normalize_space(re.sub(r"[每]+", " ", cleaned)).strip(" -;,")
+        if cleaned:
+            cleaned_kicks.append(cleaned)
+    row["toe_kick"] = _unique(cleaned_kicks)
     _yellowwood_remove_island_duplication(row)
     if row.get("has_explicit_overheads") and not normalize_space(str(row.get("door_colours_overheads", "") or "")):
         base_value = normalize_space(str(row.get("door_colours_base", "") or ""))
@@ -9240,6 +9268,8 @@ def _yellowwood_normalize_kitchen_material_fields(row: dict[str, Any]) -> None:
     if not wall_run and island and other_parts:
         row["bench_tops_wall_run"] = other_parts[0]
         row["bench_tops_other"] = " | ".join(other_parts[1:])
+    row["bench_tops"] = _rebuild_benchtop_entries(row)
+    row["door_panel_colours"] = _rebuild_door_panel_colours(row)
 
 
 def _yellowwood_normalize_vanity_material_fields(row: dict[str, Any]) -> None:
@@ -9810,9 +9840,64 @@ def _has_joinery_material_keyword(text: str) -> bool:
     )
 
 
+def _shelf_room_probe_text(row: dict[str, Any]) -> str:
+    parts: list[str] = [
+        normalize_space(str(row.get("original_room_label", "") or row.get("room_name", "") or row.get("room_key", "") or "")),
+        normalize_space(str(row.get("evidence_snippet", "") or "")),
+    ]
+    for item in _merge_other_items([], row.get("other_items", [])):
+        label = normalize_space(str(item.get("label", "") or ""))
+        value = normalize_space(str(item.get("value", "") or ""))
+        if label or value:
+            parts.append(f"{label} {value}".strip())
+    return normalize_space(" | ".join(part for part in parts if part))
+
+
+def _room_allows_shelf_field(row: dict[str, Any]) -> bool:
+    label = source_room_label(
+        str(row.get("original_room_label", "") or row.get("room_name", "") or row.get("room_key", "") or ""),
+        fallback_key=str(row.get("room_key", "") or ""),
+    )
+    normalized_label = normalize_space(label).upper()
+    room_key = normalize_room_key(str(row.get("room_key", "") or ""))
+    probe = _shelf_room_probe_text(row)
+    if not normalized_label and not room_key:
+        return False
+    if room_key in {"walk_in_pantry", "wir"}:
+        return True
+    if re.search(r"(?i)\b(?:WIP|WALK[- ]IN[- ]PANTRY|WALK IN PANTRY)\b", normalized_label):
+        return True
+    if re.search(r"(?i)\b(?:WIR|WALK[- ]IN[- ]ROBE|WALK IN ROBE)\b", normalized_label):
+        return True
+    if "ROBE FIT OUT" in normalized_label:
+        return True
+    if "ROBE" in normalized_label and re.search(
+        r"(?i)\b(?:fit out|open shelving|open faced shelving|single shelf|double shelf|x\d+\s+shelves?)\b",
+        probe,
+    ):
+        return True
+    if re.search(
+        r"(?i)\b(?:WIL|WALK[- ]IN[- ]LINEN|WALK IN LINEN|LINEN FIT OUT|LAUNDRY LINEN FIT OUT|PASSAGE LINEN FIT OUT|LINEN CUPBOARD(?: FIT OUT)?)\b",
+        normalized_label,
+    ):
+        return True
+    if normalized_label == "PANTRY":
+        return bool(
+            re.search(
+                r"(?i)\b(?:WIP|WALK[- ]IN[- ]PANTRY|OPEN (?:FACED )?SHELV(?:ES|ING)|X\d+\s+SHELVES?|SINGLE SHELF|DOUBLE SHELF)\b",
+                probe,
+            )
+        )
+    return False
+
+
 def _extract_explicit_shelf_material_from_text(text: Any) -> str:
     normalized = normalize_space(text)
     if not normalized:
+        return ""
+    if re.search(r"(?i)\bcarcass\s*&\s*shelf\s+edges?\b", normalized):
+        return ""
+    if re.search(r"(?i)\bsquare\s+edge\s+rails?\b", normalized):
         return ""
     if re.search(r"(?i)\bno\s+shelf(?:ing)?\b", normalized):
         return ""
@@ -9922,11 +10007,15 @@ def _other_item_is_actual_rail(item: dict[str, str]) -> bool:
 
 
 def _promote_conditional_shelf_field(row: dict[str, Any]) -> None:
+    original_other_items = _merge_other_items([], row.get("other_items", []))
+    allows_shelf = _room_allows_shelf_field(row)
     shelf_value = normalize_space(str(row.get("shelf", "") or ""))
     if shelf_value:
         cleaned_parts: list[str] = []
         for part in re.split(r"\s*\|\s*", shelf_value):
             part = normalize_space(re.sub(r"(?i)^(?:in\s+)+", "", part))
+            part = re.sub(r"(?i)\bas\s+per\s+plan\b", "", part)
+            part = normalize_space(part)
             if not part:
                 continue
             cleaned_existing = _extract_explicit_shelf_material_from_text(part)
@@ -9953,6 +10042,10 @@ def _promote_conditional_shelf_field(row: dict[str, Any]) -> None:
             if extracted:
                 shelf_value = extracted
                 break
+    if not allows_shelf:
+        row["shelf"] = ""
+        row["other_items"] = original_other_items
+        return
     row["shelf"] = shelf_value
     row["other_items"] = filtered_other_items
 
@@ -11264,6 +11357,8 @@ def _clean_door_colour_value(value: Any) -> str:
     text = re.sub(r"(?<=\w)\s*[^\w\s/&()'.,:-]+\s*(?=\w)", " ", text)
     text = text.replace("每", " ")
     text = re.sub(r"(?i)\bas supplied by (?:cabinetmaker|builder)\b", "", text)
+    text = re.sub(r"(?i)^only\s+", "", text)
+    text = re.sub(r"(?i)\bopen\s+faced\s+shelves?\b.*$", "", text)
     if any(re.search(pattern, text, re.IGNORECASE) for pattern in CABINET_ONLY_EXCLUDE_PATTERNS):
         return ""
     token_pattern = "|".join(re.escape(token) for token in DOOR_CONTEXT_TOKENS)
@@ -11763,6 +11858,8 @@ def _clean_benchtop_segment(value: str) -> str:
         "",
         text,
     )
+    text = re.sub(r"(?i)\bby\s+cabinetmaker\b.*$", "", text)
+    text = re.sub(r"(?i)\bas supplied by (?:cabinetmaker|builder)\b.*$", "", text)
     if re.search(r"(?i)(kickboards?|shadowline|join to be determined|glazing|door legend|client signature|job no|undermount|oven|cooktop|rangehood|handles?)", text):
         return ""
     text = normalize_brand_casing_text(text)
@@ -11940,6 +12037,7 @@ def _clean_room_fixture_text(value: Any, kind: str) -> str:
         return ""
     text = _strip_grouped_fixture_property_noise(text)
     text = re.sub(r"(?i)\bonly\s+refer\s+to\s+[\"“”'`]?plumbing[\"“”'`]? section below\b", "", text)
+    text = re.sub(r"(?i)\bremoved\s+by\s+client\b.*$", "", text)
     text = normalize_space(re.sub(r"(?i)\bn/?a\b", "", text)).strip(" -;,")
     if not text:
         return ""

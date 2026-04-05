@@ -77,6 +77,8 @@
   - Imperial sink and tap room fields now prefer the builder-specific non-joinery overlay parser over noisier AI fixture guesses when both are present
   - all room cards and exports now support a global `Tall` material field for tall cabinets / tall doors / tall panels when the source provides that split
 - room cards and exports now also support optional `Floating Shelf`, conditional `Shelf`, explicit `LED Yes/No`, dedicated `LED Note`, ordered `Accessories`, and curated accessory `Others` rows
+  - `Shelf` is now restricted to WIL/WIR/WIP/linen/robe-fit-out style rooms; main rooms such as kitchens, laundries, vanities, bars, studies, and rumpus rooms must not retain `Shelf`
+  - `CARCASS & SHELF EDGES`, `SQUARE EDGE RAILS`, and main-room `OPEN FACED SHELVES` wording no longer count as room-level shelf evidence
 - final room retention is now gated by true material evidence across builders; plumbing-only, flooring-only, handle-only, LED-only, and accessory-only rooms are dropped after builder finalization
 - spec-list room cards now sort grouped vanity titles such as `VANITIES` into the same high-priority vanity bucket as `BATHROOM / ENSUITE / POWDER`, and the shared web UI now renders at a tighter ~75% visual density across jobs, builders, QA, and spec-list pages
   - the raw Spec List summary now shows `Extraction duration`, and `Floating Shelf` materials also contribute to the `Material Summary -> Bench Tops` bucket
