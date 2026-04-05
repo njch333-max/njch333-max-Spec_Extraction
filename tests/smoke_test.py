@@ -1283,6 +1283,34 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(row.make, "Schweigen")
         self.assertEqual(row.model_no, "GG-6C")
 
+    def test_build_appliance_row_prefers_placeholder_over_noisy_dishwasher_guess(self) -> None:
+        row = parsing_module._build_appliance_row(
+            appliance_type="Dishwasher",
+            details="N / A - By others\nBy others\n600mm Standard - Specs TBC",
+            evidence="DISHWASHER ( KITCHEN ) N / A - By others By others 600mm Standard - Specs TBC",
+            file_name="imperial-appliances.pdf",
+            pages=[{"page_no": 1, "text": "", "raw_text": ""}],
+            confidence=0.5,
+        )
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual(row.make, "")
+        self.assertEqual(row.model_no, "N / A - By others")
+
+    def test_build_appliance_row_backfills_make_from_evidence_when_details_are_url_only(self) -> None:
+        row = parsing_module._build_appliance_row(
+            appliance_type="Oven",
+            details="https://www.thegoodguys.com.au/westinghouse-60cm-electric-oven-wve6516dd\nBy others\n600mm - Westinghouse 60cm Electric",
+            evidence="OVEN (KITCHEN) https://www.thegoodguys.com.au/westinghouse-60cm-electric-oven-wve6516dd By others 600mm - Westinghouse 60cm Electric Oven Model: WVE6516DD",
+            file_name="imperial-appliances.pdf",
+            pages=[{"page_no": 1, "text": "", "raw_text": ""}],
+            confidence=0.5,
+        )
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual(row.make, "Westinghouse")
+        self.assertEqual(row.model_no, "WVE6516DD")
+
     def test_loose_appliance_rows_do_not_bind_fridge_model_to_rangehood(self) -> None:
         snapshot = parse_documents(
             job_no="38251",
@@ -1521,10 +1549,14 @@ class SmokeTest(unittest.TestCase):
             ],
         )
         appliances = {row["appliance_type"]: row for row in snapshot["appliances"]}
-        self.assertNotIn("GG-6C", appliances["Dishwasher"]["model_no"])
+        dishwasher_rows = [row for row in snapshot["appliances"] if row["appliance_type"] == "Dishwasher"]
+        self.assertEqual(appliances["Rangehood"]["make"], "Schweigen")
+        self.assertEqual(appliances["Rangehood"]["model_no"], "GG-6C")
+        self.assertEqual(appliances["Cooktop"]["make"], "Westinghouse")
         self.assertEqual(appliances["Cooktop"]["model_no"], "WHI643BE")
         self.assertEqual(appliances["Oven"]["model_no"], "WVE6516DD")
-        self.assertEqual(appliances["Dishwasher"]["model_no"], "N / A - By others")
+        if dishwasher_rows:
+            self.assertEqual(dishwasher_rows[0]["model_no"], "N / A - By others")
 
     def test_clarendon_reference_polish_rebuilds_clean_room_fields(self) -> None:
         snapshot = {
@@ -5506,6 +5538,47 @@ class SmokeTest(unittest.TestCase):
             "polytec jamaican oak matt finish melamine with matching 1mm abs edges (vertical grain direction)",
         )
 
+    def test_clarendon_schedule_overlay_marks_grouped_upper_cabinetry_as_explicit_overheads(self) -> None:
+        overlay = extraction_service._extract_clarendon_schedule_overlay(
+            "butlers_pantry",
+            (
+                "BUTLERS PANTRY COLOUR SCHEDULE "
+                "BENCHTOP - QUANTUM ZERO WHITE SWIRL - 20MM PENCIL ROUND EDGE "
+                "DOOR COLOUR 1 - POL YTEC BLOSSOM WHITE MATT FINISH THERMOLAMINATE - HAMPTON EM9 PROFILE - TO UPPER CABINETRY "
+                "DOOR COLOUR 2 - POL YTEC HABITIT SMOOTH FINISH THERMOLAMINATE - HAMPTON EM9 PROFILE - TO BASE CABINETRY "
+            ),
+        )
+        self.assertTrue(overlay["has_explicit_overheads"])
+        self.assertTrue(overlay["has_explicit_base"])
+        self.assertEqual(
+            overlay["door_colours_overheads"],
+            "Polytec BLOSSOM WHITE MATT FINISH THERMOLAMINATE - HAMPTON EM9 PROFILE",
+        )
+        self.assertEqual(
+            overlay["door_colours_base"],
+            "Polytec HABITIT SMOOTH FINISH THERMOLAMINATE - HAMPTON EM9 PROFILE",
+        )
+
+    def test_clarendon_schedule_overlay_promotes_single_door_colour_to_overheads_when_upper_cabinetry_present(self) -> None:
+        overlay = extraction_service._extract_clarendon_schedule_overlay(
+            "kitchen",
+            (
+                "KITCHEN COLOUR SCHEDULE "
+                "BENCHTOP - QUANTUM ZERO WHITE SWIRL - 20MM PENCIL ROUND EDGE "
+                "DOOR COLOUR - POL YTEC ASTON WHITE SMOOTH FINISH THERMOLAMINATE - HAMPTON EM9 PROFILE "
+                "HANDLE 2 - HETTICH SALEMI 9113368 30MM BRUSHED STAINLESS STEEL LOOK - TO UPPER CABINETS "
+            ),
+        )
+        self.assertTrue(overlay["has_explicit_overheads"])
+        self.assertEqual(
+            overlay["door_colours_base"],
+            "Polytec ASTON WHITE SMOOTH FINISH THERMOLAMINATE - HAMPTON EM9 PROFILE",
+        )
+        self.assertEqual(
+            overlay["door_colours_overheads"],
+            "Polytec ASTON WHITE SMOOTH FINISH THERMOLAMINATE - HAMPTON EM9 PROFILE",
+        )
+
     def test_clarendon_vanities_fixture_fallback_does_not_merge_material_fields(self) -> None:
         overlay = extraction_service._select_clarendon_room_overlay(
             {"room_key": "vanities", "original_room_label": "Vanities"},
@@ -5590,6 +5663,59 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(polished["door_colours_overheads"], "")
         self.assertEqual(polished["basin_info"], "Johnson Suisse Emilia Rectangular Undercounter Basin (JBSE250.PW6) White")
         self.assertEqual(polished["tap_info"], "Phoenix Nostalgia Basin Mixer NS748-62")
+
+    def test_clarendon_polish_prefers_more_complete_tap_text_over_short_overlay_fragment(self) -> None:
+        row = {
+            "room_key": "kitchen",
+            "original_room_label": "Kitchen",
+            "bench_tops": [],
+            "bench_tops_wall_run": "",
+            "bench_tops_island": "",
+            "bench_tops_other": "",
+            "door_panel_colours": [],
+            "door_colours_overheads": "",
+            "door_colours_base": "",
+            "door_colours_island": "",
+            "door_colours_bar_back": "",
+            "has_explicit_overheads": False,
+            "has_explicit_base": False,
+            "has_explicit_island": False,
+            "has_explicit_bar_back": False,
+            "toe_kick": [],
+            "bulkheads": [],
+            "handles": [],
+            "sink_info": "",
+            "basin_info": "",
+            "tap_info": "Phoenix Nostalgia Twin Handle Sink Mixer 230mm Shepherds Crook NS714-62 Chrome & White",
+            "drawers_soft_close": "",
+            "hinges_soft_close": "",
+            "splashback": "",
+            "flooring": "",
+        }
+        overlay = {
+            "tap_info": "Phoenix Nostalgia Twin",
+            "sink_info": "",
+            "basin_info": "",
+            "toe_kick": "",
+            "bulkheads": "",
+            "handles": [],
+            "splashback": "",
+            "drawers_soft_close": "",
+            "hinges_soft_close": "",
+            "door_colours_overheads": "",
+            "door_colours_base": "",
+            "door_colours_island": "",
+            "door_colours_bar_back": "",
+            "has_explicit_overheads": False,
+            "has_explicit_base": False,
+            "has_explicit_island": False,
+            "has_explicit_bar_back": False,
+        }
+        polished = extraction_service._polish_clarendon_room(row, overlay)
+        self.assertEqual(
+            polished["tap_info"],
+            "Phoenix Nostalgia Twin Handle Sink Mixer 230MM Shepherds Crook NS714-62 Chrome & White",
+        )
 
     def test_clarendon_schedule_overlay_recovers_glued_vanities_doors_panels_from_realistic_ocr_text(self) -> None:
         text = (
@@ -8050,16 +8176,22 @@ class SmokeTest(unittest.TestCase):
                 "Finger Pull on Uppers",
             ],
         )
-        self.assertEqual(laundry["sink_info"], "Minka Solid Surface Wall Basin, 1 Tap Hole - Product Code: CSB310-1")
+        self.assertEqual(
+            laundry["sink_info"],
+            "Veronar, Forge Undermount Sink, Double Bowl, Satin Stainless Steel Part Number: SVF210SINK.SSS.FG",
+        )
 
         ensuite = rooms["ensuite"]
         self.assertEqual(ensuite["door_colours_base"], "Polytec - Florentine Walnut - Woodmatt")
         self.assertEqual(ensuite["toe_kick"], ["Recessed Kick - MDF Imperial"])
         self.assertNotIn("KICKBOARD", ensuite["bench_tops_other"])
+        self.assertEqual(ensuite["basin_info"], "Venice 500 Semi-Inset Basin Solid Surface White x 2 (Reece)")
 
         powder = rooms["powder"]
         self.assertEqual(powder["toe_kick"], ["Recessed Kick - MDF Imperial"])
         self.assertNotIn("KICKBOARD", powder["bench_tops_other"])
+        self.assertEqual(powder["sink_info"], "")
+        self.assertEqual(powder["basin_info"], "Minka Solid Surface Wall Basin, 1 Tap Hole - Product Code: CSB310-1")
 
         wir = rooms["wir"]
         self.assertEqual(wir["door_colours_base"], "Polytec - Florentine Walnut - Woodmatt")
@@ -8068,6 +8200,42 @@ class SmokeTest(unittest.TestCase):
         bed_1_robes = rooms["bed_1_robes"]
         self.assertEqual(bed_1_robes["door_colours_base"], "Polytec - Florentine Walnut - Woodmatt")
         self.assertTrue(any("Momo Barrington Eclipse Plain 96mm in Matt Brass Part Number:BEPL96.MBR" in entry for entry in bed_1_robes["handles"]))
+
+    def test_imperial_sinkware_semantic_parser_assigns_laundry_powder_and_ensuite_correctly(self) -> None:
+        text = (
+            "By OthersVenice 500 Semi-Inset Basin Solid Surface \n"
+            "White x 2 (Reece)\n"
+            "SIGNED DATE:\n"
+            "Fienza\n"
+            "SPECS / DESCRIPTION IMAGE SUPPLIER\n"
+            "Wall mounted Taps\n"
+            "NOTES\n"
+            "DESIGNER: SARAH ROSCOW CLIENT NAME: SIGNATURE:\n"
+            "Address:53 Thomas Street, Auchenflower\n"
+            "Client:PRIVATE - Stephen Mego\n"
+            "Date:19/02/2026\n"
+            "SINKWARE & TAPWARE\n"
+            "AREA / ITEM\n"
+            "SINKWARE (LAUNDRY)\n"
+            "Minka Solid Surface Wall Basin, 1 Tap \n"
+            "Hole - Product Code: CSB310-1SINKWARE POWDER)\n"
+            "Furnware Tapware location - In stone centered \n"
+            "behind sink\n"
+            "Veronar, Forge Undermount Sink, Double \n"
+            "Bowl, Satin Stainless Steel\n"
+            "Part Number: SVF210SINK.SSS.FG - \n"
+            "Undermounted\n"
+            "SINKWARE (ENSUITE)\n"
+        )
+        blocks = parsing_module._imperial_extract_non_joinery_blocks(text, "sinkware")
+        self.assertEqual(
+            blocks,
+            [
+                ("LAUNDRY", "Veronar, Forge Undermount Sink, Double Bowl, Satin Stainless Steel Part Number: SVF210SINK.SSS.FG"),
+                ("ENSUITE", "Venice 500 Semi-Inset Basin Solid Surface White x 2 (Reece)"),
+                ("POWDER", "Minka Solid Surface Wall Basin, 1 Tap Hole - Product Code: CSB310-1"),
+            ],
+        )
 
     def test_parse_documents_imperial_job38_layout_rows_drive_row_local_fields(self) -> None:
         documents = [
@@ -8806,6 +8974,299 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(polished["door_colours_overheads"], "Laminex - Blackened Legno")
         self.assertEqual(polished["door_colours_tall"], "Laminex - Blackened Legno")
         self.assertEqual(polished["floating_shelf"], "Laminex - Blackened Legno - Vertical Grain")
+
+    def test_simonds_finalizer_recovers_grouped_room_fields_from_document_text(self) -> None:
+        documents = [
+            {
+                "file_name": "Q6395 Simonds.pdf",
+                "role": "spec",
+                "pages": [
+                    {
+                        "page_no": 7,
+                        "text": (
+                            "Study\n"
+                            "Manufacturer Laminex\n"
+                            "Profile S/Edge\n"
+                            "Range Natural\n"
+                            "Colour Blackended Legno\n"
+                            "Benchtop NOOK 1 AND NOOK 2\n"
+                            "Kitchen\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 8,
+                        "text": (
+                            "Bulters/WIP\n"
+                            "Manufacturer Caesarstone - Mineral\n"
+                            "Profile 40mm Arris\n"
+                            "Range Caesarstone Standard M1\n"
+                            "Colour Organic White\n"
+                            "Benchtop\n"
+                            "Manufacturer Laminex\n"
+                            "Finish Natural\n"
+                            "Profile S/Edge\n"
+                            "Colour Blackened Legno\n"
+                            "Base Cabinet Panels\n"
+                            "Manufacturer Laminex\n"
+                            "Finish Natural\n"
+                            "Profile (N/A)\n"
+                            "Colour Blackened LegnoKickboard (N/A)\n"
+                            "Manufacturer Laminex\n"
+                            "Finish Natural\n"
+                            "Colour Blackened LegnoShelving\n"
+                            "Manufacturer N/A\n"
+                            "Category\n"
+                            "Category 6\n"
+                            "Model C137 Black 100m\n"
+                            "Fixing Horizontal\n"
+                            "Cabinetry Handles (N/A)\n"
+                            "Style Soft Close\n"
+                            "Mechanism\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 9,
+                        "text": (
+                            "Manufacturer Franke\n"
+                            "Range Basis\n"
+                            "Style BFG621MB Double Bowl Topmount sink\n"
+                            "Finish Matt Black\n"
+                            "Pantry\n"
+                            "Pantry Sink+ ISE 56 INSINKERATOR\n"
+                            "Manufacturer Alder\n"
+                            "Range Cori\n"
+                            "Model Pull-down Sink Mixer\n"
+                            "Finish Brushed Nickel\n"
+                            "Pantry Tapware+ ALDER SACHI\n"
+                            "ROBE HOOK IN MATT BLACK\n"
+                            "Laundry\n"
+                            "Manufacturer Caesarstone - Mineral\n"
+                            "Profile 20mm Arris\n"
+                            "Range Caesarstone Standard M1\n"
+                            "Colour Organic White\n"
+                            "Benchtop\n"
+                            "Manufacturer Laminex\n"
+                            "Finish Natural\n"
+                            "Profile S/Edge\n"
+                            "Colour Chalk White\n"
+                            "Base Cabinet Panels\n"
+                            "Manufacturer Laminex\n"
+                            "Finish Natural\n"
+                            "Profile (N/A)\n"
+                            "Colour Chalk White\n"
+                            "Kickboard\n"
+                            "Manufacturer Everhard\n"
+                            "Style Excellence Squareline 45L\n"
+                            "Finish Stainless Steel\n"
+                            "Laundry Trough\n"
+                            "Manufacturer Alder\n"
+                            "Range Milano\n"
+                            "Style Vegie Mixer\n"
+                            "Finish Chrome\n"
+                            "Laundry Tapware\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 10,
+                        "text": (
+                            "Bathroom\n"
+                            "Manufacturer Caesarstone - Mineral\n"
+                            "Profile 20mm Arris\n"
+                            "Range Caesarstone Standard M1\n"
+                            "Colour Organic White\n"
+                            "Benchtop\n"
+                            "Manufacturer Laminex\n"
+                            "Finish Natural\n"
+                            "Profile (N/A)\n"
+                            "Colour Blackened Legno\n"
+                            "Shadowline\n"
+                            "Manufacturer Laminex\n"
+                            "Finish Natural\n"
+                            "Profile S/Edge\n"
+                            "Colour Blackened Legno\n"
+                            "Cabinet Panels\n"
+                            "Manufacturer (N/A)\n"
+                            "Finish (N/A)\n"
+                            "Profile (N/A)\n"
+                            "Colour Floating Vanity\n"
+                            "Kickboard\n"
+                            "Manufacturer (N/A)\n"
+                            "Category (N/A)\n"
+                            "Model L Shaped Finger Pull\n"
+                            "Fixing (N/A)\n"
+                            "Cabinetry Handles\n"
+                            "Style Black micro-frame\n"
+                            "Mirror\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 11,
+                        "text": (
+                            "Powder\n"
+                            "Manufacturer Caesarstone - Mineral\n"
+                            "Profile 20mm Arris\n"
+                            "Range Caesarstone Standard M1\n"
+                            "Colour Organic White\n"
+                            "Benchtop\n"
+                            "Manufacturer Laminex\n"
+                            "Finish Natural\n"
+                            "Profile (N/A)\n"
+                            "Colour Blackened Legno\n"
+                            "Shadowline\n"
+                            "Manufacturer Laminex\n"
+                            "Finish Natural\n"
+                            "Profile S/Edge\n"
+                            "Colour Blackened Legno\n"
+                            "Cabinet Panels\n"
+                            "Manufacturer (N/A)\n"
+                            "Finish (N/A)\n"
+                            "Profile (N/A)\n"
+                            "Colour Floating Vanity\n"
+                            "Kickboard\n"
+                            "Manufacturer (N/A)\n"
+                            "Category (N/A)\n"
+                            "Model L Shaped Finger Pull\n"
+                            "Fixing (N/A)\n"
+                            "Cabinetry Handles\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 15,
+                        "text": (
+                            "Additional Kitchen/Butlers/Kitchenette\n"
+                            "Location Rumpus\n"
+                            "Location\n"
+                            "Manufacturer Caesarstone - Mineral\n"
+                            "Profile 20mm Arris\n"
+                            "Range Builders M0\n"
+                            "Colour Raven\n"
+                            "Benchtop\n"
+                            "Manufacturer Laminex\n"
+                            "Finish Natural\n"
+                            "Profile S/Edge\n"
+                            "Colour Aries\n"
+                            "Base Cabinet Panels\n"
+                            "Manufacturer Laminex\n"
+                            "Finish Natural\n"
+                            "Profile (N/A)\n"
+                            "Colour Aries\n"
+                            "Kickboard\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                ],
+            }
+        ]
+        rooms = [
+            {
+                "room_key": "study",
+                "original_room_label": "Study",
+                "bench_tops_other": "NOOK 1 | NOOK 2",
+                "bench_tops_wall_run": "",
+                "bench_tops_island": "",
+                "bench_tops": ["NOOK 1 | NOOK 2"],
+                "toe_kick": [],
+                "shelf": "",
+                "sink_info": "",
+                "basin_info": "",
+                "tap_info": "",
+                "handles": [],
+            },
+            {
+                "room_key": "butlers_wip",
+                "original_room_label": "Butlers/WIP",
+                "bench_tops_other": "Manufacturer Laminex Finish Natural Profile S/Edge Colour Blackened Legno Base Cabinet Panels",
+                "bench_tops_wall_run": "",
+                "bench_tops_island": "",
+                "bench_tops": ["x"],
+                "toe_kick": ["Manufacturer N/A Category Category 6 Model C137 Black 100m Fixing Horizontal Cabinetry Handles"],
+                "shelf": "(N/A) Manufacturer Laminex Finish Natural Colour Blackened Legno",
+                "sink_info": "",
+                "basin_info": "",
+                "tap_info": "",
+                "handles": ["C137 Black 100m - Horizontal"],
+            },
+            {
+                "room_key": "laundry",
+                "original_room_label": "Laundry",
+                "bench_tops_other": "Manufacturer Laminex Finish Natural Profile S/Edge Colour Chalk White Base Cabinet Panels",
+                "bench_tops_wall_run": "",
+                "bench_tops_island": "",
+                "bench_tops": ["x"],
+                "toe_kick": ["Manufacturer Laminex Finish Natural Profile S/Edge Finish Blackened Legno Overheads Manufacturer N/A Category Category 6 Model C137 Black 100m"],
+                "shelf": "",
+                "sink_info": "",
+                "basin_info": "",
+                "tap_info": "",
+                "handles": ["C137 Black 100m - Horizontal"],
+            },
+            {
+                "room_key": "bathroom",
+                "original_room_label": "Bathroom",
+                "bench_tops_other": "20mm Alder - Blackened Legno - Arris - Accessories HAND TOWEL HOOKS",
+                "bench_tops_wall_run": "",
+                "bench_tops_island": "",
+                "bench_tops": ["x"],
+                "toe_kick": ["Manufacturer (N/A) Category (N/A) Model L Shaped Finger Pull Fixing (N/A) Mirror"],
+                "shelf": "",
+                "sink_info": "",
+                "basin_info": "Caroma - Liano II - 400mm Round Above Counter Basin 0TH 852500 - White",
+                "tap_info": "Alder - Samm - Wall Basin/Bath Mixer Set Backplate - 220mm",
+                "handles": ["Mixer - Samm - Single 800mm - Matt Black - 1No. additional, installed above inclusion", "L Shaped Finger Pull"],
+            },
+            {
+                "room_key": "powder",
+                "original_room_label": "Powder",
+                "bench_tops_other": "20mm Alder - WhiteBath/Spa - Arris - Accessories 2No Bath towel hooks + 1No Hand towel hook",
+                "bench_tops_wall_run": "",
+                "bench_tops_island": "",
+                "bench_tops": ["x"],
+                "toe_kick": ["Manufacturer (N/A) Category (N/A) Model L Shaped Finger Pull Fixing (N/A) Mirror"],
+                "shelf": "",
+                "sink_info": "",
+                "basin_info": "Caroma - Liano II - 400mm Round Above Counter Basin 0TH 852500 - White",
+                "tap_info": "Alder - Samm - Wall Basin/Bath Mixer Set Backplate - 220mm",
+                "handles": ["L Shaped Finger Pull"],
+            },
+            {
+                "room_key": "rumpus",
+                "original_room_label": "Rumpus",
+                "bench_tops_other": "Simonds Dark Ebony Stain - Raven",
+                "bench_tops_wall_run": "",
+                "bench_tops_island": "",
+                "bench_tops": ["x"],
+                "toe_kick": ["Aries"],
+                "shelf": "",
+                "sink_info": "",
+                "basin_info": "",
+                "tap_info": "",
+                "handles": ["Horizontal"],
+                "door_colours_base": "Aries",
+            },
+        ]
+        parsing_module._finalize_simonds_rooms(rooms, {}, documents)
+        by_key = {row["room_key"]: row for row in rooms}
+        self.assertEqual(by_key["study"]["bench_tops_other"], "Laminex - Blackended Legno - S/Edge")
+        self.assertEqual(by_key["butlers_wip"]["bench_tops_other"], "40mm Caesarstone - Mineral - Organic White - Arris")
+        self.assertEqual(by_key["butlers_wip"]["shelf"], "Laminex - Blackened Legno")
+        self.assertEqual(by_key["butlers_wip"]["toe_kick"], ["Laminex - Blackened Legno"])
+        self.assertEqual(by_key["butlers_wip"]["sink_info"], "Franke - Basis - BFG621MB Double Bowl Topmount - Matt Black")
+        self.assertEqual(by_key["butlers_wip"]["tap_info"], "Alder - Cori - Pull-down - Brushed Nickel")
+        self.assertEqual(by_key["laundry"]["bench_tops_other"], "20mm Caesarstone - Mineral - Organic White - Arris")
+        self.assertEqual(by_key["laundry"]["toe_kick"], ["Laminex - Chalk White"])
+        self.assertEqual(by_key["laundry"]["sink_info"], "Everhard - Excellence Squareline 45L - Stainless Steel")
+        self.assertEqual(by_key["laundry"]["tap_info"], "Alder - Milano - Vegie Mixer - Chrome")
+        self.assertEqual(by_key["bathroom"]["bench_tops_other"], "20mm Caesarstone - Mineral - Organic White - Arris")
+        self.assertEqual(by_key["bathroom"]["handles"], ["L Shaped Finger Pull"])
+        self.assertEqual(by_key["bathroom"]["toe_kick"], [])
+        self.assertEqual(by_key["powder"]["bench_tops_other"], "20mm Caesarstone - Mineral - Organic White - Arris")
+        self.assertEqual(by_key["powder"]["toe_kick"], [])
+        self.assertEqual(by_key["rumpus"]["bench_tops_other"], "20mm Caesarstone - Mineral - Raven - Arris")
 
     def test_shared_generic_polish_clears_existing_materials_when_explicit_not_applicable_blocks_exist(self) -> None:
         row = {

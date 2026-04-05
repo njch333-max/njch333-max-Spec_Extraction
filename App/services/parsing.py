@@ -6664,6 +6664,43 @@ def _looks_like_appliance_placeholder_model(text: str) -> bool:
     )
 
 
+def _looks_like_noisy_appliance_model(text: str, appliance_type: str = "") -> bool:
+    model = normalize_space(str(text or "")).strip(" -;,").upper()
+    if not model:
+        return False
+    lowered = model.lower()
+    generic_tokens = (
+        "rangehood",
+        "dishwasher",
+        "cooktop",
+        "oven",
+        "undermount",
+        "underbench",
+        "electric",
+        "standard",
+        "others",
+        "retractable",
+        "freestanding",
+        "60cm",
+        "90cm",
+        "600mm",
+        "900mm",
+    )
+    if appliance_type and appliance_type.lower() in lowered:
+        return True
+    if "others" in lowered or "standard" in lowered:
+        return True
+    if re.search(r"(?i)\b(?:cm|mm)\b", lowered) and any(token in lowered for token in generic_tokens):
+        return True
+    parts = [part for part in re.split(r"[-_/]+", model) if part]
+    if len(parts) >= 3 and sum(1 for part in parts if any(token in part.lower() for token in generic_tokens)) >= 2:
+        return True
+    explicit_suffix = re.search(r"\b([A-Z]{1,4}\d[A-Z0-9-]{2,})\b$", model)
+    if explicit_suffix and explicit_suffix.group(1) != model and any(token in lowered for token in generic_tokens):
+        return True
+    return False
+
+
 def _build_appliance_row(
     appliance_type: str,
     details: str,
@@ -6677,6 +6714,8 @@ def _build_appliance_row(
         return None
     guess_text = _strip_urls_for_appliance_guessing(clean_details)
     make = _guess_make(guess_text)
+    if not make:
+        make = _guess_make(evidence or clean_details)
     guessed_model = _guess_model(guess_text)
     model_no = guessed_model
     placeholder_model = ""
@@ -6686,9 +6725,18 @@ def _build_appliance_row(
         appliance_type = "Oven"
     if clean_details.upper().startswith("N/A") and not (guessed_model or placeholder_model or explicit_model):
         return None
-    if explicit_model and (not model_no or _looks_like_appliance_placeholder_model(model_no) or model_no.startswith("WWW.")):
+    if explicit_model and (
+        not model_no
+        or _looks_like_appliance_placeholder_model(model_no)
+        or model_no.startswith("WWW.")
+        or _looks_like_noisy_appliance_model(model_no, appliance_type)
+    ):
         model_no = explicit_model
-    if placeholder_model and ("as above" in placeholder_model.lower() or not guessed_model):
+    if placeholder_model and (
+        "as above" in placeholder_model.lower()
+        or not guessed_model
+        or _looks_like_noisy_appliance_model(model_no, appliance_type)
+    ):
         make = ""
         model_no = placeholder_model
     elif not model_no and placeholder_model:
@@ -7326,6 +7374,10 @@ def _snapshot_builder_finalizer(builder_name: str) -> Callable[[list[dict[str, A
         return _finalize_yellowwood_rooms
     if _is_imperial_builder(normalized):
         return _finalize_imperial_rooms
+    if normalized == "simonds":
+        return _finalize_simonds_rooms
+    if normalized == "evoca":
+        return _finalize_evoca_rooms
     if normalized in {"simonds", "evoca"}:
         return _finalize_grouped_row_builder_rooms
     return None
@@ -7360,6 +7412,23 @@ def _finalize_imperial_rooms(
     return
 
 
+def _finalize_simonds_rooms(
+    rooms: list[dict[str, Any]],
+    overlays: dict[str, dict[str, Any]],
+    documents: list[dict[str, object]],
+) -> None:
+    _finalize_grouped_row_builder_rooms(rooms, overlays, documents)
+    _recover_simonds_grouped_row_fields(rooms, documents)
+
+
+def _finalize_evoca_rooms(
+    rooms: list[dict[str, Any]],
+    overlays: dict[str, dict[str, Any]],
+    documents: list[dict[str, object]],
+) -> None:
+    _finalize_grouped_row_builder_rooms(rooms, overlays, documents)
+
+
 def _finalize_grouped_row_builder_rooms(
     rooms: list[dict[str, Any]],
     overlays: dict[str, dict[str, Any]],
@@ -7371,6 +7440,364 @@ def _finalize_grouped_row_builder_rooms(
         room_key = normalize_room_key(str(row.get("room_key", "") or ""))
         if grouped_splashback and room_key in {"kitchen", "laundry"} and not normalize_space(str(row.get("splashback", "") or "")):
             row["splashback"] = grouped_splashback
+
+
+SIMONDS_RECOVERY_ROOM_ALIASES: dict[str, tuple[str, ...]] = {
+    "kitchen": ("Kitchen",),
+    "study": ("Study",),
+    "butlers_wip": ("Bulters/WIP", "Butlers/WIP", "Pantry"),
+    "laundry": ("Laundry",),
+    "master_ensuite": ("Master Ensuite",),
+    "ensuite_3": ("Ensuite 3",),
+    "bathroom": ("Bathroom",),
+    "powder": ("Powder",),
+    "guest_ensuite_2": ("Guest Ensuite 2",),
+    "rumpus": ("Rumpus",),
+}
+
+SIMONDS_RECOVERY_PROPERTY_LABELS: tuple[str, ...] = (
+    "Colour & Finish",
+    "Manufacturer",
+    "Mechanism",
+    "Category",
+    "Profile",
+    "Finish",
+    "Colour",
+    "Fixing",
+    "Style",
+    "Range",
+    "Model",
+)
+
+SIMONDS_RECOVERY_ANCHOR_LABELS: tuple[str, ...] = (
+    "Island/Peninsula Feature Panels",
+    "Island/Penisula Feature Panels",
+    "Island/Peninsula Base Cabinet Panels",
+    "Island/Penisula Base Cabinet Panels",
+    "Wall Run Base Cabinet Panels",
+    "Overhead Cabinetry Handles",
+    "Island/Peninsula Kickboard",
+    "Island/Penisula Kickboard",
+    "Island/Peninsula Benchtop",
+    "Island/Penisula Benchtop",
+    "Base Cabinet Panels",
+    "Cabinet Panels",
+    "Base Cabinetry Handles",
+    "Cabinetry Handles",
+    "Wall Run Kickboard",
+    "Wall Run Benchtop",
+    "Bath Tapware",
+    "Bath/Spa Bath",
+    "Toilet Roll Holder",
+    "Toilet Suite",
+    "Feature Waste",
+    "Shower Mixer",
+    "Shower Frame",
+    "Shower Rose",
+    "Shower Base",
+    "Accessories",
+    "Robe Hook",
+    "Mirror",
+    "Vanity Basin Tapware",
+    "Kitchen Tapware",
+    "Pantry Tapware",
+    "Laundry Tapware",
+    "Vanity Basin",
+    "Kitchen Sink",
+    "Pantry Sink",
+    "Laundry Trough",
+    "Waterfall End Panels",
+    "Tall Panel",
+    "Kickboard",
+    "Overheads",
+    "Shelving",
+    "Shadowline",
+    "Benchtop",
+)
+
+
+def _recover_simonds_grouped_row_fields(rooms: list[dict[str, Any]], documents: list[dict[str, object]]) -> None:
+    if not rooms or not documents:
+        return
+    segments_by_room = {
+        room_key: _simonds_extract_room_segments(documents, room_key)
+        for room_key in SIMONDS_RECOVERY_ROOM_ALIASES
+    }
+    for row in rooms:
+        room_key = _simonds_canonical_room_key(row)
+        segments = segments_by_room.get(room_key, [])
+        if not segments:
+            continue
+        if room_key in {"study", "butlers_wip", "laundry", "bathroom", "powder", "rumpus", "guest_ensuite_2"}:
+            bench_value = _simonds_recover_anchor_material(
+                segments,
+                (
+                    "Wall Run Benchtop",
+                    "Island/Peninsula Benchtop",
+                    "Island/Penisula Benchtop",
+                    "Benchtop",
+                ),
+            )
+            if bench_value and _simonds_should_replace_material_value(str(row.get("bench_tops_other", "") or ""), bench_value):
+                row["bench_tops_other"] = bench_value
+                row["bench_tops_wall_run"] = ""
+                row["bench_tops_island"] = ""
+                row["bench_tops"] = [bench_value]
+        if room_key == "butlers_wip":
+            shelf_value = _simonds_recover_anchor_material(segments, ("Shelving",))
+            if shelf_value and _simonds_should_replace_material_value(str(row.get("shelf", "") or ""), shelf_value):
+                row["shelf"] = shelf_value
+            sink_value = _simonds_recover_anchor_fixture(segments, ("Pantry Sink",), kind="sink")
+            if sink_value and _simonds_should_replace_fixture_value(str(row.get("sink_info", "") or ""), sink_value):
+                row["sink_info"] = sink_value
+            tap_value = _simonds_recover_anchor_fixture(segments, ("Pantry Tapware",), kind="tap")
+            if tap_value and _simonds_should_replace_fixture_value(str(row.get("tap_info", "") or ""), tap_value):
+                row["tap_info"] = tap_value
+        if room_key == "laundry":
+            sink_value = _simonds_recover_anchor_fixture(segments, ("Laundry Trough",), kind="sink")
+            if sink_value and _simonds_should_replace_fixture_value(str(row.get("sink_info", "") or ""), sink_value):
+                row["sink_info"] = sink_value
+            tap_value = _simonds_recover_anchor_fixture(segments, ("Laundry Tapware",), kind="tap")
+            if tap_value and _simonds_should_replace_fixture_value(str(row.get("tap_info", "") or ""), tap_value):
+                row["tap_info"] = tap_value
+        if room_key in {"bathroom", "powder", "guest_ensuite_2"}:
+            handle_value = _simonds_recover_anchor_handles(segments, ("Cabinetry Handles", "Base Cabinetry Handles"))
+            if handle_value:
+                row["handles"] = [handle_value]
+        current_toe_kick = _coerce_string_list(row.get("toe_kick", []))
+        if room_key in {"butlers_wip", "laundry", "rumpus"}:
+            toe_kick_value = _simonds_recover_anchor_material(
+                segments,
+                ("Wall Run Kickboard", "Island/Peninsula Kickboard", "Island/Penisula Kickboard", "Kickboard"),
+            )
+            if toe_kick_value:
+                if _simonds_should_replace_toe_kick(current_toe_kick, toe_kick_value):
+                    row["toe_kick"] = [toe_kick_value]
+            elif _simonds_toe_kick_is_noisy(current_toe_kick):
+                row["toe_kick"] = []
+        elif room_key in {"bathroom", "powder", "guest_ensuite_2"} and _simonds_toe_kick_is_noisy(current_toe_kick):
+            row["toe_kick"] = []
+
+
+def _simonds_canonical_room_key(row: dict[str, Any]) -> str:
+    raw_key = normalize_space(str(row.get("room_key", "") or "")).lower()
+    original_label = normalize_space(str(row.get("original_room_label", "") or "")).lower()
+    if raw_key in {"butlers_wip", "butlers/wip", "walk_in_pantry", "pantry"}:
+        return "butlers_wip"
+    if raw_key in {"guest_ensuite_2", "ensuite_2"} or "guest ensuite 2" in original_label:
+        return "guest_ensuite_2"
+    if raw_key in {"master_ensuite", "ensuite"} and "master" in original_label:
+        return "master_ensuite"
+    if raw_key in SIMONDS_RECOVERY_ROOM_ALIASES:
+        return raw_key
+    label_to_key = {
+        "study": "study",
+        "laundry": "laundry",
+        "bathroom": "bathroom",
+        "powder": "powder",
+        "rumpus": "rumpus",
+    }
+    return label_to_key.get(original_label, normalize_room_key(raw_key))
+
+
+def _simonds_extract_room_segments(documents: list[dict[str, object]], room_key: str) -> list[list[str]]:
+    aliases = SIMONDS_RECOVERY_ROOM_ALIASES.get(room_key, ())
+    if not aliases:
+        return []
+    alias_map: dict[str, str] = {}
+    for candidate_key, alias_values in SIMONDS_RECOVERY_ROOM_ALIASES.items():
+        for alias in alias_values:
+            alias_map[normalize_space(alias).lower()] = candidate_key
+    segments: list[list[str]] = []
+    for lines in _simonds_prepared_page_lines(documents):
+        start_index = None
+        for index, line in enumerate(lines):
+            heading_key = _simonds_line_heading_room_key(line, alias_map)
+            if heading_key == room_key:
+                start_index = index + 1
+                if room_key == "butlers_wip" and normalize_space(line).lower() == "pantry":
+                    probe_index = index - 1
+                    while probe_index >= 0:
+                        prior_heading_key = _simonds_line_heading_room_key(lines[probe_index], alias_map)
+                        if prior_heading_key:
+                            break
+                        probe_label, _ = _simonds_split_anchor_line(lines[probe_index])
+                        if probe_label or re.match(r"(?i)^(?:manufacturer|range|profile|finish|colour|style|model|category|fixing|mechanism)\b", lines[probe_index]):
+                            start_index = probe_index
+                            probe_index -= 1
+                            continue
+                        break
+                break
+        if start_index is None:
+            continue
+        segment: list[str] = []
+        for line in lines[start_index:]:
+            heading_key = _simonds_line_heading_room_key(line, alias_map)
+            if heading_key and heading_key != room_key:
+                break
+            segment.append(line)
+        if segment:
+            segments.append(segment)
+    return segments
+
+
+def _simonds_prepared_page_lines(documents: list[dict[str, object]]) -> list[list[str]]:
+    from App.services import extraction_service
+
+    pages: list[list[str]] = []
+    for document in documents:
+        for page in document.get("pages", []):
+            if not isinstance(page, dict):
+                continue
+            raw_text = str(page.get("raw_text") or page.get("text") or "")
+            if not raw_text.strip():
+                continue
+            prepared = extraction_service._prepare_simonds_layout_text(raw_text)
+            for label in sorted(SIMONDS_RECOVERY_ANCHOR_LABELS, key=len, reverse=True):
+                label_pattern = re.escape(label)
+                prepared = re.sub(
+                    rf"(?<!\n)(?<=\S)(?={label_pattern}(?:\b|\())",
+                    "\n",
+                    prepared,
+                    flags=re.IGNORECASE,
+                )
+            lines = [normalize_space(line) for line in str(prepared).splitlines() if normalize_space(line)]
+            if lines:
+                pages.append(lines)
+    return pages
+
+
+def _simonds_line_heading_room_key(line: str, alias_map: dict[str, str]) -> str:
+    normalized = normalize_space(line).strip(" -;,")
+    if not normalized:
+        return ""
+    lowered = normalized.lower()
+    direct = alias_map.get(lowered, "")
+    if direct:
+        return direct
+    if lowered.startswith("location "):
+        location_value = normalize_space(normalized.split(" ", 1)[1] if " " in normalized else "").lower()
+        direct = alias_map.get(location_value, "")
+        if direct:
+            return direct
+    return ""
+
+
+def _simonds_split_anchor_line(line: str) -> tuple[str, str]:
+    normalized = normalize_space(line)
+    if not normalized:
+        return "", ""
+    labels = sorted(
+        (*SIMONDS_RECOVERY_PROPERTY_LABELS, *SIMONDS_RECOVERY_ANCHOR_LABELS),
+        key=len,
+        reverse=True,
+    )
+    for label in labels:
+        pattern = rf"(?i)^{re.escape(label)}(?:\b|(?=\())"
+        match = re.match(pattern, normalized)
+        if not match:
+            continue
+        remainder = normalize_space(normalized[match.end() :]).strip(" -:;,")
+        return label, remainder
+    return "", normalized
+
+
+def _simonds_recover_anchor_material(segments: list[list[str]], anchors: tuple[str, ...]) -> str:
+    candidate = _simonds_recover_anchor_value(segments, anchors, kind="material")
+    if not candidate:
+        return ""
+    lowered = candidate.lower()
+    if lowered in {"floating vanity", "n/a", "not applicable"}:
+        return ""
+    if not _has_joinery_material_keyword(candidate) and not re.search(r"(?i)\b\d+\s*mm\b", candidate):
+        return ""
+    return candidate
+
+
+def _simonds_recover_anchor_handles(segments: list[list[str]], anchors: tuple[str, ...]) -> str:
+    return _simonds_recover_anchor_value(segments, anchors, kind="handles")
+
+
+def _simonds_recover_anchor_fixture(segments: list[list[str]], anchors: tuple[str, ...], *, kind: str) -> str:
+    return _simonds_recover_anchor_value(segments, anchors, kind=kind)
+
+
+def _simonds_recover_anchor_value(segments: list[list[str]], anchors: tuple[str, ...], *, kind: str) -> str:
+    from App.services import extraction_service
+
+    target_labels = {normalize_space(anchor).lower() for anchor in anchors}
+    candidates: list[str] = []
+    for segment in segments:
+        properties: list[tuple[str, str]] = []
+        for line in segment:
+            label, value = _simonds_split_anchor_line(line)
+            normalized_label = normalize_space(label).lower()
+            if normalized_label in {entry.lower() for entry in SIMONDS_RECOVERY_PROPERTY_LABELS}:
+                properties.append((label, value))
+                continue
+            if normalized_label in {entry.lower() for entry in SIMONDS_RECOVERY_ANCHOR_LABELS}:
+                if normalized_label in target_labels:
+                    parts: dict[str, list[str]] = {"note": [], "_ordered_fragments": []}
+                    for property_label, property_value in properties:
+                        extraction_service._append_generic_part_value(parts, property_label, property_value)
+                        extraction_service._append_generic_ordered_fragment(parts, property_value, label=property_label)
+                    if kind == "material":
+                        candidate = extraction_service._format_generic_material_from_parts(parts)
+                    elif kind == "handles":
+                        candidate = extraction_service._format_generic_handles_from_parts(parts)
+                    else:
+                        candidate = extraction_service._format_generic_fixture_from_parts(parts, kind=kind, anchor_label=label)
+                    candidate = normalize_space(str(candidate or "")).strip(" -;,")
+                    if candidate:
+                        candidates.append(candidate)
+                properties = []
+                continue
+        if candidates:
+            break
+    return candidates[0] if candidates else ""
+
+
+def _simonds_should_replace_material_value(current: str, recovered: str) -> bool:
+    existing = normalize_space(current)
+    if not existing:
+        return True
+    lowered = existing.lower()
+    if any(token in lowered for token in ("manufacturer", "profile", "range", "colour", "category", "model", "fixing", "mechanism")):
+        return True
+    if any(token in lowered for token in ("nook 1", "nook 2", "accessories", "simonds dark ebony stain")):
+        return True
+    if not _has_joinery_material_keyword(existing) and not re.search(r"(?i)\b\d+\s*mm\b", existing):
+        return True
+    return False
+
+
+def _simonds_should_replace_fixture_value(current: str, recovered: str) -> bool:
+    existing = normalize_space(current)
+    if not existing:
+        return True
+    lowered = existing.lower()
+    if any(token in lowered for token in ("manufacturer", "profile", "range", "colour", "category", "model", "fixing", "mechanism")):
+        return True
+    return False
+
+
+def _simonds_toe_kick_is_noisy(values: list[str]) -> bool:
+    entries = [normalize_space(value) for value in values if normalize_space(value)]
+    if not entries:
+        return False
+    combined = " | ".join(entries).lower()
+    return any(token in combined for token in ("manufacturer", "category", "model", "fixing", "mirror", "basin", "handle", "mechanism"))
+
+
+def _simonds_should_replace_toe_kick(current_values: list[str], recovered: str) -> bool:
+    existing = [normalize_space(value) for value in current_values if normalize_space(value)]
+    if not existing:
+        return True
+    if _simonds_toe_kick_is_noisy(existing):
+        return True
+    if not any(_has_joinery_material_keyword(value) or re.search(r"(?i)\b\d+\s*mm\b", value) for value in existing):
+        return True
+    return False
 
 
 def _yellowwood_row_probe_text(row: dict[str, Any]) -> str:
@@ -8579,6 +9006,10 @@ def _imperial_preprocess_non_joinery_lines(text: str) -> list[str]:
 
 def _imperial_extract_non_joinery_blocks(text: str, kind: str) -> list[tuple[str, str]]:
     lines = _imperial_preprocess_non_joinery_lines(text)
+    if kind == "sinkware":
+        semantic_blocks = _imperial_extract_semantic_sinkware_blocks(lines)
+        if semantic_blocks:
+            return semantic_blocks
     blocks: list[tuple[str, str]] = []
     pending: list[str] = []
     index = 0
@@ -8637,25 +9068,24 @@ def _imperial_extract_non_joinery_blocks(text: str, kind: str) -> list[tuple[str
                     blocks.append((room_label, cleaned))
                 continue
 
-            primary_lines = [line for line in body_parts if not _imperial_is_non_joinery_note_line(line, kind)]
-            note_lines = [line for line in body_parts if line not in primary_lines]
-            assigned: list[list[str]] = [[] for _ in heading_cluster]
-            filtered_prefix = [line for line in body_prefix if _imperial_is_non_joinery_note_line(line, kind)]
-            if filtered_prefix:
-                assigned[0].extend(filtered_prefix)
-            for cluster_index, (_, tail) in enumerate(heading_cluster):
-                if tail:
-                    assigned[cluster_index].append(tail)
-            for cluster_index in range(len(heading_cluster)):
-                if cluster_index < len(primary_lines):
-                    assigned[cluster_index].append(primary_lines[cluster_index])
-            if len(primary_lines) > len(heading_cluster):
-                assigned[-1].extend(primary_lines[len(heading_cluster):])
-            if note_lines:
-                if kind == "sinkware" and len(heading_cluster) > 1 and all(_imperial_is_non_joinery_note_line(line, kind) for line in note_lines):
-                    for cluster_parts in assigned:
-                        cluster_parts.extend(note_lines)
-                else:
+            if kind == "sinkware":
+                assigned = _imperial_assign_sinkware_cluster_parts(heading_cluster, body_prefix, body_parts)
+            else:
+                primary_lines = [line for line in body_parts if not _imperial_is_non_joinery_note_line(line, kind)]
+                note_lines = [line for line in body_parts if line not in primary_lines]
+                assigned = [[] for _ in heading_cluster]
+                filtered_prefix = [line for line in body_prefix if _imperial_is_non_joinery_note_line(line, kind)]
+                if filtered_prefix:
+                    assigned[0].extend(filtered_prefix)
+                for cluster_index, (_, tail) in enumerate(heading_cluster):
+                    if tail:
+                        assigned[cluster_index].append(tail)
+                for cluster_index in range(len(heading_cluster)):
+                    if cluster_index < len(primary_lines):
+                        assigned[cluster_index].append(primary_lines[cluster_index])
+                if len(primary_lines) > len(heading_cluster):
+                    assigned[-1].extend(primary_lines[len(heading_cluster):])
+                if note_lines:
                     assigned[-1].extend(note_lines)
             for (room_label, _), parts in zip(heading_cluster, assigned):
                 cleaned = _imperial_clean_non_joinery_body("\n".join(parts), kind)
@@ -8668,13 +9098,193 @@ def _imperial_extract_non_joinery_blocks(text: str, kind: str) -> list[tuple[str
             continue
         if _imperial_is_relevant_preheading_non_joinery_line(line, kind):
             pending.append(line)
-            pending = pending[-5:]
+            pending = pending[-8:]
         elif pending and not re.match(r"(?i)^(?:SINKWARE|TAPWARE|SINK ACCESSORIES|NOTES)\b", line):
-            pending.append(line)
-            pending = pending[-5:]
+            if kind == "sinkware":
+                if (
+                    not _is_imperial_page_noise_line(line)
+                    and not re.match(r"(?i)^(?:signed date|designer:|client:|date:|address:)$", line)
+                    and (
+                        _imperial_is_relevant_preheading_non_joinery_line(line, kind)
+                        or re.search(r"(?i)\b(?:reece|fienza|wall mounted taps?|product code|part number|x\s*\d+|behind sink|solid surface|white)\b", line)
+                    )
+                ):
+                    pending.append(line)
+                    pending = pending[-8:]
+            else:
+                pending.append(line)
+                pending = pending[-5:]
+        elif kind == "sinkware" and pending and normalize_space(line).upper() in {"NOTES", "AREA / ITEM", "SPECS / DESCRIPTION IMAGE SUPPLIER"}:
+            pass
         else:
             pending = []
         index += 1
+    return blocks
+
+
+def _imperial_extract_semantic_sinkware_blocks(lines: list[str]) -> list[tuple[str, str]]:
+    headings: list[str] = []
+    detail_entries: list[tuple[str, bool]] = []
+    awaiting_follow_line = ""
+    saw_heading = False
+    skip_foreign_block = False
+    for line in lines:
+        if _is_imperial_page_noise_line(line) or line.upper() in {
+            "SINKWARE & TAPWARE",
+            "AREA / ITEM",
+            "AREA / ITEM SPECS / DESCRIPTION IMAGE SUPPLIER NOTES",
+            "AREA / ITEM SPECS / DESCRIPTION IMAGE SUPPLIER",
+            "NOTES",
+            "SPECS / DESCRIPTION IMAGE SUPPLIER",
+        }:
+            continue
+        heading_match = re.match(r"(?i)^SINKWARE\s*\((?P<room>[^)]+)\)\s*(?P<tail>.*)$", line)
+        if heading_match:
+            room_label = normalize_space(heading_match.group("room"))
+            tail = normalize_space(heading_match.group("tail"))
+            headings.append(room_label)
+            saw_heading = True
+            skip_foreign_block = False
+            if tail:
+                detail_entries.append((tail, True))
+            continue
+        if re.match(r"(?i)^(?:TAPWARE|SINK ACCESSORIES|NOTES)\b", line):
+            skip_foreign_block = True
+            continue
+        if skip_foreign_block:
+            continue
+        normalized_line = normalize_space(line)
+        if awaiting_follow_line and normalized_line:
+            detail_entries.append((line, saw_heading))
+            awaiting_follow_line = ""
+            continue
+        if re.match(r"(?i)^taphole location\s*:?\s*$", normalized_line):
+            detail_entries.append((line, saw_heading))
+            awaiting_follow_line = "taphole"
+            continue
+        if re.match(r"(?i)^(?:part number|product code)\s*:?\s*$", normalized_line):
+            detail_entries.append((line, saw_heading))
+            awaiting_follow_line = "code"
+            continue
+        if re.match(r"(?i)^(?:TAPWARE|SINK ACCESSORIES)\b", line):
+            continue
+        if _looks_like_person_name_line(line):
+            continue
+        if _imperial_is_supplier_only_line(line):
+            continue
+        if re.fullmatch(r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?", normalize_space(line)):
+            continue
+        if normalize_space(line).lower() == "behind sink":
+            continue
+        if re.search(r"(?i)\bwall mounted taps?\b", line):
+            continue
+        if _imperial_is_relevant_preheading_non_joinery_line(line, "sinkware") or re.search(
+            r"(?i)\b(?:reece|fienza|product code|part number|x\s*\d+|solid surface|white|behind sink|double|bowl|stainless steel|undermounted)\b",
+            line,
+        ):
+            detail_entries.append((line, saw_heading))
+    if not headings:
+        return []
+    detail_lines = [
+        line
+        for line, after_heading in detail_entries
+        if len(headings) <= 1
+        or after_heading
+        or not (
+            re.match(r"(?i)^taphole location\b", normalize_space(line))
+            or re.match(r"(?i)^(?:basin|tub|drop\s+in\s+tub)\s*\(", normalize_space(line))
+            or (
+                re.search(r"(?i)\b(?:laundry|kitchen|pantry|powder|bathroom|wc|ensuite)\b", normalize_space(line))
+                and not any(token in normalize_space(line).lower() for token in {normalize_space(room).lower() for room in headings})
+            )
+        )
+    ]
+    allowed_heading_tokens = {normalize_space(room).lower() for room in headings}
+
+    items: list[dict[str, Any]] = []
+    pending_notes: list[str] = []
+    current_item: dict[str, Any] | None = None
+    awaiting_code_suffix = False
+    for line in detail_lines:
+        normalized_line = normalize_space(line)
+        if re.search(r"(?i)\bcorner of tub\b", normalized_line):
+            continue
+        if (
+            re.match(r"(?i)^(?:basin|tub|drop\s+in\s+tub)\s*\(", normalized_line)
+            and not any(token in normalized_line.lower() for token in allowed_heading_tokens)
+        ):
+            continue
+        if (
+            re.search(r"(?i)\b(?:laundry|kitchen|pantry|powder|bathroom|wc|ensuite)\b", normalized_line)
+            and "taphole location" in normalized_line.lower()
+            and not any(token in normalized_line.lower() for token in allowed_heading_tokens)
+        ):
+            continue
+        if awaiting_code_suffix and normalized_line:
+            code_fragment = normalized_line.strip(" -;,")
+            if re.fullmatch(r"[A-Z0-9./_-]{4,}", code_fragment):
+                if current_item is not None:
+                    current_item["lines"].append(code_fragment)
+                else:
+                    pending_notes.append(code_fragment)
+                awaiting_code_suffix = False
+                continue
+            awaiting_code_suffix = False
+        if current_item is not None and re.fullmatch(r"(?i)-?\s*undermount(?:ed)?", normalized_line):
+            current_item["lines"].append(normalized_line.strip(" -"))
+            continue
+        note_like = _imperial_is_non_joinery_note_line(line, "sinkware") or bool(
+            re.search(r"(?i)\b(?:part number|product code|undermounted|behind sink|sink pre-?punched hole|centre of sink|center of sink)\b", line)
+        )
+        role = _imperial_sinkware_line_role(line)
+        if role:
+            current_item = {"role": role, "lines": [*pending_notes, line]}
+            items.append(current_item)
+            pending_notes = []
+            continue
+        if note_like:
+            if re.search(r"(?i)\b(?:part number|product code)\b", line):
+                if current_item is not None:
+                    current_item["lines"].append(line)
+                else:
+                    pending_notes.append(line)
+                awaiting_code_suffix = True
+            elif re.search(r"(?i)\b(?:behind sink|taphole location)\b", line):
+                pending_notes.append(line)
+            elif re.search(r"(?i)\b(?:sink pre-?punched hole|centre of sink|center of sink|ctr of sink)\b", line):
+                pending_notes.append(line)
+            elif current_item is not None and current_item.get("role") == "sink":
+                current_item["lines"].append(line)
+            else:
+                pending_notes.append(line)
+            continue
+        if current_item is not None:
+            current_item["lines"].append(line)
+        else:
+            pending_notes.append(line)
+    if pending_notes:
+        sink_items_pending = [item for item in items if item.get("role") == "sink"]
+        if sink_items_pending and all(_imperial_is_non_joinery_note_line(note, "sinkware") for note in pending_notes):
+            for item in sink_items_pending:
+                item["lines"].extend(pending_notes)
+        elif current_item is not None:
+            current_item["lines"].extend(pending_notes)
+
+    utility_rooms = [room for room in headings if _imperial_room_supports_sinkware_role(room, "sink")]
+    wet_rooms = [room for room in headings if _imperial_room_supports_sinkware_role(room, "basin")]
+    sink_items = [item for item in items if item.get("role") == "sink"]
+    basin_items = [item for item in items if item.get("role") == "basin"]
+    blocks: list[tuple[str, str]] = []
+
+    for room_label, item in zip(utility_rooms, sink_items):
+        cleaned = _imperial_clean_non_joinery_body("\n".join(item["lines"]), "sinkware")
+        if room_label and cleaned:
+            blocks.append((room_label, cleaned))
+    reversed_wet_rooms = list(reversed(wet_rooms))
+    for room_label, item in zip(reversed_wet_rooms, basin_items):
+        cleaned = _imperial_clean_non_joinery_body("\n".join(item["lines"]), "sinkware")
+        if room_label and cleaned:
+            blocks.append((room_label, cleaned))
     return blocks
 
 
@@ -8687,7 +9297,7 @@ def _imperial_is_relevant_preheading_non_joinery_line(line: str, kind: str) -> b
         return bool(
             re.match(r"(?i)^taphole location\s*:", text)
             or "UNDERMOUT" in upper
-            or re.search(r"(?i)\b(?:corner of tub|centre of sink|sink pre-?punched hole|sink mounting|topmount|matrix sink|double bowl|double drain|undermount)\b", text)
+            or re.search(r"(?i)\b(?:corner of tub|centre of sink|sink pre-?punched hole|sink mounting|topmount|matrix sink|double bowl|double drain|undermount|basin|semi-?inset|wall basin|above counter)\b", text)
         )
     return bool(
         re.search(r"(?i)\b(?:tap|mixer|gooseneck|spray|pull out|pull-out|filter)\b", text)
@@ -8696,6 +9306,127 @@ def _imperial_is_relevant_preheading_non_joinery_line(line: str, kind: str) -> b
             and not re.search(r"(?i)\b(?:sink|bowl|drain|undermount|stainless|basin)\b", text)
         )
     )
+
+
+def _imperial_sinkware_line_role(line: str) -> str:
+    text = normalize_space(line)
+    if not text:
+        return ""
+    if _imperial_is_non_joinery_note_line(text, "sinkware") or re.search(r"(?i)\b(?:part number|product code|behind sink)\b", text):
+        return ""
+    if re.search(r"(?i)\b(?:basin|semi-?inset|wall basin|above counter)\b", text):
+        return "basin"
+    if re.search(r"(?i)\b(?:sink|laundry trough|trough|double bowl|undermount|drop\s+in\s+tub|utility sink)\b", text):
+        return "sink"
+    return ""
+
+
+def _imperial_room_supports_sinkware_role(room_label: str, role: str) -> bool:
+    normalized = normalize_space(room_label).lower()
+    wet_area = any(token in normalized for token in ("ensuite", "powder", "bathroom", "wc"))
+    utility = any(token in normalized for token in ("laundry", "kitchen", "pantry"))
+    if role == "basin":
+        return wet_area or "vanity" in normalized
+    if role == "sink":
+        return utility and not wet_area
+    return False
+
+
+def _imperial_sinkware_overlay_field(room_label: str, value: str) -> str:
+    normalized_room = normalize_space(room_label).lower()
+    role = _imperial_sinkware_line_role(value)
+    if role == "basin" and "powder" in normalized_room and "vanity" not in normalized_room:
+        return "sink_info"
+    if role == "basin" or _imperial_room_supports_sinkware_role(room_label, "basin"):
+        return "basin_info"
+    return "sink_info"
+
+
+def _imperial_assign_sinkware_cluster_parts(
+    heading_cluster: list[tuple[str, str]],
+    body_prefix: list[str],
+    body_parts: list[str],
+) -> list[list[str]]:
+    assigned: list[list[str]] = [[] for _ in heading_cluster]
+    room_labels = [normalize_space(room) for room, _ in heading_cluster]
+    has_primary = [False for _ in heading_cluster]
+    last_sink_index: int | None = None
+    last_basin_index: int | None = None
+
+    for cluster_index, (_, tail) in enumerate(heading_cluster):
+        if tail:
+            assigned[cluster_index].append(tail)
+
+    def _first_unassigned(preferred_role: str, reverse: bool = False) -> int | None:
+        indices = list(range(len(heading_cluster)))
+        if reverse:
+            indices.reverse()
+        preferred = [
+            idx
+            for idx in indices
+            if not has_primary[idx] and _imperial_room_supports_sinkware_role(room_labels[idx], preferred_role)
+        ]
+        if preferred:
+            return preferred[0]
+        for idx in indices:
+            if not has_primary[idx]:
+                return idx
+        return None
+
+    def _assign_line(target_index: int | None, line: str, role: str) -> None:
+        nonlocal last_sink_index, last_basin_index
+        if target_index is None:
+            return
+        assigned[target_index].append(line)
+        has_primary[target_index] = True
+        if role == "sink":
+            last_sink_index = target_index
+        elif role == "basin":
+            last_basin_index = target_index
+
+    prefix_primary = [line for line in body_prefix if not _imperial_is_non_joinery_note_line(line, "sinkware")]
+    prefix_notes = [line for line in body_prefix if line not in prefix_primary]
+    for line in prefix_primary:
+        role = _imperial_sinkware_line_role(line)
+        if role == "basin":
+            _assign_line(_first_unassigned("basin", reverse=True), line, role)
+        elif role == "sink":
+            _assign_line(_first_unassigned("sink"), line, role)
+        elif last_sink_index is not None:
+            assigned[last_sink_index].append(line)
+        elif last_basin_index is not None:
+            assigned[last_basin_index].append(line)
+
+    primary_lines = [line for line in body_parts if not _imperial_is_non_joinery_note_line(line, "sinkware")]
+    note_lines = [line for line in body_parts if line not in primary_lines]
+    for line in primary_lines:
+        role = _imperial_sinkware_line_role(line)
+        if role == "basin":
+            _assign_line(_first_unassigned("basin"), line, role)
+        elif role == "sink":
+            _assign_line(_first_unassigned("sink"), line, role)
+        elif last_sink_index is not None:
+            assigned[last_sink_index].append(line)
+        elif last_basin_index is not None:
+            assigned[last_basin_index].append(line)
+        else:
+            _assign_line(_first_unassigned("sink"), line, role)
+
+    for line in prefix_notes + note_lines:
+        role = _imperial_sinkware_line_role(line)
+        if role == "sink" and last_sink_index is not None:
+            assigned[last_sink_index].append(line)
+            continue
+        if role == "basin" and last_basin_index is not None:
+            assigned[last_basin_index].append(line)
+            continue
+        if last_sink_index is not None:
+            assigned[last_sink_index].append(line)
+        elif last_basin_index is not None:
+            assigned[last_basin_index].append(line)
+        elif heading_cluster:
+            assigned[-1].append(line)
+    return assigned
 
 
 def _imperial_is_non_joinery_note_line(line: str, kind: str) -> bool:
@@ -8715,6 +9446,9 @@ def _imperial_clean_non_joinery_body(body: str, kind: str) -> str:
     raw_lines = [normalize_space(line) for line in body.replace("\r", "\n").split("\n") if normalize_space(line)]
     lines: list[str] = []
     for line in raw_lines:
+        line = normalize_space(re.sub(r"(?i)^by others\s*", "", line))
+        if not line:
+            continue
         if lines and not _is_imperial_page_noise_line(line) and not re.match(r"(?i)^(?:SINKWARE|TAPWARE|SINK ACCESSORIES|NOTES)\b", line):
             previous = lines[-1]
             if previous.endswith(("TO", "OF", "IN", "WITH", "UNDERMOUTNED", "UNDERMOUT", "INSTAL", "INSTALLED")) or line[:1].islower():
@@ -8738,6 +9472,9 @@ def _imperial_clean_non_joinery_body(body: str, kind: str) -> str:
             location = normalize_space(re.sub(r"(?i)^taphole location\s*:\s*", "", line))
             if location:
                 normalized_location = normalize_brand_casing_text(location)
+                if kind == "sinkware" and re.search(r"(?i)\bin stone\b", normalized_location):
+                    pending_taphole = False
+                    continue
                 if kind == "sinkware" and re.search(r"(?i)\b(?:undermount|topmount|above counter|matrix sink|double bowl|double drain|specs tbc)\b", normalized_location):
                     values.append(normalized_location)
                 else:
@@ -8964,7 +9701,8 @@ def _collect_imperial_room_overlays(documents: list[dict[str, object]]) -> dict[
             for room_label, sink_text in _imperial_extract_non_joinery_blocks(text, "sinkware"):
                 room_key = source_room_key(room_label, fallback_key=room_label)
                 overlay = overlays.setdefault(room_key, _blank_overlay())
-                overlay["sink_info"] = _merge_text(overlay["sink_info"], sink_text)
+                sink_field = _imperial_sinkware_overlay_field(room_label, sink_text)
+                overlay[sink_field] = _merge_text(overlay[sink_field], sink_text)
             for room_label, tap_text in _imperial_extract_non_joinery_blocks(text, "tapware"):
                 room_key = source_room_key(room_label, fallback_key=room_label)
                 overlay = overlays.setdefault(room_key, _blank_overlay())
@@ -10079,6 +10817,13 @@ def _dedupe_appliances(rows: list[ApplianceRow]) -> list[ApplianceRow]:
             row.source_file
             and row.model_no
             and _looks_like_appliance_placeholder_model(row.model_no)
+            and (row.source_file.lower(), row.appliance_type.lower()) in typed_source_with_concrete_model
+        ):
+            continue
+        if (
+            row.source_file
+            and row.model_no
+            and _looks_like_noisy_appliance_model(row.model_no, row.appliance_type)
             and (row.source_file.lower(), row.appliance_type.lower()) in typed_source_with_concrete_model
         ):
             continue

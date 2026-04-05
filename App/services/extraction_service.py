@@ -7277,6 +7277,22 @@ def _extract_clarendon_schedule_overlay(room_key: str, text: str) -> dict[str, A
             overlay["door_panel_colours"] = list(parsing._rebuild_door_panel_colours(groups))
             for key in ("door_colours_overheads", "door_colours_base", "door_colours_island", "door_colours_bar_back"):
                 overlay[key] = parsing._merge_text(overlay[key], groups.get(key, ""))
+            if parsing.normalize_space(groups.get("door_colours_overheads", "")):
+                overlay["has_explicit_overheads"] = True
+            if parsing.normalize_space(groups.get("door_colours_base", "")):
+                overlay["has_explicit_base"] = True
+            if parsing.normalize_space(groups.get("door_colours_island", "")):
+                overlay["has_explicit_island"] = True
+            if parsing.normalize_space(groups.get("door_colours_bar_back", "")):
+                overlay["has_explicit_bar_back"] = True
+            if (
+                room_key in {"kitchen", "butlers_pantry", "walk_in_pantry", "laundry"}
+                and not parsing.normalize_space(overlay.get("door_colours_overheads", ""))
+                and parsing.normalize_space(overlay.get("door_colours_base", ""))
+                and re.search(r"(?i)\b(?:upper cabinetry|upper cabinets|upper cabinet|upper cupboards|upper cupboard)\b", text)
+            ):
+                overlay["door_colours_overheads"] = overlay["door_colours_base"]
+                overlay["has_explicit_overheads"] = True
     else:
         overlay["door_panel_colours"] = list(parsing._rebuild_door_panel_colours(overlay))
 
@@ -7580,13 +7596,25 @@ def _polish_clarendon_room(row: dict[str, Any], overlay: dict[str, Any]) -> dict
     polished["bulkheads"] = [bulkheads] if bulkheads else []
     polished["handles"] = handles
 
-    polished["sink_info"] = _clarendon_clean_fixture_text(overlay.get("sink_info", ""), fixture_kind="sink") if overlay_present else _clarendon_clean_fixture_text(row.get("sink_info", ""), fixture_kind="sink")
-    polished["basin_info"] = (
-        _clarendon_clean_fixture_text(overlay.get("basin_info", ""), fixture_kind="basin")
-        if is_vanity_room and overlay_present
-        else (_clarendon_clean_fixture_text(row.get("basin_info", ""), fixture_kind="basin") if is_vanity_room else "")
+    polished["sink_info"] = _clarendon_select_fixture_text(
+        row.get("sink_info", ""),
+        overlay.get("sink_info", "") if overlay_present else "",
+        fixture_kind="sink",
     )
-    polished["tap_info"] = _clarendon_clean_fixture_text(overlay.get("tap_info", ""), fixture_kind="tap") if overlay_present else _clarendon_clean_fixture_text(row.get("tap_info", ""), fixture_kind="tap")
+    polished["basin_info"] = (
+        _clarendon_select_fixture_text(
+            row.get("basin_info", ""),
+            overlay.get("basin_info", "") if overlay_present else "",
+            fixture_kind="basin",
+        )
+        if is_vanity_room
+        else ""
+    )
+    polished["tap_info"] = _clarendon_select_fixture_text(
+        row.get("tap_info", ""),
+        overlay.get("tap_info", "") if overlay_present else "",
+        fixture_kind="tap",
+    )
     overlay_splashback = _clarendon_clean_splashback_text(overlay.get("splashback", ""), room_key=room_key)
     current_splashback = _clarendon_clean_splashback_text(row.get("splashback", ""), room_key=room_key)
     polished["splashback"] = overlay_splashback or (current_splashback if room_key in {"kitchen", "laundry"} else "")
@@ -7814,6 +7842,42 @@ def _clarendon_clean_fixture_text(value: Any, fixture_kind: str) -> str:
         cleaned_entries = [existing for existing in cleaned_entries if existing.lower() not in text.lower()]
         cleaned_entries.append(text)
     return " | ".join(cleaned_entries)
+
+
+def _clarendon_fixture_detail_score(value: str, fixture_kind: str) -> int:
+    text = parsing.normalize_space(str(value or ""))
+    if not text:
+        return 0
+    score = len(text)
+    if re.search(r"\b[A-Z]{1,4}\d[A-Z0-9-]{2,}\b", text):
+        score += 20
+    if re.search(r"(?i)\b(?:chrome|white|stainless|brushed|black)\b", text):
+        score += 8
+    if fixture_kind == "tap" and re.search(r"(?i)\b(?:mixer|shepherds? crook|gooseneck|tap)\b", text):
+        score += 12
+    if fixture_kind == "sink" and re.search(r"(?i)\b(?:sink|bowl|undermount|drop-?in|tub)\b", text):
+        score += 12
+    if fixture_kind == "basin" and re.search(r"(?i)\b(?:basin|semi-?inset|undercounter|wall basin)\b", text):
+        score += 12
+    return score
+
+
+def _clarendon_select_fixture_text(current_value: Any, overlay_value: Any, fixture_kind: str) -> str:
+    current = _clarendon_clean_fixture_text(current_value, fixture_kind=fixture_kind)
+    overlay = _clarendon_clean_fixture_text(overlay_value, fixture_kind=fixture_kind)
+    if not current:
+        return overlay
+    if not overlay:
+        return current
+    current_lower = current.lower()
+    overlay_lower = overlay.lower()
+    if overlay_lower in current_lower and len(current) >= len(overlay) + 8:
+        return current
+    if current_lower in overlay_lower and len(overlay) >= len(current) + 8:
+        return overlay
+    current_score = _clarendon_fixture_detail_score(current, fixture_kind)
+    overlay_score = _clarendon_fixture_detail_score(overlay, fixture_kind)
+    return current if current_score >= overlay_score else overlay
 
 
 def _clarendon_clean_sink_text(value: Any) -> str:
