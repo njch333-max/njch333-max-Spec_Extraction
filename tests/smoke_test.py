@@ -8736,6 +8736,7 @@ class SmokeTest(unittest.TestCase):
                         "page_no": 6,
                         "raw_text": (
                             "LAUNDRY + STORAGE NOOK JOINERY SELECTION SHEET\n"
+                            "Bulkhead:MDF to ceiling Shadowline:NA\n"
                             "LAUNDRY\n"
                             "BENCHTOP\n"
                             "Polytec\n"
@@ -8793,6 +8794,20 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("Boston Oak", rooms_by_key["storage_nook"]["door_colours_base"])
         self.assertIn("LT120", rooms_by_key["laundry"]["sink_info"])
         self.assertIn("3K4-B", rooms_by_key["laundry"]["tap_info"])
+        self.assertEqual(rooms_by_key["laundry"]["bulkheads"], ["MDF to ceiling"])
+        self.assertEqual(rooms_by_key["storage_nook"]["bulkheads"], ["MDF to ceiling"])
+
+    def test_imperial_compact_note_only_handles_capture_no_handles_overheads(self) -> None:
+        notes = parsing_module._imperial_extract_compact_note_only_handles(
+            "NO HANDLES OVERHEADS Recessed finger space - no handles Touch catch above Fridge and bar back"
+        )
+        self.assertEqual(notes, ["NO HANDLES OVERHEADS - RECESSED FINGER SPACE"])
+
+    def test_imperial_finalize_toe_kick_entries_dedupes_as_doors_variants(self) -> None:
+        self.assertEqual(
+            parsing_module._imperial_finalize_toe_kick_entries(["As Doors Polytec", "As Doors"]),
+            ["As Doors Polytec"],
+        )
 
     def test_imperial_strip_waterfall_from_wall_benchtop_removes_waterfall_and_count_noise(self) -> None:
         self.assertEqual(

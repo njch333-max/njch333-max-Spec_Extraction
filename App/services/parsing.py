@@ -8025,7 +8025,10 @@ def _imperial_finalize_toe_kick_entries(values: list[str]) -> list[str]:
             current = _imperial_clean_toe_kick_value([current])
         current = _collapse_repeated_token_sequence(current)
         if current and not _is_placeholder_material_value(current):
-            signature = tuple(sorted(re.findall(r"[a-z0-9]+", current.lower())))
+            if re.match(r"(?i)^as\s+doors\b", current):
+                signature = ("as", "doors")
+            else:
+                signature = tuple(sorted(re.findall(r"[a-z0-9]+", current.lower())))
             if signature and signature in seen_signatures:
                 continue
             if signature:
@@ -8202,6 +8205,8 @@ def _imperial_extract_compact_note_only_handles(section_text: str) -> list[str]:
             entries.append("NO HANDLE for OVERHEADS - RECESSED FINGER SPACE")
         if "NO HANDLES TO OVERHEADS" in upper and "RECESSED FINGER SPACE" in upper:
             entries.append("NO HANDLES TO OVERHEADS - RECESSED FINGER SPACE")
+        if "NO HANDLES OVERHEADS" in upper and "RECESSED FINGER SPACE" in upper:
+            entries.append("NO HANDLES OVERHEADS - RECESSED FINGER SPACE")
         if "NO HANDLES ON UPPERS" in upper:
             note = re.search(r"(?i)(No handles on Uppers\b.*)", line)
             normalized_note = normalize_space(note.group(1) if note else line)
@@ -8272,6 +8277,26 @@ def _imperial_extract_compact_laundry_storage_fields(section: dict[str, Any]) ->
     raw_lines = [normalize_space(line) for line in raw_text.replace("\r", "\n").split("\n") if normalize_space(line)]
     result: dict[str, dict[str, Any]] = {"laundry": {}, "storage_nook": {}}
     section_text = normalize_space(str(section.get("text", "") or ""))
+    bulkhead = _imperial_clean_bulkhead_value(
+        _imperial_extract_inline_value(
+            raw_text,
+            "Bulkhead:",
+            (
+                "Shadowline:",
+                "Ceiling height:",
+                "Cabinetry Height:",
+                "Hinges & Drawer Runners:",
+                "AREA / ITEM",
+                "LAUNDRY",
+                "STORAGE NOOK",
+                "DESIGNER:",
+                "ALL COLOURS SHOWN",
+            ),
+        )
+    )
+    if bulkhead and not re.fullmatch(r"(?i)n/?a", bulkhead):
+        result["laundry"]["bulkheads"] = [bulkhead]
+        result["storage_nook"]["bulkheads"] = [bulkhead]
     flooring = _imperial_extract_flooring_text(section_text, _preprocess_imperial_lines(raw_lines))
     if flooring:
         result["laundry"]["flooring"] = flooring
