@@ -7378,35 +7378,47 @@ def _extract_flooring_block_from_text(text: str, area_pattern: str, stop_pattern
 
 
 def _extract_floor_tile_block_from_text(text: str, area_pattern: str, stop_patterns: tuple[str, ...]) -> str:
-    normalized = normalize_space(text)
-    if not normalized:
+    area_blocks = _extract_area_blocks_from_text(text, area_pattern, stop_patterns)
+    if not area_blocks:
         return ""
-    area_match = re.search(rf"(?is)\b{area_pattern}\b", normalized)
-    if not area_match:
-        return ""
-    trailing = normalized[area_match.end() :]
-    stop_union = "|".join(stop_patterns)
-    floor_match = re.search(
-        rf"(?is)\bFloor Tile\b\s+(?P<value>.+?)(?=\b(?:{stop_union})\b|$)",
-        trailing,
-    )
-    if not floor_match:
-        return ""
-    return _clean_flooring_overlay_text(f"Floor Tile {floor_match.group('value')}")
+    for area_block in area_blocks:
+        floor_value = _extract_named_value_from_block(
+            area_block,
+            r"Floor Tile",
+            (
+                r"Wall Tile",
+                r"Splashback Tile",
+                r"Vanity Splashback",
+                r"Niche Tile",
+                r"Skirting",
+            ),
+        )
+        if floor_value:
+            return _clean_flooring_overlay_text(f"Floor Tile {floor_value}")
+        if re.search(r"(?i)^Tiles?\s+Refer\s+to\b", area_block):
+            continue
+    return ""
 
 
 def _extract_area_block_from_text(text: str, area_pattern: str, stop_patterns: tuple[str, ...]) -> str:
+    area_blocks = _extract_area_blocks_from_text(text, area_pattern, stop_patterns)
+    return area_blocks[0] if area_blocks else ""
+
+
+def _extract_area_blocks_from_text(text: str, area_pattern: str, stop_patterns: tuple[str, ...]) -> list[str]:
     normalized = normalize_space(text)
     if not normalized:
-        return ""
+        return []
     stop_union = "|".join(stop_patterns)
-    match = re.search(
+    pattern = re.compile(
         rf"(?is)\b{area_pattern}\b\s+(?P<value>.+?)(?=\b(?:{stop_union})\b|$)",
-        normalized,
     )
-    if not match:
-        return ""
-    return normalize_space(match.group("value"))
+    blocks: list[str] = []
+    for match in pattern.finditer(normalized):
+        value = normalize_space(match.group("value"))
+        if value:
+            blocks.append(value)
+    return blocks
 
 
 def _extract_named_value_from_block(block: str, label_pattern: str, stop_patterns: tuple[str, ...]) -> str:
@@ -7516,6 +7528,7 @@ def _collect_yellowwood_flooring_overlays(
     )
     non_wet_stops = (
         r"MEDIA ROOM",
+        r"MEDIA",
         r"MASTER\s+BED\s*1\s*\+\s*WALK\s+IN\s+ROBE",
         r"BED\s*1\s*\+\s*WIR",
         r"BED\s*2\s*\+\s*ROBE",
@@ -7530,6 +7543,9 @@ def _collect_yellowwood_flooring_overlays(
         r"BATHROOM",
         r"UPPER[- ](?:LEVEL|FLOOR)\s+BED\s*5\s+ENSUITE",
         r"UPPER[- ](?:LEVEL|FLOOR)\s+POWDER\s+ROOM",
+        r"GROUND\s+FLOOR\s+ALL\s+MAIN\s+FLOORING",
+        r"MAIN\s+FLOOR(?:ING| TILE)",
+        r"MEDIA(?:\s+ROOM)?",
         r"WC",
         r"PORCH",
         r"ALFRESCO",
@@ -8022,6 +8038,7 @@ def _imperial_finalize_toe_kick_entries(values: list[str]) -> list[str]:
         current = normalize_space(str(value or ""))
         if not current:
             continue
+        current = re.sub(r"(?i)^MATCH ABOVE\b.*$", "", current)
         current = re.sub(r"(?i)\bNO HANDLES?\s+OVERHEADS\b.*$", "", current)
         current = re.sub(r"(?i)\bTouch catch\b.*$", "", current)
         current = normalize_space(current).strip(" -;,|")
@@ -11389,7 +11406,8 @@ def _clean_door_colour_value(value: Any) -> str:
     text = text.replace("每", " ")
     text = re.sub(r"(?i)\bas supplied by (?:cabinetmaker|builder)\b", "", text)
     text = re.sub(r"(?i)^only\s+", "", text)
-    text = re.sub(r"(?i)^doors?\s*-\s*", "", text)
+    text = re.sub(r"(?i)^doors?\s*-\s+(?!(?-i:in\b))", "", text)
+    text = re.sub(r"(?i)\bdoors?\s*-\s+(?!(?-i:in\b))", "", text)
     text = re.sub(r"(?i)\bopen\s+faced\s+shelves?\b.*$", "", text)
     if any(re.search(pattern, text, re.IGNORECASE) for pattern in CABINET_ONLY_EXCLUDE_PATTERNS):
         return ""

@@ -4864,6 +4864,21 @@ def _apply_shared_layout_row_polish(
         if parsing._looks_like_spec_room_label_noise(str(current.get("original_room_label", "") or current.get("room_key", ""))):
             continue
         resolved_rooms.append(current)
+    resolved_keys = {
+        parsing.same_room_identity(str(room.get("original_room_label", "") or ""), str(room.get("room_key", "")))
+        for room in resolved_rooms
+        if isinstance(room, dict)
+    }
+    for room in snapshot.get("rooms", []):
+        if not isinstance(room, dict):
+            continue
+        room_key = parsing.same_room_identity(str(room.get("original_room_label", "") or ""), str(room.get("room_key", "")))
+        if not room_key or room_key in resolved_keys:
+            continue
+        if parsing._looks_like_spec_room_label_noise(str(room.get("original_room_label", "") or room_key)):
+            continue
+        resolved_rooms.append(dict(room))
+        resolved_keys.add(room_key)
     polished = dict(snapshot)
     polished["rooms"] = _merge_rooms_by_source_identity(resolved_rooms)
     polished = parsing.apply_snapshot_cleaning_rules(polished, rule_flags=rule_flags)

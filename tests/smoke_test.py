@@ -4497,6 +4497,57 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(kitchen["door_colours_overheads"], "Polytec Blossom White Matt")
         self.assertEqual(kitchen["splashback"], "")
 
+    def test_shared_layout_row_polish_preserves_valid_room_missing_from_layout_overlays(self) -> None:
+        snapshot = {
+            "job_no": "39012",
+            "builder_name": "Yellowwood",
+            "source_kind": "spec",
+            "generated_at": "2026-04-05T10:00:00+10:00",
+            "rooms": [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "bench_tops_wall_run": "40mm YDL Classic White Polished",
+                    "door_panel_colours": [],
+                    "toe_kick": [],
+                    "bulkheads": [],
+                    "handles": [],
+                },
+                {
+                    "room_key": "pantry",
+                    "original_room_label": "PANTRY",
+                    "shelf": "White Melamine",
+                    "evidence_snippet": "WIP Open Shelving X4 Shelves White Melamine",
+                    "door_panel_colours": [],
+                    "toe_kick": [],
+                    "bulkheads": [],
+                    "handles": [],
+                },
+            ],
+            "appliances": [],
+            "others": {},
+            "warnings": [],
+            "source_documents": [],
+            "analysis": {"mode": "structure_first"},
+        }
+        documents = [{"file_name": "yellowwood.pdf", "role": "spec", "pages": []}]
+        section = {"section_key": "kitchen", "original_section_label": "KITCHEN", "layout_rows": [{"row_label": "dummy"}]}
+        overlay = {"original_room_label": "KITCHEN"}
+        with mock.patch("App.services.parsing._collect_room_sections_for_document", return_value=[section]), mock.patch(
+            "App.services.extraction_service._extract_generic_layout_overlay",
+            return_value=overlay,
+        ), mock.patch(
+            "App.services.extraction_service._resolve_generic_room_label_from_documents",
+            side_effect=lambda row, _documents: row.get("original_room_label", ""),
+        ):
+            polished = extraction_service._apply_shared_layout_row_polish(
+                snapshot,
+                documents,
+                builder_name="Yellowwood",
+                parser_strategy="stable_hybrid",
+            )
+        self.assertIn("PANTRY", [room["original_room_label"] for room in polished["rooms"]])
+
     def test_apply_snapshot_cleaning_rules_purifies_yellowwood_wet_area_fixtures(self) -> None:
         snapshot = {
             "job_no": "38095",
@@ -5046,6 +5097,24 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("Floor Tile Regina Grey Matt 450x450mm", rooms["bathroom"]["flooring"])
         self.assertIn("Floor Tile Regina Grey Matt 450x450mm", rooms["ensuite_1"]["flooring"])
         self.assertEqual(enriched["others"]["flooring_notes"], "")
+
+    def test_extract_floor_tile_block_from_text_ignores_refer_stub_before_next_area(self) -> None:
+        text = (
+            "BED 1 ENSUITE Tiles Refer to Tiling section below N/A "
+            "GROUND FLOOR ALL MAIN FLOORING Floor Tile Verona Crema Polished 600x600mm "
+            "BATHROOM Floor Tile Verona Grey Matt 600x600mm"
+        )
+        self.assertEqual(
+            parsing_module._extract_floor_tile_block_from_text(
+                text,
+                r"BED\\s*1\\s+ENSUITE",
+                (
+                    r"GROUND\\s+FLOOR\\s+ALL\\s+MAIN\\s+FLOORING",
+                    r"BATHROOM",
+                ),
+            ),
+            "",
+        )
 
     def test_extract_yellowwood_area_block_from_lines_handles_multiline_heading(self) -> None:
         lines = [
