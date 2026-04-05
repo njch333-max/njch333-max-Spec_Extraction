@@ -8,12 +8,17 @@
   - `Project_state.md`
   - `AGENTS.md`
 - GitHub collaboration scaffolding is now present locally:
+- GitHub collaboration scaffolding is now present and the local repository is connected to a live remote:
   - `.github/PULL_REQUEST_TEMPLATE.md`
   - `.github/CODEOWNERS`
   - `tools/connect-github-remote.ps1`
   - `tools/new-feature-branch.ps1`
   - `GITHUB_SETUP.md`
-- The local repository is still not connected to a GitHub remote yet; the remaining external step is to create an empty GitHub repo and register the generated SSH public key.
+- The current remote is `git@github.com:njch333-max/njch333-max-Spec_Extraction.git`
+- The repo is ready for Codex-centered PR review on short-lived feature branches.
+- Workflow rule is now explicit:
+  - default to `fix this bug` for specific live defects that are already PDF-grounded
+  - use `review this PR` for shared parser, grouped-row, builder-finalizer, or PDF-QA state-flow changes
 - Application code is implemented:
   - FastAPI web app
   - SQLite persistence

@@ -91,6 +91,7 @@ For major changes, use:
    - whether reruns and PDF QA are required
 5. Default Codex review focus is bug risk, parser regression, builder cross-contamination, PDF QA gating, and field-name drift across UI/export/storage.
 6. Use `.github/PULL_REQUEST_TEMPLATE.md` and `.github/CODEOWNERS` as the default repo review conventions once the GitHub remote is connected.
+7. For this project, default to `fix this bug` when a live issue is already specific and PDF-grounded. Prefer `review this PR` only when the change touches shared parser flow, grouped-row cleanup, builder finalizers, or PDF QA state handling.
 
 ## Online Deployment
 Use the online deploy helper from `tools/`:

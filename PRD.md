@@ -128,6 +128,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
   - Codex review against the PR diff
 - PR descriptions should explicitly capture affected builders/jobs, key sample PDFs, rerun requirements, and whether the four root docs changed.
 - The repository should include a PR template and CODEOWNERS file so parser and UI changes can be reviewed consistently.
+- Day-to-day parser work should default to `fix this bug` when a live issue is already specific and PDF-grounded; `review this PR` is reserved for shared parser/finalizer/PDF-QA changes that carry cross-builder regression risk.
 - For Yellowwood, final room names must preserve the more specific spec-title form, such as `BED 1 ENSUITE VANITY`, `BATHROOM VANITY`, `BED 1 WALK IN ROBE`, and `BED 2/3/4 ROBE`.
 - For Yellowwood, builder-specific finalization must also preserve more detailed titles where the source provides them, including `PANTRY`, `BED 1 MASTER ENSUITE VANITY`, `GROUND FLOOR POWDER ROOM`, `UPPER-LEVEL POWDER ROOM`, `BED 2/3/4/5 ROBE FIT OUT`, and `BED 1 MASTER WALK IN ROBE FIT OUT`.
 - For Yellowwood, rooms are kept only when they have real joinery/material evidence. Pure plumbing, tiling, accessory, or flooring-only rooms must be dropped, while `robe` or `media` rooms may stay only when they contain material evidence such as `Polytec` or `Laminex`.
