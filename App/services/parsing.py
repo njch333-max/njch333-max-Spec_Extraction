@@ -7501,9 +7501,12 @@ def _collect_yellowwood_flooring_overlays(
     non_wet_areas: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             r"ENTRY,\s*PASSAGE,\s*HALLWAYS,\s*DINING,\s*LIVING,\s*KITCHEN,\s*PANTRY",
-            (source_room_key("KITCHEN"), source_room_key("PANTRY")),
+            (source_room_key("KITCHEN"), source_room_key("PANTRY"), source_room_key("BUTLERS PANTRY")),
         ),
+        (r"LIVING,\s*KITCHEN,\s*PANTRY", (source_room_key("KITCHEN"), source_room_key("PANTRY"), source_room_key("BUTLERS PANTRY"))),
+        (r"KITCHEN,\s*PANTRY", (source_room_key("KITCHEN"), source_room_key("PANTRY"), source_room_key("BUTLERS PANTRY"))),
         (r"KITCHEN\s*&\s*DINING", (source_room_key("KITCHEN"),)),
+        (r"GROUND\s+FLOOR\s+ALL\s+MAIN\s+FLOORING", (source_room_key("KITCHEN"), source_room_key("BUTLERS PANTRY"))),
         (r"MASTER\s+BED\s*1\s*\+\s*WALK\s+IN\s+ROBE", (source_room_key("BED 1 MASTER WALK IN ROBE FIT OUT"),)),
         (r"BED\s*1\s*\+\s*WIR", (source_room_key("BED 1 WALK IN ROBE"),)),
         (r"BED\s*2\s*\+\s*ROBE", (source_room_key("BED 2 ROBE FIT OUT"),)),
@@ -7562,7 +7565,7 @@ def _collect_yellowwood_flooring_overlays(
         r"ALFRESCO",
     )
     for document in documents:
-        combined_text = _build_yellowwood_overlay_text(document)
+        combined_text = _build_yellowwood_overlay_text(document, page_filter=_yellowwood_flooring_page_filter)
         if not combined_text:
             continue
         combined_upper = combined_text.upper()
@@ -7834,6 +7837,7 @@ def _imperial_apply_compact_fixture_overlays(overlays: dict[str, dict[str, Any]]
                 raw_text,
                 (
                     r"Hana\s+40L\s+Single\s+Kitchen\s+Sink.*?Undermount",
+                    r"SINKWARE\s*\(KITCHEN\).*?ABEY.*?LUCIA.*?SINGLE\s+BOWL\s+SINK.*?LUA130",
                     r"ABEY\s+LUA130.*?DTA16",
                     r"Schock\s+horizontal\s+double\s+bowl\s+sink.*?N200BZ",
                 ),
@@ -7843,6 +7847,7 @@ def _imperial_apply_compact_fixture_overlays(overlays: dict[str, dict[str, Any]]
                 raw_text,
                 (
                     r"Kaya\s+Pull-?Out\s+Sink\s+Mixer.*?228108UB-LF",
+                    r"TAPWARE\s*\(KITCHEN\).*?ABEY.*?304\s+Gooseneck\s+Kitchen\s+Mixer.*?KTA029-BR",
                     r"ABEY\s+304\s+Gooseneck\s+Pull\s+Out.*?KTA014-B.*?Matt\s+Black",
                 ),
                 "tap",
@@ -7850,6 +7855,7 @@ def _imperial_apply_compact_fixture_overlays(overlays: dict[str, dict[str, Any]]
             laundry_sink = _imperial_extract_regex_fixture_value(
                 raw_text,
                 (
+                    r"SINKWARE\s*\(laundry\).*?ABEY.*?LUCIA.*?SINGLE\s+BOWL\s+SINK.*?LUA100",
                     r"Abey\s+Laundry\s+Sink.*?Overflow\.",
                     r"LT120\s+45\s+Litre\s+Single\s+Bowl.*?Overflow\.",
                 ),
@@ -7858,6 +7864,7 @@ def _imperial_apply_compact_fixture_overlays(overlays: dict[str, dict[str, Any]]
             laundry_tap = _imperial_extract_regex_fixture_value(
                 raw_text,
                 (
+                    r"TAPWARE\s*\(LAUNDRY\).*?ABEY.*?304\s+Gooseneck\s+Kitchen\s+Mixer.*?KTA029-BR",
                     r"Laundry\s+Tap.*?ABEY\s+3K4-B.*?Mixer\s*-\s*Matt\s+Black",
                     r"ABEY\s+3K4-B.*?Lucia\s+Goose\s+Sidelever\s+Mixer.*?Matt\s+Black",
                 ),
@@ -7998,12 +8005,12 @@ def _imperial_finalize_material_field_text(value: Any, *, drop_note_lines: bool)
     current = re.sub(r"(?i)\bBulkhead:.*?(?=(?:Polytec|Laminex|Thermolaminated|Classic White|Prime Oak|Boston Oak|Calcutta|$))", "", current)
     current = re.sub(r"(?i)\bOPEN\s+FACED\s+SHELVES?\b.*$", "", current)
     current = re.sub(r"(?i)\+\s*TALL\s+CABINETS?\s*-\s*", "", current)
-    current = re.sub(r"(?i)\bNOTE:\b.*$", "", current).strip(" -;,")
+    current = re.sub(r"(?i)\bNOTE:\s*.*$", "", current).strip(" -;,")
     current = re.sub(r"(?i)\bFEATURE\b$", "", current).strip(" -;,")
     if _imperial_benchtop_value_looks_noisy(current):
         current = _imperial_clean_material_value([current], drop_note_lines=drop_note_lines)
     current = re.sub(r"(?i)\+\s*TALL\s+CABINETS?\s*-\s*", "", current)
-    current = re.sub(r"(?i)\bNOTE:\b.*$", "", current).strip(" -;,")
+    current = re.sub(r"(?i)\bNOTE:\s*.*$", "", current).strip(" -;,")
     current = _dedupe_delimited_fragments(current)
     return _collapse_repeated_token_sequence(current)
 
@@ -9490,6 +9497,26 @@ def _yellowwood_fixture_page_filter(upper_text: str) -> bool:
             "UNDERMOUNT 750MM DOUBLE",
             "GOOSENECK",
         )
+        )
+
+
+def _yellowwood_flooring_page_filter(upper_text: str) -> bool:
+    upper = normalize_space(upper_text).upper()
+    if not upper or _yellowwood_looks_like_contents_noise(upper):
+        return False
+    return any(
+        token in upper
+        for token in (
+            "FLOORING - OTHER THAN TILING",
+            "OTHER THAN TILING TO WET AREAS",
+            "TILING SCHEDULE",
+            "FLOOR TILE",
+            "ALL MAIN FLOORING",
+            "FLOORING XTRA",
+            "KITCHEN, PANTRY",
+            "LIVING, KITCHEN, PANTRY",
+            "ENTRY, PASSAGE",
+        )
     )
 
 
@@ -10044,7 +10071,11 @@ def _promote_conditional_shelf_field(row: dict[str, Any]) -> None:
                 break
     if not allows_shelf:
         row["shelf"] = ""
-        row["other_items"] = original_other_items
+        row["other_items"] = [
+            item
+            for item in original_other_items
+            if normalize_space(str(item.get("label", "") or "")).upper() != "RAIL" or _other_item_is_actual_rail(item)
+        ]
         return
     row["shelf"] = shelf_value
     row["other_items"] = filtered_other_items
@@ -11358,6 +11389,7 @@ def _clean_door_colour_value(value: Any) -> str:
     text = text.replace("每", " ")
     text = re.sub(r"(?i)\bas supplied by (?:cabinetmaker|builder)\b", "", text)
     text = re.sub(r"(?i)^only\s+", "", text)
+    text = re.sub(r"(?i)^doors?\s*-\s*", "", text)
     text = re.sub(r"(?i)\bopen\s+faced\s+shelves?\b.*$", "", text)
     if any(re.search(pattern, text, re.IGNORECASE) for pattern in CABINET_ONLY_EXCLUDE_PATTERNS):
         return ""

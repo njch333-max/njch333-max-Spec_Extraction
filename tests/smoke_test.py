@@ -4385,6 +4385,12 @@ class SmokeTest(unittest.TestCase):
             "Polytec Belgian Oak Matt",
         )
 
+    def test_clean_door_colour_value_strips_leading_doors_prefix(self) -> None:
+        self.assertEqual(
+            parsing_module._clean_door_colour_value("DOORS - Valla Profile Door in Boston Oak Woodmatt EM0"),
+            "Valla Profile Door in Boston Oak Woodmatt EM0",
+        )
+
     def test_yellowwood_normalize_kitchen_material_fields_promotes_wall_run_and_fills_overheads(self) -> None:
         row = {
             "room_key": "kitchen",
