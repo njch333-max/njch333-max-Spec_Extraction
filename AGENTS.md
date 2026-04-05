@@ -71,12 +71,26 @@ If a change affects user-visible behavior, architecture, storage, deployment, wo
 ## Git Workflow
 Use these scripts from `tools/`:
 - `git-setup.ps1`
+- `connect-github-remote.ps1`
+- `new-feature-branch.ps1`
 - `checkpoint.ps1`
 - `history.ps1`
 - `restore.ps1`
 
 For major changes, use:
 - `tools/checkpoint.ps1 -MajorChange -Message "..."`
+
+## GitHub Review Workflow
+1. Keep the default branch stable and do parser/UI/export work on short-lived feature branches.
+2. Prefer one builder, one field family, or one UI/workflow topic per branch and PR.
+3. Use GitHub PRs as the default Codex review surface whenever a remote repo is available.
+4. PR descriptions must call out:
+   - affected builders and jobs
+   - key sample PDFs or live jobs
+   - whether `PRD.md`, `Arch.md`, `Project_state.md`, and `AGENTS.md` changed
+   - whether reruns and PDF QA are required
+5. Default Codex review focus is bug risk, parser regression, builder cross-contamination, PDF QA gating, and field-name drift across UI/export/storage.
+6. Use `.github/PULL_REQUEST_TEMPLATE.md` and `.github/CODEOWNERS` as the default repo review conventions once the GitHub remote is connected.
 
 ## Online Deployment
 Use the online deploy helper from `tools/`:

@@ -7,6 +7,13 @@
   - `Arch.md`
   - `Project_state.md`
   - `AGENTS.md`
+- GitHub collaboration scaffolding is now present locally:
+  - `.github/PULL_REQUEST_TEMPLATE.md`
+  - `.github/CODEOWNERS`
+  - `tools/connect-github-remote.ps1`
+  - `tools/new-feature-branch.ps1`
+  - `GITHUB_SETUP.md`
+- The local repository is still not connected to a GitHub remote yet; the remaining external step is to create an empty GitHub repo and register the generated SSH public key.
 - Application code is implemented:
   - FastAPI web app
   - SQLite persistence

@@ -118,6 +118,16 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - If no explicit `Wall Run Bench Top` is present, a plain `Bench Top` or `Cooktop Run` description defaults to `Wall Run Bench Top`.
 - Yellowwood-style joinery schedules must map `Back Benchtops` to `Wall Run Bench Top` and preserve `Waterfall Ends` as part of `Island Bench Top`.
 - Yellowwood jobs must use `layout + row-local parser + selective Docling` on grouped schedule pages such as cabinetry, vanity, tiling, and `Area / Item / Colour / Supplier` tables.
+
+### 4.5 Engineering Workflow
+- The project should be ready to live in a GitHub repository with Codex-centered PR review.
+- Default collaboration flow should be:
+  - stable default branch
+  - short-lived feature branches
+  - GitHub pull requests
+  - Codex review against the PR diff
+- PR descriptions should explicitly capture affected builders/jobs, key sample PDFs, rerun requirements, and whether the four root docs changed.
+- The repository should include a PR template and CODEOWNERS file so parser and UI changes can be reviewed consistently.
 - For Yellowwood, final room names must preserve the more specific spec-title form, such as `BED 1 ENSUITE VANITY`, `BATHROOM VANITY`, `BED 1 WALK IN ROBE`, and `BED 2/3/4 ROBE`.
 - For Yellowwood, builder-specific finalization must also preserve more detailed titles where the source provides them, including `PANTRY`, `BED 1 MASTER ENSUITE VANITY`, `GROUND FLOOR POWDER ROOM`, `UPPER-LEVEL POWDER ROOM`, `BED 2/3/4/5 ROBE FIT OUT`, and `BED 1 MASTER WALK IN ROBE FIT OUT`.
 - For Yellowwood, rooms are kept only when they have real joinery/material evidence. Pure plumbing, tiling, accessory, or flooring-only rooms must be dropped, while `robe` or `media` rooms may stay only when they contain material evidence such as `Polytec` or `Laminex`.
