@@ -8794,6 +8794,112 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("LT120", rooms_by_key["laundry"]["sink_info"])
         self.assertIn("3K4-B", rooms_by_key["laundry"]["tap_info"])
 
+    def test_imperial_strip_waterfall_from_wall_benchtop_removes_waterfall_and_count_noise(self) -> None:
+        self.assertEqual(
+            parsing_module._imperial_strip_waterfall_from_wall_benchtop(
+                "20mm Caesarstone - 2141 Snow - PR 2 x - Waterfall Ends to Island 20mm Stone"
+            ),
+            "20mm Caesarstone - 2141 Snow - PR",
+        )
+        self.assertEqual(
+            parsing_module._imperial_strip_waterfall_from_wall_benchtop(
+                "20mm Caesarstone - + WFALL END Alpine Mist - Pencil Round edge - 1 x Mitred edge - waterfall end to peninsula"
+            ),
+            "20mm Caesarstone - Alpine Mist - Pencil Round edge",
+        )
+
+    def test_imperial_section_lookup_merges_multi_page_room_sections(self) -> None:
+        documents = [
+            {
+                "file_name": "imperial-compact.pdf",
+                "role": "spec",
+                "pages": [
+                    {
+                        "page_no": 4,
+                        "raw_text": (
+                            "KITCHEN JOINERY SELECTION SHEET\n"
+                            "BENCHTOP + WFALL END Caesarstone\n"
+                            "BASE + OVERHEAD + OPEN OVERHEADS + TALLS\n"
+                        ),
+                        "text": "",
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 5,
+                        "raw_text": (
+                            "KITCHEN JOINERY SELECTION SHEET\n"
+                            "FEATURE COLOUR BAR BACK + BAR BACK DOOR\n"
+                            "HANDLES - BASE DOORS\n"
+                        ),
+                        "text": "",
+                        "needs_ocr": False,
+                    },
+                ],
+            }
+        ]
+        lookup = parsing_module._imperial_section_lookup(documents)
+        kitchen = lookup["kitchen"]
+        self.assertEqual(kitchen["page_nos"], [4, 5])
+        self.assertIn("BENCHTOP + WFALL END", kitchen["text"])
+        self.assertIn("FEATURE COLOUR BAR BACK + BAR BACK DOOR", kitchen["text"])
+
+    def test_crosscheck_imperial_snapshot_rebuilds_benchtop_lists_from_scalar_fields(self) -> None:
+        layout_snapshot = {
+            "rooms": [
+                {
+                    "room_key": "study",
+                    "room_name": "STUDY",
+                    "original_room_label": "STUDY",
+                    "bench_tops": ["Polytec - Laminate Benchtop Prime Oak Matt Tight Form Edge"],
+                    "bench_tops_wall_run": "",
+                    "bench_tops_island": "",
+                    "bench_tops_other": "Polytec - Laminate Benchtop Prime Oak Matt Tight Form Edge",
+                    "door_panel_colours": [],
+                    "door_colours_overheads": "",
+                    "door_colours_base": "Polytec - Prime Oak Matt",
+                    "door_colours_tall": "",
+                    "door_colours_island": "",
+                    "door_colours_bar_back": "",
+                    "toe_kick": [],
+                    "bulkheads": [],
+                    "handles": [],
+                    "floating_shelf": "",
+                    "shelf": "",
+                    "sink_info": "",
+                    "basin_info": "",
+                    "tap_info": "",
+                    "drawers_soft_close": "",
+                    "hinges_soft_close": "",
+                    "splashback": "",
+                    "flooring": "",
+                    "led": "No",
+                    "led_note": "",
+                    "accessories": [],
+                    "other_items": [],
+                    "has_explicit_overheads": False,
+                    "has_explicit_base": True,
+                    "has_explicit_tall": False,
+                    "has_explicit_island": False,
+                    "has_explicit_bar_back": False,
+                }
+            ]
+        }
+        raw_snapshot = {
+            "rooms": [
+                {
+                    **layout_snapshot["rooms"][0],
+                    "bench_tops_other": "Polytec - Prime Oak Matt - Tight Form Edge - Laminate Benchtop",
+                }
+            ]
+        }
+        merged = extraction_service._crosscheck_imperial_snapshot_with_raw(layout_snapshot, raw_snapshot)
+        cleaned = parsing_module.apply_snapshot_cleaning_rules(merged)
+        study = cleaned["rooms"][0]
+        self.assertEqual(
+            study["bench_tops_other"],
+            "Polytec - Prime Oak Matt - Tight Form Edge - Laminate Benchtop",
+        )
+
     def test_job_detail_and_spec_list_titles_show_snapshot_site_address(self) -> None:
         builder_id = store.create_builder("Imperial", "imperial", "")
         job_id = store.create_job("37813.2", builder_id, "", "")

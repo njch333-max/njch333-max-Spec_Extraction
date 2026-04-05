@@ -4184,6 +4184,16 @@ def _crosscheck_imperial_snapshot_with_raw(layout_snapshot: dict[str, Any], raw_
             merged_row[field_name] = _prefer_imperial_raw_scalar(field_name, layout_row.get(field_name), raw_row.get(field_name))
         for field_name in IMPERIAL_RAW_LIST_FIELDS:
             merged_row[field_name] = _prefer_imperial_raw_list(field_name, layout_row.get(field_name), raw_row.get(field_name))
+        merged_row["bench_tops"] = [
+            value
+            for value in (
+                merged_row.get("bench_tops_wall_run", ""),
+                merged_row.get("bench_tops_island", ""),
+                merged_row.get("bench_tops_other", ""),
+            )
+            if parsing.normalize_space(str(value or ""))
+        ]
+        merged_row["door_panel_colours"] = parsing._rebuild_door_panel_colours(merged_row)
         merged_rooms.append(merged_row)
     merged["rooms"] = merged_rooms
     return merged
@@ -4196,6 +4206,11 @@ def _prefer_imperial_raw_scalar(field_name: str, layout_value: Any, raw_value: A
         return layout_value
     if not layout_text:
         return raw_value
+    if field_name.startswith("bench_tops_"):
+        layout_dedup = parsing._dedupe_delimited_fragments(layout_text)
+        raw_dedup = parsing._dedupe_delimited_fragments(raw_text)
+        if layout_dedup and raw_dedup and layout_dedup == raw_dedup and layout_text != raw_text:
+            return layout_value
     if _imperial_field_quality(raw_text, field_name) > _imperial_field_quality(layout_text, field_name):
         return raw_value
     return layout_value
@@ -4248,6 +4263,9 @@ def _imperial_field_quality(text: str, field_name: str) -> int:
         return -1000
     lowered = cleaned.lower()
     score = min(len(cleaned), 180)
+    deduped_fragments = parsing._dedupe_delimited_fragments(cleaned)
+    if "|" in cleaned and deduped_fragments and deduped_fragments != cleaned:
+        score -= 90
     for token in (
         "client",
         "date",
@@ -4266,6 +4284,8 @@ def _imperial_field_quality(text: str, field_name: str) -> int:
             score -= 70
     if field_name.startswith("door_colours_") and any(token in lowered for token in ("handle", "knob", "pull", "part number", "so-")):
         score -= 140
+    if field_name.startswith("door_colours_") and any(token in lowered for token in ("bulkhead:", "cornicing", "90mm")):
+        score -= 120
     if field_name.startswith("door_colours_") and any(
         token in lowered
         for token in (
@@ -4279,14 +4299,22 @@ def _imperial_field_quality(text: str, field_name: str) -> int:
         score -= 120
     if field_name.startswith("bench_tops_") and any(token in lowered for token in ("base cabinetry", "upper cabinetry", "kickboard", "handle")):
         score -= 140
+    if field_name == "bench_tops_wall_run" and any(token in lowered for token in ("wfall", "waterfall")):
+        score -= 180
+    if field_name == "bench_tops_wall_run" and re.search(r"\b\d+\s*x\b", cleaned, re.I):
+        score -= 40
     if field_name in {"sink_info", "tap_info", "basin_info"} and any(token in lowered for token in ("client", "date", "signature", "designer", "document ref", "private")):
         score -= 160
     if field_name in {"toe_kick", "bulkheads"} and any(token in lowered for token in ("soft close", "floor type", "handle", "benchtop")):
+        score -= 140
+    if field_name == "door_colours_bar_back" and "note:" in lowered:
         score -= 140
     if field_name == "toe_kick" and any(token in lowered for token in ("cabinetry colour", "mirrored shaving cabinet", "external panels only")):
         score -= 160
     if field_name == "handles" and any(token in lowered for token in ("base cabinetry colour", "upper cabinetry colour", "benchtop", "kickboard")):
         score -= 140
+    if field_name == "handles" and any(token in lowered for token in ("no handles", "touch catch", "pto where req")):
+        score -= 180
     if field_name == "handles" and _imperial_handle_entry_looks_compound(cleaned):
         score -= 180
     if field_name == "flooring" and any(token in lowered for token in ("polytec", "laminex", "caesarstone", "ceiling height", "cabinetry height")):

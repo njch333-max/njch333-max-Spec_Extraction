@@ -3863,6 +3863,17 @@ def _imperial_handle_value_looks_noisy(value: str) -> bool:
     )
 
 
+def _imperial_is_note_only_handle_entry(value: str) -> bool:
+    text = normalize_space(value)
+    if not text:
+        return False
+    return bool(
+        re.search(r"(?i)\bno handles?\b", text)
+        or re.search(r"(?i)\btouch catch\b", text)
+        or re.search(r"(?i)\brecessed finger space\b", text)
+    ) and not re.search(r"(?i)\b(?:doors?|drawers?|pantry doors?)\b.*\b(?:\d+\s*mm|oa\s*=|sbh\d+|allegra|momo|furnware)\b", text)
+
+
 def _looks_like_imperial_handle_stop_line(line: str) -> bool:
     text = normalize_space(line)
     if not text:
@@ -3893,7 +3904,34 @@ def _imperial_handle_entry_is_valid(value: str) -> bool:
         or re.search(r"(?i)\b(?:horizontal|vertical)\b.*\b(?:drawers?|doors?|uppers?)\b", text)
         or re.match(r"(?i)^(?:doors?|drawers?)\s*-\s*[A-Z0-9-]+", text)
         or re.search(r"(?i)\b(?:so-[a-z0-9-]+|bepl\d+)\b", text)
+        or (
+            re.search(r"(?i)\b(?:drawers?|doors?|pantry doors?|base drawers?|base doors?|tall pantry doors?)\b", text)
+            and re.search(r"(?i)\b(?:oa\s*=|\d+\s*mm|sbh\d+|allegra|furnware|momo)\b", text)
+        )
+        or (
+            re.search(r"(?i)\b(?:oa\s*=|\d+\s*mm)\b", text)
+            and re.search(r"(?i)\b(?:allegra|momo|furnware|sbh\d+)\b", text)
+        )
     )
+
+
+def _imperial_finalize_handle_entries(values: list[str], *, preserve_note_only: bool = False) -> list[str]:
+    cleaned = [
+        normalize_space(
+            re.sub(
+                r"(?i)\b(?:LIGHTING\b.*|NO LIGHTS\b.*)$",
+                "",
+                re.sub(r"(?i)\bTouch catch above Fridge and bar back\b", "", str(value or "")),
+            )
+        ).strip(" -;,|")
+        for value in _clean_handle_entries(values)
+    ]
+    cleaned = [value for value in cleaned if value and not _imperial_handle_value_looks_noisy(value) and _imperial_handle_entry_is_valid(value)]
+    note_only = [value for value in cleaned if _imperial_is_note_only_handle_entry(value)]
+    non_note = [value for value in cleaned if not _imperial_is_note_only_handle_entry(value)]
+    if len(note_only) == 1 and len(non_note) == 2 and re.search(r"(?i)\b(?:uppers|overheads)\b", note_only[0]):
+        cleaned = [non_note[0], note_only[0], non_note[1]]
+    return _unique(cleaned)
 
 
 def _imperial_extract_structured_handle_rows(lines: list[str]) -> list[str]:
@@ -3932,7 +3970,15 @@ def _imperial_extract_structured_handle_rows(lines: list[str]) -> list[str]:
             if not next_line:
                 cursor += 1
                 continue
-            if cursor > index + 1 and "HANDLES" in next_upper and not _imperial_is_supplier_only_line(next_line):
+            if (
+                cursor >= index + 1
+                and not _imperial_is_supplier_only_line(next_line)
+                and (
+                    "HANDLES" in next_upper
+                    or next_upper.startswith("FEATURE LIP PULL PANTRY")
+                    or next_upper.startswith("LIP PULL HANDLES")
+                )
+            ):
                 break
             if cursor > index + 1 and (
                 _imperial_match_field_label(next_line)[0]
@@ -3979,7 +4025,7 @@ def _imperial_extract_structured_handle_rows(lines: list[str]) -> list[str]:
 
 
 def _imperial_extract_delayed_handles(lines: list[str]) -> list[str]:
-    entries: list[str] = []
+    entries: list[str] = _imperial_extract_compact_note_only_handles("\n".join(lines))
     index = 0
     while index < len(lines):
         line = normalize_space(lines[index])
@@ -4330,6 +4376,92 @@ def _imperial_collect_page_fields(page_text: str) -> dict[str, Any]:
         overrides["feature_cabinetry"] = feature_cabinetry
     if fields.get("bar_back_feature"):
         overrides["bar_back_feature"] = fields["bar_back_feature"]
+    compact_base = _imperial_extract_compact_material_block(
+        page_text,
+        r"BASE\s+CABINETRY\s+COLOUR\b",
+        (
+            r"UPPER\s+CABINETRY\s+COLOUR\b",
+            r"BENCHTOP(?:S|\b)",
+            r"HANDLES?\b",
+            r"KICKBOARDS?\b",
+            r"SPLASHBACK\b",
+            r"DESIGNER:",
+            r"CLIENT NAME:",
+            r"SIGNATURE:",
+            r"SIGNED DATE:",
+            r"ALL COLOURS SHOWN",
+        ),
+    )
+    compact_upper = _imperial_extract_compact_material_block(
+        page_text,
+        r"UPPER\s+CABINETRY\s+COLOUR\b",
+        (
+            r"BENCHTOP(?:S|\b)",
+            r"HANDLES?\b",
+            r"KICKBOARDS?\b",
+            r"SPLASHBACK\b",
+            r"DESIGNER:",
+            r"CLIENT NAME:",
+            r"SIGNATURE:",
+            r"SIGNED DATE:",
+            r"ALL COLOURS SHOWN",
+        ),
+    )
+    compact_combined = _imperial_extract_compact_material_block(
+        page_text,
+        r"BASE\s*\+\s*OVERHEAD(?:S)?\s*\+\s*OPEN\s+OVERHEADS\s*\+\s*TALLS\b",
+        (
+            r"SPLASHBACK\b",
+            r"FEATURE\s+COLOUR\s+BAR\s+BACK",
+            r"HANDLES?\b",
+            r"KICKBOARDS?\b",
+            r"DESIGNER:",
+            r"CLIENT NAME:",
+            r"SIGNATURE:",
+            r"SIGNED DATE:",
+            r"ALL COLOURS SHOWN",
+        ),
+    )
+    compact_bar_back = _imperial_extract_compact_material_block(
+        page_text,
+        r"FEATURE\s+COLOUR\s+BAR\s+BACK\s*\+\s*BAR\s+BACK\s+DOOR\b",
+        (
+            r"HANDLES?\b",
+            r"KICKBOARDS?\b",
+            r"NO\s+HANDLES\b",
+            r"DESIGNER:",
+            r"CLIENT NAME:",
+            r"SIGNATURE:",
+            r"SIGNED DATE:",
+            r"ALL COLOURS SHOWN",
+        ),
+    )
+    compact_robe_drawers = _imperial_extract_compact_material_block(
+        page_text,
+        r"ROBE\s+DRAWERS\s+AND\s+PANELS\b",
+        (
+            r"KICKBOARDS?\b",
+            r"HANDLES?\b",
+            r"LIGHTING\b",
+            r"DESIGNER:",
+            r"CLIENT NAME:",
+            r"SIGNATURE:",
+            r"SIGNED DATE:",
+            r"ALL COLOURS SHOWN",
+        ),
+    )
+    if compact_base:
+        overrides["base"] = compact_base
+    if compact_upper:
+        overrides["upper"] = compact_upper
+    if compact_combined:
+        overrides["base"] = compact_combined
+        overrides["upper"] = compact_combined
+        overrides["upper_tall"] = compact_combined
+    if compact_bar_back:
+        overrides["bar_back_feature"] = compact_bar_back
+    if compact_robe_drawers and not overrides["base"]:
+        overrides["base"] = compact_robe_drawers
     if fields.get("base_overheads_tall"):
         shared_material = fields["base_overheads_tall"]
         overrides["base"] = _merge_text(overrides["base"], shared_material)
@@ -4352,11 +4484,12 @@ def _imperial_collect_page_fields(page_text: str) -> dict[str, Any]:
     if fragment_accessory_entries:
         overrides["accessories_list"] = _merge_lists(overrides["accessories_list"], fragment_accessory_entries)
     delayed_handles = _imperial_extract_delayed_handles(lines)
-    if delayed_handles:
-        overrides["delayed_handles"] = delayed_handles
     structured_handles = _imperial_extract_structured_handle_rows(lines)
     if structured_handles:
-        overrides["delayed_handles"] = _merge_lists(overrides["delayed_handles"], structured_handles)
+        delayed_note_only = [value for value in delayed_handles if _imperial_is_note_only_handle_entry(value)]
+        overrides["delayed_handles"] = _merge_lists(delayed_note_only, structured_handles)
+    elif delayed_handles:
+        overrides["delayed_handles"] = delayed_handles
     fragment_handles = _imperial_extract_fragment_handle_entries(lines)
     if fragment_handles:
         overrides["delayed_handles"] = _merge_lists(overrides["delayed_handles"], fragment_handles)
@@ -4717,6 +4850,33 @@ def _imperial_extract_inline_value(text: str, start_label: str, stop_labels: tup
     if not match:
         return ""
     return normalize_space(match.group("value"))
+
+
+def _imperial_extract_compact_material_block(page_text: str, label_pattern: str, stop_patterns: tuple[str, ...]) -> str:
+    stop_re = "|".join(stop_patterns)
+    match = re.search(rf"(?is){label_pattern}\s*(?P<value>.*?)(?=(?:{stop_re})|$)", page_text)
+    if not match:
+        return ""
+    raw_block = str(match.group("value") or "")
+    lines = [normalize_space(line) for line in raw_block.replace("\r", "\n").split("\n") if normalize_space(line)]
+    supplier = ""
+    parts: list[str] = []
+    for line in lines:
+        if _is_imperial_page_noise_line(line) or _is_imperial_field_stop_line(line):
+            break
+        if re.search(r"(?i)\b(?:designer|client name|signature|signed date|all colours shown)\b", line):
+            break
+        if re.search(r"(?i)\b(?:installed by client|supplied by imperial)\b", line) and not parts:
+            continue
+        if re.search(r"(?i)\bnote:\b", line):
+            break
+        if _imperial_is_supplier_only_line(line):
+            supplier = normalize_brand_casing_text(line)
+            continue
+        cleaned = normalize_brand_casing_text(line)
+        if cleaned:
+            parts.append(cleaned)
+    return _imperial_compose_material_text(supplier, parts)
 
 
 def _imperial_extract_soft_close_text(page_text: str, lines: list[str]) -> str:
@@ -5492,11 +5652,7 @@ def _imperial_room_from_section(section: dict[str, Any]) -> RoomRow:
     ]
     if delayed_handles:
         cleaned_handles = _merge_lists(cleaned_handles, [item for item in delayed_handles if _imperial_handle_entry_is_valid(item)])
-    row.handles = [
-        item
-        for item in _clean_handle_entries(cleaned_handles)
-        if not _imperial_handle_value_looks_noisy(item) and _imperial_handle_entry_is_valid(item)
-    ]
+    row.handles = _imperial_finalize_handle_entries(cleaned_handles)
     soft_close = normalize_soft_close_value(soft_close_text, keyword="drawer") or normalize_soft_close_value(soft_close_text)
     if soft_close:
         row.drawers_soft_close = soft_close
@@ -5546,9 +5702,12 @@ def _imperial_room_from_section(section: dict[str, Any]) -> RoomRow:
     if layout_overlay.get("door_colours_bar_back"):
         row.door_colours_bar_back = layout_overlay["door_colours_bar_back"]
     if layout_overlay.get("toe_kick"):
-        row.toe_kick = _coerce_string_list(layout_overlay["toe_kick"])
+        row.toe_kick = _merge_lists(row.toe_kick, _coerce_string_list(layout_overlay["toe_kick"]))
     if layout_overlay.get("handles"):
-        row.handles = _clean_handle_entries(_coerce_string_list(layout_overlay["handles"]))
+        preserved_note_handles = [value for value in row.handles if _imperial_is_note_only_handle_entry(value)]
+        row.handles = _imperial_finalize_handle_entries(
+            _merge_lists(preserved_note_handles, _coerce_string_list(layout_overlay["handles"]))
+        )
     row.led_note = _merge_led_note(row.led_note, layout_overlay.get("led_note", ""))
     row.led = _normalize_led_value(layout_overlay.get("led") or row.led, row.led_note)
     if layout_overlay.get("accessories"):
@@ -5556,11 +5715,11 @@ def _imperial_room_from_section(section: dict[str, Any]) -> RoomRow:
     if layout_overlay.get("other_items"):
         row.other_items = layout_overlay["other_items"]
     if layout_overlay.get("sink_info"):
-        row.sink_info = layout_overlay["sink_info"]
+        row.sink_info = _yellowwood_prefer_overlay_text(row.sink_info, layout_overlay["sink_info"], "sink")
     if layout_overlay.get("basin_info"):
-        row.basin_info = layout_overlay["basin_info"]
+        row.basin_info = _yellowwood_prefer_overlay_text(row.basin_info, layout_overlay["basin_info"], "basin")
     if layout_overlay.get("tap_info"):
-        row.tap_info = layout_overlay["tap_info"]
+        row.tap_info = _yellowwood_prefer_overlay_text(row.tap_info, layout_overlay["tap_info"], "tap")
     if layout_overlay.get("drawers_soft_close"):
         row.drawers_soft_close = layout_overlay["drawers_soft_close"]
     if layout_overlay.get("hinges_soft_close"):
@@ -5666,7 +5825,10 @@ def _parse_imperial_documents(
                     rooms[row.room_key] = row
                 else:
                     special_sections.append(_imperial_special_section_from_section(section))
-        appliances.extend(_extract_appliances_from_pages(file_name, pages))
+        page_appliances = _extract_appliances_from_pages(file_name, pages)
+        if imperial_builder:
+            page_appliances.extend(_extract_imperial_compact_appliances_from_pages(file_name, pages))
+        appliances.extend(page_appliances)
 
     payload = SnapshotPayload(
         job_no=job_no,
@@ -5884,7 +6046,10 @@ def _parse_spec_documents_structure_first(
             )
             rooms[target_room_key] = row
 
-        appliances.extend(_extract_appliances_from_pages(file_name, pages))
+        page_appliances = _extract_appliances_from_pages(file_name, pages)
+        if imperial_builder:
+            page_appliances.extend(_extract_imperial_compact_appliances_from_pages(file_name, pages))
+        appliances.extend(page_appliances)
         flooring_text = _extract_global_value(full_text, "flooring")
         splashback_text = _extract_global_value(full_text, "splashback")
         if flooring_text:
@@ -6431,6 +6596,70 @@ def _extract_appliances_from_pages(file_name: str, pages: list[dict[str, object]
         if not page_text.strip():
             continue
         rows.extend(_extract_appliances(page_text, file_name, [page]))
+    return _dedupe_appliances(rows)
+
+
+def _extract_imperial_compact_appliances_from_pages(file_name: str, pages: list[dict[str, object]]) -> list[ApplianceRow]:
+    rows: list[ApplianceRow] = []
+    for page in pages:
+        page_text = str(page.get("raw_text") or page.get("text") or "")
+        if not page_text.strip():
+            continue
+        upper = page_text.upper()
+        if "APPLIANCES" not in upper or not any(marker in upper for marker in ("WINNING", "WINNINGS", "SUPPLIED BY IMPERIAL")):
+            continue
+        compact_specs: tuple[tuple[str, str, str, str], ...] = (
+            (
+                "Freestanding Stove",
+                r"FREESTANDING STOVE.*?Westinghouse\s+WEST\s+90CM\s+DUAL\s+FUEL\s+FS\s+SS\s*-\s*WFE9515SD",
+                "Westinghouse",
+                "WFE9515SD",
+            ),
+            (
+                "Rangehood",
+                r"RANGEHOOD.*?Westinghouse\s+WEST\s+86CM\s+INT\s+RH\s+SS",
+                "Westinghouse",
+                "WEST 86CM INT RH SS",
+            ),
+            (
+                "Rangehood",
+                r"RANGEHOOD.*?Schweigen\s+BGUM6B.*?700M3HR\s+BLK\s+GLASS",
+                "Schweigen",
+                "BGUM6B",
+            ),
+            (
+                "Oven",
+                r"OVEN.*?Bosch(?:\s+Serie\s+\d+)?\s+60cm\s+Built-?in\s+Oven.*?HBF134EB0A",
+                "Bosch",
+                "HBF134EB0A",
+            ),
+            (
+                "Cooktop",
+                r"COOKTOP.*?(?:BOSCH\s+)?PNH6B6B91A.*?60CM\s+BLK\s+GAS\s+COOKTOP",
+                "Bosch",
+                "PNH6B6B91A",
+            ),
+        )
+        for appliance_type, pattern, forced_make, forced_model in compact_specs:
+            match = re.search(pattern, page_text, re.IGNORECASE | re.DOTALL)
+            if not match:
+                continue
+            evidence = normalize_space(match.group(0))
+            row = ApplianceRow(
+                appliance_type=appliance_type,
+                make=forced_make,
+                model_no=forced_model,
+                product_url="",
+                spec_url="",
+                manual_url="",
+                website_url="",
+                overall_size="",
+                source_file=file_name,
+                page_refs=_guess_page_refs(evidence, [page]),
+                evidence_snippet=evidence[:300],
+                confidence=0.76,
+            )
+            rows.append(row)
     return _dedupe_appliances(rows)
 
 
@@ -7560,8 +7789,19 @@ def _finalize_imperial_rooms(
 ) -> None:
     _imperial_apply_compact_fixture_overlays(overlays, documents)
     combined_section = _imperial_find_combined_storage_nook_section(documents)
+    section_lookup = _imperial_section_lookup(documents)
     finalized: list[dict[str, Any]] = []
     for row in rooms:
+        _imperial_finalize_room_payload(row, overlays)
+        _imperial_apply_compact_section_room_enrichment(
+            row,
+            section_lookup.get(
+                source_room_key(
+                    str(row.get("original_room_label", "") or row.get("room_name", "") or ""),
+                    fallback_key=str(row.get("room_key", "") or ""),
+                )
+            ),
+        )
         _imperial_finalize_room_payload(row, overlays)
         if _imperial_row_needs_laundry_storage_split(row) and combined_section is not None:
             split_rows = _imperial_split_laundry_storage_nook_room(row, combined_section, overlays)
@@ -7640,25 +7880,17 @@ def _imperial_apply_compact_fixture_overlays(overlays: dict[str, dict[str, Any]]
                 "tap",
             )
             if kitchen_sink:
-                overlays.setdefault("kitchen", _blank_overlay())["sink_info"] = _merge_text(
-                    overlays.setdefault("kitchen", _blank_overlay())["sink_info"],
-                    kitchen_sink,
-                )
+                kitchen_overlay = overlays.setdefault("kitchen", _blank_overlay())
+                kitchen_overlay["sink_info"] = _yellowwood_prefer_overlay_text(kitchen_overlay.get("sink_info", ""), kitchen_sink, "sink")
             if kitchen_tap:
-                overlays.setdefault("kitchen", _blank_overlay())["tap_info"] = _merge_text(
-                    overlays.setdefault("kitchen", _blank_overlay())["tap_info"],
-                    kitchen_tap,
-                )
+                kitchen_overlay = overlays.setdefault("kitchen", _blank_overlay())
+                kitchen_overlay["tap_info"] = _yellowwood_prefer_overlay_text(kitchen_overlay.get("tap_info", ""), kitchen_tap, "tap")
             if laundry_sink:
-                overlays.setdefault("laundry", _blank_overlay())["sink_info"] = _merge_text(
-                    overlays.setdefault("laundry", _blank_overlay())["sink_info"],
-                    laundry_sink,
-                )
+                laundry_overlay = overlays.setdefault("laundry", _blank_overlay())
+                laundry_overlay["sink_info"] = _yellowwood_prefer_overlay_text(laundry_overlay.get("sink_info", ""), laundry_sink, "sink")
             if laundry_tap:
-                overlays.setdefault("laundry", _blank_overlay())["tap_info"] = _merge_text(
-                    overlays.setdefault("laundry", _blank_overlay())["tap_info"],
-                    laundry_tap,
-                )
+                laundry_overlay = overlays.setdefault("laundry", _blank_overlay())
+                laundry_overlay["tap_info"] = _yellowwood_prefer_overlay_text(laundry_overlay.get("tap_info", ""), laundry_tap, "tap")
             if wet_basin or wet_tap:
                 wet_room_keys = []
                 if "ENSUITE" in upper:
@@ -7668,9 +7900,9 @@ def _imperial_apply_compact_fixture_overlays(overlays: dict[str, dict[str, Any]]
                 for room_key in wet_room_keys:
                     overlay = overlays.setdefault(room_key, _blank_overlay())
                     if wet_basin:
-                        overlay["basin_info"] = _merge_text(overlay["basin_info"], wet_basin)
+                        overlay["basin_info"] = _yellowwood_prefer_overlay_text(overlay.get("basin_info", ""), wet_basin, "basin")
                     if wet_tap:
-                        overlay["tap_info"] = _merge_text(overlay["tap_info"], wet_tap)
+                        overlay["tap_info"] = _yellowwood_prefer_overlay_text(overlay.get("tap_info", ""), wet_tap, "tap")
 
 
 def _imperial_clean_room_label_text(label: str, fallback_key: str = "") -> str:
@@ -7697,6 +7929,10 @@ def _imperial_finalize_room_payload(row: dict[str, Any], overlays: dict[str, dic
         row[key] = _imperial_finalize_material_field_text(row.get(key, ""), drop_note_lines=True)
     for key in ("door_colours_overheads", "door_colours_base", "door_colours_tall", "door_colours_island", "door_colours_bar_back", "floating_shelf", "shelf"):
         row[key] = _imperial_finalize_material_field_text(row.get(key, ""), drop_note_lines=False)
+    for key in ("door_colours_overheads", "door_colours_base", "door_colours_tall", "door_colours_island", "door_colours_bar_back"):
+        row[key] = _clean_door_colour_value_strict(row.get(key, ""))
+    row["bench_tops_wall_run"] = _imperial_finalize_wall_benchtop_value(row.get("bench_tops_wall_run", ""))
+    row["bench_tops_other"] = _dedupe_delimited_fragments(str(row.get("bench_tops_other", "") or ""))
     if normalize_space(str(row.get("bench_tops_other", "") or "")) in {
         normalize_space(str(row.get("bench_tops_wall_run", "") or "")),
         normalize_space(str(row.get("bench_tops_island", "") or "")),
@@ -7710,11 +7946,34 @@ def _imperial_finalize_room_payload(row: dict[str, Any], overlays: dict[str, dic
         if cleaned
     ]
     row["toe_kick"] = _imperial_finalize_toe_kick_entries(_coerce_string_list(row.get("toe_kick", [])))
-    row["handles"] = [
-        item
-        for item in _clean_handle_entries(_coerce_string_list(row.get("handles", [])))
-        if not _imperial_handle_value_looks_noisy(item) and _imperial_handle_entry_is_valid(item)
-    ]
+    if any(re.search(r"(?i)\bAs Doors\b", value) for value in row["toe_kick"]):
+        literal_as_doors_only = all(
+            re.match(r"(?i)^AS DOORS(?:\s+[A-Z][A-Za-z]+)?$", normalize_space(value))
+            for value in row["toe_kick"]
+        )
+        as_doors_material = normalize_space(
+            str(row.get("door_colours_base", "") or row.get("door_colours_overheads", "") or row.get("door_colours_tall", "") or "")
+        )
+        if as_doors_material and not literal_as_doors_only:
+            row["toe_kick"] = [as_doors_material]
+    elif len(row["toe_kick"]) == 1:
+        partial_toe_kick = normalize_space(row["toe_kick"][0])
+        full_material = normalize_space(str(row.get("door_colours_base", "") or row.get("door_colours_overheads", "") or ""))
+        partial_signature = _material_signature(partial_toe_kick) if partial_toe_kick else ""
+        full_signature = _material_signature(full_material) if full_material else ""
+        if (
+            partial_toe_kick
+            and full_material
+            and (
+                (partial_signature and full_signature and partial_signature == full_signature)
+                or (partial_toe_kick.lower() in full_material.lower() and full_material.lower() != partial_toe_kick.lower())
+            )
+        ):
+            row["toe_kick"] = [full_material]
+    row["handles"] = _imperial_finalize_handle_entries(
+        _coerce_string_list(row.get("handles", [])),
+        preserve_note_only=bool(row.pop("_preserve_note_only_handles", False)),
+    )
     overlay = _match_room_overlay(row, overlays)
     row["sink_info"] = _yellowwood_prefer_overlay_text(row.get("sink_info", ""), overlay.get("sink_info", ""), "sink")
     row["basin_info"] = _yellowwood_prefer_overlay_text(row.get("basin_info", ""), overlay.get("basin_info", ""), "basin")
@@ -7731,21 +7990,46 @@ def _imperial_finalize_material_field_text(value: Any, *, drop_note_lines: bool)
     current = normalize_space(str(value or ""))
     if not current:
         return ""
+    if re.search(r"(?i)\b(?:thermolaminated|profile|style|vinyl|cabinetry)\b", current) and not re.search(
+        r"(?i)\b(?:floating shelves?|benchtop|laminate|stone|pencil round|arissed|mitred|waterfall)\b",
+        current,
+    ):
+        current = re.sub(r"(?i)\b\d+\s*mm\s+(?=(?:Polytec|Laminex|Thermolaminated|Profile))", "", current)
+    current = re.sub(r"(?i)\bBulkhead:.*?(?=(?:Polytec|Laminex|Thermolaminated|Classic White|Prime Oak|Boston Oak|Calcutta|$))", "", current)
+    current = re.sub(r"(?i)\+\s*TALL\s+CABINETS?\s*-\s*", "", current)
+    current = re.sub(r"(?i)\bNOTE:\b.*$", "", current).strip(" -;,")
+    current = re.sub(r"(?i)\bFEATURE\b$", "", current).strip(" -;,")
     if _imperial_benchtop_value_looks_noisy(current):
         current = _imperial_clean_material_value([current], drop_note_lines=drop_note_lines)
+    current = re.sub(r"(?i)\+\s*TALL\s+CABINETS?\s*-\s*", "", current)
+    current = re.sub(r"(?i)\bNOTE:\b.*$", "", current).strip(" -;,")
+    current = _dedupe_delimited_fragments(current)
     return _collapse_repeated_token_sequence(current)
 
 
 def _imperial_finalize_toe_kick_entries(values: list[str]) -> list[str]:
     cleaned_entries: list[str] = []
+    seen_signatures: set[tuple[str, ...]] = set()
     for value in values:
         current = normalize_space(str(value or ""))
         if not current:
+            continue
+        current = re.sub(r"(?i)\bNO HANDLES?\s+OVERHEADS\b.*$", "", current)
+        current = re.sub(r"(?i)\bTouch catch\b.*$", "", current)
+        current = normalize_space(current).strip(" -;,|")
+        if not current:
+            continue
+        if normalize_brand_casing_text(current) in ENTRY_SUPPLIER_HINTS:
             continue
         if _imperial_benchtop_value_looks_noisy(current):
             current = _imperial_clean_toe_kick_value([current])
         current = _collapse_repeated_token_sequence(current)
         if current and not _is_placeholder_material_value(current):
+            signature = tuple(sorted(re.findall(r"[a-z0-9]+", current.lower())))
+            if signature and signature in seen_signatures:
+                continue
+            if signature:
+                seen_signatures.add(signature)
             cleaned_entries.append(current)
     return _unique(cleaned_entries)
 
@@ -7754,11 +8038,16 @@ def _imperial_row_needs_laundry_storage_split(row: dict[str, Any]) -> bool:
     label = normalize_space(str(row.get("original_room_label", "") or row.get("room_name", "") or ""))
     room_key = normalize_space(str(row.get("room_key", "") or ""))
     probe = normalize_space(" ".join(str(row.get(key, "") or "") for key in ("evidence_snippet", "original_room_label", "room_name")))
+    lowered_probe = probe.lower()
+    lowered_label = label.lower()
+    lowered_key = room_key.lower()
+    if lowered_label in {"storage nook", "laundry"} or lowered_key in {"storage_nook", "laundry"}:
+        return False
     return bool(
-        "storage nook" in label.lower()
-        or "storage nook" in room_key.lower()
-        or "laundry + storage nook" in probe.lower()
-        or "notessupplier laundry + storage nook" in probe.lower()
+        "laundry + storage nook" in lowered_probe
+        or "notessupplier laundry + storage nook" in lowered_probe
+        or ("laundry" in lowered_label and "storage nook" in lowered_label)
+        or ("laundry_storage_nook" in lowered_key)
     )
 
 
@@ -7794,6 +8083,351 @@ def _imperial_find_combined_storage_nook_section(documents: list[dict[str, objec
                     )
                 )
     return merged_section
+
+
+def _imperial_section_lookup(documents: list[dict[str, object]]) -> dict[str, dict[str, Any]]:
+    lookup: dict[str, dict[str, Any]] = {}
+    for document in documents:
+        for section in _collect_imperial_sections_for_document(document):
+            if section.get("section_kind") != "room":
+                continue
+            room_key = source_room_key(
+                str(section.get("original_section_label", "") or ""),
+                fallback_key=str(section.get("section_key", "") or ""),
+            )
+            if not room_key:
+                continue
+            if room_key not in lookup:
+                lookup[room_key] = deepcopy(section)
+                continue
+            merged = lookup[room_key]
+            merged["page_nos"] = _unique([*list(merged.get("page_nos", []) or []), *list(section.get("page_nos", []) or [])])
+            merged["page_texts"] = [*list(merged.get("page_texts", []) or []), *list(section.get("page_texts", []) or [])]
+            merged["raw_page_texts"] = [*list(merged.get("raw_page_texts", []) or []), *list(section.get("raw_page_texts", []) or [])]
+            merged["layout_rows"] = [*list(merged.get("layout_rows", []) or []), *list(section.get("layout_rows", []) or [])]
+            merged["text_parts"] = [*list(merged.get("text_parts", []) or []), *list(section.get("text_parts", []) or [])]
+            merged["text"] = normalize_space(
+                "\n".join(
+                    part
+                    for part in (
+                        str(merged.get("text", "") or ""),
+                        str(section.get("text", "") or ""),
+                    )
+                    if normalize_space(part)
+                )
+            )
+    return lookup
+
+
+def _imperial_extract_compact_handle_after_label(section_text: str, label_pattern: str, role_note: str = "") -> str:
+    match = re.search(
+        rf"(?is){label_pattern}\s*(?P<value>.*?)(?=(?:KICKBOARDS?|NO\s+HANDLES|LIGHTING|DESIGNER:|CLIENT NAME:|SIGNATURE:|SIGNED DATE:|ALL COLOURS SHOWN|$))",
+        section_text,
+    )
+    if not match:
+        return ""
+    supplier = ""
+    description_parts: list[str] = []
+    note_parts: list[str] = [role_note] if role_note else []
+    lines = [normalize_space(line) for line in str(match.group("value") or "").replace("\r", "\n").split("\n") if normalize_space(line)]
+    for line in lines:
+        if _imperial_is_supplier_only_line(line):
+            supplier = normalize_brand_casing_text(line)
+            continue
+        if re.search(r"(?i)\b(?:installed|horizontal|vertical|drawers?|doors?|pantry)\b", line):
+            note_parts.append(normalize_brand_casing_text(line))
+            continue
+        if re.search(r"(?i)\b(?:oa\s*=|\d+\s*mm|sbh\d+|3750\b|128\b|192\b|momo|allegra|furnware)\b", line):
+            description_parts.append(normalize_brand_casing_text(line))
+            continue
+    description = normalize_space(" ".join(description_parts)).strip(" -;,")
+    note = normalize_space(" ".join(note_parts)).strip(" -;,")
+    return _compose_supplier_description_note(supplier, description, note)
+
+
+def _imperial_extract_hanging_rail_item(section_text: str) -> dict[str, str] | None:
+    match = re.search(r"(?is)HANGING RAIL\s+(?P<value>.*?)(?=(?:ROBE DRAWERS AND PANELS|KICKBOARDS?|HANDLES?|LIGHTING|DESIGNER:|CLIENT NAME:|SIGNATURE:|SIGNED DATE:|ALL COLOURS SHOWN|$))", section_text)
+    if not match:
+        return None
+    block = normalize_space(str(match.group("value") or ""))
+    block = re.sub(r"(?i)\bPolytec\b", "", block)
+    block = normalize_space(block).strip(" -;,")
+    if not block:
+        return None
+    return {"label": "RAIL", "value": f"Hanging Rail - {normalize_brand_casing_text(block)}"}
+
+
+def _imperial_extract_momo_compact_handle_entries(section_text: str) -> list[str]:
+    text = str(section_text or "")
+    if not re.search(r"(?is)\bmomo\s*strano\s*d\s*handle\b", text):
+        return []
+    supplier = "Furnware" if re.search(r"(?i)\bfurnware\b", text) else ""
+    entries: list[str] = []
+    drawer_match = re.search(r"(?is)\bDraw(?:ers?|s)\s*-\s*(?P<value>\d+\s*mm\b.*?\bSBH[0-9A-Z.]+\b)", text)
+    if drawer_match:
+        entries.append(
+            _compose_supplier_description_note(
+                supplier,
+                f"Momo strano d handle - Drawers {normalize_brand_casing_text(normalize_space(drawer_match.group('value')))}",
+                "Horizontal on Drawers",
+            )
+        )
+    door_match = re.search(r"(?is)\bDoors?\s*-\s*(?P<value>\d+\s*mm\b.*?\bSBH[0-9A-Z.]+\b)", text)
+    if door_match:
+        entries.append(
+            _compose_supplier_description_note(
+                supplier,
+                f"Momo strano d handle - Doors {normalize_brand_casing_text(normalize_space(door_match.group('value')))}",
+                "Vertical on Doors",
+            )
+        )
+    if entries:
+        return [entry for entry in entries if entry]
+    bundle = _compose_supplier_description_note(
+        supplier,
+        "Momo strano d handle",
+        "Horizontal on Drawers and Vertical on Doors" if re.search(r"(?is)\bHorizontal on Drawers and Vertical on Doors\b", text) else "",
+    )
+    return [bundle] if bundle else []
+
+
+def _imperial_extract_compact_note_only_handles(section_text: str) -> list[str]:
+    entries: list[str] = []
+    lines = [normalize_space(line) for line in str(section_text or "").replace("\r", "\n").split("\n") if normalize_space(line)]
+    for line in lines:
+        upper = line.upper()
+        if "TOUCH CATCH ABOVE OVENS" in upper:
+            entries.append("Touch catch above ovens")
+        if "NO HANDLE FOR OVERHEADS" in upper and "RECESSED FINGER SPACE" in upper:
+            entries.append("NO HANDLE for OVERHEADS - RECESSED FINGER SPACE")
+        if "NO HANDLES TO OVERHEADS" in upper and "RECESSED FINGER SPACE" in upper:
+            entries.append("NO HANDLES TO OVERHEADS - RECESSED FINGER SPACE")
+        if "NO HANDLES ON UPPERS" in upper:
+            note = re.search(r"(?i)(No handles on Uppers\b.*)", line)
+            normalized_note = normalize_space(note.group(1) if note else line)
+            normalized_note = re.sub(r"(?i)HANDLES\s*$", "", normalized_note).strip(" -;,")
+            entries.append(normalized_note)
+        if "NO HANDLES - BRONTE HANDLE" in upper:
+            entries.append("NO HANDLES - BRONTE HANDLE")
+    return _unique(entries)
+
+
+def _imperial_finalize_wall_benchtop_value(value: Any) -> str:
+    cleaned = _imperial_strip_waterfall_from_wall_benchtop(str(value or ""))
+    if not cleaned:
+        return ""
+    fragments = [
+        normalize_space(part).strip(" -;,")
+        for part in cleaned.split("|")
+        if normalize_space(part)
+    ]
+    if not fragments:
+        return ""
+    unique_fragments = _unique(fragments)
+    if len(unique_fragments) == 1:
+        return unique_fragments[0]
+
+    def _score(fragment: str) -> tuple[int, int, int]:
+        lowered = fragment.lower()
+        penalties = 0
+        if re.search(r"\b\d+\s*x\b", fragment, re.I):
+            penalties += 5
+        if any(token in lowered for token in ("wfall", "waterfall", "mitred edge")):
+            penalties += 10
+        return (penalties, len(fragment.split()), len(fragment))
+
+    return min(unique_fragments, key=_score)
+
+
+def _imperial_strip_waterfall_from_wall_benchtop(value: str) -> str:
+    fragments = [
+        normalize_space(part).strip(" -;,")
+        for part in normalize_space(str(value or "")).split("|")
+        if normalize_space(part)
+    ]
+    cleaned_fragments: list[str] = []
+    for fragment in fragments:
+        current = fragment
+        current = re.sub(r"(?i)\s*\+\s*WFALL END\b", "", current)
+        current = re.sub(r"(?i)\b\d+\s*x\s*Mitred edge(?:\s*waterfall)?\b", "", current)
+        current = re.sub(r"(?i)\b\d+\s*x\s*20mm\s*Waterfall Ends?\s+to\s+(?:Island|Peninsula)\b", "", current)
+        current = re.sub(r"(?i)\bWaterfall Ends?\s+to\s+(?:Island|Peninsula)\b", "", current)
+        current = re.sub(r"(?i)\bwaterfall end to peninsula\b", "", current)
+        current = re.sub(r"(?i)\bend to peninsula\b", "", current)
+        current = re.sub(r"(?i)\b20mm Stone\b", "", current)
+        current = re.sub(r"(?i)\b\d+\s*x\b$", "", current)
+        current = re.sub(r"\s*-\s*-\s*", " - ", current)
+        current = normalize_space(current).strip(" -;,|")
+        current = re.sub(r"(?i)\b\d+\s*x\b$", "", current).strip(" -;,|")
+        current = _collapse_repeated_token_sequence(current)
+        if current:
+            cleaned_fragments.append(current)
+    if not cleaned_fragments:
+        return ""
+    return _dedupe_delimited_fragments(" | ".join(cleaned_fragments))
+
+
+def _imperial_extract_compact_laundry_storage_fields(section: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    raw_text = "\n".join(str(entry.get("text", "") or "") for entry in section.get("raw_page_texts", []) or [])
+    raw_lines = [normalize_space(line) for line in raw_text.replace("\r", "\n").split("\n") if normalize_space(line)]
+    result: dict[str, dict[str, Any]] = {"laundry": {}, "storage_nook": {}}
+    section_text = normalize_space(str(section.get("text", "") or ""))
+    flooring = _imperial_extract_flooring_text(section_text, _preprocess_imperial_lines(raw_lines))
+    if flooring:
+        result["laundry"]["flooring"] = flooring
+        result["storage_nook"]["flooring"] = flooring
+    laundry_base = _imperial_extract_compact_material_block(
+        raw_text,
+        r"LAUNDRY\s+BASE\s+CABINETRY\s+COLOUR\b",
+        (r"LAUNDRY\s+SPLASHBACK\b", r"STORAGE\s+NOOK\b", r"LAUNDRY\s+KICKBOARDS?\b", r"LAUNDRY\s+HANDLES\b", r"ALL COLOURS SHOWN", r"DESIGNER:"),
+    )
+    if laundry_base:
+        result["laundry"]["door_colours_base"] = laundry_base
+    storage_base = _imperial_extract_compact_material_block(
+        raw_text,
+        r"STORAGE\s+NOOK\s+OPEN\s+CABINETRY\s*\+\s*DRAWER\s+COLOUR\b",
+        (r"LAUNDRY\s+KICKBOARDS?\b", r"LAUNDRY\s+HANDLES\b", r"ALL COLOURS SHOWN", r"DESIGNER:"),
+    )
+    if storage_base:
+        result["storage_nook"]["door_colours_base"] = storage_base
+    if re.search(r"(?i)LAUNDRY\s+SPLASHBACK\b.*?\bTiles by client\b", raw_text, re.DOTALL):
+        result["laundry"]["splashback"] = "Tiles by client"
+    for index, line in enumerate(raw_lines):
+        normalized = re.sub(r"\s+", "", line).upper()
+        if normalized in {"POLYTECLAUNDRY", "LAUNDRY"} and index + 1 < len(raw_lines) and re.sub(r"\s+", "", raw_lines[index + 1]).upper() == "BENCHTOP":
+            window = raw_lines[max(0, index - 6) : index]
+            supplier = next((normalize_brand_casing_text(item) for item in window if _imperial_is_supplier_only_line(item)), "Polytec")
+            material = next((normalize_brand_casing_text(item) for item in window if re.search(r"(?i)\bwoodmatt|oak\b", item)), "")
+            thickness = next((normalize_brand_casing_text(item) for item in window if re.search(r"(?i)\b\d+\s*mm\b", item)), "")
+            edge = next((normalize_brand_casing_text(item) for item in window if re.search(r"(?i)\bedge\b", item)), "")
+            bench = _imperial_compose_material_text(supplier, [thickness, material, edge, "Laminate Benchtop"])
+            if bench:
+                result["laundry"]["bench_tops_other"] = bench
+            break
+    storage_handle = ""
+    for index in range(len(raw_lines) - 1):
+        if raw_lines[index].upper() == "STORAGE NOOK" and raw_lines[index + 1].upper() == "HANDLES - BASE DRAWER":
+            window = raw_lines[max(0, index - 6) : index]
+            supplier = next((normalize_brand_casing_text(item) for item in window if "ALLEGRA" in item.upper()), "Allegra")
+            description = " ".join(
+                normalize_brand_casing_text(item)
+                for item in window
+                if re.search(r"(?i)\b(?:3750|OA\s*=|\d+\s*MB)\b", item)
+            )
+            note = normalize_space(
+                " ".join(
+                    normalize_brand_casing_text(item)
+                    for item in window
+                    if re.search(r"(?i)\b(?:installed|horizontal|drawer)\b", item)
+                )
+            )
+            storage_handle = _compose_supplier_description_note(supplier, description, normalize_space(f"Base Drawer {note}".strip()))
+            result["storage_nook"]["toe_kick"] = []
+            break
+    if storage_handle:
+        result["storage_nook"]["handles"] = [storage_handle]
+    if re.search(r"(?i)No Kicks\s*NA", raw_text):
+        result["storage_nook"]["toe_kick"] = []
+    laundry_handles = _imperial_extract_compact_handle_after_label(raw_text, r"LAUNDRY\s+HANDLES\b", "Laundry")
+    if laundry_handles:
+        result["laundry"]["handles"] = [laundry_handles]
+    laundry_kick = _imperial_extract_compact_material_block(
+        raw_text,
+        r"LAUNDRY\s+KICKBOARDS?\b",
+        (r"LAUNDRY\s+HANDLES\b", r"ALL COLOURS SHOWN", r"DESIGNER:"),
+    )
+    if laundry_kick:
+        result["laundry"]["toe_kick"] = [laundry_kick]
+    return result
+
+
+def _imperial_apply_compact_section_room_enrichment(row: dict[str, Any], section: dict[str, Any] | None) -> None:
+    if not section:
+        return
+    room_key = source_room_key(
+        str(row.get("original_room_label", "") or row.get("room_name", "") or ""),
+        fallback_key=str(row.get("room_key", "") or ""),
+    )
+    section_text = str(section.get("text", "") or "")
+    if room_key == "kitchen":
+        row["bench_tops_wall_run"] = _imperial_strip_waterfall_from_wall_benchtop(str(row.get("bench_tops_wall_run", "") or ""))
+        bar_back = _imperial_extract_compact_material_block(
+            section_text,
+            r"FEATURE\s+COLOUR\s+BAR\s+BACK\s*\+\s*BAR\s+BACK\s+DOOR\b",
+            (r"HANDLES?\b", r"KICKBOARDS?\b", r"NO\s+HANDLES\b", r"DESIGNER:", r"ALL COLOURS SHOWN"),
+        )
+        if bar_back:
+            row["door_colours_bar_back"] = re.sub(r"(?is)\bNOTE:.*$", "", bar_back).strip(" -;,")
+        kitchen_handles = [
+            value
+            for value in (
+                _imperial_extract_compact_handle_after_label(section_text, r"HANDLES\s*-\s*BASE\s*DRAWERS\s*\+\s*tall pantry doors\b", "Base Drawers + Tall Pantry Doors"),
+                _imperial_extract_compact_handle_after_label(section_text, r"HANDLES\s*-\s*BASE\s*DOORS\b", "Base Doors"),
+            )
+            if value
+        ]
+        fallback_handles = _imperial_extract_momo_compact_handle_entries(section_text)
+        preserved_note_handles = _imperial_extract_compact_note_only_handles(section_text)
+        if kitchen_handles:
+            row["handles"] = _imperial_finalize_handle_entries(
+                [*preserved_note_handles, *kitchen_handles],
+                preserve_note_only=bool(preserved_note_handles),
+            )
+            if preserved_note_handles:
+                row["_preserve_note_only_handles"] = True
+        elif fallback_handles:
+            row["handles"] = _imperial_finalize_handle_entries(
+                [*preserved_note_handles, *fallback_handles],
+                preserve_note_only=bool(preserved_note_handles),
+            )
+            if preserved_note_handles:
+                row["_preserve_note_only_handles"] = True
+        else:
+            row["handles"] = _imperial_finalize_handle_entries(_coerce_string_list(row.get("handles", [])))
+    elif room_key == "master_wir":
+        material = _imperial_extract_compact_material_block(
+            section_text,
+            r"ROBE\s+DRAWERS\s+AND\s+PANELS\b",
+            (r"KICKBOARDS?\b", r"HANDLES?\b", r"LIGHTING\b", r"DESIGNER:", r"ALL COLOURS SHOWN"),
+        )
+        if material:
+            row["door_colours_base"] = material
+        handles = _imperial_extract_compact_handle_after_label(section_text, r"HANDLES\s*-\s*DRAWERS\b", "Drawers")
+        if handles:
+            row["handles"] = _imperial_finalize_handle_entries([handles])
+        rail_item = _imperial_extract_hanging_rail_item(section_text)
+        if rail_item:
+            row["other_items"] = _merge_other_items(row.get("other_items", []), [rail_item])
+    elif room_key == "study":
+        row["bench_tops_other"] = _dedupe_delimited_fragments(str(row.get("bench_tops_other", "") or ""))
+        material = _imperial_extract_compact_material_block(
+            section_text,
+            r"BASE\s+CABINETRY\s+COLOUR\b",
+            (r"FEATURE\s+FLOATING\s+SHELVES\b", r"KICKBOARDS?\b", r"HANDLES?\b", r"DESIGNER:", r"ALL COLOURS SHOWN"),
+        )
+        if material:
+            row["door_colours_base"] = material
+        handles = _imperial_extract_compact_handle_after_label(section_text, r"HANDLES\s*-\s*BASE\s*DRAWERS\b", "Base Drawers")
+        if handles:
+            row["handles"] = _imperial_finalize_handle_entries([handles])
+    elif room_key in {"master_ensuite", "bathroom"}:
+        material = _imperial_extract_compact_material_block(
+            section_text,
+            r"BASE\s+CABINETRY\s+COLOUR\b",
+            (r"HANDLES?\b", r"BENCHTOP(?:S|\b)", r"KICKBOARDS?\b", r"DESIGNER:", r"ALL COLOURS SHOWN"),
+        )
+        if material:
+            row["door_colours_base"] = material
+        handles = _imperial_extract_momo_compact_handle_entries(section_text)
+        if handles:
+            row["handles"] = _imperial_finalize_handle_entries(handles)
+        else:
+            generic_handle = _imperial_extract_compact_handle_after_label(section_text, r"HANDLES\b", "Doors / Drawers")
+            if generic_handle:
+                row["handles"] = _imperial_finalize_handle_entries([generic_handle])
+    row["toe_kick"] = _imperial_finalize_toe_kick_entries(_coerce_string_list(row.get("toe_kick", [])))
+    if row.get("bench_tops_other"):
+        row["bench_tops_other"] = _dedupe_delimited_fragments(str(row.get("bench_tops_other", "") or ""))
 
 
 def _imperial_extract_prefixed_section_lines(section: dict[str, Any], prefix: str) -> list[str]:
@@ -7919,16 +8553,43 @@ def _imperial_split_laundry_storage_nook_room(
 ) -> list[dict[str, Any]]:
     laundry_lines = _imperial_extract_prefixed_section_lines(section, "LAUNDRY")
     storage_lines = _imperial_extract_prefixed_section_lines(section, "STORAGE NOOK")
-    if not laundry_lines and not storage_lines:
+    extracted = _imperial_extract_compact_laundry_storage_fields(section)
+    if not laundry_lines and not storage_lines and not any(extracted.values()):
         return []
     split_rows: list[dict[str, Any]] = []
     if laundry_lines:
         laundry = _imperial_blank_split_room(base_row, "laundry", "LAUNDRY", "\n".join(laundry_lines))
         _imperial_apply_prefixed_page_fields(laundry, laundry_lines, overlays)
+        for key, value in extracted.get("laundry", {}).items():
+            if key in {"handles", "toe_kick"}:
+                laundry[key] = value
+            elif value:
+                laundry[key] = value
+        _imperial_finalize_room_payload(laundry, overlays)
+        _imperial_apply_compact_section_room_enrichment(laundry, None)
+        split_rows.append(laundry)
+    elif extracted.get("laundry"):
+        laundry = _imperial_blank_split_room(base_row, "laundry", "LAUNDRY", "")
+        for key, value in extracted.get("laundry", {}).items():
+            laundry[key] = value
+        _imperial_finalize_room_payload(laundry, overlays)
         split_rows.append(laundry)
     if storage_lines:
         storage = _imperial_blank_split_room(base_row, "storage_nook", "STORAGE NOOK", "\n".join(storage_lines))
         _imperial_apply_prefixed_page_fields(storage, storage_lines, overlays)
+        for key, value in extracted.get("storage_nook", {}).items():
+            if key in {"handles", "toe_kick"}:
+                storage[key] = value
+            elif value:
+                storage[key] = value
+        _imperial_finalize_room_payload(storage, overlays)
+        _imperial_apply_compact_section_room_enrichment(storage, None)
+        split_rows.append(storage)
+    elif extracted.get("storage_nook"):
+        storage = _imperial_blank_split_room(base_row, "storage_nook", "STORAGE NOOK", "")
+        for key, value in extracted.get("storage_nook", {}).items():
+            storage[key] = value
+        _imperial_finalize_room_payload(storage, overlays)
         split_rows.append(storage)
     return split_rows
 
@@ -8658,6 +9319,16 @@ def _yellowwood_prefer_overlay_text(current: Any, overlay: Any, kind: str = "") 
     if current_parts and all(part.lower() in overlay_text.lower() for part in current_parts):
         return overlay_text
     if kind in {"sink", "basin", "tap"}:
+        if kind == "sink" and re.search(r"(?i)\b(?:mixer|tapware|gooseneck|pull-?out)\b", current_text) and not re.search(
+            r"(?i)\b(?:mixer|tapware|gooseneck|pull-?out)\b", overlay_text
+        ):
+            return overlay_text
+        if kind == "basin" and re.search(r"(?i)\b(?:mixer|tapware)\b", current_text) and not re.search(r"(?i)\b(?:mixer|tapware)\b", overlay_text):
+            return overlay_text
+        if kind == "tap" and re.search(r"(?i)\b(?:sink|basin|bowl|undermount|top mounted)\b", current_text) and not re.search(
+            r"(?i)\b(?:sink|basin|bowl|undermount|top mounted)\b", overlay_text
+        ):
+            return overlay_text
         if _yellowwood_is_placeholder_fixture(current_text, kind) and not _yellowwood_is_placeholder_fixture(overlay_text, kind):
             return overlay_text
         if len(overlay_text) > len(current_text) + 12:
@@ -9410,8 +10081,8 @@ def _apply_room_cleaning_rules(row: dict[str, Any], rule_flags: dict[str, bool])
         else _split_door_colour_groups(row["door_panel_colours"])
     )
     for key in ("door_colours_overheads", "door_colours_base", "door_colours_tall", "door_colours_island", "door_colours_bar_back"):
-        existing = _display_rule_text(row.get(key, ""), rule_flags)
-        merged = _merge_clean_group_text(existing, grouped_doors.get(key, ""), cleaner=_clean_door_colour_value)
+        existing = _clean_door_colour_value_strict(_display_rule_text(row.get(key, ""), rule_flags))
+        merged = _merge_clean_group_text(existing, grouped_doors.get(key, ""), cleaner=_clean_door_colour_value_strict)
         row[key] = _display_rule_text(merged, rule_flags)
     if cleaning_rules.rule_enabled(rule_flags, "door_colour_dedupe_cleanup"):
         row.update(_prune_door_group_overlap({key: row.get(key, "") for key in ("door_colours_overheads", "door_colours_base", "door_colours_tall", "door_colours_island", "door_colours_bar_back")}))
@@ -10595,6 +11266,23 @@ def _clean_door_colour_value(value: Any) -> str:
     if re.search(r"(?i)\b([a-z])\1{4,}\b", text):
         return ""
     return text
+
+
+def _clean_door_colour_value_strict(value: Any) -> str:
+    text = normalize_space(str(value or ""))
+    if not text:
+        return ""
+    text = re.sub(r"(?i)\+\s*TALL\s+CABINETS?\s*-\s*", "", text)
+    for supplier in ("Polytec", "Laminex", "Caesarstone", "Smartstone", "WK Stone", "YDL"):
+        parts = [
+            normalize_space(part).strip(" -;,")
+            for part in re.split(rf"(?i)(?=\b{re.escape(supplier)}\b\s*-)", text)
+            if normalize_space(part)
+        ]
+        if len(parts) > 1 and all(part.lower().startswith(supplier.lower()) for part in parts):
+            deduped = _dedupe_prefer_specific([_clean_door_colour_value(part) for part in parts])
+            return deduped[0] if deduped else _clean_door_colour_value(text)
+    return _clean_door_colour_value(text)
 
 
 def _material_signature(value: str) -> str:
