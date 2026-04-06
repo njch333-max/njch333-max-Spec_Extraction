@@ -307,6 +307,7 @@ def build_spec_snapshot(
                 rule_flags=rule_flags,
             )
             merged = _crosscheck_clarendon_snapshot_with_raw(merged, raw_crosscheck)
+        merged = parsing.enrich_snapshot_rooms(merged, documents, rule_flags=rule_flags)
         merged = parsing.apply_snapshot_cleaning_rules(merged, rule_flags=rule_flags)
         merged["analysis"] = analysis
         return merged
@@ -340,6 +341,7 @@ def build_spec_snapshot(
             rule_flags=rule_flags,
         )
         heuristic = _crosscheck_clarendon_snapshot_with_raw(heuristic, raw_crosscheck)
+    heuristic = parsing.enrich_snapshot_rooms(heuristic, documents, rule_flags=rule_flags)
     heuristic = parsing.apply_snapshot_cleaning_rules(heuristic, rule_flags=rule_flags)
     heuristic["analysis"] = analysis
     return heuristic
@@ -4131,8 +4133,23 @@ def _clarendon_field_quality(text: str, field_name: str) -> int:
             score -= 60
     if field_name.startswith("door_colours_") and "display cabinet" in lowered:
         score -= 70
+    if field_name.startswith("door_colours_") and any(token in lowered for token in ("open shelves", "shelf edges", "carcass edges", "10mm door overhang")):
+        score -= 90
+    if field_name.startswith("bench_tops_") and any(token in lowered for token in ("sink run", "shadowline", "wfa water filter")):
+        score -= 80
     if field_name == "handles" and not any(token in lowered for token in ("belluno", "salemi", "hettich")):
         score -= 40
+    if field_name == "handles" and any(token in lowered for token in ("10mm door overhang", "docusign envelope id", "aedt")):
+        score -= 120
+    if field_name in {"sink_info", "basin_info", "tap_info"}:
+        if re.fullmatch(r"(?i)(?:franke|phoenix|caroma|everhard|fienza|parisi)", cleaned):
+            score -= 140
+        if re.fullmatch(r"(?i)\(?\d{4,}\)?", cleaned):
+            score -= 160
+        if "washing machine taps" in lowered and field_name == "tap_info":
+            score -= 120
+        if any(token in lowered for token in ("wfa water filter", "powder floating", "no kick")):
+            score -= 120
     if "profile" in lowered or re.search(r"\b\d+\s*mm\b", cleaned, re.I):
         score += 10
     return score

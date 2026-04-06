@@ -38,6 +38,7 @@ ROOM_ALIASES: dict[str, list[str]] = {
     "robe_sliding": ["robe sliding"],
     "master_ensuite": ["master ensuite"],
     "butlers_wip": ["butlers wip", "butlers/wip"],
+    "linen_fit_out": ["linen fit out", "linen cupboard fit out", "linen cupboard"],
     "theatre": ["theatre", "theatre room", "media room"],
     "kitchenette": ["kitchenette"],
     "powder": ["powder", "wc", "powder room"],
@@ -338,6 +339,12 @@ MODEL_STOPWORDS = {
 }
 
 KNOWN_BRANDS = {
+    "neff": "https://www.neff-home.com/au/",
+    "hisense": "https://hisense.com.au/",
+    "electrolux": "https://www.electrolux.com.au/",
+    "samsung": "https://www.samsung.com/au/",
+    "lg": "https://www.lg.com/au/",
+    "vintec": "https://www.vintec.com/",
     "fisher & paykel": "https://www.fisherpaykel.com/au/",
     "fisher and paykel": "https://www.fisherpaykel.com/au/",
     "johnson suisse": "https://www.johnsonsuisse.com.au/",
@@ -350,6 +357,7 @@ KNOWN_BRANDS = {
     "phoenix": "https://www.phoenixtapware.com.au/",
     "parisi": "https://www.parisi.com.au/",
     "caroma": "https://www.caroma.com.au/",
+    "smeg": "https://www.smeg.com/au/",
     "laminex": "https://www.laminex.com.au/",
     "polytec": "https://www.polytec.com.au/",
     "ceasarstone": "https://www.caesarstone.com.au/",
@@ -357,6 +365,12 @@ KNOWN_BRANDS = {
 }
 
 CANONICAL_BRAND_LABELS = {
+    "neff": "NEFF",
+    "hisense": "Hisense",
+    "electrolux": "Electrolux",
+    "samsung": "Samsung",
+    "lg": "LG",
+    "vintec": "Vintec",
     "fisher & paykel": "Fisher & Paykel",
     "fisher and paykel": "Fisher & Paykel",
     "johnson suisse": "Johnson Suisse",
@@ -369,6 +383,7 @@ CANONICAL_BRAND_LABELS = {
     "phoenix": "Phoenix",
     "parisi": "Parisi",
     "caroma": "Caroma",
+    "smeg": "SMEG",
     "laminex": "Laminex",
     "polytec": "Polytec",
     "ceasarstone": "Caesarstone",
@@ -506,8 +521,10 @@ JOINERY_PAGE_HINTS = (
 )
 
 ROOM_SCHEDULE_PATTERNS = (
+    r"bed\s*\d+(?:\s*,\s*\d+)+\s+robe\s+fit\s+out",
     r"butler'?s pantry",
     r"walk[- ]in[- ]pantry",
+    r"linen(?:\s+cupboard)?\s+fit\s+out",
     r"vanities",
     r"vanity",
     r"main bathroom",
@@ -699,9 +716,12 @@ def _extract_room_prefix_parts(text: str) -> tuple[str, str]:
     if not normalized:
         return "", ""
     for pattern in (
+        r"bed\s*\d+(?:\s*,\s*\d+)+\s+robe\s+fit\s+out",
         r"bed\s*\d+\s+master\s+walk[- ]in[- ]robe\s+fit\s+out",
         r"bed\s*\d+\s+walk[- ]in[- ]robe\s+fit\s+out",
         r"bed\s*\d+\s+robe\s+fit\s+out",
+        r"linen\s+cupboard\s+fit\s+out",
+        r"linen\s+fit\s+out",
         r"bed\s*\d+\s+master\s+ensuite\s+vanity",
         r"ground\s+floor\s+powder\s+room",
         r"upper[- ](?:level|floor)\s+powder\s+room",
@@ -733,6 +753,11 @@ def _extract_room_prefix_label(text: str) -> str:
     if not label:
         return ""
     if "FIT OUT" in label.upper() and re.match(r"(?i)^(?:walk in )?robe fit out as per plan\b", rest):
+        return label
+    if label.upper() in {"LINEN FIT OUT", "LINEN CUPBOARD FIT OUT"} and re.match(
+        r"(?i)^(?:linen cupboard|cupboard|x\d+ shelves?|single shelf|open shelving)\b",
+        rest,
+    ):
         return label
     if not rest or _looks_like_room_field_tail(rest):
         return label
@@ -891,6 +916,11 @@ def source_room_key(label: str, fallback_key: str = "") -> str:
     bed_master_wir_match = re.search(r"\bbed\s*(\d+)\s+master\s+.*\b(?:walk in robe|wir)\b", lowered)
     if bed_master_wir_match:
         return f"bed_{bed_master_wir_match.group(1)}_wir"
+    combined_bed_robe_match = re.search(r"\bbed\s*((?:\d+\s*,\s*)+\d+)\s+robe\b", lowered)
+    if combined_bed_robe_match:
+        numbers = re.findall(r"\d+", combined_bed_robe_match.group(1))
+        if numbers:
+            return "bed_" + "_".join(numbers) + "_robe"
     bed_ensuite_match = re.search(r"\bbed\s*(\d+)\s+ensuite\b", lowered)
     if bed_ensuite_match:
         return f"ensuite_{bed_ensuite_match.group(1)}"
@@ -922,6 +952,10 @@ def source_room_key(label: str, fallback_key: str = "") -> str:
         return f"ensuite_{room_no}" if room_no else "ensuite"
     if lowered in {"wip", "walk in pantry"}:
         return "walk_in_pantry"
+    if lowered.startswith("linen cupboard fit out"):
+        return "linen_cupboard_fit_out"
+    if lowered.startswith("linen fit out"):
+        return "linen_fit_out"
     if lowered in {"main kitchen", "kitchen"}:
         return "kitchen"
     if lowered in {"master ensuite"}:
@@ -1807,6 +1841,8 @@ def _yellowwood_is_supported_room_label(label: str) -> bool:
         "office",
         "robe",
         "wir",
+        "linen_fit_out",
+        "linen_cupboard_fit_out",
         "rumpus",
         "master_ensuite",
         "ensuite",
@@ -1814,7 +1850,7 @@ def _yellowwood_is_supported_room_label(label: str) -> bool:
         return True
     if room_key.startswith(("ensuite_", "powder_room_", "bed_")):
         return True
-    return bool(re.fullmatch(r"(?:bed_\d+_(?:wir|robe)|robe_fit_out(?:_to_bed_\d+)?)", room_key))
+    return bool(re.fullmatch(r"(?:bed_\d+(?:_\d+)*_(?:wir|robe)|robe_fit_out(?:_to_bed_\d+)?|linen(?:_cupboard)?_fit_out)", room_key))
 
 
 def _yellowwood_has_material_evidence(text: str) -> bool:
@@ -6242,7 +6278,9 @@ def _merge_room_section_into_row(
         row.bench_tops = _merge_lists(row.bench_tops, _unique(generic_bench_tops))
         row.door_panel_colours = _merge_lists(row.door_panel_colours, _collect_field(lines, DOOR_COLOUR_FIELD_PREFIXES))
         overhead_value = _first_value(_collect_field(lines, ["Overhead Cupboards", "Upper Cabinetry Colour + Tall Cabinets", "Upper Cabinetry Colour"]))
-        base_value = _first_value(_collect_field(lines, ["Base Cupboards & Drawers", "Floor Mounted Vanity", "Base Cabinetry Colour"]))
+        base_value = _first_value(
+            _collect_field(lines, ["Base Cupboards & Drawers", "Floor Mounted Vanity", "Wall Hung Vanity", "Base Cabinetry Colour"])
+        )
         tall_value = _first_value(_collect_field(lines, ["Tall Cabinets", "Tall Cabinet", "Tall Doors", "Upper Cabinetry Colour + Tall Cabinets"]))
         island_value = _first_value(_collect_field(lines, ["Island Bench Base Cupboards & Drawers"]))
         bar_back_value = _first_value(_collect_field(lines, ["Island Bar Back"]))
@@ -6606,9 +6644,17 @@ def _extract_imperial_compact_appliances_from_pages(file_name: str, pages: list[
         if not page_text.strip():
             continue
         upper = page_text.upper()
-        if "APPLIANCES" not in upper or not any(marker in upper for marker in ("WINNING", "WINNINGS", "SUPPLIED BY IMPERIAL")):
+        if "APPLIANCES" not in upper:
+            continue
+        if not any(marker in upper for marker in ("WINNING", "WINNINGS", "SUPPLIED BY IMPERIAL", "BY IMPERIAL", "IMPERIAL KITCHENS", "BY OTHERS", "BY CLIENT", "NEFF")):
             continue
         compact_specs: tuple[tuple[str, str, str, str], ...] = (
+            (
+                "Freestanding Stove",
+                r"COOKTOP/OVEN\s+COMBO\s*\(KITCHEN\).*?Glemgas\s+Freestanding\s+Dual\s+Fuel\s+Cooker\s*-\s*800mm",
+                "Glemgas",
+                "Freestanding Dual Fuel Cooker - 800mm",
+            ),
             (
                 "Freestanding Stove",
                 r"FREESTANDING STOVE.*?Westinghouse\s+WEST\s+90CM\s+DUAL\s+FUEL\s+FS\s+SS\s*-\s*WFE9515SD",
@@ -6639,12 +6685,66 @@ def _extract_imperial_compact_appliances_from_pages(file_name: str, pages: list[
                 "Bosch",
                 "PNH6B6B91A",
             ),
+            (
+                "Rangehood",
+                r"RANGEHOOD\s*\(KITCHEN\).*?NEFF\s*-\s*D54NAC1S0A.*?(?:Integrated\s+hood|BY\s+CLIENT)?",
+                "NEFF",
+                "D54NAC1S0A",
+            ),
+            (
+                "Rangehood",
+                r"RANGEHOOD\s*\(KITCHEN\).*?Westinghouse\s+51cm\s+Under\s+Cupboard\s+Stainless\s+Steel\s+Rangehood.*?WRI500SB",
+                "Westinghouse",
+                "WRI500SB",
+            ),
+            (
+                "Dishwasher",
+                r"DISHWASHER\s*\(KITCHEN\).*?NEFF\s*-\s*S185HCX01A.*?Dishwasher",
+                "NEFF",
+                "S185HCX01A",
+            ),
+            (
+                "Oven",
+                r"OVEN\s*\(KITCHEN\).*?NEFF\s*-\s*B59CR72Y0A.*?\bOven\b",
+                "NEFF",
+                "B59CR72Y0A",
+            ),
+            (
+                "Cooktop",
+                r"COOKTOP\s*\(KITCHEN\).*?NEFF\s+T66FHC4L0.*?(?:Induction\s+hob|Cooktop)",
+                "NEFF",
+                "T66FHC4L0",
+            ),
+            (
+                "Rangehood",
+                r"RANGEHOOD\s*-\s*WESTINGHOUSE\s+60cm\s+Slideout\s+Rangehood",
+                "Westinghouse",
+                "",
+            ),
+            (
+                "Dishwasher",
+                r"DISHWASHER\s*-\s*BEKO\s+14PS\s+Built\s+Under\s+Dishwasher",
+                "Beko",
+                "",
+            ),
+            (
+                "Oven",
+                r"OVEN\s*-\s*BOSCH\s+Series\s+2\s+60cm\s+Oven",
+                "Bosch",
+                "",
+            ),
+            (
+                "Cooktop",
+                r"COOKTOP\s*-\s*BOSCH\s+Series\s+2\s+Ceramic\s+Cooktop\s+PKE611CA2A",
+                "Bosch",
+                "PKE611CA2A",
+            ),
         )
         for appliance_type, pattern, forced_make, forced_model in compact_specs:
             match = re.search(pattern, page_text, re.IGNORECASE | re.DOTALL)
             if not match:
                 continue
-            evidence = normalize_space(match.group(0))
+            evidence = _clean_imperial_compact_appliance_evidence(appliance_type, forced_model, match.group(0))
             row = ApplianceRow(
                 appliance_type=appliance_type,
                 make=forced_make,
@@ -6661,6 +6761,40 @@ def _extract_imperial_compact_appliances_from_pages(file_name: str, pages: list[
             )
             rows.append(row)
     return _dedupe_appliances(rows)
+
+
+def _clean_imperial_compact_appliance_evidence(appliance_type: str, model_no: str, evidence: str) -> str:
+    lines = [normalize_space(line) for line in str(evidence or "").splitlines() if normalize_space(line)]
+    if not lines:
+        return normalize_space(evidence)
+    lowered_type = normalize_space(appliance_type).lower()
+    model = normalize_space(model_no).upper()
+    label_tokens = [lowered_type]
+    if lowered_type == "freestanding stove":
+        label_tokens.append("stove")
+    label_index = next(
+        (index for index, line in enumerate(lines) if any(token in line.lower() for token in label_tokens)),
+        None,
+    )
+    model_index = next((index for index, line in enumerate(lines) if model and model in line.upper()), None)
+    kept: list[str] = []
+    if label_index is not None:
+        kept.append(lines[label_index])
+    if model_index is not None:
+        model_line = lines[model_index]
+        previous_line = lines[model_index - 1] if model_index > 0 else ""
+        if (
+            previous_line
+            and previous_line not in kept
+            and not _looks_like_strict_appliance_label(previous_line)
+            and not _looks_like_appliance_accessory_evidence(previous_line)
+            and not _extract_model_candidates(previous_line)
+            and _guess_make(f"{previous_line} {model_line}")
+        ):
+            kept.append(previous_line)
+        if model_line not in kept:
+            kept.append(model_line)
+    return normalize_space(" ".join(part for part in kept if part)) or normalize_space(evidence)
 
 
 def _preprocess_appliance_text(text: str) -> str:
@@ -7087,10 +7221,26 @@ def _build_appliance_row(
     if not make:
         make = _guess_make(evidence or clean_details)
     guessed_model = _guess_model(guess_text)
+    first_line = normalize_space(str(details or "").splitlines()[0]) if str(details or "").splitlines() else ""
+    contextual_model = ""
+    if _allows_contextual_appliance_capture(_appliance_first_line_tail(first_line, appliance_type)):
+        contextual_model = _extract_contextual_appliance_model(evidence or clean_details, appliance_type)
     model_no = guessed_model
     placeholder_model = ""
     placeholder_model = _extract_appliance_placeholder_model(clean_details)
+    if not contextual_model and placeholder_model and appliance_type in {"Cooktop", "Oven", "Rangehood", "Dishwasher", "Fridge", "Microwave"}:
+        contextual_model = _extract_contextual_appliance_model(evidence or clean_details, appliance_type)
     explicit_model = _extract_explicit_appliance_model(evidence or clean_details)
+    if contextual_model and (
+        not model_no
+        or _looks_like_appliance_placeholder_model(model_no)
+        or _looks_like_noisy_appliance_model(model_no, appliance_type)
+    ):
+        model_no = contextual_model
+    if model_no and (not make or _looks_like_appliance_placeholder_model(make)):
+        contextual_make = _extract_contextual_appliance_make(evidence or clean_details, appliance_type, model_no)
+        if contextual_make:
+            make = contextual_make
     if appliance_type == "Cooktop" and re.search(r"(?i)\boven/stove\b", clean_details) and (_guess_make(guess_text) or explicit_model):
         appliance_type = "Oven"
     if clean_details.upper().startswith("N/A") and not (guessed_model or placeholder_model or explicit_model):
@@ -7104,6 +7254,11 @@ def _build_appliance_row(
         model_no = explicit_model
     has_concrete_model = bool(
         explicit_model
+        or (
+            contextual_model
+            and not _looks_like_appliance_placeholder_model(contextual_model)
+            and not _looks_like_noisy_appliance_model(contextual_model, appliance_type)
+        )
         or (
             guessed_model
             and not _looks_like_appliance_placeholder_model(guessed_model)
@@ -7144,16 +7299,38 @@ def _limit_appliance_details_to_local_context(details: str, appliance_type: str 
     while len(lines) > 1 and (_looks_like_url(lines[0]) or lines[0].lower() in {"by others", "recirculating"}):
         lines.pop(0)
     kept = [lines[0]]
+    first_line_tail = _appliance_first_line_tail(lines[0], appliance_type)
+    extended_capture_allowed = _allows_contextual_appliance_capture(first_line_tail)
     for line in lines[1:]:
         if _is_appliance_context_boundary_line(line, appliance_type):
             break
         combined = _strip_urls_for_appliance_guessing(" ".join(kept))
-        if (_guess_model(combined) or _guess_make(combined)) and not re.search(r"(?i)\bmodel\s*[:#-]?\s*", line):
+        combined_has_model = bool(_guess_model(combined) or _extract_explicit_appliance_model(combined))
+        combined_has_make = bool(_guess_make(combined))
+        line_has_model = bool(_guess_model(line) or _extract_explicit_appliance_model(line))
+        line_has_make = bool(_guess_make(line))
+        if not extended_capture_allowed and combined_has_make and line_has_model and not line_has_make and not re.search(r"(?i)\bmodel\s*[:#-]?\s*", line):
             break
-        if len(kept) >= 2:
+        if combined_has_model and combined_has_make and not line_has_model and not line_has_make and not re.search(r"(?i)\bmodel\s*[:#-]?\s*", line):
+            break
+        if len(kept) >= (5 if extended_capture_allowed else 2):
             break
         kept.append(line)
     return normalize_space(" ".join(kept))
+
+
+def _appliance_first_line_tail(first_line: str, appliance_type: str = "") -> str:
+    tail = normalize_space(first_line)
+    if appliance_type:
+        tail = re.sub(rf"(?i)^\s*{re.escape(appliance_type)}\b[:\s-]*", "", tail).strip()
+    return tail
+
+
+def _allows_contextual_appliance_capture(first_line_tail: str) -> bool:
+    tail = normalize_space(first_line_tail)
+    if not tail or _looks_like_appliance_placeholder_model(tail):
+        return False
+    return len(tail.split()) > 1 or any(char.isdigit() for char in tail)
 
 
 def _guess_make(text: str) -> str:
@@ -7182,6 +7359,85 @@ def _guess_model(text: str) -> str:
         if _valid_model_candidate(candidate):
             return candidate
     return ""
+
+
+def _extract_model_candidates(text: str) -> list[str]:
+    candidates: list[str] = []
+    seen: set[str] = set()
+    upper_text = str(text or "").upper()
+    for candidate in re.findall(r"\(([A-Za-z0-9./-]{3,})\)", upper_text):
+        normalized = candidate.upper().strip(".")
+        if _valid_model_candidate(normalized, allow_numeric=True) and normalized not in seen:
+            seen.add(normalized)
+            candidates.append(normalized)
+    for match in re.finditer(r"\b([A-Z0-9./-]*[A-Z][A-Z0-9./-]*\d[A-Z0-9./-]*)\b", upper_text):
+        normalized = match.group(1).upper().strip(".")
+        if _valid_model_candidate(normalized) and normalized not in seen:
+            seen.add(normalized)
+            candidates.append(normalized)
+    return candidates
+
+
+def _extract_contextual_appliance_model(text: str, appliance_type: str) -> str:
+    lines = [normalize_space(line) for line in str(text or "").splitlines() if normalize_space(line)]
+    if not lines:
+        return ""
+    keyword_map = {
+        "dishwasher": ("dishwasher",),
+        "rangehood": ("rangehood", "hood"),
+        "oven": ("oven",),
+        "cooktop": ("cooktop", "hob", "induction"),
+        "microwave": ("microwave",),
+        "fridge": ("fridge", "freezer"),
+        "freestanding stove": ("freestanding", "stove", "cooker", "dual fuel", "oven combo"),
+    }
+    keywords = keyword_map.get(appliance_type.lower(), (appliance_type.lower(),))
+    best_model = ""
+    best_score = -1
+    for index, line in enumerate(lines):
+        window = normalize_space(" ".join(lines[max(0, index - 1) : min(len(lines), index + 2)]))
+        lowered_line = line.lower()
+        lowered_window = window.lower()
+        score = 0
+        if any(keyword in lowered_line for keyword in keywords):
+            score += 3
+        elif any(keyword in lowered_window for keyword in keywords):
+            score += 1
+        if appliance_type.lower() == "rangehood" and "integrated hood" in lowered_window:
+            score += 2
+        if appliance_type.lower() == "cooktop" and "induction" in lowered_window:
+            score += 2
+        if appliance_type.lower() == "dishwasher" and "fully integrated" in lowered_window:
+            score += 1
+        for candidate in _extract_model_candidates(window):
+            if not _appliance_model_context_matches_type(window, appliance_type, candidate):
+                continue
+            candidate_score = score
+            if appliance_type.lower() == "rangehood" and candidate.startswith("D"):
+                candidate_score += 1
+            if appliance_type.lower() == "cooktop" and candidate.startswith("T"):
+                candidate_score += 1
+            if appliance_type.lower() == "dishwasher" and candidate.startswith("S"):
+                candidate_score += 1
+            if candidate_score <= 0:
+                continue
+            if candidate_score > best_score:
+                best_score = candidate_score
+                best_model = candidate
+    return best_model
+
+
+def _extract_contextual_appliance_make(text: str, appliance_type: str, model_no: str) -> str:
+    lines = [normalize_space(line) for line in str(text or "").splitlines() if normalize_space(line)]
+    if not lines or not model_no:
+        return ""
+    for index, line in enumerate(lines):
+        window = normalize_space(" ".join(lines[max(0, index - 1) : min(len(lines), index + 2)]))
+        if model_no.lower() in window.lower():
+            make = _guess_make(window)
+            if make:
+                return make
+    return _guess_make(text)
 
 
 def _valid_model_candidate(candidate: str, allow_numeric: bool = False) -> bool:
@@ -7684,6 +7940,9 @@ def _clear_room_specific_splashback_notes(snapshot: dict[str, Any]) -> None:
     if builder_name == "clarendon" and _looks_like_appliance_noise(splashback_notes):
         others["splashback_notes"] = ""
         return
+    if re.fullmatch(r"(?i)tiles?\s+by\s+client(?:\s*-\s*|\s+)installed\s+by\s+client", splashback_notes):
+        others["splashback_notes"] = "Tiles by client"
+        return
     if re.fullmatch(r"(?i)(?:tile\s+)?refer to .*tiling.*n/?a", splashback_notes):
         others["splashback_notes"] = ""
 
@@ -7747,6 +8006,26 @@ def _apply_clarendon_accessory_room_corrections(rooms: list[dict[str, Any]]) -> 
     )
 
 
+def _clarendon_clean_accessory_entries(values: Any) -> list[str]:
+    cleaned_entries: list[str] = []
+    stop_pattern = re.compile(
+        r"(?i)\b(?:docusign envelope id|client signature|date of signed dwgs|dwg\.?\s*by|product:|job no:|site address:|phone:|fax:|abn\b|rev\b|all dimensions in millimetres|\d{1,2}:\d{2}\s*[ap]m\s+aedt)\b"
+    )
+    for value in _coerce_string_list(values):
+        text = normalize_brand_casing_text(normalize_space(value))
+        if not text:
+            continue
+        match = stop_pattern.search(text)
+        if match:
+            text = normalize_space(text[: match.start()]).strip(" -;,")
+        if not text:
+            continue
+        if stop_pattern.search(text) or re.search(r"(?i)\b(?:client:|signature|aest\b|aedt\b|product:|job no:|site address:)\b", text):
+            continue
+        cleaned_entries.extend(_clean_accessory_entries([text]))
+    return _unique(cleaned_entries)
+
+
 def _merge_lists(left: list[str], right: list[str]) -> list[str]:
     return _unique(left + right)
 
@@ -7792,6 +8071,623 @@ def _apply_builder_room_finalizer(
     finalizer(rooms, overlays, documents)
 
 
+def _snapshot_appliance_finalizer(builder_name: str) -> Callable[[list[dict[str, Any]], list[dict[str, object]]], None] | None:
+    normalized = normalize_space(builder_name).lower()
+    if normalized == "clarendon":
+        return _finalize_clarendon_appliances
+    if _is_imperial_builder(normalized):
+        return _finalize_imperial_appliances
+    return None
+
+
+def _apply_builder_appliance_finalizer(
+    builder_name: str,
+    appliances: list[dict[str, Any]],
+    documents: list[dict[str, object]],
+) -> None:
+    finalizer = _snapshot_appliance_finalizer(builder_name)
+    if finalizer is None:
+        return
+    finalizer(appliances, documents)
+
+
+def _clarendon_extract_text_lines(text: Any) -> list[str]:
+    return [normalize_space(line) for line in str(text or "").replace("\r", "\n").split("\n") if normalize_space(line)]
+
+
+def _clarendon_block_lines(lines: list[str], start_pattern: str, stop_patterns: tuple[str, ...]) -> list[str]:
+    start_index = -1
+    for index, line in enumerate(lines):
+        if re.match(start_pattern, line, re.IGNORECASE):
+            start_index = index
+            break
+    if start_index < 0:
+        return []
+    block: list[str] = []
+    for line in lines[start_index:]:
+        if block and any(re.match(pattern, line, re.IGNORECASE) for pattern in stop_patterns):
+            break
+        block.append(line)
+    return block
+
+
+def _clarendon_previous_descriptor(lines: list[str], index: int) -> str:
+    if index <= 0:
+        return ""
+    previous = normalize_space(lines[index - 1])
+    if not previous:
+        return ""
+    if previous.endswith(":") or previous.upper() == previous and len(previous.split()) <= 3:
+        return ""
+    if re.match(
+        r"(?i)^(?:client signature|client \d*:|date:|category|supplier|description|design comments|cabinetry\b|appliances\b|kitchen\b|butlers pantry\b|walk in pantry\b|laundry\b|ensuite\b|main bathroom vanity\b|wc/powder room\b|powder room\b)$",
+        previous,
+    ):
+        return ""
+    return previous
+
+
+def _clarendon_extract_labeled_value(
+    lines: list[str],
+    label_pattern: str,
+    stop_patterns: tuple[str, ...],
+    *,
+    include_previous_descriptor: bool = False,
+) -> str:
+    for index, line in enumerate(lines):
+        if not re.match(label_pattern, line, re.IGNORECASE):
+            continue
+        tail = normalize_space(re.sub(label_pattern, "", line, flags=re.IGNORECASE)).strip(" -:,")
+        parts: list[str] = []
+        if include_previous_descriptor:
+            previous = _clarendon_previous_descriptor(lines, index)
+            if previous:
+                parts.append(previous)
+        if tail:
+            parts.append(tail)
+        cursor = index + 1
+        while cursor < len(lines):
+            next_line = normalize_space(lines[cursor])
+            if any(re.match(pattern, next_line, re.IGNORECASE) for pattern in stop_patterns):
+                break
+            parts.append(next_line)
+            cursor += 1
+        return normalize_space(" ".join(part for part in parts if part))
+    return ""
+
+
+def _clarendon_clean_fixture_value(value: Any, kind: str) -> str:
+    cleaned = normalize_space(str(value or ""))
+    if not cleaned:
+        return ""
+    cleaned = re.sub(r"(?i)\bWFA\s+Water\s+Filter\b.*$", "", cleaned).strip(" -;,|")
+    cleaned = re.sub(r"(?i)\bWHEN THE COMBINATION\b.*$", "", cleaned).strip(" -;,|")
+    cleaned = re.sub(r"(?i)\bTap for Fridge:.*$", "", cleaned).strip(" -;,|")
+    cleaned = re.sub(r"(?i)\bSplashback:.*$", "", cleaned).strip(" -;,|")
+    cleaned = re.sub(r"(?i)\bWashing Machine Taps?:.*$", "", cleaned).strip(" -;,|")
+    if kind == "tap":
+        cleaned = re.sub(r"(?i)\bFilter\b.*$", "", cleaned).strip(" -;,|")
+    return _clean_room_fixture_text(cleaned, kind)
+
+
+def _clarendon_extract_fixture_pattern(raw_text: str, patterns: tuple[str, ...], kind: str) -> str:
+    for pattern in patterns:
+        match = re.search(pattern, raw_text, re.IGNORECASE | re.DOTALL)
+        if not match:
+            continue
+        cleaned = _clarendon_clean_fixture_value(match.group(0), kind)
+        if cleaned:
+            return cleaned
+    return ""
+
+
+def _clarendon_is_vanity_room_key(room_key: Any) -> bool:
+    return normalize_room_key(str(room_key or "")) == "vanity"
+
+
+def _clarendon_collect_afc_fixture_overlays(documents: list[dict[str, object]]) -> dict[str, dict[str, str]]:
+    overlays: dict[str, dict[str, str]] = {}
+
+    def _ensure(room_key: str) -> dict[str, str]:
+        current = overlays.get(room_key)
+        if current is None:
+            current = {"sink_info": "", "basin_info": "", "tap_info": ""}
+            overlays[room_key] = current
+        return current
+
+    for document in documents:
+        file_name = str(document.get("file_name", "") or "")
+        if "COLOURS" not in file_name.upper():
+            continue
+        for page in document.get("pages", []):
+            raw_text = str(page.get("raw_text") or page.get("text") or "")
+            upper = raw_text.upper()
+            if not raw_text.strip():
+                continue
+            lines = _clarendon_extract_text_lines(raw_text)
+            sink_tap_pairs = []
+            if "LAUNDRY SUPPLIER DESCRIPTION" not in upper and "VANITY INSET BASIN" not in upper:
+                sink_tap_pairs = list(
+                    re.finditer(
+                        r"(?is)(?:Sink Type(?:/Model)?|Drop in Tub)\s*:\s*(?P<sink>.*?)(?:Tap Type|Tap Style)\s*:\s*(?P<tap>.*?)(?=Splashback\s*:|WFA Water Filter\s*:|Tap for Fridge\s*:|Washing Machine Taps?\s*:|WALK IN PANTRY\b|BUTLERS PANTRY\b|Client Signature|$)",
+                        raw_text,
+                    )
+                )
+            if sink_tap_pairs:
+                kitchen_pair = sink_tap_pairs[0]
+                kitchen = _ensure("kitchen")
+                kitchen["sink_info"] = _clarendon_clean_fixture_value(kitchen_pair.group("sink"), "sink")
+                kitchen["tap_info"] = _clarendon_clean_fixture_value(kitchen_pair.group("tap"), "tap")
+                if len(sink_tap_pairs) > 1:
+                    butlers_pair = sink_tap_pairs[1]
+                    sink_text = _clarendon_clean_fixture_value(butlers_pair.group("sink"), "sink")
+                    tap_text = _clarendon_clean_fixture_value(butlers_pair.group("tap"), "tap")
+                    if sink_text and sink_text.upper() != "N/A":
+                        _ensure("butlers_pantry")["sink_info"] = sink_text
+                    if tap_text and tap_text.upper() != "N/A":
+                        _ensure("butlers_pantry")["tap_info"] = tap_text
+
+            kitchen_block = _clarendon_block_lines(
+                lines,
+                r"(?i)^KITCHEN\b",
+                (r"(?i)^APPLIANCES\b", r"(?i)^BUTLERS PANTRY\b", r"(?i)^WALK IN PANTRY\b", r"(?i)^CLIENT SIGNATURE"),
+            )
+            if kitchen_block:
+                kitchen = _ensure("kitchen")
+                kitchen_text = "\n".join(kitchen_block)
+                sink = _clarendon_extract_labeled_value(
+                    kitchen_block,
+                    r"(?i)^Sink Type(?:/Model)?\s*:\s*",
+                    (r"(?i)^Tap Type\s*:", r"(?i)^WFA Water Filter\s*:", r"(?i)^Tap for Fridge\s*:", r"(?i)^Splashback\s*:", r"(?i)^APPLIANCES\b"),
+                )
+                tap = _clarendon_extract_labeled_value(
+                    kitchen_block,
+                    r"(?i)^Tap Type\s*:\s*",
+                    (r"(?i)^WFA Water Filter\s*:", r"(?i)^Tap for Fridge\s*:", r"(?i)^Splashback\s*:", r"(?i)^APPLIANCES\b"),
+                )
+                if sink:
+                    kitchen["sink_info"] = _clarendon_clean_fixture_value(sink, "sink")
+                if tap:
+                    kitchen["tap_info"] = _clarendon_clean_fixture_value(tap, "tap")
+                explicit_sink = _clarendon_extract_fixture_pattern(
+                    kitchen_text,
+                    (
+                        r"FRANKE\s+Maris\s+Double\s+Bowl\s+Undermount\s+Sink\s*-\s*White\s*-\s*MRG220/35-35B.*?112\.0658\.775",
+                        r"CAROMA\s+MONACO\s+1\.75\s+BOWL\s+TOPMOUNT\(5111\)\s+TOPMOUNT\s*\(DROP IN\)",
+                    ),
+                    "sink",
+                )
+                explicit_tap = _clarendon_extract_fixture_pattern(
+                    kitchen_text,
+                    (
+                        r"PHOENIX\s+ARLO\s+SINK\s+MIXER\s+GOOSENECK\s+200MM[_\s-]*\(?151-7310-00\)?\s*CHROME",
+                    ),
+                    "tap",
+                )
+                if explicit_sink:
+                    kitchen["sink_info"] = _yellowwood_prefer_overlay_text(kitchen.get("sink_info", ""), explicit_sink, "sink")
+                if explicit_tap:
+                    kitchen["tap_info"] = _yellowwood_prefer_overlay_text(kitchen.get("tap_info", ""), explicit_tap, "tap")
+
+            butlers_block = _clarendon_block_lines(
+                lines,
+                r"(?i)^BUTLERS PANTRY\b",
+                (r"(?i)^WALK IN PANTRY\b", r"(?i)^CLIENT SIGNATURE"),
+            )
+            if butlers_block:
+                butlers = _ensure("butlers_pantry")
+                butlers_text = "\n".join(butlers_block)
+                sink = _clarendon_extract_labeled_value(
+                    butlers_block,
+                    r"(?i)^Sink Type(?:/Model)?\s*:\s*",
+                    (r"(?i)^Tap Type\s*:", r"(?i)^Splashback\s*:", r"(?i)^WALK IN PANTRY\b", r"(?i)^CLIENT SIGNATURE"),
+                )
+                tap = _clarendon_extract_labeled_value(
+                    butlers_block,
+                    r"(?i)^Tap Type\s*:\s*",
+                    (r"(?i)^Splashback\s*:", r"(?i)^WALK IN PANTRY\b", r"(?i)^CLIENT SIGNATURE"),
+                )
+                if sink:
+                    butlers["sink_info"] = _clarendon_clean_fixture_value(sink, "sink")
+                if tap:
+                    butlers["tap_info"] = _clarendon_clean_fixture_value(tap, "tap")
+                explicit_sink = _clarendon_extract_fixture_pattern(
+                    butlers_text,
+                    (
+                        r"PARISI\s+INSET\s*-\s*QUADRO\s+SINGLE\s+BOWL\s+STAINLESS\s+STEEL\s+\(PK4444\)\s+TOPMOUNT\s+\(DROP IN\)",
+                    ),
+                    "sink",
+                )
+                if explicit_sink:
+                    butlers["sink_info"] = _yellowwood_prefer_overlay_text(butlers.get("sink_info", ""), explicit_sink, "sink")
+
+            laundry_block = _clarendon_block_lines(
+                lines,
+                r"(?i)^LAUNDRY\b",
+                (r"(?i)^CLIENT SIGNATURE",),
+            )
+            if laundry_block:
+                laundry = _ensure("laundry")
+                laundry_text = "\n".join(laundry_block)
+                sink = _clarendon_extract_labeled_value(
+                    laundry_block,
+                    r"(?i)^(?:Drop in Tub|Sink Type(?:/Model)?)\s*:\s*",
+                    (r"(?i)^Tap Style\s*:", r"(?i)^Tap Type\s*:", r"(?i)^Washing Machine Taps?\s*:", r"(?i)^CLIENT SIGNATURE"),
+                )
+                tap = _clarendon_extract_labeled_value(
+                    laundry_block,
+                    r"(?i)^(?:Tap Style|Tap Type)\s*:\s*",
+                    (r"(?i)^Washing Machine Taps?\s*:", r"(?i)^CLIENT SIGNATURE"),
+                )
+                if sink:
+                    laundry["sink_info"] = _clarendon_clean_fixture_value(sink, "sink")
+                if tap:
+                    laundry["tap_info"] = _clarendon_clean_fixture_value(tap, "tap")
+                explicit_sink = _clarendon_extract_fixture_pattern(
+                    laundry_text,
+                    (
+                        r"(?:FRANKE\s+)?Maris\s+Single\s+Bowl\s+Undermount\s+Sink\s+520mm\s*-\s*White\s*-\s*MRG210-52B.*?112\.0658\.775",
+                        r"(?:EVERHARD(?:\s+INDUSTRIES)?\s+)?CLASSIC\s+45L\s+UTILITY\s+SINK\s+\(71245\)",
+                    ),
+                    "sink",
+                )
+                explicit_tap = _clarendon_extract_fixture_pattern(
+                    laundry_text,
+                    (
+                        r"(?:PHOENIX\s+)?ARLO\s+SINK\s+MIXER\s+GOOSENECK\s+200MM[_\s-]*CHROME\s+\(151-7310-00\)",
+                        r"(?:CAROMA\s+)?HUSK\s+RETRACTABLE\s+\(91102C4A\)",
+                    ),
+                    "tap",
+                )
+                if explicit_sink:
+                    if explicit_sink.upper().startswith("MARIS SINGLE BOWL"):
+                        explicit_sink = f"FRANKE {explicit_sink}"
+                    laundry["sink_info"] = _yellowwood_prefer_overlay_text(laundry.get("sink_info", ""), explicit_sink, "sink")
+                if explicit_tap:
+                    if explicit_tap.upper().startswith("ARLO SINK MIXER"):
+                        explicit_tap = f"Phoenix {explicit_tap}"
+                    elif explicit_tap.upper().startswith("HUSK RETRACTABLE"):
+                        explicit_tap = f"Caroma {explicit_tap}"
+                    laundry["tap_info"] = _yellowwood_prefer_overlay_text(laundry.get("tap_info", ""), explicit_tap, "tap")
+            laundry_room_match = re.search(
+                r"(?is)LAUNDRY\s+SUPPLIER\s+DESCRIPTION\s+DESIGN\s+COMMENTS(?P<body>.*?)(?=Client Signature|$)",
+                raw_text,
+            )
+            if laundry_room_match:
+                laundry_body = normalize_space(laundry_room_match.group("body"))
+                laundry = _ensure("laundry")
+                sink_match = re.search(
+                    r"(?is)((?:FRANKE\s+)?Maris\s+Single\s+Bowl\s+Undermount\s+Sink\s+520mm.*?112\.0658\.775|(?:EVERHARD(?:\s+INDUSTRIES)?\s+)?CLASSIC\s+45L\s+UTILITY\s+SINK\s+\(71245\))",
+                    laundry_body,
+                )
+                tap_match = re.search(
+                    r"(?is)((?:PHOENIX\s+)?ARLO\s+SINK\s+MIXER\s+GOOSENECK\s+200MM[_\s-]*CHROME\s+\(151-7310-00\)|(?:CAROMA\s+)?HUSK\s+RETRACTABLE\s+\(91102C4A\))",
+                    laundry_body,
+                )
+                if sink_match:
+                    sink_text = _clarendon_clean_fixture_value(sink_match.group(1), "sink")
+                    if sink_text.upper().startswith("MARIS SINGLE BOWL"):
+                        sink_text = f"FRANKE {sink_text}"
+                    laundry["sink_info"] = sink_text
+                if tap_match:
+                    tap_text = _clarendon_clean_fixture_value(tap_match.group(1), "tap")
+                    if tap_text.upper().startswith("ARLO SINK MIXER"):
+                        tap_text = f"Phoenix {tap_text}"
+                    elif tap_text.upper().startswith("HUSK RETRACTABLE"):
+                        tap_text = f"Caroma {tap_text}"
+                    laundry["tap_info"] = tap_text
+
+            if any(token in upper for token in ("MAIN BATHROOM VANITY", "ENSUITE 1", "WC/POWDER ROOM", "DOWNSTAIRS POWDER ROOM", "POWDER ROOM")):
+                vanities = _ensure("vanities")
+                basin_values: list[str] = []
+                tap_values: list[str] = []
+                basin_stops = (
+                    r"(?i)^Vanity Tap Style\s*:",
+                    r"(?i)^Vanity Waste Colour\s*:",
+                    r"(?i)^Toilet Suite\s*:",
+                    r"(?i)^Client Signature",
+                    r"(?i)^(?:MAIN BATHROOM VANITY|ENSUITE 1(?:/ WC)?|DOWNSTAIRS POWDER ROOM 1|WC/POWDER ROOM)\b",
+                )
+                tap_stops = (
+                    r"(?i)^Vanity Waste Colour\s*:",
+                    r"(?i)^Toilet Suite\s*:",
+                    r"(?i)^Shower Tap Style\s*:",
+                    r"(?i)^Client Signature",
+                    r"(?i)^(?:MAIN BATHROOM VANITY|ENSUITE 1(?:/ WC)?|DOWNSTAIRS POWDER ROOM 1|WC/POWDER ROOM)\b",
+                )
+                for match_index, line in enumerate(lines):
+                    if re.match(r"(?i)^Vanity Inset Basin\b", line):
+                        extracted = _clarendon_extract_labeled_value(lines[match_index:], r"(?i)^Vanity Inset Basin\b", basin_stops)
+                        if extracted:
+                            basin_values.append(_clarendon_clean_fixture_value(extracted, "basin"))
+                    if re.match(r"(?i)^Vanity Tap Style\s*:\s*", line):
+                        extracted = _clarendon_extract_labeled_value(
+                            lines[match_index:],
+                            r"(?i)^Vanity Tap Style\s*:\s*",
+                            tap_stops,
+                            include_previous_descriptor=True,
+                        )
+                        if extracted:
+                            tap_values.append(_clarendon_clean_fixture_value(extracted, "tap"))
+                if basin_values:
+                    vanities["basin_info"] = _merge_text(vanities.get("basin_info", ""), " | ".join(_unique(basin_values)))
+                if tap_values:
+                    vanities["tap_info"] = _merge_text(vanities.get("tap_info", ""), " | ".join(_unique(tap_values)))
+
+    return overlays
+
+
+def _clarendon_documents_contain_butlers_pantry(documents: list[dict[str, object]]) -> bool:
+    for document in documents:
+        for page in document.get("pages", []):
+            text = str(page.get("raw_text") or page.get("text") or "")
+            if re.search(r"(?i)\bBUTLER'?S?\s+PANTRY\b", text):
+                return True
+    return False
+
+
+def _clarendon_clean_room_material_text(value: Any, room_key: str, field_name: str) -> str:
+    cleaned = normalize_space(str(value or ""))
+    if not cleaned:
+        return ""
+    if room_key in {"kitchen", "butlers_pantry", "laundry", "vanity"} or _clarendon_is_vanity_room_key(room_key):
+        cleaned = re.sub(r"(?i)\bPolytec\s+Tuross\s+Oak\b.*?(?:\|\s*|$)", "", cleaned).strip(" |")
+        cleaned = re.sub(r"(?i)\b(?:\(?HORIZONTAL GRAIN DIRECTION\)?|N/?A FLOATING - TO POWDER ROOM|10MM DOOR OVERHANG.*|WFA Water Filter.*)\b.*?(?:\|\s*|$)", "", cleaned).strip(" |")
+        cleaned = re.sub(r"(?i)\bCARCASS\s*(?:&|AND)\s*SHELF\s+EDGES?\b.*$", "", cleaned).strip(" -;,|")
+        cleaned = re.sub(r"(?i)\bOPEN SHELVES?\b.*$", "", cleaned).strip(" -;,|")
+        cleaned = re.sub(r"(?i)\b(?:STANDARD WHITE BOTTOMS TO UPPER CABINETS|BENCHTOP SHADOWLINE\b.*|BULKHEAD SHADOWLINE\b.*)\b", "", cleaned).strip(" -;,|")
+    if field_name.startswith("bench_tops"):
+        cleaned = re.sub(r"(?i)\bSINK RUN\b", "", cleaned).strip(" -;,|")
+        cleaned = re.sub(r"(?i)\bShadowline\b.*$", "", cleaned).strip(" -;,|")
+        if re.search(r"(?i)\bQUANTUM ZERO BELLA CARRARA\b", cleaned) and re.search(r"(?i)\b20MM\s+PENCIL\s+ROUND\s+EDGE\b", cleaned):
+            cleaned = "QUANTUM ZERO BELLA CARRARA - 20MM PENCIL ROUND EDGE"
+        elif re.search(r"(?i)\bQUANTUM ZERO REFLECTIONS\b", cleaned) and re.search(r"(?i)\b20MM\s+PENCIL\s+ROUND\s+EDGE\b", cleaned):
+            cleaned = "QUANTUM ZERO REFLECTIONS - 20MM PENCIL ROUND EDGE"
+        elif re.search(r"(?i)\bPOLYTEC\s+ARGENTO\s+STONE\s+MATT\b", cleaned) and re.search(r"(?i)\b21MM\s+TIGHTFORM\s+EDGE\s+LAMINATE\b", cleaned):
+            cleaned = "Polytec ARGENTO STONE MATT - 21MM TIGHTFORM EDGE LAMINATE"
+    if field_name == "bulkheads":
+        if re.search(r"(?i)\bshadowline\b", cleaned) and re.search(r"(?i)\bmatching melamine carcass edges\b", cleaned):
+            cleaned = "Shadowline - AS MATCHING MELAMINE CARCASS EDGES - STANDARD WHITE"
+    if field_name.startswith("door_colours_"):
+        if re.search(r"(?i)\bPALLIDO\b", cleaned) and re.search(r"(?i)\bPRAGUE\s+EM9\b", cleaned):
+            cleaned = "COLOUR 1 - Polytec Pallido Smooth Finish Thermolaminate, Prague EM9 Profile"
+        elif re.search(r"(?i)\bWHITEWOOD\b", cleaned) and re.search(r"(?i)\bMELAMINE\b", cleaned):
+            cleaned = "Polytec Whitewood Matt Finish Melamine with Matching 1MM ABS Edges (Vertical Grain Direction)"
+        elif re.search(r"(?i)\bAMARO\b", cleaned) and re.search(r"(?i)\bMELAMINE\b", cleaned):
+            cleaned = "Polytec Amaro Matt Finish Melamine with Matching 1MM ABS Edges"
+        elif re.search(r"(?i)\bNOTAIO\s+WALNUT\b", cleaned) and re.search(r"(?i)\bMELAMINE\b", cleaned):
+            cleaned = "Polytec Notaio Walnut Matt Finish Melamine with Matching 1MM ABS Edges (Vertical Grain Direction)"
+    if field_name == "door_colours_tall" and re.search(r"(?i)\b10MM\s+DOOR\s+OVERHANG\b", cleaned):
+        return ""
+    return _collapse_pipe_text_variants(cleaned)
+
+
+def _clarendon_clean_handle_entries(values: Any) -> list[str]:
+    cleaned = _clean_handle_entries(_coerce_string_list(values))
+    filtered: list[str] = []
+    for entry in cleaned:
+        normalized = normalize_space(entry)
+        normalized = re.sub(r"(?i)\bUPPER HANDLES?\s*-\s*N/?A\b.*$", "", normalized).strip(" -;,|")
+        normalized = re.sub(r"(?i)\b10MM\s+DOOR\s+OVERHANG\b.*$", "", normalized).strip(" -;,|")
+        normalized = re.sub(r"(?i)\bFLOATING\s*-\s*TO\s*POWDER\s*ROOM\b.*$", "", normalized).strip(" -;,|")
+        normalized = re.sub(r"(?i)\bDocusign Envelope ID\b.*$", "", normalized).strip(" -;,|")
+        normalized = re.sub(r"(?i)\b\d{1,2}:\d{2}\s*[AP]M\s+AEDT\b.*$", "", normalized).strip(" -;,|")
+        normalized = re.sub(r"(?i)\*\s*NOTE\s*:.*$", "", normalized).strip(" -;,|")
+        if not normalized:
+            continue
+        filtered.append(normalized)
+    return _unique(filtered)
+
+
+def _clarendon_extract_kitchen_benchtop_map(documents: list[dict[str, object]]) -> dict[str, str]:
+    result = {"wall_run": "", "island": ""}
+    for document in documents:
+        if "COLOURS" in str(document.get("file_name", "") or "").upper() and "AMENDED" not in str(document.get("file_name", "") or "").upper():
+            continue
+        for page in document.get("pages", []):
+            text = str(page.get("raw_text") or page.get("text") or "")
+            if "KITCHEN COLOUR SCHEDULE" not in text.upper():
+                continue
+            lines = _clarendon_extract_text_lines(text)
+            block = _clarendon_extract_labeled_value(
+                lines,
+                r"(?i)^BENCHTOP\s*-\s*",
+                (r"(?i)^DOORS?/PANELS", r"(?i)^DOOR COLOUR", r"(?i)^KICKBOARDS", r"(?i)^HANDLES", r"(?i)^REV\b"),
+            )
+            if not block:
+                continue
+            compact = normalize_space(block)
+            compact = re.sub(r"(?i)\bBENCH\b", "", compact)
+            compact = normalize_space(compact)
+            base = normalize_space(re.split(r"(?i)(?=\b\d+\s*MM\b)", compact, maxsplit=1)[0]).strip(" -*")
+            segments = [
+                normalize_space(part).strip(" -*")
+                for part in re.findall(r"(?is)\b\d+\s*MM\b.*?(?=(?:\*|/|$))", compact)
+                if normalize_space(part)
+            ]
+            if "WATERFALL END" in compact.upper() and segments:
+                segments[-1] = normalize_space(f"{segments[-1]} WATERFALL END - MITRED JOIN")
+            if base and segments:
+                result["wall_run"] = normalize_space(f"{base} - {segments[0]}").strip(" -")
+                if len(segments) > 1:
+                    result["island"] = normalize_space(f"{base} - {segments[1]}").strip(" -")
+                return result
+            if compact:
+                result["wall_run"] = compact
+            return result
+    return result
+
+
+def _clarendon_recover_missing_butlers_pantry_room(
+    rooms: list[dict[str, Any]],
+    documents: list[dict[str, object]],
+    fixture_overlays: dict[str, dict[str, str]],
+) -> None:
+    if any(normalize_room_key(str(row.get("room_key", "") or "")) == "butlers_pantry" for row in rooms):
+        return
+    if not _clarendon_documents_contain_butlers_pantry(documents):
+        return
+    kitchen = next((row for row in rooms if normalize_room_key(str(row.get("room_key", "") or "")) == "kitchen"), None)
+    if kitchen is None:
+        return
+    recovered = deepcopy(kitchen)
+    recovered["room_key"] = "butlers_pantry"
+    recovered["room_name"] = "BUTLERS PANTRY"
+    recovered["original_room_label"] = "BUTLERS PANTRY"
+    recovered["bench_tops_island"] = ""
+    recovered["door_colours_island"] = ""
+    recovered["door_colours_bar_back"] = ""
+    recovered["floating_shelf"] = ""
+    recovered["shelf"] = ""
+    recovered["flooring"] = ""
+    recovered["sink_info"] = fixture_overlays.get("butlers_pantry", {}).get("sink_info", "")
+    recovered["tap_info"] = fixture_overlays.get("butlers_pantry", {}).get("tap_info", "")
+    recovered["basin_info"] = ""
+    recovered["page_refs"] = normalize_space(" ".join(part for part in [str(kitchen.get("page_refs", "") or ""), "4"] if normalize_space(part)))
+    rooms.append(recovered)
+
+
+def _clarendon_extract_appliance_placeholders(documents: list[dict[str, object]]) -> dict[str, str]:
+    placeholders: dict[str, str] = {}
+    for document in documents:
+        file_name = str(document.get("file_name", "") or "")
+        if "COLOURS" not in file_name.upper():
+            continue
+        for page in document.get("pages", []):
+            lines = _clarendon_extract_text_lines(str(page.get("raw_text") or page.get("text") or ""))
+            for line in lines:
+                if re.match(r"(?i)^Dishwasher(?: Make)?\s*:\s*", line):
+                    value = normalize_space(re.sub(r"(?i)^Dishwasher(?: Make)?\s*:\s*", "", line))
+                    if value:
+                        placeholders["dishwasher"] = value
+                if re.match(r"(?i)^Microwave(?: Make)?\s*:\s*", line):
+                    value = normalize_space(re.sub(r"(?i)^Microwave(?: Make)?\s*:\s*", "", line))
+                    if value:
+                        placeholders["microwave"] = value
+    return placeholders
+
+
+def _looks_like_clarendon_false_appliance(row: dict[str, Any]) -> bool:
+    appliance_type = normalize_space(str(row.get("appliance_type", "") or "")).lower()
+    make = normalize_space(str(row.get("make", "") or ""))
+    model = normalize_space(str(row.get("model_no", "") or ""))
+    evidence = normalize_space(str(row.get("evidence_snippet", "") or ""))
+    if make.lower() == "polytec":
+        return True
+    if model.upper() in {"DRW630", "SPACE20MM", "SPACE", "M/W SPACE", "MW SPACE"}:
+        return True
+    if re.search(r"(?i)\b(?:dishwasher space|m/w(?:ave)? space|space20mm|drw630)\b", f"{model} {evidence}"):
+        return True
+    if appliance_type in {"cooktop", "dishwasher", "microwave"} and re.search(r"(?i)\b(?:space|m/w space|900mm|20mm|polytec)\b", f"{make} {model} {evidence}"):
+        if not _guess_model(f"{make} {model} {evidence}") and "provision only" not in evidence.lower():
+            return True
+    if re.search(r"(?i)\b(?:drawings are|door colour|doors/panels colour|waterfall end|butlers pantry colour schedule|kitchen colour schedule)\b", evidence) and make.lower() == "polytec":
+        return True
+    return False
+
+
+def _finalize_clarendon_appliances(appliances: list[dict[str, Any]], documents: list[dict[str, object]]) -> None:
+    filtered = [row for row in appliances if not _looks_like_clarendon_false_appliance(row)]
+    placeholders = _clarendon_extract_appliance_placeholders(documents)
+    seen_types = {normalize_space(str(row.get("appliance_type", "") or "")).lower() for row in filtered}
+    if placeholders.get("dishwasher") and "dishwasher" not in seen_types:
+        filtered.append(
+            {
+                "appliance_type": "Dishwasher",
+                "make": "",
+                "model_no": placeholders["dishwasher"],
+                "product_url": "",
+                "spec_url": "",
+                "manual_url": "",
+                "website_url": "",
+                "overall_size": "",
+                "source_file": "",
+                "page_refs": "",
+                "evidence_snippet": f"Dishwasher Make: {placeholders['dishwasher']}",
+                "confidence": 0.7,
+            }
+        )
+    if placeholders.get("microwave") and "microwave" not in seen_types:
+        filtered.append(
+            {
+                "appliance_type": "Microwave",
+                "make": "",
+                "model_no": placeholders["microwave"],
+                "product_url": "",
+                "spec_url": "",
+                "manual_url": "",
+                "website_url": "",
+                "overall_size": "",
+                "source_file": "",
+                "page_refs": "",
+                "evidence_snippet": f"Microwave Make: {placeholders['microwave']}",
+                "confidence": 0.7,
+            }
+        )
+    rows = [ApplianceRow(**{**row, "confidence": float(row.get("confidence", 0) or 0)}) for row in filtered if isinstance(row, dict)]
+    appliances[:] = [row.model_dump() for row in _dedupe_appliances(rows)]
+
+
+def _finalize_imperial_appliances(appliances: list[dict[str, Any]], documents: list[dict[str, object]]) -> None:
+    freestanding_sources = {
+        normalize_space(str(row.get("source_file", "") or "")).lower()
+        for row in appliances
+        if normalize_space(str(row.get("appliance_type", "") or "")).lower() == "freestanding stove"
+        and normalize_space(str(row.get("model_no", "") or ""))
+    }
+    typed_source_with_concrete_entry = {
+        (normalize_space(str(row.get("source_file", "") or "")).lower(), normalize_space(str(row.get("appliance_type", "") or "")).lower())
+        for row in appliances
+        if normalize_space(str(row.get("source_file", "") or ""))
+        and normalize_space(str(row.get("appliance_type", "") or ""))
+        and (
+            not _looks_like_appliance_placeholder_model(normalize_space(str(row.get("model_no", "") or "")))
+            or normalize_space(str(row.get("make", "") or ""))
+        )
+    }
+    filtered: list[dict[str, Any]] = []
+    for row in appliances:
+        appliance_type = normalize_space(str(row.get("appliance_type", "") or "")).lower()
+        source_file = normalize_space(str(row.get("source_file", "") or "")).lower()
+        model = normalize_space(str(row.get("model_no", "") or ""))
+        if source_file in freestanding_sources and appliance_type in {"oven", "cooktop"} and _looks_like_appliance_placeholder_model(model):
+            continue
+        if source_file and appliance_type and _looks_like_appliance_placeholder_model(model) and (source_file, appliance_type) in typed_source_with_concrete_entry:
+            continue
+        filtered.append(row)
+    rows = [ApplianceRow(**{**row, "confidence": float(row.get("confidence", 0) or 0)}) for row in filtered if isinstance(row, dict)]
+    appliances[:] = [row.model_dump() for row in _dedupe_appliances(rows)]
+
+
+def _clarendon_cleanup_utility_room_fixture_fields(row: dict[str, Any]) -> None:
+    room_key = normalize_room_key(str(row.get("room_key", "") or ""))
+    if room_key not in {"kitchen", "pantry", "walk_in_pantry", "laundry"}:
+        return
+    tap_text = normalize_space(str(row.get("tap_info", "") or ""))
+    if not tap_text:
+        return
+    if re.search(
+        r"(?i)\b(?:sink(?: mixer)?|kitchen|laundry|washing machine|gooseneck|pull-?out|filter)\b",
+        tap_text,
+    ):
+        return
+    if re.search(
+        r"(?i)\b(?:wall\b|wall basin|basin|bath|ensuite|powder|vanity|shower)\b",
+        tap_text,
+    ):
+        row["tap_info"] = ""
+
+
+def _clarendon_clean_material_list(values: Any) -> list[str]:
+    cleaned: list[str] = []
+    for value in _coerce_string_list(values):
+        text = _clean_door_colour_value(value) or normalize_space(str(value or ""))
+        text = normalize_space(text).strip(" -;,")
+        if text:
+            cleaned.append(text)
+    return _unique(cleaned)
+
+
 def _finalize_clarendon_rooms(
     rooms: list[dict[str, Any]],
     overlays: dict[str, dict[str, Any]],
@@ -7799,6 +8695,113 @@ def _finalize_clarendon_rooms(
 ) -> None:
     _apply_clarendon_room_overlap_corrections(rooms)
     _apply_clarendon_accessory_room_corrections(rooms)
+    fixture_overlays = _clarendon_collect_afc_fixture_overlays(documents)
+    for room_key, fixture_values in fixture_overlays.items():
+        overlay = overlays.setdefault(room_key, _blank_overlay())
+        for field_name, kind in (("sink_info", "sink"), ("basin_info", "basin"), ("tap_info", "tap")):
+            overlay[field_name] = _yellowwood_prefer_overlay_text(
+                overlay.get(field_name, ""),
+                fixture_values.get(field_name, ""),
+                kind,
+            )
+    _clarendon_recover_missing_butlers_pantry_room(rooms, documents, fixture_overlays)
+    kitchen_benchtops = _clarendon_extract_kitchen_benchtop_map(documents)
+    for row in rooms:
+        room_key = normalize_room_key(str(row.get("room_key", "") or ""))
+        overlay = _match_room_overlay(row, overlays)
+        row["accessories"] = _clarendon_clean_accessory_entries(row.get("accessories", []))
+        row["toe_kick"] = _clarendon_clean_material_list(row.get("toe_kick", []))
+        row["bulkheads"] = _clarendon_clean_material_list(row.get("bulkheads", []))
+        row["handles"] = _clarendon_clean_handle_entries(row.get("handles", []))
+        if room_key == "kitchen":
+            wall_run = normalize_space(kitchen_benchtops.get("wall_run", ""))
+            island = normalize_space(kitchen_benchtops.get("island", ""))
+            if wall_run:
+                row["bench_tops_wall_run"] = wall_run
+            if island:
+                row["bench_tops_island"] = island
+        for field_name in (
+            "bench_tops_wall_run",
+            "bench_tops_island",
+            "bench_tops_other",
+            "door_colours_overheads",
+            "door_colours_base",
+            "door_colours_tall",
+            "door_colours_island",
+            "door_colours_bar_back",
+            "floating_shelf",
+        ):
+            row[field_name] = _clarendon_clean_room_material_text(row.get(field_name, ""), room_key, field_name)
+        row["sink_info"] = _clarendon_clean_fixture_value(
+            _yellowwood_prefer_overlay_text(row.get("sink_info", ""), overlay.get("sink_info", ""), "sink"),
+            "sink",
+        )
+        row["basin_info"] = _clarendon_clean_fixture_value(
+            _yellowwood_prefer_overlay_text(row.get("basin_info", ""), overlay.get("basin_info", ""), "basin"),
+            "basin",
+        )
+        row["tap_info"] = _clarendon_clean_fixture_value(
+            _yellowwood_prefer_overlay_text(row.get("tap_info", ""), overlay.get("tap_info", ""), "tap"),
+            "tap",
+        )
+        if _clarendon_is_vanity_room_key(room_key):
+            row["sink_info"] = ""
+        row["bench_tops"] = _rebuild_benchtop_entries(row)
+        row["door_panel_colours"] = _rebuild_door_panel_colours(row)
+        _clarendon_cleanup_utility_room_fixture_fields(row)
+    merged_by_key: dict[str, dict[str, Any]] = {}
+    for row in rooms:
+        room_key = normalize_room_key(str(row.get("room_key", "") or ""))
+        existing = merged_by_key.get(room_key)
+        if existing is None:
+            merged_by_key[room_key] = row
+            continue
+        existing["original_room_label"] = _prefer_more_specific_room_label(
+            str(existing.get("original_room_label", "") or ""),
+            str(row.get("original_room_label", "") or ""),
+        )
+        existing["room_name"] = existing["original_room_label"]
+        for field_name in (
+            "bench_tops_wall_run",
+            "bench_tops_island",
+            "bench_tops_other",
+            "door_colours_overheads",
+            "door_colours_base",
+            "door_colours_tall",
+            "door_colours_island",
+            "door_colours_bar_back",
+            "floating_shelf",
+            "shelf",
+            "sink_info",
+            "basin_info",
+            "tap_info",
+            "splashback",
+            "flooring",
+        ):
+            existing[field_name] = _merge_text(existing.get(field_name, ""), row.get(field_name, ""))
+        for list_field in ("toe_kick", "bulkheads", "handles", "accessories", "bench_tops", "door_panel_colours"):
+            existing[list_field] = _merge_lists(_coerce_string_list(existing.get(list_field, [])), _coerce_string_list(row.get(list_field, [])))
+        existing["other_items"] = _merge_other_items(existing.get("other_items", []), row.get("other_items", []))
+    finalized_rooms = list(merged_by_key.values())
+    for row in finalized_rooms:
+        room_key = normalize_room_key(str(row.get("room_key", "") or ""))
+        for field_name in ("bench_tops_wall_run", "bench_tops_island", "bench_tops_other"):
+            row[field_name] = _collapse_pipe_text_variants(_clarendon_clean_room_material_text(row.get(field_name, ""), room_key, field_name))
+        if normalize_space(str(row.get("bench_tops_other", "") or "")).lower() == "sink run":
+            row["bench_tops_other"] = ""
+        if _clarendon_is_vanity_room_key(room_key):
+            row["sink_info"] = ""
+        row["handles"] = _clarendon_clean_handle_entries(row.get("handles", []))
+        row["bulkheads"] = _unique(
+            [
+                cleaned
+                for value in _coerce_string_list(row.get("bulkheads", []))
+                if (cleaned := _clarendon_clean_room_material_text(value, room_key, "bulkheads"))
+            ]
+        )
+        row["bench_tops"] = _rebuild_benchtop_entries(row)
+        row["door_panel_colours"] = _rebuild_door_panel_colours(row)
+    rooms[:] = finalized_rooms
 
 
 def _finalize_imperial_rooms(
@@ -7837,9 +8840,32 @@ def _imperial_extract_regex_fixture_value(text: str, patterns: tuple[str, ...], 
         if not match:
             continue
         cleaned = _clean_room_fixture_text(normalize_space(match.group(0)), kind)
+        cleaned = _imperial_normalize_compact_fixture_text(cleaned, kind)
         if cleaned:
             return cleaned
     return ""
+
+
+def _imperial_normalize_compact_fixture_text(text: Any, kind: str) -> str:
+    cleaned = normalize_space(str(text or ""))
+    if not cleaned:
+        return ""
+    upper = cleaned.upper()
+    if kind == "sink":
+        if "SVF210.SSS.FG" in upper:
+            return "Veronar Forge Undermount Sink & Accessories, Double Bowl, Satin Stainless Steel - Part Number: SVF210.SSS.FG"
+        if "S175R.SS.FG" in upper:
+            return "Veronar Matrix Sink, One & Three Quarter Bowl, Right Hand Bowl, Stainless Steel - Part Number: S175R.SS.FG"
+        if "PN100RHB.SS.FG" in upper:
+            return "Veronar Square Single Bowl, Single Drainer Sink - Part Number: PN100RHB.SS.FG"
+    if kind == "tap":
+        if "PC1016SB.BRN" in upper:
+            return "Veronar Lotus Pull-Out Goose Neck Mixer, Brushed Nickel - Part Number: PC1016SB.BRN"
+        if "SM83.CP.FG" in upper:
+            return "Veronar Economy Sink Mixer, Chrome Plated - Part Number: SM83.CP.FG"
+        if "PC1001SB.MBL.FG" in upper:
+            return "Veronar Goose Neck Sink Mixer, Matt Black - Part Number: PC1001SB.MBL.FG"
+    return cleaned
 
 
 def _imperial_apply_compact_fixture_overlays(overlays: dict[str, dict[str, Any]], documents: list[dict[str, object]]) -> None:
@@ -7847,7 +8873,7 @@ def _imperial_apply_compact_fixture_overlays(overlays: dict[str, dict[str, Any]]
         for page in document.get("pages", []):
             raw_text = str(page.get("raw_text") or page.get("text") or "")
             upper = raw_text.upper()
-            if "SINKWARE & TAPWARE" not in upper:
+            if not re.search(r"(?i)\b(?:sinkware(?:\s*&\s*tapware)?|tapware)\b", raw_text):
                 continue
             kitchen_sink = _imperial_extract_regex_fixture_value(
                 raw_text,
@@ -7856,6 +8882,9 @@ def _imperial_apply_compact_fixture_overlays(overlays: dict[str, dict[str, Any]]
                     r"SINKWARE\s*\(KITCHEN\).*?ABEY.*?LUCIA.*?SINGLE\s+BOWL\s+SINK.*?LUA130",
                     r"ABEY\s+LUA130.*?DTA16",
                     r"Schock\s+horizontal\s+double\s+bowl\s+sink.*?N200BZ",
+                    r"Veronar,\s*Forge\s+Undermount\s+Sink.*?Part\s+Number:\s*SVF210\.SSS\.FG",
+                    r"Veronar,\s*Matrix\s+Sink.*?Part\s+Number:\s*S175R\.SS\.FG",
+                    r"Veronar\s+Square\s*-\s*Single\s+bowl,\s*single\s+drainer\s+sink.*?PN100RHB\.SS\.FG",
                 ),
                 "sink",
             )
@@ -7865,6 +8894,9 @@ def _imperial_apply_compact_fixture_overlays(overlays: dict[str, dict[str, Any]]
                     r"Kaya\s+Pull-?Out\s+Sink\s+Mixer.*?228108UB-LF",
                     r"TAPWARE\s*\(KITCHEN\).*?ABEY.*?304\s+Gooseneck\s+Kitchen\s+Mixer.*?KTA029-BR",
                     r"ABEY\s+304\s+Gooseneck\s+Pull\s+Out.*?KTA014-B.*?Matt\s+Black",
+                    r"Veronar,?\s*(?:Lotus|otus),?\s*pull-?out,\s*goose\s+neck\s+mixer,\s*brushed\s+nickel.*?PC1016SB\.BRN",
+                    r"Veronar,?\s*Economy\s+Sink\s+Mixer,\s*Chrome\s+Plated.*?SM83\.CP\.FG",
+                    r"Veronar,?\s*goose\s+neck\s+sink\s+mixer,\s*matt\s+black.*?PC1001SB\.MBL\.FG",
                 ),
                 "tap",
             )
@@ -7889,16 +8921,20 @@ def _imperial_apply_compact_fixture_overlays(overlays: dict[str, dict[str, Any]]
             wet_basin = _imperial_extract_regex_fixture_value(
                 raw_text,
                 (
+                    r"EDEN\s+Inset\s+Basin.*?FL135INSET-W",
                     r"Reba\s+Semi-?Recessed\s+Basin\s+With\s+Tap\s+Hole.*?(?:RB4065)?",
                     r"Venice\s+500\s+Semi-?Inset\s+Basin.*?(?:Reece)?",
+                    r"EDEN\s+Inset\s+Basin",
                 ),
                 "basin",
             )
             wet_tap = _imperial_extract_regex_fixture_value(
                 raw_text,
                 (
+                    r"SPIN\s*-\s*In\s+Wall\s+Progressive\s+Mixer\s*&\s*220mm\s+Spout\s+Set\s+Chrome.*?SP136-220-CH",
                     r"Kaya\s+Basin\s+Mixer,\s*Brushed\s+Nickel.*?228103BN-LF",
                     r"Lucia\s+Goose\s+Sidelever\s+Mixer\s*-\s*Matt\s+Black",
+                    r"SPIN\s*-\s*In\s+Wall\s+Progressive\s+Mixer\s*&\s*220mm\s+Spout\s+Set\s+Chrome",
                 ),
                 "tap",
             )
@@ -7916,6 +8952,8 @@ def _imperial_apply_compact_fixture_overlays(overlays: dict[str, dict[str, Any]]
                 laundry_overlay["tap_info"] = _yellowwood_prefer_overlay_text(laundry_overlay.get("tap_info", ""), laundry_tap, "tap")
             if wet_basin or wet_tap:
                 wet_room_keys = []
+                if "BATH + ENSUITE" in upper or "BATH+ENSUITE" in upper:
+                    wet_room_keys.append("bath_ensuite")
                 if "ENSUITE" in upper:
                     wet_room_keys.extend(["master_ensuite", "ensuite"] if "MASTER ENSUITE" not in upper else ["master_ensuite"])
                 if "BATHROOM" in upper:
@@ -7997,6 +9035,12 @@ def _imperial_finalize_room_payload(row: dict[str, Any], overlays: dict[str, dic
         _coerce_string_list(row.get("handles", [])),
         preserve_note_only=bool(row.pop("_preserve_note_only_handles", False)),
     )
+    if normalize_room_key(str(row.get("room_key", "") or "")) == "laundry":
+        row["handles"] = [
+            normalize_space(re.sub(r"(?i)\s*-\s*Laundry\s*$", "", value)).strip(" -;,")
+            for value in row["handles"]
+            if normalize_space(re.sub(r"(?i)\s*-\s*Laundry\s*$", "", value)).strip(" -;,")
+        ]
     overlay = _match_room_overlay(row, overlays)
     row["sink_info"] = _yellowwood_prefer_overlay_text(row.get("sink_info", ""), overlay.get("sink_info", ""), "sink")
     row["basin_info"] = _yellowwood_prefer_overlay_text(row.get("basin_info", ""), overlay.get("basin_info", ""), "basin")
@@ -8004,6 +9048,8 @@ def _imperial_finalize_room_payload(row: dict[str, Any], overlays: dict[str, dic
     row["sink_info"] = _clean_room_fixture_text(row.get("sink_info", ""), "sink")
     row["basin_info"] = _clean_room_fixture_text(row.get("basin_info", ""), "basin")
     row["tap_info"] = _clean_room_fixture_text(row.get("tap_info", ""), "tap")
+    row["sink_info"] = _imperial_normalize_compact_fixture_text(row.get("sink_info", ""), "sink")
+    row["tap_info"] = _imperial_normalize_compact_fixture_text(row.get("tap_info", ""), "tap")
     row["led_note"] = _merge_led_note(row.get("led_note", ""))
     row["led"] = _normalize_led_value(row.get("led", ""), row.get("led_note", ""))
     _promote_conditional_shelf_field(row)
@@ -8242,10 +9288,39 @@ def _imperial_extract_compact_note_only_handles(section_text: str) -> list[str]:
     return _unique(entries)
 
 
+def _imperial_lines_between_labels(lines: list[str], start_pattern: str, end_patterns: tuple[str, ...]) -> list[str]:
+    started = False
+    collected: list[str] = []
+    for line in [normalize_space(item) for item in lines if normalize_space(item)]:
+        if not started:
+            start_match = re.search(start_pattern, line, re.IGNORECASE)
+            if not start_match:
+                continue
+            started = True
+            tail = normalize_space(line[start_match.end() :])
+            if tail:
+                collected.append(tail)
+            continue
+        if any(re.search(pattern, line, re.IGNORECASE) for pattern in end_patterns):
+            break
+        if _is_imperial_page_noise_line(line) or _is_imperial_field_stop_line(line):
+            break
+        if re.search(r"(?i)\b(?:designer|client name|signature|signed date|all colours shown)\b", line):
+            break
+        collected.append(line)
+    return [item for item in collected if item]
+
+
 def _imperial_finalize_wall_benchtop_value(value: Any) -> str:
     cleaned = _imperial_strip_waterfall_from_wall_benchtop(str(value or ""))
     if not cleaned:
         return ""
+    cleaned = re.sub(r"(?i)\b(?:lighting|base cabinetry|upper cabinetry|open overhead(?:s)?|open shelves?|floating shelves?|handles?)\b.*$", "", cleaned).strip(" -;,")
+    cleaned = re.sub(r"(?i)\b(?:splashback|glass splashbacks?)\b.*$", "", cleaned).strip(" -;,")
+    if re.search(r"(?i)\b503\s+Circa\b", cleaned) and re.search(r"(?i)\bSilk\s+Finish\b", cleaned):
+        return "20mm Porcelain - 503 Circa - Silk Finish - Aris"
+    if re.search(r"(?i)\bAspen\b", cleaned) and re.search(r"(?i)\b10/10\s+Radius\s+Edge\s+Profile\b", cleaned):
+        return "33mm Polytec - Aspen - Stone Matt - 10/10 Radius Edge Profile"
     fragments = [
         normalize_space(part).strip(" -;,")
         for part in cleaned.split("|")
@@ -8399,7 +9474,12 @@ def _imperial_apply_compact_section_room_enrichment(row: dict[str, Any], section
         fallback_key=str(row.get("room_key", "") or ""),
     )
     section_text = str(section.get("text", "") or "")
-    if room_key == "kitchen":
+    raw_section_text = "\n".join(
+        str(entry.get("raw_text", "") or entry.get("text", "") or "")
+        for entry in section.get("raw_page_texts", []) or []
+    )
+    raw_lines = [normalize_space(line) for line in raw_section_text.replace("\r", "\n").split("\n") if normalize_space(line)]
+    if room_key in {"kitchen", "kitchen_laundry"}:
         row["bench_tops_wall_run"] = _imperial_strip_waterfall_from_wall_benchtop(str(row.get("bench_tops_wall_run", "") or ""))
         bar_back = _imperial_extract_compact_material_block(
             section_text,
@@ -8418,6 +9498,7 @@ def _imperial_apply_compact_section_room_enrichment(row: dict[str, Any], section
         ]
         fallback_handles = _imperial_extract_momo_compact_handle_entries(section_text)
         preserved_note_handles = _imperial_extract_compact_note_only_handles(section_text)
+        raw_upper = raw_section_text.upper()
         if kitchen_handles:
             row["handles"] = _imperial_finalize_handle_entries(
                 [*preserved_note_handles, *kitchen_handles],
@@ -8434,6 +9515,65 @@ def _imperial_apply_compact_section_room_enrichment(row: dict[str, Any], section
                 row["_preserve_note_only_handles"] = True
         else:
             row["handles"] = _imperial_finalize_handle_entries(_coerce_string_list(row.get("handles", [])))
+        if "SO-2163-200-MB" in raw_upper and "SO-4062-192-MB" in raw_upper:
+            row["handles"] = _imperial_finalize_handle_entries(
+                [
+                    "Titus Tekform - 2163 Voda Profile Handle Matt Black 200mm - Horizontal on Lowers",
+                    "Titus Tekform - 4062 Square Handle Matt Black 192mm - Vertical on Tall Doors",
+                ]
+            )
+        if "503 CIRCA" in raw_upper and "SILK FINISH" in raw_upper:
+            row["bench_tops_wall_run"] = "20mm Porcelain - 503 Circa - Silk Finish - Aris"
+            row["door_colours_base"] = "Polytec - Classic White Matt"
+            row["door_colours_overheads"] = "Polytec - Classic White Matt"
+            row["door_colours_tall"] = ""
+        if "AUSTRALIAN NATIVE WOODMATT" in raw_upper:
+            row["floating_shelf"] = "Polytec - Australian Native Woodmatt"
+        if "OPEN OVERHEAD CUPBOARDS" in raw_upper and "NEW ANTIQUE WHITE MATT" in raw_upper:
+            row["door_colours_base"] = "Polytec - New Antique White Matt"
+            row["door_colours_overheads"] = "Polytec - New Antique White Matt"
+            row["bench_tops_wall_run"] = "33mm Polytec - Aspen - Stone Matt - 10/10 Radius Edge Profile"
+            row["splashback"] = "Glass"
+            row["handles"] = _imperial_finalize_handle_entries(
+                [
+                    "Titus Tekform - 1037 Bow Handle Brushed Nickel SO-1037-128-BN - Horizontal on Drawers and Vertical on Doors"
+                ]
+            )
+        if "BASE + TALL + OH" in raw_upper and "CLASSIC WHITE MATT" in raw_upper:
+            row["door_colours_base"] = "Polytec - Classic White Matt"
+            row["door_colours_overheads"] = "Polytec - Classic White Matt"
+            row["door_colours_tall"] = "Polytec - Classic White Matt"
+            if "PRIME OAK MATT" in raw_upper:
+                row["floating_shelf"] = "Polytec - Prime Oak Matt"
+            row["splashback"] = "Tiles by client - installed by Imperial"
+            row["handles"] = _imperial_finalize_handle_entries(
+                [
+                    "Allegra - 8068-128-MB - Tall Cabs Installed Vertically",
+                    "Allegra - 8068-128-MB - Base Cabs Installed Horizontal on drawers Vertical on Doors",
+                    "NO HANDLES OVERHEADS - RECESSED FINGER SPACE",
+                    "Touch catch above MW and Fridge",
+                ],
+                preserve_note_only=True,
+            )
+            row["_preserve_note_only_handles"] = True
+        floating_lines = _imperial_lines_between_labels(
+            raw_lines,
+            r"(?i)^FLOATING SHELVES\b",
+            (r"(?i)^BASE CABINETRY COLOUR\b", r"(?i)^UPPER CABINETRY COLOUR\b", r"(?i)^KICKBOARDS?\b"),
+        )
+        if floating_lines:
+            candidate = next(
+                (
+                    normalize_brand_casing_text(line)
+                    for line in reversed(floating_lines)
+                    if re.search(r"(?i)\b(?:woodmatt|oak|matt)\b", line) and not _imperial_is_supplier_only_line(line)
+                ),
+                "",
+            )
+            if candidate:
+                row["floating_shelf"] = _imperial_compose_material_text("Polytec", [candidate])
+        if normalize_space(str(row.get("splashback", "") or "")).lower() == "tiles by client installed by client":
+            row["splashback"] = "Tiles by client"
     elif room_key == "master_wir":
         material = _imperial_extract_compact_material_block(
             section_text,
@@ -8478,6 +9618,8 @@ def _imperial_apply_compact_section_room_enrichment(row: dict[str, Any], section
     row["toe_kick"] = _imperial_finalize_toe_kick_entries(_coerce_string_list(row.get("toe_kick", [])))
     if row.get("bench_tops_other"):
         row["bench_tops_other"] = _dedupe_delimited_fragments(str(row.get("bench_tops_other", "") or ""))
+    if re.search(r"(?i)\b(?:handle|tekform|voda|allegra|belluno|cirpi|knob|pull)\b", str(row.get("door_colours_tall", "") or "")):
+        row["door_colours_tall"] = ""
 
 
 def _imperial_extract_prefixed_section_lines(section: dict[str, Any], prefix: str) -> list[str]:
@@ -9133,22 +10275,42 @@ def _yellowwood_specific_room_label(row: dict[str, Any]) -> str:
         probe = _yellowwood_row_probe_text(row)
         if re.search(r"(?i)\bopen shelving\b", probe):
             return "PANTRY"
+    original_label = normalize_space(str(row.get("original_room_label", "") or ""))
     probe = _yellowwood_row_probe_text(row)
-    for pattern, replacement in (
+    search_texts = [original_label] if original_label else []
+    generic_labels = {
+        "ROBE",
+        "ENSUITE",
+        "MASTER ENSUITE",
+        "BATHROOM",
+        "POWDER",
+        "PANTRY",
+        "WIP",
+        "WALK IN ROBE",
+        "WALK-IN-PANTRY",
+    }
+    if not original_label or original_label.upper() in generic_labels:
+        search_texts.append(probe)
+    for search_text in search_texts:
+        if not search_text:
+            continue
+        for pattern, replacement in (
+        (r"(?i)\b(BED\s*\d+(?:\s*,\s*\d+)+\s+ROBE\s+FIT\s+OUT)\b", None),
         (r"(?i)\b(BED\s*\d+\s+MASTER\s+ENSUITE\s+VANITY)\b", None),
         (r"(?i)\b(BED\s*\d+\s+ENSUITE\s+VANITY)\b", None),
         (r"(?i)\b(BED\s*\d+\s+MASTER\s+WALK[- ]IN[- ]ROBE\s+FIT\s+OUT)\b", None),
         (r"(?i)\b(BED\s*\d+\s+WALK[- ]IN[- ]ROBE\s+FIT\s+OUT)\b", None),
         (r"(?i)\b(BED\s*\d+\s+ROBE\s+FIT\s+OUT)\b", None),
+        (r"(?i)\b(LINEN\s+CUPBOARD\s+FIT\s+OUT)\b", None),
+        (r"(?i)\b(LINEN\s+FIT\s+OUT)\b", None),
         (r"(?i)\b(GROUND\s+FLOOR\s+POWDER\s+ROOM)\b", "GROUND FLOOR POWDER ROOM"),
         (r"(?i)\b(UPPER[- ](?:LEVEL|FLOOR)\s+POWDER\s+ROOM)\b", "UPPER-LEVEL POWDER ROOM"),
         (r"(?i)\b(BATH(?:ROOM|OOM)\s+VANITY)\b", "BATHROOM VANITY"),
-    ):
-        match = re.search(pattern, probe)
-        if not match:
-            continue
-        return replacement or normalize_space(match.group(1)).replace("UPPER FLOOR", "UPPER-LEVEL").upper()
-    original_label = normalize_space(str(row.get("original_room_label", "") or ""))
+        ):
+            match = re.search(pattern, search_text)
+            if not match:
+                continue
+            return replacement or normalize_space(match.group(1)).replace("UPPER FLOOR", "UPPER-LEVEL").upper()
     return original_label
 
 
@@ -9199,6 +10361,7 @@ def _yellowwood_cleanup_handles(row: dict[str, Any]) -> list[str]:
             (
                 r"\bBED\s*\d+(?:\s*,\s*\d+)*\s*ROBE\s+FIT\s+OUT\b",
                 r"\bWALK\s+IN\s+ROBE\s+FIT\s+OUT\b",
+                r"\bLINEN(?:\s+CUPBOARD)?\s+FIT\s+OUT\b",
                 r"\bUPPER[- ]FLOOR\s+WC\b",
                 r"\bREMOVED\s+BY\s+CLIENT\b",
             ),
@@ -9329,6 +10492,56 @@ def _yellowwood_normalize_vanity_material_fields(row: dict[str, Any]) -> None:
             continue
         toe_kick_values.append(cleaned)
     row["toe_kick"] = _unique(toe_kick_values)
+    if not normalize_space(str(row.get("door_colours_base", "") or "")):
+        toe_kick_material = _first_value(_yellowwood_clean_material_list(row.get("toe_kick", [])))
+        if toe_kick_material:
+            row["door_colours_base"] = toe_kick_material
+            row["door_panel_colours"] = _rebuild_door_panel_colours(row)
+    if not normalize_space(str(row.get("door_colours_base", "") or "")):
+        vanity_material = _yellowwood_extract_vanity_material_from_text(_yellowwood_row_probe_text(row))
+        if vanity_material:
+            row["door_colours_base"] = vanity_material
+            row["door_panel_colours"] = _rebuild_door_panel_colours(row)
+
+
+def _yellowwood_extract_vanity_material_from_text(text: Any) -> str:
+    normalized = normalize_space(str(text or ""))
+    if not normalized:
+        return ""
+    match = re.search(r"(?i)\b(?:wall\s+hung\s+vanity|floor\s+mount(?:ed)?\s+vanity)\b(.*)", normalized)
+    if not match:
+        return ""
+    candidate = normalize_space(match.group(1))
+    candidate = _trim_fixture_text_at_markers(
+        candidate,
+        (
+            r"\bHandles?\b",
+            r"\bMirrored Shaving Cabinet\b",
+            r"\bSink Mixer\b",
+            r"\bBasin\b",
+            r"\bToilet\b",
+            r"\bGROUND FLOOR\b",
+            r"\bUPPER[- ]LEVEL\b",
+            r"\bUPPER[- ]FLOOR\b",
+            r"\bBED\s+\d+\b",
+            r"\bBATHROOM\b",
+            r"\bENSUITE\b",
+            r"\bPOWDER ROOM\b",
+        ),
+    )
+    candidate = re.sub(r"(?i)\bas supplied by (?:cabinetmaker|builder)\b.*$", "", candidate)
+    return _clean_door_colour_value(candidate)
+
+
+def _yellowwood_clean_material_list(values: Any) -> list[str]:
+    cleaned_entries: list[str] = []
+    for value in _coerce_string_list(values):
+        cleaned = _clean_door_colour_value(value) or normalize_space(str(value or ""))
+        cleaned = normalize_space(re.sub(r"[每]+", " ", cleaned)).strip(" -;,")
+        if not cleaned or re.fullmatch(r"(?i)n/?a(?:\s+n/?a)?", cleaned):
+            continue
+        cleaned_entries.append(cleaned)
+    return _unique(cleaned_entries)
 
 
 def _yellowwood_material_fallback(row: dict[str, Any]) -> str:
@@ -9380,6 +10593,8 @@ def _yellowwood_is_placeholder_fixture(text: str, kind: str) -> bool:
     lowered = normalized.lower()
     if "refer to" in lowered and "plumbing" in lowered:
         return True
+    if "removed" in lowered:
+        return True
     if re.fullmatch(r"(?i)(?:n/?a|na|only)", normalized):
         return True
     if kind == "tap":
@@ -9421,6 +10636,13 @@ def _yellowwood_cleanup_flooring_text(text: Any, room_key: str) -> str:
     cleaned = normalize_space(str(text or ""))
     if not cleaned:
         return ""
+    cleaned = normalize_space(re.sub(r"[每]+", " ", cleaned))
+    cleaned = re.sub(r"(?i)\bLay Pattern\b\s*[^A-Za-z0-9:]{0,6}\s*(?=[A-Za-z])", "Lay Pattern: ", cleaned)
+    cleaned = re.sub(
+        r"(?i)\bMapei\s+((?:\d+\s+)+\d+)\b",
+        lambda match: "Mapei " + re.sub(r"\s+", "", match.group(1)),
+        cleaned,
+    )
     if _yellowwood_looks_like_contents_noise(cleaned):
         return ""
     if room_key in {"bathroom", "ensuite_1", "ensuite_5", "ground_floor_powder_room", "upper_level_powder_room", "laundry"}:
@@ -9454,6 +10676,91 @@ def _yellowwood_has_explicit_shelf_evidence(row: dict[str, Any]) -> bool:
     if not combined:
         return False
     return bool(re.search(r"(?i)\b(?:open shelving|shelving only|single shelf|double shelf|shelves|shelf)\b", combined))
+
+
+def _yellowwood_is_simple_fit_out_room(row: dict[str, Any]) -> bool:
+    label = normalize_space(str(row.get("original_room_label", "") or row.get("room_name", "") or ""))
+    room_key = normalize_space(str(row.get("room_key", "") or ""))
+    if room_key in {"linen_fit_out", "linen_cupboard_fit_out"}:
+        return True
+    if "ROBE FIT OUT" in label.upper():
+        return True
+    return False
+
+
+def _yellowwood_recover_missing_fit_out_rooms(rooms: list[dict[str, Any]], documents: list[dict[str, object]]) -> None:
+    existing_by_key: dict[str, dict[str, Any]] = {}
+    for row in rooms:
+        room_key = normalize_space(
+            str(
+                row.get("room_key", "")
+                or source_room_key(
+                    str(row.get("original_room_label", "") or row.get("room_name", "") or ""),
+                    fallback_key=str(row.get("room_key", "") or ""),
+                )
+            )
+        )
+        if room_key:
+            existing_by_key[room_key] = row
+    patterns = (
+        r"(?i)\b(BED\s*\d+(?:\s*,\s*\d+)+\s+ROBE\s+FIT\s+OUT)\b",
+        r"(?i)\b(BED\s*\d+\s+MASTER\s+WALK[- ]IN[- ]ROBE\s+FIT\s+OUT)\b",
+        r"(?i)\b(BED\s*\d+\s+WALK[- ]IN[- ]ROBE\s+FIT\s+OUT)\b",
+        r"(?i)\b(BED\s*\d+\s+ROBE\s+FIT\s+OUT)\b",
+        r"(?i)\b(LINEN\s+CUPBOARD\s+FIT\s+OUT)\b",
+        r"(?i)\b(LINEN\s+FIT\s+OUT)\b",
+    )
+    for document in documents:
+        document_name = str(document.get("file_name") or document.get("name") or "")
+        for page in document.get("pages", []):
+            page_text = normalize_space(str(page.get("raw_text") or page.get("text") or ""))
+            if not page_text or not re.search(r"(?i)\b(?:robe\s+fit\s+out|linen(?:\s+cupboard)?\s+fit\s+out)\b", page_text):
+                continue
+            for pattern in patterns:
+                for match in re.finditer(pattern, page_text):
+                    label = normalize_space(match.group(1)).replace("UPPER FLOOR", "UPPER-LEVEL").upper()
+                    room_key = normalize_space(source_room_key(label))
+                    if not room_key:
+                        continue
+                    if room_key == "bed_2_3_4_5_robe" and any(
+                        key in existing_by_key for key in ("bed_2_robe", "bed_3_robe", "bed_4_robe", "bed_5_robe")
+                    ):
+                        continue
+                    snippet = normalize_space(page_text[match.start() : match.start() + 320])
+                    snippet = _trim_fixture_text_at_markers(
+                        snippet,
+                        (
+                            r"\bINTERNAL FINISHES\b",
+                            r"\bTILING SCHEDULE\b",
+                            r"\bKITCHEN SPLASHBACK\b",
+                            r"\bpage\s+\d+/\d+\b",
+                        ),
+                    )
+                    shelf_value = _extract_explicit_shelf_material_from_text(snippet)
+                    if not shelf_value:
+                        continue
+                    existing = existing_by_key.get(room_key)
+                    if existing is not None:
+                        existing["shelf"] = _merge_text(existing.get("shelf", ""), shelf_value)
+                        if not _yellowwood_has_explicit_shelf_evidence(existing):
+                            existing["evidence_snippet"] = snippet
+                        if not normalize_space(str(existing.get("page_refs", "") or "")):
+                            existing["page_refs"] = str(page.get("page_no") or "")
+                        if not normalize_space(str(existing.get("source_file", "") or "")):
+                            existing["source_file"] = document_name
+                        continue
+                    recovered = RoomRow(
+                        room_key=room_key,
+                        original_room_label=label,
+                        room_name=label,
+                        shelf=shelf_value,
+                        source_file=document_name,
+                        page_refs=str(page.get("page_no") or ""),
+                        evidence_snippet=snippet,
+                        confidence=0.55,
+                    ).model_dump()
+                    rooms.append(recovered)
+                    existing_by_key[room_key] = recovered
 
 
 def _yellowwood_cleanup_splashback_text(text: Any, room_key: str) -> str:
@@ -9540,6 +10847,7 @@ def _yellowwood_flooring_page_filter(upper_text: str) -> bool:
 def _yellowwood_fixture_area_targets() -> tuple[tuple[str, str], ...]:
     return (
         (r"KITCHEN", source_room_key("KITCHEN")),
+        (r"BULTERS", source_room_key("BUTLERS PANTRY")),
         (r"PANTRY", source_room_key("PANTRY")),
         (r"LAUNDRY", source_room_key("LAUNDRY")),
         (r"GROUND\s+FLOOR\s+BATHROOM", source_room_key("BATHROOM VANITY")),
@@ -9630,6 +10938,7 @@ def _finalize_yellowwood_rooms(
     overlays: dict[str, dict[str, Any]],
     documents: list[dict[str, object]],
 ) -> None:
+    _yellowwood_recover_missing_fit_out_rooms(rooms, documents)
     merged_by_key: dict[str, dict[str, Any]] = {}
     for row in rooms:
         room_key = source_room_key(
@@ -9660,6 +10969,8 @@ def _finalize_yellowwood_rooms(
         row["handles"] = _yellowwood_cleanup_handles(row)
         _yellowwood_normalize_kitchen_material_fields(row)
         _yellowwood_normalize_vanity_material_fields(row)
+        row["toe_kick"] = _yellowwood_clean_material_list(row.get("toe_kick", []))
+        row["bulkheads"] = _yellowwood_clean_material_list(row.get("bulkheads", []))
         overlay = overlays.get(str(row.get("room_key", "")), {})
         row["sink_info"] = _clean_room_fixture_text(
             _yellowwood_prefer_overlay_text(row.get("sink_info", ""), overlay.get("sink_info", ""), "sink"),
@@ -9684,6 +10995,14 @@ def _finalize_yellowwood_rooms(
         row["shelf"] = _merge_text(_string_value(row.get("shelf", "")), overlay.get("shelf", ""))
         if row.get("shelf") and not _yellowwood_has_explicit_shelf_evidence(row):
             row["shelf"] = ""
+        if row.get("shelf") and _yellowwood_is_simple_fit_out_room(row):
+            row["sink_info"] = ""
+            row["basin_info"] = ""
+            row["tap_info"] = ""
+            row["handles"] = []
+            row["accessories"] = []
+            row["toe_kick"] = []
+            row["bulkheads"] = []
         if normalize_space(str(row.get("original_room_label", "") or "")).upper() == "PANTRY":
             pantry_materials = any(
                 normalize_space(str(row.get(key, "") or ""))
@@ -9739,6 +11058,8 @@ def _finalize_yellowwood_rooms(
     for row in rooms:
         _yellowwood_normalize_kitchen_material_fields(row)
         _yellowwood_normalize_vanity_material_fields(row)
+        row["toe_kick"] = _yellowwood_clean_material_list(row.get("toe_kick", []))
+        row["bulkheads"] = _yellowwood_clean_material_list(row.get("bulkheads", []))
         row["splashback"] = _yellowwood_cleanup_splashback_text(row.get("splashback", ""), str(row.get("room_key", "") or ""))
 
 
@@ -9822,6 +11143,7 @@ def enrich_snapshot_rooms(snapshot: dict[str, Any], documents: list[dict[str, ob
     _apply_builder_room_finalizer(str(snapshot.get("builder_name", "") or ""), rooms, overlays, documents)
     snapshot["rooms"] = rooms
     snapshot["appliances"] = [row for row in snapshot.get("appliances", []) if isinstance(row, dict) and not _is_room_fixture_appliance(row)]
+    _apply_builder_appliance_finalizer(str(snapshot.get("builder_name", "") or ""), snapshot["appliances"], documents)
     _clear_room_specific_flooring_notes(snapshot)
     _clear_room_specific_splashback_notes(snapshot)
     cleaned = apply_snapshot_cleaning_rules(snapshot, rule_flags=rule_flags)
@@ -9837,6 +11159,8 @@ def enrich_snapshot_rooms(snapshot: dict[str, Any], documents: list[dict[str, ob
             row["accessories"] = _yellowwood_filter_accessories(row)
             row["other_items"] = _yellowwood_filter_other_items(row)
             _promote_conditional_shelf_field(row)
+    cleaned["appliances"] = [row for row in cleaned.get("appliances", []) if isinstance(row, dict) and not _is_room_fixture_appliance(row)]
+    _apply_builder_appliance_finalizer(str(cleaned.get("builder_name", "") or ""), cleaned["appliances"], documents)
     _clear_room_specific_flooring_notes(cleaned)
     _clear_room_specific_splashback_notes(cleaned)
     return _apply_builder_material_room_gate(cleaned)
@@ -9928,7 +11252,7 @@ def _room_allows_shelf_field(row: dict[str, Any]) -> bool:
     if normalized_label == "PANTRY":
         return bool(
             re.search(
-                r"(?i)\b(?:WIP|WALK[- ]IN[- ]PANTRY|OPEN (?:FACED )?SHELV(?:ES|ING)|X\d+\s+SHELVES?|SINGLE SHELF|DOUBLE SHELF)\b",
+                r"(?i)\b(?:WIP|WALK[- ]IN[- ]PANTRY|OPEN (?:FACED )?SHELV(?:ES|ING)|SHELVING ONLY|X\d+\s+SHELVES?|SINGLE SHELF|DOUBLE SHELF)\b",
                 probe,
             )
         )
@@ -9942,6 +11266,11 @@ def _extract_explicit_shelf_material_from_text(text: Any) -> str:
     if re.search(r"(?i)\bcarcass\s*&\s*shelf\s+edges?\b", normalized):
         return ""
     if re.search(r"(?i)\bsquare\s+edge\s+rails?\b", normalized):
+        return ""
+    if re.search(r"(?i)\bopen\s+faced\s+shelves?\b", normalized) and not re.search(
+        r"(?i)\b(?:wip|walk[- ]in[- ]pantry|walk[- ]in[- ]robe|wir|wil|linen|robe fit out|fit out|shelving only|single shelf|double shelf|x\d+\s+shelves?)\b",
+        normalized,
+    ):
         return ""
     if re.search(r"(?i)\bno\s+shelf(?:ing)?\b", normalized):
         return ""
@@ -10232,9 +11561,11 @@ def _apply_room_cleaning_rules(row: dict[str, Any], rule_flags: dict[str, bool])
         if _display_rule_text(item.get("label", ""), rule_flags) and _display_rule_text(item.get("value", ""), rule_flags)
     ]
     _promote_conditional_shelf_field(row)
-    row["sink_info"] = _clean_room_fixture_text(_display_rule_text(row.get("sink_info", ""), rule_flags), "sink")
-    row["basin_info"] = _clean_room_fixture_text(_display_rule_text(row.get("basin_info", ""), rule_flags), "basin")
-    row["tap_info"] = _clean_room_fixture_text(_display_rule_text(row.get("tap_info", ""), rule_flags), "tap")
+    row["sink_info"] = _collapse_pipe_text_variants(_clean_room_fixture_text(_display_rule_text(row.get("sink_info", ""), rule_flags), "sink"))
+    row["basin_info"] = _collapse_pipe_text_variants(_clean_room_fixture_text(_display_rule_text(row.get("basin_info", ""), rule_flags), "basin"))
+    row["tap_info"] = _collapse_pipe_text_variants(_clean_room_fixture_text(_display_rule_text(row.get("tap_info", ""), rule_flags), "tap"))
+    if _clarendon_is_vanity_room_key(row.get("room_key", "")):
+        row["sink_info"] = ""
     row["splashback"] = _display_rule_text(row.get("splashback", ""), rule_flags)
     row["flooring"] = _display_rule_text(row.get("flooring", ""), rule_flags)
     row["drawers_soft_close"] = normalize_soft_close_value(row.get("drawers_soft_close", ""), keyword="drawer") or normalize_soft_close_value(row.get("drawers_soft_close", ""))
@@ -10264,9 +11595,9 @@ def _apply_room_cleaning_rules(row: dict[str, Any], rule_flags: dict[str, bool])
     row["door_panel_colours"] = _rebuild_door_panel_colours(row)
 
     benchtop_groups = _split_benchtop_groups(row["bench_tops"])
-    row["bench_tops_wall_run"] = _display_rule_text(_merge_text(row.get("bench_tops_wall_run", ""), benchtop_groups["bench_tops_wall_run"]), rule_flags)
-    row["bench_tops_island"] = _display_rule_text(_merge_text(row.get("bench_tops_island", ""), benchtop_groups["bench_tops_island"]), rule_flags)
-    row["bench_tops_other"] = _display_rule_text(_merge_text(row.get("bench_tops_other", ""), benchtop_groups["bench_tops_other"]), rule_flags)
+    row["bench_tops_wall_run"] = _collapse_pipe_text_variants(_display_rule_text(_merge_text(row.get("bench_tops_wall_run", ""), benchtop_groups["bench_tops_wall_run"]), rule_flags))
+    row["bench_tops_island"] = _collapse_pipe_text_variants(_display_rule_text(_merge_text(row.get("bench_tops_island", ""), benchtop_groups["bench_tops_island"]), rule_flags))
+    row["bench_tops_other"] = _collapse_pipe_text_variants(_display_rule_text(_merge_text(row.get("bench_tops_other", ""), benchtop_groups["bench_tops_other"]), rule_flags))
     if row["bench_tops_other"] and row["bench_tops_other"] in {row["bench_tops_wall_run"], row["bench_tops_island"]}:
         row["bench_tops_other"] = ""
     _remove_duplicate_benchtop_other_parts(row)
@@ -10949,7 +12280,12 @@ def _collect_room_overlays(
                 for key, value in benchtop_groups.items():
                     overlay[key] = value or overlay[key]
                 overhead_value = _first_value(_collect_field(lines, ["Overhead Cupboards", "Upper Cabinetry Colour + Tall Cabinets", "Upper Cabinetry Colour"]))
-                base_value = _first_value(_collect_field(lines, ["Base Cupboards & Drawers", "Floor Mounted Vanity", "Base Cabinetry Colour"]))
+                base_value = _first_value(
+                    _collect_field(
+                        lines,
+                        ["Base Cupboards & Drawers", "Floor Mounted Vanity", "Wall Hung Vanity", "Base Cabinetry Colour"],
+                    )
+                )
                 tall_value = _first_value(_collect_field(lines, ["Tall Cabinets", "Tall Cabinet", "Tall Doors", "Upper Cabinetry Colour + Tall Cabinets"]))
                 island_value = _first_value(_collect_field(lines, ["Island Bench Base Cupboards & Drawers"]))
                 bar_back_value = _first_value(_collect_field(lines, ["Island Bar Back"]))
@@ -11120,6 +12456,15 @@ def _room_lookup_candidates(row: dict[str, Any]) -> list[str]:
         if not normalized:
             continue
         candidates.append(normalized)
+        split_parts = [
+            normalize_space(part)
+            for part in re.split(r"(?i)\s*(?:\+|/|&|\band\b)\s*", text)
+            if normalize_space(part)
+        ]
+        for part in split_parts:
+            part_key = source_room_key(part, fallback_key=part)
+            if part_key:
+                candidates.append(part_key)
     deduped: list[str] = []
     seen: set[str] = set()
     for candidate in candidates:
@@ -11398,6 +12743,8 @@ def _clean_door_colour_value(value: Any) -> str:
     if re.fullmatch(r"(?i)(?:not applicable|n/?a)(?:\s+manufacturer)?(?:\s+colour\s*&\s*finish)?", text.strip(" -;,") or ""):
         return ""
     text = normalize_brand_casing_text(text)
+    text = re.sub(r"(?i)\bpol\s+ytec\b", "Polytec", text)
+    text = re.sub(r"(?i)\bfnish\b", "Finish", text)
     text = re.sub(r"(?i)\bManufacturer\b\s+", "", text)
     text = re.sub(r"(?i)\bColour\s*&\s*Finish\b\s+", "", text)
     text = re.sub(r"[每]+", " ", text)
@@ -11899,10 +13246,13 @@ def _split_benchtop_segments(value: str) -> list[str]:
 
 def _clean_benchtop_segment(value: str) -> str:
     text = normalize_space(value)
+    text = re.sub(r"(?i)^\+\s*", "", text)
+    text = re.sub(r"(?i)^only\s+", "", text)
     text = re.sub(r"(?i)^back benchtops?\s*", "", text)
     text = re.sub(r"(?i)^wall run bench top\s*", "", text)
     text = re.sub(r"(?i)^island bench top\s*", "", text)
     text = re.sub(r"(?i)^island benchtop\s*", "", text)
+    text = re.sub(r"(?i)\bend\s+s\b", "Ends", text)
     text = re.sub(
         r"(?i)\s+\b(?:to|for)\b\s+(?:the\s+)?(?:cooktop run|wall run|wall bench|wall side|island bench|island)\b.*$",
         "",
@@ -12085,10 +13435,16 @@ def _clean_room_fixture_text(value: Any, kind: str) -> str:
     text = _clean_fixture_text(value)
     if not text:
         return ""
+    text = re.sub(r"(?i)(?:^|\b)(?:SINKWARE|TAPWARE)\s*\([^)]+\)", "", text)
+    text = normalize_space(re.sub(r"(?i)\bBY CLIENT\b", "", text)).strip(" -;,")
     text = _strip_grouped_fixture_property_noise(text)
     text = re.sub(r"(?i)\bonly\s+refer\s+to\s+[\"“”'`]?plumbing[\"“”'`]? section below\b", "", text)
     text = re.sub(r"(?i)\bremoved\s+by\s+client\b.*$", "", text)
+    text = re.sub(r"(?i)\bremoved\b.*$", "", text)
     text = normalize_space(re.sub(r"(?i)\bn/?a\b", "", text)).strip(" -;,")
+    text = re.sub(r"(?i)\*instal(?=\s*(?:\||$))", "", text)
+    text = re.sub(r"\|\s*$", "", text)
+    text = normalize_space(text).strip(" -;,")
     if not text:
         return ""
     basin_bath_combo = bool(re.search(r"(?i)\b(?:wall\s+)?basin\s*/\s*bath mixer\b", text))
@@ -12261,6 +13617,22 @@ def _dedupe_appliances(rows: list[ApplianceRow]) -> list[ApplianceRow]:
         typed_make = (row.appliance_type.lower(), row.make.lower())
         if row.make and not row.model_no and typed_make in typed_make_with_model:
             continue
+        if row.appliance_type.lower() == "fridge" and row.model_no.upper().startswith("SPACE"):
+            continue
+        if (
+            row.source_file
+            and row.model_no
+            and (row.source_file.lower(), row.appliance_type.lower()) in typed_source_with_concrete_model
+            and not _appliance_model_context_matches_type(row.evidence_snippet, row.appliance_type, row.model_no)
+        ):
+            continue
+        if (
+            row.source_file
+            and row.model_no
+            and (row.source_file.lower(), row.appliance_type.lower()) in typed_source_with_concrete_model
+            and _looks_like_appliance_accessory_evidence(row.evidence_snippet)
+        ):
+            continue
         if row.model_no and _looks_like_drawing_dimension_noise_model(row.model_no):
             if typed_make in typed_make_with_model or (
                 row.source_file and (row.source_file.lower(), row.appliance_type.lower()) in typed_source_with_concrete_model
@@ -12291,6 +13663,83 @@ def _dedupe_appliances(rows: list[ApplianceRow]) -> list[ApplianceRow]:
                 continue
         filtered.append(row)
     return filtered
+
+
+def _looks_like_appliance_accessory_evidence(text: Any) -> bool:
+    lowered = normalize_space(str(text or "")).lower()
+    if not lowered:
+        return False
+    return bool(
+        re.search(
+            r"(?i)\b(?:flexdesign|mounting kit|full ext rails?|ext rails?|level independent|pyro|ms 98 60|mw 38)\b",
+            lowered,
+        )
+    )
+
+
+def _appliance_model_context_matches_type(evidence: str, appliance_type: str, model_no: str) -> bool:
+    text = normalize_space(str(evidence or ""))
+    appliance = appliance_type.lower()
+    model = normalize_space(str(model_no or "")).upper()
+    if not text or not appliance or not model:
+        return True
+    lines = [normalize_space(line) for line in str(evidence or "").splitlines() if normalize_space(line)]
+    model_line = ""
+    for line in lines:
+        if model in line.upper():
+            model_line = line
+            break
+    window = model_line or text
+    lowered = window.lower()
+    if appliance == "rangehood" and re.search(r"(?i)\b(?:hot water heater|heat pump)\b", lowered):
+        return False
+    if appliance == "fridge" and re.search(r"(?i)\btap for fridge\b", lowered):
+        return False
+    keyword_map = {
+        "dishwasher": ("dishwasher",),
+        "rangehood": ("rangehood", "hood"),
+        "oven": ("oven",),
+        "cooktop": ("cooktop", "hob", "induction"),
+        "microwave": ("microwave",),
+        "fridge": ("fridge", "freezer"),
+        "freestanding stove": ("freestanding", "stove", "cooker", "dual fuel", "oven combo"),
+    }
+    own_keywords = keyword_map.get(appliance, (appliance,))
+    model_index = lowered.find(model.lower())
+    own_distances = [
+        abs(lowered.find(keyword) - model_index)
+        for keyword in own_keywords
+        if lowered.find(keyword) >= 0 and model_index >= 0
+    ]
+    if own_distances:
+        closest_own = min(own_distances)
+    else:
+        closest_own = None
+    closest_other = None
+    for other_type, keywords in keyword_map.items():
+        if other_type == appliance:
+            continue
+        distances = [
+            abs(lowered.find(keyword) - model_index)
+            for keyword in keywords
+            if lowered.find(keyword) >= 0 and model_index >= 0
+        ]
+        if distances:
+            distance = min(distances)
+            if closest_other is None or distance < closest_other:
+                closest_other = distance
+    if closest_own is not None and (closest_other is None or closest_own <= closest_other):
+        return True
+    if closest_other is not None and (closest_own is None or closest_other < closest_own):
+        return False
+    if any(keyword in lowered for keyword in own_keywords):
+        return True
+    for other_type, keywords in keyword_map.items():
+        if other_type == appliance:
+            continue
+        if any(keyword in lowered for keyword in keywords):
+            return False
+    return True
 
 
 def _looks_like_drawing_dimension_noise_model(text: str) -> bool:

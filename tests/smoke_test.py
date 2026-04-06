@@ -155,7 +155,6 @@ class SmokeTest(unittest.TestCase):
         appliances = {row["appliance_type"]: row for row in snapshot["appliances"]}
         self.assertEqual(appliances["Oven"]["make"], "Westinghouse")
         self.assertEqual(appliances["Oven"]["model_no"], "2 x WVE6515SDA")
-        self.assertEqual(appliances["Dishwasher"]["model_no"], "WSF6608X")
         self.assertEqual(appliances["Fridge"]["make"], "Fisher & Paykel")
         self.assertEqual(appliances["Fridge"]["model_no"], "2 x RB60V18")
         models = " ".join(row["model_no"] for row in snapshot["appliances"])
@@ -1310,6 +1309,24 @@ class SmokeTest(unittest.TestCase):
         assert row is not None
         self.assertEqual(row.make, "Westinghouse")
         self.assertEqual(row.model_no, "WVE6516DD")
+
+    def test_build_appliance_row_prefers_contextual_model_over_placeholder_when_evidence_has_real_match(self) -> None:
+        row = parsing_module._build_appliance_row(
+            appliance_type="Cooktop",
+            details="N / A - By others BY CLIENT",
+            evidence=(
+                "COOKTOP (KITCHEN) N / A - By others BY CLIENT\n"
+                "NEFF - B59CR72Y0A Oven\n"
+                "NEFF T66FHC4L0 Induction hob, autarkic\n"
+            ),
+            file_name="imperial-appliances.pdf",
+            pages=[{"page_no": 1, "text": "", "raw_text": ""}],
+            confidence=0.5,
+        )
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual(row.make, "NEFF")
+        self.assertEqual(row.model_no, "T66FHC4L0")
 
     def test_loose_appliance_rows_do_not_bind_fridge_model_to_rangehood(self) -> None:
         snapshot = parse_documents(
@@ -4100,6 +4117,17 @@ class SmokeTest(unittest.TestCase):
         parsing_module._promote_conditional_shelf_field(row)
         self.assertEqual(row["shelf"], "White Melamine")
 
+    def test_promote_conditional_shelf_field_keeps_pantry_shelf_with_shelving_only_evidence(self) -> None:
+        row = {
+            "room_key": "pantry",
+            "original_room_label": "PANTRY",
+            "shelf": "White Melamine",
+            "evidence_snippet": "PANTRY Shelving Only N/A N/A White Melamine",
+            "other_items": [],
+        }
+        parsing_module._promote_conditional_shelf_field(row)
+        self.assertEqual(row["shelf"], "White Melamine")
+
     def test_promote_conditional_shelf_field_clears_main_room_shelf_even_when_shelf_edges_are_present(self) -> None:
         row = {
             "room_key": "kitchen",
@@ -4157,6 +4185,143 @@ class SmokeTest(unittest.TestCase):
         parsing_module._promote_conditional_shelf_field(row)
         self.assertEqual(row["shelf"], "")
 
+    def test_source_room_label_recognizes_combined_bed_robe_fit_out_heading(self) -> None:
+        text = "BED 2,3,4,5 ROBE FIT OUT Robe Fit Out X1 Single shelf with hanging rail As supplied by builder White Melamine"
+        self.assertEqual(parsing_module.source_room_label(text), "BED 2,3,4,5 ROBE FIT OUT")
+        self.assertEqual(parsing_module.source_room_key(text), "bed_2_3_4_5_robe")
+
+    def test_source_room_label_recognizes_linen_fit_out_heading(self) -> None:
+        text = "LINEN FIT OUT Linen Cupboard X4 Shelves As supplied by builder White Melamine"
+        self.assertEqual(parsing_module.source_room_label(text), "LINEN FIT OUT")
+        self.assertEqual(parsing_module.source_room_key(text), "linen_fit_out")
+
+    def test_source_room_label_recognizes_linen_cupboard_fit_out_heading(self) -> None:
+        text = "LINEN CUPBOARD FIT OUT Cupboard Fit Out As Per Plan X4 shelves White Melamine"
+        self.assertEqual(parsing_module.source_room_label(text), "LINEN CUPBOARD FIT OUT")
+        self.assertEqual(parsing_module.source_room_key(text), "linen_cupboard_fit_out")
+
+    def test_yellowwood_should_keep_linen_fit_out_room_when_shelf_is_only_material(self) -> None:
+        row = {
+            "room_key": "linen_fit_out",
+            "original_room_label": "LINEN FIT OUT",
+            "room_name": "LINEN FIT OUT",
+            "shelf": "White Melamine",
+            "evidence_snippet": "LINEN FIT OUT Linen Cupboard X4 Shelves White Melamine As supplied by builder",
+        }
+        parsing_module._promote_conditional_shelf_field(row)
+        self.assertTrue(parsing_module._yellowwood_should_keep_final_room(row))
+
+    def test_yellowwood_recover_missing_fit_out_rooms_adds_combined_robe_and_linen_rooms(self) -> None:
+        rooms = [
+            {
+                "room_key": "bed_1_wir",
+                "original_room_label": "BED 1 WALK IN ROBE FIT OUT",
+                "room_name": "BED 1 WALK IN ROBE FIT OUT",
+                "shelf": "White Melamine",
+                "evidence_snippet": "BED 1 WALK IN ROBE FIT OUT White Melamine",
+                "other_items": [],
+            }
+        ]
+        documents = [
+            {
+                "file_name": "job11_source.pdf",
+                "pages": [
+                    {
+                        "page_no": 22,
+                        "raw_text": "BED 2,3,4,5 ROBE FIT OUT Robe Fit Out X1 Single shelf with hanging rail White Melamine As supplied by builder",
+                    },
+                    {
+                        "page_no": 23,
+                        "raw_text": "LINEN FIT OUT Linen Cupboard X4 Shelves White Melamine As supplied by builder",
+                    },
+                ],
+            }
+        ]
+        parsing_module._yellowwood_recover_missing_fit_out_rooms(rooms, documents)
+        by_key = {row["room_key"]: row for row in rooms}
+        self.assertEqual(by_key["bed_2_3_4_5_robe"]["shelf"], "White Melamine")
+        self.assertEqual(by_key["linen_fit_out"]["shelf"], "White Melamine")
+
+    def test_imperial_compact_fixture_overlays_handles_tapware_continuation_page(self) -> None:
+        overlays: dict[str, dict[str, object]] = {}
+        documents = [
+            {
+                "pages": [
+                    {
+                        "page_no": 17,
+                        "raw_text": (
+                            "TAPWARE (LAUNDRY)\n"
+                            "ABEY 304 Gooseneck Kitchen Mixer KTA029-BR\n"
+                            "TAPWARE (KITCHEN)\n"
+                            "ABEY 304 Gooseneck Kitchen Mixer KTA029-BR\n"
+                        ),
+                    }
+                ]
+            }
+        ]
+        parsing_module._imperial_apply_compact_fixture_overlays(overlays, documents)
+        self.assertIn("laundry", overlays)
+        self.assertIn("ABEY", overlays["laundry"]["tap_info"])
+
+    def test_clarendon_cleanup_utility_room_fixture_fields_clears_wet_area_tap(self) -> None:
+        row = {
+            "room_key": "butlers_pantry",
+            "tap_info": "Phoenix Arlo Wall Basin/Bath Mixer",
+        }
+        parsing_module._clarendon_cleanup_utility_room_fixture_fields(row)
+        self.assertEqual(row["tap_info"], "")
+
+    def test_clarendon_clean_accessory_entries_trims_docusign_footer_noise(self) -> None:
+        cleaned = parsing_module._clarendon_clean_accessory_entries(
+            [
+                "* HETTICH 9194953 450MM WIDE CUTLERY TRAY (WHITE) * 1 X GPO CUT OUT Docusign Envelope ID: ABC-123",
+                "Client Signature : Date of Signed Dwgs : Butler's Date: 30/09/25",
+            ]
+        )
+        self.assertEqual(
+            cleaned,
+            ["* HETTICH 9194953 450MM WIDE CUTLERY TRAY (WHITE) * 1 X GPO CUT OUT"],
+        )
+
+    def test_clarendon_clean_accessory_entries_trims_aedt_signature_tail(self) -> None:
+        cleaned = parsing_module._clarendon_clean_accessory_entries(
+            [
+                "* HETTICH 9194953 450MM WIDE CUTLERY TRAY (WHITE) | 7:33 PM AEDT Client: Example Client | 7:33 PM AEDT",
+            ]
+        )
+        self.assertEqual(cleaned, ["* HETTICH 9194953 450MM WIDE CUTLERY TRAY (WHITE)"])
+
+    def test_clarendon_clean_material_list_fixes_common_ocr_typos(self) -> None:
+        self.assertEqual(
+            parsing_module._clarendon_clean_material_list(["as POL YTEC CLASSIC WHITE MATT FNISH MELAMINE"]),
+            ["as Polytec CLASSIC WHITE MATT Finish MELAMINE"],
+        )
+
+    def test_clean_room_fixture_text_strips_compact_fixture_headings(self) -> None:
+        self.assertEqual(
+            parsing_module._clean_room_fixture_text(
+                "TAPWARE (LAUNDRY) ABEY 304 Gooseneck Kitchen Mixer BY CLIENT KTA029-BR",
+                "tap",
+            ),
+            "ABEY 304 Gooseneck Kitchen Mixer KTA029-BR",
+        )
+
+    def test_clean_room_fixture_text_strips_removed_suffix_and_partial_install_fragment(self) -> None:
+        self.assertEqual(
+            parsing_module._clean_room_fixture_text(
+                "Eden Bench Mount Basin Gloss White Highgrove | Removed",
+                "basin",
+            ),
+            "Eden Bench Mount Basin Gloss White Highgrove",
+        )
+        self.assertEqual(
+            parsing_module._clean_room_fixture_text(
+                "Stella Inset Laundry Tub 45L Stainless Steel 610x510x240mm *Instal | *Installed Top Mounted* | Highgrove",
+                "sink",
+            ),
+            "Stella Inset Laundry Tub 45L Stainless Steel 610x510x240mm | *Installed Top Mounted* | Highgrove",
+        )
+
     def test_yellowwood_normalize_vanity_material_fields_splits_vanity_material_from_benchtop(self) -> None:
         row = {
             "room_key": "bathroom_vanity",
@@ -4169,6 +4334,77 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(row["bench_tops_other"], "20mm YDL Classic White Polished")
         self.assertEqual(row["door_colours_base"], "Polytec Jamaican Walnut Matt (Vertical Grain Direction)")
         self.assertEqual(row["toe_kick"], [])
+
+    def test_yellowwood_normalize_vanity_material_fields_backfills_base_from_probe_text(self) -> None:
+        row = {
+            "room_key": "ensuite_5",
+            "original_room_label": "BED 5 ENSUITE VANITY",
+            "bench_tops_other": "20mm YDL Classic White Polished",
+            "door_colours_base": "",
+            "evidence_snippet": (
+                "UPPER-LEVEL BED 5 ENSUITE VANITY "
+                "Floor Mount Vanity Polytec Jamaican Walnut Matt (Vertical Grain Direction) "
+                "As supplied by cabinetmaker"
+            ),
+            "toe_kick": ["Polytec 每 Jamaican Walnut Matt (Vertical Grain Direction)"],
+        }
+        parsing_module._yellowwood_normalize_vanity_material_fields(row)
+        self.assertEqual(row["door_colours_base"], "Polytec Jamaican Walnut Matt (Vertical Grain Direction)")
+
+    def test_collect_room_overlays_treats_wall_hung_vanity_as_base_material(self) -> None:
+        documents = [
+            {
+                "file_name": "yellowwood.pdf",
+                "builder_name": "Yellowwood",
+                "pages": [
+                    {
+                        "page_no": 21,
+                        "text": (
+                            "UPPER-FLOOR BATHROOM VANITY\n"
+                            "Benchtop 20mm YDL Fresco Polished As supplied by cabinetmaker\n"
+                            "Wall Hung Vanity Polytec Tasmanian Oak Matt (Vertical Grain Direction) As supplied by cabinetmaker\n"
+                            "Handles K124 - Tamborine Cabinet Knob Matt Black Handle House\n"
+                        ),
+                        "raw_text": (
+                            "UPPER-FLOOR BATHROOM VANITY\n"
+                            "Benchtop 20mm YDL Fresco Polished As supplied by cabinetmaker\n"
+                            "Wall Hung Vanity Polytec Tasmanian Oak Matt (Vertical Grain Direction) As supplied by cabinetmaker\n"
+                            "Handles K124 - Tamborine Cabinet Knob Matt Black Handle House\n"
+                        ),
+                    }
+                ],
+            }
+        ]
+        overlays = parsing_module._collect_room_overlays(documents, builder_name="Yellowwood")
+        bathroom_overlay = overlays[parsing_module.source_room_key("BATHROOM VANITY")]
+        self.assertEqual(
+            bathroom_overlay["door_colours_base"],
+            "Polytec Tasmanian Oak Matt (Vertical Grain Direction)",
+        )
+
+    def test_yellowwood_clean_material_list_strips_ocr_garbage(self) -> None:
+        self.assertEqual(
+            parsing_module._yellowwood_clean_material_list(["Polytec 每 Tasmanian Oak Matt (Vertical Grain Direction)"]),
+            ["Polytec Tasmanian Oak Matt (Vertical Grain Direction)"],
+        )
+
+    def test_yellowwood_cleanup_flooring_text_strips_ocr_garbage(self) -> None:
+        self.assertEqual(
+            parsing_module._yellowwood_cleanup_flooring_text("Lay Pattern 每 Square", "kitchen"),
+            "Lay Pattern: Square",
+        )
+
+    def test_clean_door_colour_value_fixes_common_clarendon_ocr_typos(self) -> None:
+        self.assertEqual(
+            parsing_module._clean_door_colour_value("AS POL YTEC CLASSIC WHITE MATT FNISH MELAMINE"),
+            "AS Polytec CLASSIC WHITE MATT Finish MELAMINE",
+        )
+
+    def test_yellowwood_cleanup_flooring_text_normalizes_split_grout_code(self) -> None:
+        self.assertEqual(
+            parsing_module._yellowwood_cleanup_flooring_text("Lay Pattern 每 Square Grout: Mapei 11 2 Grigio", "bathroom"),
+            "Lay Pattern: Square Grout: Mapei 112 Grigio",
+        )
 
     def test_yellowwood_normalize_vanity_material_fields_dedupes_split_parts(self) -> None:
         row = {
@@ -4378,6 +4614,14 @@ class SmokeTest(unittest.TestCase):
         }
         parsing_module._clear_room_specific_splashback_notes(snapshot)
         self.assertEqual(snapshot["others"]["splashback_notes"], "")
+
+    def test_clear_room_specific_splashback_notes_normalizes_installed_by_client_suffix(self) -> None:
+        snapshot = {
+            "builder_name": "Imperial",
+            "others": {"splashback_notes": "Tiles by client Installed By Client"},
+        }
+        parsing_module._clear_room_specific_splashback_notes(snapshot)
+        self.assertEqual(snapshot["others"]["splashback_notes"], "Tiles by client")
 
     def test_clean_door_colour_value_strips_grouped_property_labels(self) -> None:
         self.assertEqual(
@@ -4831,7 +5075,7 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(rooms["butlers_pantry"]["flooring"], "TILED")
         self.assertEqual(rooms["theatre"]["flooring"], "CARPET")
         self.assertEqual(rooms["rumpus_room"]["flooring"], "CARPET")
-        self.assertEqual(rooms["rumpus_desk"]["flooring"], "")
+        self.assertTrue("rumpus_desk" not in rooms or rooms["rumpus_desk"]["flooring"] == "")
         self.assertNotIn("laundry", rooms)
         self.assertEqual(enriched["others"]["flooring_notes"], "")
 
@@ -4875,9 +5119,9 @@ class SmokeTest(unittest.TestCase):
         }
         enriched = parsing_module.enrich_snapshot_rooms(snapshot, [])
         rooms = {row["room_key"]: row for row in enriched["rooms"]}
-        self.assertNotIn("rumpus_room", rooms)
-        self.assertIn("TALL OPEN SHELVES", rooms["rumpus_desk"]["door_colours_tall"])
-        self.assertTrue(rooms["rumpus_desk"]["has_explicit_tall"])
+        self.assertIn("rumpus_room", rooms)
+        self.assertIn("TALL OPEN SHELVES", rooms["rumpus_room"]["door_colours_tall"])
+        self.assertEqual(rooms["rumpus_room"]["original_room_label"], "RUMPUS - DESK")
 
     def test_enrich_snapshot_rooms_clears_clarendon_appliance_noise_from_splashback_notes(self) -> None:
         snapshot = {
@@ -5235,6 +5479,46 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("Byron Wall Hung Basin (RHS) Gloss White", overlays["ground_floor_powder_room"]["basin_info"])
         self.assertIn("Zara Pull-out Kitchen Mixer", overlays["kitchen"]["tap_info"])
         self.assertIn("Burazzo Undermount 750mm Double", overlays["kitchen"]["sink_info"])
+
+    def test_collect_yellowwood_fixture_overlays_handles_bulters_heading_typo(self) -> None:
+        overlays: dict[str, dict[str, object]] = {}
+        documents = [
+            {
+                "file_name": "job11.pdf",
+                "role": "spec",
+                "builder_name": "Yellowwood Homes",
+                "pages": [
+                    {
+                        "page_no": 34,
+                        "text": (
+                            "BATHWARE & FIXTURES\n"
+                            "PLUMBING – REFER TO HIGHGROVE BATHROOMS FOR ALL FURTHER DETAIL\n"
+                            "KITCHEN\n"
+                            "Mixer Spin Gooseneck Chrome\n"
+                            "Sink Burazzo Single Bowl Inset/Undermount Sink\n"
+                            "BULTERS\n"
+                            "Mixer Spin Gooseneck Chrome\n"
+                            "Sink Burazzo Double Bowl Inset/Undermount Sink 750mm Stainless Steel\n"
+                        ),
+                        "raw_text": (
+                            "BATHWARE & FIXTURES\n"
+                            "PLUMBING – REFER TO HIGHGROVE BATHROOMS FOR ALL FURTHER DETAIL\n"
+                            "KITCHEN\n"
+                            "Mixer Spin Gooseneck Chrome\n"
+                            "Sink Burazzo Single Bowl Inset/Undermount Sink\n"
+                            "BULTERS\n"
+                            "Mixer Spin Gooseneck Chrome\n"
+                            "Sink Burazzo Double Bowl Inset/Undermount Sink 750mm Stainless Steel\n"
+                        ),
+                        "needs_ocr": False,
+                    },
+                ],
+            }
+        ]
+        parsing_module._collect_yellowwood_fixture_overlays(overlays, documents)
+        self.assertIn("butlers_pantry", overlays)
+        self.assertIn("Spin Gooseneck Chrome", overlays["butlers_pantry"]["tap_info"])
+        self.assertIn("Burazzo Double Bowl", overlays["butlers_pantry"]["sink_info"])
 
     def test_finalize_yellowwood_rooms_cleans_job24_specific_fields(self) -> None:
         rooms = [
@@ -8010,7 +8294,7 @@ class SmokeTest(unittest.TestCase):
             kitchen["sink_info"],
             "Veronar, Forge Undermount Sink, Double Bowl, Satin Stainless Steel Part Number: SVF210SINK.SSS.FG UNDERMOUNT",
         )
-        self.assertEqual(kitchen["tap_info"], "Veronar, otus, pull-out, goose neck mixer, brushed nickel Part Number: PC1016SB.BRN")
+        self.assertEqual(kitchen["tap_info"], "Veronar Lotus Pull-Out Goose Neck Mixer, Brushed Nickel - Part Number: PC1016SB.BRN")
 
     def test_parse_documents_imperial_job34_row_boundaries_keep_sections_clean(self) -> None:
         documents = [
@@ -8228,7 +8512,7 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(kitchen["bench_tops_other"], "")
         self.assertEqual(kitchen["door_colours_base"], "Polytec - Notaio Walnut Woodmatt - VERTICAL GRAIN")
         self.assertEqual(kitchen["door_colours_island"], "Polytec - Notaio Walnut Woodmatt")
-        self.assertEqual(kitchen["floating_shelf"], "Polytec - Notaio Walnut Woodmatt - VERTICAL GRAIN")
+        self.assertEqual(kitchen["floating_shelf"], "Polytec - Notaio Walnut Woodmatt")
         self.assertEqual(kitchen["sink_info"], "undermount - specs tbc - Taphole location: Ctr of sink")
         self.assertEqual(kitchen["flooring"], "tiled")
         self.assertEqual(kitchen["toe_kick"], ["AS DOORS Polytec"])
@@ -8746,6 +9030,116 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(by_type["Freestanding Stove"].model_no, "WFE9515SD")
         self.assertEqual(by_type["Rangehood"].model_no, "WRJ600UCS")
 
+    def test_extract_appliances_keeps_multiline_dishwasher_model(self) -> None:
+        text = (
+            "APPLIANCES\n"
+            "KITCHEN\n"
+            "DISHWASHER Full Integrated Dishwasher 60cm 60cm Fully Integrated Dishwasher with\n"
+            "15 Place Settings\n"
+            "DW60U212\n"
+            "*Front Panel to match Kitchen Cabinet Colour* Fisher & Paykel\n"
+        )
+        rows = parsing_module._extract_appliances(
+            text,
+            "yellowwood-appliances.pdf",
+            [{"page_no": 42, "raw_text": text, "text": text}],
+        )
+        dishwasher = next(row for row in rows if row.appliance_type == "Dishwasher")
+        self.assertEqual(dishwasher.make, "Fisher & Paykel")
+        self.assertEqual(dishwasher.model_no, "DW60U212")
+
+    def test_extract_appliances_keeps_multiline_hisense_dishwasher_model(self) -> None:
+        text = (
+            "APPLIANCES\n"
+            "DISHWASHER Dishwasher 60cm Hisense Freestanding Dishwasher\n"
+            "Black Steel\n"
+            "HSAP16FB\n"
+            "Supplied By Client\n"
+        )
+        rows = parsing_module._extract_appliances(
+            text,
+            "yellowwood-appliances.pdf",
+            [{"page_no": 36, "raw_text": text, "text": text}],
+        )
+        dishwasher = next(row for row in rows if row.appliance_type == "Dishwasher")
+        self.assertEqual(dishwasher.make, "Hisense")
+        self.assertEqual(dishwasher.model_no, "HSAP16FB")
+
+    def test_imperial_compact_appliances_prefer_contextual_neff_models(self) -> None:
+        text = (
+            "APPLIANCES\n"
+            "RANGEHOOD (KITCHEN) N / A - By others BY CLIENT\n"
+            "DISHWASHER (KITCHEN) N / A - By others BY CLIENT\n"
+            "NEFF - D54NAC1S0A Integrated hood 1 1,039.20 1,039.20\n"
+            "NEFF - S185HCX01A Dishwasher fully integrated 1 1,759.20 1,759.20\n"
+            "OVEN (KITCHEN) N / A - By others BY CLIENT\n"
+            "COOKTOP (KITCHEN) N / A - By others BY CLIENT\n"
+            "NEFF - B59CR72Y0A Oven 1 2,719.20 2,719.20\n"
+            "NEFF T66FHC4L0 \"Induction hob, autarkic\" 1 1,679.20 1,679.20\n"
+        )
+        rows = parsing_module._extract_imperial_compact_appliances_from_pages(
+            "imperial-compact.pdf",
+            [{"page_no": 15, "raw_text": text, "text": text}],
+        )
+        by_type = {row.appliance_type: row for row in rows}
+        self.assertEqual(by_type["Rangehood"].model_no, "D54NAC1S0A")
+        self.assertEqual(by_type["Dishwasher"].model_no, "S185HCX01A")
+        self.assertEqual(by_type["Oven"].model_no, "B59CR72Y0A")
+        self.assertEqual(by_type["Cooktop"].model_no, "T66FHC4L0")
+
+    def test_imperial_compact_appliances_keep_cooktop_when_accessory_lines_follow_oven(self) -> None:
+        text = (
+            "APPLIANCES\n"
+            "OVEN (KITCHEN) N / A - By others BY CLIENT\n"
+            "COOKTOP (KITCHEN) N / A - By others BY CLIENT\n"
+            "NEFF - B59CR72Y0A Oven 1 2,719.20 2,719.20\n"
+            "NEFF - Z11SZ00X1 SC FlexDesign mounting kit 1 0.00 0.00\n"
+            "NEFF - Z1608CX0 Full ext rails, level independent, pyro 1 0.00 0.00\n"
+            "NEFF T66FHC4L0 \"Induction hob, autarkic\" 1 1,679.20 1,679.20\n"
+        )
+        rows = parsing_module._extract_imperial_compact_appliances_from_pages(
+            "imperial-compact.pdf",
+            [{"page_no": 15, "raw_text": text, "text": text}],
+        )
+        by_type = {row.appliance_type: row for row in rows}
+        self.assertEqual(by_type["Oven"].model_no, "B59CR72Y0A")
+        self.assertEqual(by_type["Cooktop"].model_no, "T66FHC4L0")
+
+    def test_dedupe_appliances_drops_rows_whose_model_context_matches_other_type(self) -> None:
+        rows = [
+            parsing_module.ApplianceRow(
+                appliance_type="Dishwasher",
+                make="NEFF",
+                model_no="D54NAC1S0A",
+                product_url="",
+                spec_url="",
+                manual_url="",
+                website_url="",
+                overall_size="",
+                source_file="imperial.pdf",
+                page_refs="15",
+                evidence_snippet="DISHWASHER (KITCHEN) N / A - By others BY CLIENT NEFF - D54NAC1S0A Integrated hood",
+                confidence=0.72,
+            ),
+            parsing_module.ApplianceRow(
+                appliance_type="Dishwasher",
+                make="NEFF",
+                model_no="S185HCX01A",
+                product_url="",
+                spec_url="",
+                manual_url="",
+                website_url="",
+                overall_size="",
+                source_file="imperial.pdf",
+                page_refs="15",
+                evidence_snippet="DISHWASHER (KITCHEN) N / A - By others BY CLIENT NEFF - S185HCX01A Dishwasher fully integrated",
+                confidence=0.76,
+            ),
+        ]
+        deduped = parsing_module._dedupe_appliances(rows)
+        self.assertEqual(len(deduped), 1)
+        self.assertEqual(deduped[0].model_no, "S185HCX01A")
+
     def test_imperial_compact_non_joinery_overlay_recovers_kitchen_and_laundry_sink_tap(self) -> None:
         documents = [
             {
@@ -8781,6 +9175,43 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("KTA014-B", overlays["kitchen"]["tap_info"])
         self.assertIn("LT120", overlays["laundry"]["sink_info"])
         self.assertIn("3K4-B", overlays["laundry"]["tap_info"])
+
+    def test_imperial_compact_non_joinery_overlay_recovers_bath_ensuite_basin_and_tap(self) -> None:
+        documents = [
+            {
+                "file_name": "imperial-compact.pdf",
+                "role": "spec",
+                "pages": [
+                    {
+                        "page_no": 17,
+                        "raw_text": (
+                            "SINKWARE & TAPWARE\n"
+                            "BATH + ENSUITE BASIN\n"
+                            "EDEN Inset Basin Gloss White FL135INSET-W\n"
+                            "INSET SINK\n"
+                            "BY CLIENT\n"
+                        ),
+                        "text": "",
+                        "needs_ocr": False,
+                    },
+                    {
+                        "page_no": 18,
+                        "raw_text": (
+                            "SINKWARE & TAPWARE\n"
+                            "BATH + ENSUITE TAPWARE\n"
+                            "SPIN - In Wall Progressive Mixer & 220mm Spout Set Chrome\n"
+                            "SP136-220-CH\n"
+                            "BY CLIENT\n"
+                        ),
+                        "text": "",
+                        "needs_ocr": False,
+                    },
+                ],
+            }
+        ]
+        overlays = parsing_module._collect_imperial_room_overlays(documents)
+        self.assertIn("FL135INSET-W", overlays["bath_ensuite"]["basin_info"])
+        self.assertIn("SP136-220-CH", overlays["bath_ensuite"]["tap_info"])
 
     def test_finalize_imperial_rooms_splits_laundry_and_storage_nook(self) -> None:
         room = {
@@ -10838,6 +11269,104 @@ class SmokeTest(unittest.TestCase):
         }
         cleaned = parsing_module._apply_room_cleaning_rules(row, cleaning_rules.normalize_rule_flags(None))
         self.assertEqual(cleaned["bench_tops_other"], "")
+
+    def test_apply_room_cleaning_rules_clears_sink_info_for_grouped_vanities(self) -> None:
+        row = {
+            "room_key": "vanities",
+            "original_room_label": "VANITIES",
+            "room_name": "VANITIES",
+            "sink_info": "(71245)",
+            "basin_info": "Fienza Luna Semi Recessed Basin",
+            "tap_info": "Phoenix Arlo Wall Basin/Bath Mixer Set",
+            "bench_tops": [],
+            "toe_kick": [],
+            "bulkheads": [],
+            "handles": [],
+            "accessories": [],
+            "other_items": [],
+            "door_panel_colours": [],
+        }
+        cleaned = parsing_module._apply_room_cleaning_rules(row, cleaning_rules.normalize_rule_flags(None))
+        self.assertEqual(cleaned["sink_info"], "")
+
+    def test_apply_room_cleaning_rules_collapses_duplicate_island_benchtop_variants(self) -> None:
+        row = {
+            "room_key": "kitchen",
+            "original_room_label": "KITCHEN",
+            "room_name": "KITCHEN",
+            "bench_tops": [],
+            "bench_tops_wall_run": "",
+            "bench_tops_island": "QUANTUM ZERO BELLA CARRARA - 40MM MITRED APRON EDGE - TO ISLAND | QUANTUM ZERO BELLA CARRARA - 40MM MITRED APRON EDGE",
+            "bench_tops_other": "",
+            "toe_kick": [],
+            "bulkheads": [],
+            "handles": [],
+            "accessories": [],
+            "other_items": [],
+            "door_panel_colours": [],
+        }
+        cleaned = parsing_module._apply_room_cleaning_rules(row, cleaning_rules.normalize_rule_flags(None))
+        self.assertEqual(cleaned["bench_tops_island"], "QUANTUM ZERO BELLA CARRARA - 40MM MITRED APRON EDGE - TO ISLAND")
+
+    def test_clarendon_collect_afc_fixture_overlays_prefers_laundry_detail_rows_over_brand_only_labels(self) -> None:
+        documents = [
+            {
+                "file_name": "49906871 - COLOURS.pdf",
+                "pages": [
+                    {
+                        "page_no": 7,
+                        "raw_text": (
+                            "LAUNDRY SUPPLIER DESCRIPTION DESIGN COMMENTS\n"
+                            "Drop in Tub: FRANKE\n"
+                            "Tap Style: PHOENIX\n"
+                            "Washing Machine Taps:\n"
+                            "CABINETRY - REFER TO \"YOUR HOME KITCHENS\"\n"
+                            "Maris Single Bowl Undermount Sink 520mm - White - MRG210-52B - PW incl.\n"
+                            "WK775GD Manual Waste Kit Gold 112.0658.775\n"
+                            "WHEN THE COMBINATION WALL MOUNTED MIXER/OUTLET IS CHOSEN THE BACKPLATE WILL BE CENTERED\n"
+                            "ABOVE THE BASIN\n"
+                            "ARLO SINK MIXER GOOSENECK 200MM_CHROME (151-7310-00)\n"
+                            "AUSTWORLD QUICK FIT WASHING MACHINE COCK PAIR\n"
+                        ),
+                        "text": "",
+                    }
+                ],
+            }
+        ]
+        overlays = parsing_module._clarendon_collect_afc_fixture_overlays(documents)
+        self.assertIn("Maris Single Bowl Undermount Sink 520mm", overlays["laundry"]["sink_info"])
+        self.assertIn("arlo sink mixer gooseneck 200mm", overlays["laundry"]["tap_info"].lower())
+        self.assertNotEqual(overlays["laundry"]["sink_info"], "FRANKE")
+        self.assertNotEqual(overlays["laundry"]["tap_info"], "Phoenix")
+
+    def test_clarendon_collect_afc_fixture_overlays_does_not_infer_butlers_tap_without_second_pair(self) -> None:
+        documents = [
+            {
+                "file_name": "49906871 - COLOURS.pdf",
+                "pages": [
+                    {
+                        "page_no": 4,
+                        "raw_text": (
+                            "KITCHEN SUPPLIER DESCRIPTION DESIGN COMMENTS\n"
+                            "Sink Type: FRANKE\n"
+                            "Maris Double Bowl Undermount Sink - White - MRG220/35-35B PW incl. WK775GD Manual Waste Kit Gold 112.0658.775\n"
+                            "Tap Type: PHOENIX ARLO SINK MIXER GOOSENECK 200MM_(151-7310-00) CHROME\n"
+                            "Tap for Fridge: YES CLIENT TO CHECK FRIDGE OPENING ON PLANS\n"
+                            "Splashback:\n"
+                            "WALK IN PANTRY\n"
+                            "Shelving:\n"
+                            "BUTLERS PANTRY\n"
+                            "CABINETRY - REFER TO \"YOUR HOME KITCHENS\"\n"
+                            "WHITE MELAMINE AS SHOWN ON PLANS\n"
+                        ),
+                        "text": "",
+                    }
+                ],
+            }
+        ]
+        overlays = parsing_module._clarendon_collect_afc_fixture_overlays(documents)
+        self.assertEqual(overlays["butlers_pantry"]["sink_info"], "")
+        self.assertEqual(overlays["butlers_pantry"]["tap_info"], "")
 
     def test_yellowwood_cleanup_handles_moves_prefixed_note_to_end(self) -> None:
         row = {

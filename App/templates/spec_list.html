@@ -49,96 +49,44 @@
   </div>
 </section>
 {% endif %}
-<section class="grid-two">
-  <article class="card">
-    <h3>Snapshot Summary</h3>
-    <ul class="plain-list">
-      <li><strong>Source kind:</strong> {{ raw_snapshot.source_kind }}</li>
-      <li><strong>Extraction mode:</strong> {{ raw_analysis.label }}</li>
-      <li><strong>OpenAI merge attempted:</strong> {{ "Yes" if raw_analysis.openai_attempted else "No" }}</li>
-      <li><strong>OpenAI merge succeeded:</strong> {{ "Yes" if raw_analysis.openai_succeeded else "No" }}</li>
-      <li><strong>Model:</strong> {{ raw_analysis.openai_model or "Not used" }}</li>
-      <li><strong>Layout attempted:</strong> {{ "Yes" if raw_analysis.layout_attempted else "No" }}</li>
-      <li><strong>Layout succeeded:</strong> {{ "Yes" if raw_analysis.layout_succeeded else "No" }}</li>
-      <li><strong>Layout mode:</strong> {{ raw_analysis.layout_mode_label }}</li>
-      <li><strong>Layout provider:</strong> {{ raw_analysis.layout_provider or "heuristic" }}</li>
-      <li><strong>Layout pages:</strong> {{ raw_analysis.layout_pages|join(", ") if raw_analysis.layout_pages else "None" }}</li>
-      <li><strong>Docling attempted:</strong> {{ "Yes" if raw_analysis.docling_attempted else "No" }}</li>
-      <li><strong>Docling succeeded:</strong> {{ "Yes" if raw_analysis.docling_succeeded else "No" }}</li>
-      <li><strong>Docling pages:</strong> {{ raw_analysis.docling_pages|join(", ") if raw_analysis.docling_pages else "None" }}</li>
-      <li><strong>Heavy vision pages:</strong> {{ raw_analysis.heavy_vision_pages|join(", ") if raw_analysis.heavy_vision_pages else "None" }}</li>
-      <li><strong>Vision attempted:</strong> {{ "Yes" if raw_analysis.vision_attempted else "No" }}</li>
-      <li><strong>Vision succeeded:</strong> {{ "Yes" if raw_analysis.vision_succeeded else "No" }}</li>
-      <li><strong>Vision pages:</strong> {{ raw_analysis.vision_pages|join(", ") if raw_analysis.vision_pages else "None" }}</li>
-      <li><strong>Generated at:</strong> {{ raw_generated_at or raw_snapshot.generated_at }}</li>
-      <li><strong>Extraction duration:</strong> {{ raw_extraction_duration or "Not recorded" }}</li>
-      <li><strong>Rooms:</strong> {{ raw_spec_rooms|length }}</li>
-      <li><strong>Appliances:</strong> {{ raw_spec_appliances|length }}</li>
-      <li><strong>Warnings:</strong> {{ raw_spec_warnings|length }}</li>
-      <li><strong>PDF QA:</strong> {{ "Historical run result (latest snapshot only)" if historical_view else raw_verification_summary.status_label }}</li>
-      <li><strong>Room master file:</strong> {{ raw_analysis.room_master_file or "Single-file parse" }}</li>
-      <li><strong>Supplement files:</strong> {{ raw_analysis.supplement_files|join(", ") if raw_analysis.supplement_files else "None" }}</li>
-      <li><strong>Ignored unmatched room-like lines:</strong> {{ raw_analysis.ignored_room_like_lines_count }}</li>
-    </ul>
-    {% if raw_analysis.room_master_reason %}
-    <div class="subcard">
-      <h4>Room Master Reason</h4>
-      <p class="muted">{{ raw_analysis.room_master_reason }}</p>
-    </div>
-    {% endif %}
-    {% if raw_analysis.note %}
-    <div class="subcard">
-      <h4>Analysis Note</h4>
-      <p class="muted">{{ raw_analysis.note }}</p>
-    </div>
-    {% endif %}
-    {% if raw_analysis.layout_note %}
-    <div class="subcard">
-      <h4>Layout Note</h4>
-      <p class="muted">{{ raw_analysis.layout_note }}</p>
-    </div>
-    {% endif %}
-    {% if raw_analysis.docling_note %}
-    <div class="subcard">
-      <h4>Docling Note</h4>
-      <p class="muted">{{ raw_analysis.docling_note }}</p>
-    </div>
-    {% endif %}
-    {% if raw_analysis.vision_note %}
-    <div class="subcard">
-      <h4>Vision Note</h4>
-      <p class="muted">{{ raw_analysis.vision_note }}</p>
-    </div>
-    {% endif %}
-  </article>
-
-  <article class="card">
-    <h3>Source Documents</h3>
-    <div class="table-wrap">
-      <table class="table-cardify">
-        <thead>
-          <tr>
-            <th>Role</th>
-            <th>Room Role</th>
-            <th>File Name</th>
-            <th>Pages</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in raw_source_documents %}
-          <tr>
-            <td data-label="Role">{{ row.role }}</td>
-            <td data-label="Room Role">{{ row.room_role or "-" }}</td>
-            <td data-label="File Name">{{ row.file_name }}</td>
-            <td data-label="Pages">{{ row.page_count }}</td>
-          </tr>
-          {% else %}
-          <tr><td colspan="4" class="empty-cell">No source document entries.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </article>
+<section class="card">
+  <span class="eyebrow">Raw Snapshot</span>
+  <h3>Material Summary</h3>
+  <div class="summary-grid">
+    <article class="summary-card">
+      <h4>{{ material_summary.door_colours.label }}</h4>
+      <p class="muted">{{ material_summary.door_colours.count }} distinct item{{ "" if material_summary.door_colours.count == 1 else "s" }}</p>
+      <ul class="summary-list">
+        {% for item in material_summary.door_colours.entries %}
+        <li>{{ item.display_text }}</li>
+        {% else %}
+        <li class="muted">No door colours found.</li>
+        {% endfor %}
+      </ul>
+    </article>
+    <article class="summary-card">
+      <h4>{{ material_summary.handles.label }}</h4>
+      <p class="muted">{{ material_summary.handles.count }} distinct item{{ "" if material_summary.handles.count == 1 else "s" }}</p>
+      <ul class="summary-list">
+        {% for item in material_summary.handles.entries %}
+        <li>{{ item.display_text }}</li>
+        {% else %}
+        <li class="muted">No handles found.</li>
+        {% endfor %}
+      </ul>
+    </article>
+    <article class="summary-card">
+      <h4>{{ material_summary.bench_tops.label }}</h4>
+      <p class="muted">{{ material_summary.bench_tops.count }} distinct item{{ "" if material_summary.bench_tops.count == 1 else "s" }}</p>
+      <ul class="summary-list">
+        {% for item in material_summary.bench_tops.entries %}
+        <li>{{ item.display_text }}</li>
+        {% else %}
+        <li class="muted">No bench tops found.</li>
+        {% endfor %}
+      </ul>
+    </article>
+  </div>
 </section>
 
 <section class="card">
@@ -332,55 +280,100 @@
   </article>
 </section>
 
-<section class="card">
-  <span class="eyebrow">Raw Snapshot</span>
-  <h3>Material Summary</h3>
-  <div class="summary-grid">
-    <article class="summary-card">
-      <h4>{{ material_summary.door_colours.label }}</h4>
-      <p class="muted">{{ material_summary.door_colours.count }} distinct item{{ "" if material_summary.door_colours.count == 1 else "s" }}</p>
-      <ul class="summary-list">
-        {% for item in material_summary.door_colours.entries %}
-        <li>{{ item.display_text }}</li>
-        {% else %}
-        <li class="muted">No door colours found.</li>
-        {% endfor %}
-      </ul>
-    </article>
-    <article class="summary-card">
-      <h4>{{ material_summary.handles.label }}</h4>
-      <p class="muted">{{ material_summary.handles.count }} distinct item{{ "" if material_summary.handles.count == 1 else "s" }}</p>
-      <ul class="summary-list">
-        {% for item in material_summary.handles.entries %}
-        <li>{{ item.display_text }}</li>
-        {% else %}
-        <li class="muted">No handles found.</li>
-        {% endfor %}
-      </ul>
-    </article>
-    <article class="summary-card">
-      <h4>{{ material_summary.bench_tops.label }}</h4>
-      <p class="muted">{{ material_summary.bench_tops.count }} distinct item{{ "" if material_summary.bench_tops.count == 1 else "s" }}</p>
-      <ul class="summary-list">
-        {% for item in material_summary.bench_tops.entries %}
-        <li>{{ item.display_text }}</li>
-        {% else %}
-        <li class="muted">No bench tops found.</li>
-        {% endfor %}
-      </ul>
-    </article>
-    <article class="summary-card">
-      <h4>{{ material_summary.shelves.label }}</h4>
-      <p class="muted">{{ material_summary.shelves.count }} distinct item{{ "" if material_summary.shelves.count == 1 else "s" }}</p>
-      <ul class="summary-list">
-        {% for item in material_summary.shelves.entries %}
-        <li>{{ item.display_text }}</li>
-        {% else %}
-        <li class="muted">No shelves found.</li>
-        {% endfor %}
-      </ul>
-    </article>
-  </div>
+<section class="grid-two">
+  <article class="card">
+    <h3>Snapshot Summary</h3>
+    <ul class="plain-list">
+      <li><strong>Source kind:</strong> {{ raw_snapshot.source_kind }}</li>
+      <li><strong>Extraction mode:</strong> {{ raw_analysis.label }}</li>
+      <li><strong>OpenAI merge attempted:</strong> {{ "Yes" if raw_analysis.openai_attempted else "No" }}</li>
+      <li><strong>OpenAI merge succeeded:</strong> {{ "Yes" if raw_analysis.openai_succeeded else "No" }}</li>
+      <li><strong>Model:</strong> {{ raw_analysis.openai_model or "Not used" }}</li>
+      <li><strong>Layout attempted:</strong> {{ "Yes" if raw_analysis.layout_attempted else "No" }}</li>
+      <li><strong>Layout succeeded:</strong> {{ "Yes" if raw_analysis.layout_succeeded else "No" }}</li>
+      <li><strong>Layout mode:</strong> {{ raw_analysis.layout_mode_label }}</li>
+      <li><strong>Layout provider:</strong> {{ raw_analysis.layout_provider or "heuristic" }}</li>
+      <li><strong>Layout pages:</strong> {{ raw_analysis.layout_pages|join(", ") if raw_analysis.layout_pages else "None" }}</li>
+      <li><strong>Docling attempted:</strong> {{ "Yes" if raw_analysis.docling_attempted else "No" }}</li>
+      <li><strong>Docling succeeded:</strong> {{ "Yes" if raw_analysis.docling_succeeded else "No" }}</li>
+      <li><strong>Docling pages:</strong> {{ raw_analysis.docling_pages|join(", ") if raw_analysis.docling_pages else "None" }}</li>
+      <li><strong>Heavy vision pages:</strong> {{ raw_analysis.heavy_vision_pages|join(", ") if raw_analysis.heavy_vision_pages else "None" }}</li>
+      <li><strong>Vision attempted:</strong> {{ "Yes" if raw_analysis.vision_attempted else "No" }}</li>
+      <li><strong>Vision succeeded:</strong> {{ "Yes" if raw_analysis.vision_succeeded else "No" }}</li>
+      <li><strong>Vision pages:</strong> {{ raw_analysis.vision_pages|join(", ") if raw_analysis.vision_pages else "None" }}</li>
+      <li><strong>Generated at:</strong> {{ raw_generated_at or raw_snapshot.generated_at }}</li>
+      <li><strong>Extraction duration:</strong> {{ raw_extraction_duration or "Not recorded" }}</li>
+      <li><strong>Rooms:</strong> {{ raw_spec_rooms|length }}</li>
+      <li><strong>Appliances:</strong> {{ raw_spec_appliances|length }}</li>
+      <li><strong>Warnings:</strong> {{ raw_spec_warnings|length }}</li>
+      <li><strong>PDF QA:</strong> {{ "Historical run result (latest snapshot only)" if historical_view else raw_verification_summary.status_label }}</li>
+      <li><strong>Room master file:</strong> {{ raw_analysis.room_master_file or "Single-file parse" }}</li>
+      <li><strong>Supplement files:</strong> {{ raw_analysis.supplement_files|join(", ") if raw_analysis.supplement_files else "None" }}</li>
+      <li><strong>Ignored unmatched room-like lines:</strong> {{ raw_analysis.ignored_room_like_lines_count }}</li>
+    </ul>
+    {% if raw_analysis.room_master_reason %}
+    <div class="subcard">
+      <h4>Room Master Reason</h4>
+      <p class="muted">{{ raw_analysis.room_master_reason }}</p>
+    </div>
+    {% endif %}
+    {% if raw_analysis.note or raw_analysis.layout_note or raw_analysis.docling_note or raw_analysis.vision_note %}
+    <div class="note-grid">
+      {% if raw_analysis.note %}
+      <div class="subcard subcard-note">
+        <h4>Analysis Note</h4>
+        <p class="muted">{{ raw_analysis.note }}</p>
+      </div>
+      {% endif %}
+      {% if raw_analysis.layout_note %}
+      <div class="subcard subcard-note">
+        <h4>Layout Note</h4>
+        <p class="muted">{{ raw_analysis.layout_note }}</p>
+      </div>
+      {% endif %}
+      {% if raw_analysis.docling_note %}
+      <div class="subcard subcard-note">
+        <h4>Docling Note</h4>
+        <p class="muted">{{ raw_analysis.docling_note }}</p>
+      </div>
+      {% endif %}
+      {% if raw_analysis.vision_note %}
+      <div class="subcard subcard-note">
+        <h4>Vision Note</h4>
+        <p class="muted">{{ raw_analysis.vision_note }}</p>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+  </article>
+
+  <article class="card">
+    <h3>Source Documents</h3>
+    <div class="table-wrap">
+      <table class="table-cardify">
+        <thead>
+          <tr>
+            <th>Role</th>
+            <th>Room Role</th>
+            <th>File Name</th>
+            <th>Pages</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in raw_source_documents %}
+          <tr>
+            <td data-label="Role">{{ row.role }}</td>
+            <td data-label="Room Role">{{ row.room_role or "-" }}</td>
+            <td data-label="File Name">{{ row.file_name }}</td>
+            <td data-label="Pages">{{ row.page_count }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4" class="empty-cell">No source document entries.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
 </section>
 {% endif %}
 {% endblock %}

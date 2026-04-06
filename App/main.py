@@ -807,7 +807,47 @@ def _flatten_rooms(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
                 "confidence": _display_value(row.get("confidence", "")),
             }
         )
-    return rows
+    return _sort_room_rows_by_priority(rows)
+
+
+def _sort_room_rows_by_priority(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(rows, key=_room_priority_sort_key)
+
+
+def _room_priority_sort_key(row: dict[str, Any]) -> int:
+    title = _display_value(row.get("original_room_label", "")) or _display_value(row.get("room_key", ""))
+    normalized = _normalize_room_priority_title(title)
+    if re.search(r"\bKITCHEN\b", normalized):
+        return 0
+    if (re.search(r"\bBUTLER\b", normalized) or re.search(r"\bPANTRY\b", normalized)) and not (
+        re.search(r"\bWIP\b", normalized) or "WALK IN PANTRY" in normalized
+    ):
+        return 1
+    if re.search(r"\bWIP\b", normalized) or "WALK IN PANTRY" in normalized:
+        return 2
+    if re.search(r"\bBAR\b", normalized):
+        return 3
+    if "LAUNDRY CHUTE" in normalized:
+        return 5
+    if re.search(r"\bLAUNDRY\b", normalized):
+        return 4
+    if any(keyword in normalized for keyword in ("VANITY", "VANITIES", "BATHROOM", "ENSUITE", "POWDER")):
+        return 6
+    if any(keyword in normalized for keyword in ("WALK IN ROBE", "ROBE", "WIR")):
+        return 7
+    if re.search(r"\bRUMPUS\b", normalized):
+        return 8
+    if re.search(r"\bLINEN\b", normalized):
+        return 9
+    return 10
+
+
+def _normalize_room_priority_title(value: str) -> str:
+    text = parsing.normalize_space(value).upper()
+    text = re.sub(r"[’']", "", text)
+    text = text.replace("&", " AND ")
+    text = re.sub(r"[^A-Z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _flatten_special_sections(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1437,12 +1477,6 @@ def _build_material_summary(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
                 row.get("bench_tops_other", ""),
                 row.get("floating_shelf", ""),
             ],
-            _normalize_benchtop_summary_value,
-        ),
-        "shelves": _material_bucket_with_rooms(
-            "Shelves",
-            rooms,
-            lambda row: [row.get("shelf", "")],
             _normalize_benchtop_summary_value,
         ),
     }
