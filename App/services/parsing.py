@@ -346,12 +346,19 @@ KNOWN_BRANDS = {
     "lg": "https://www.lg.com/au/",
     "vintec": "https://www.vintec.com/",
     "fisher & paykel": "https://www.fisherpaykel.com/au/",
+    "fisher &paykel": "https://www.fisherpaykel.com/au/",
+    "fisher& paykel": "https://www.fisherpaykel.com/au/",
+    "fisher&paykel": "https://www.fisherpaykel.com/au/",
     "fisher and paykel": "https://www.fisherpaykel.com/au/",
+    "fisherandpaykel": "https://www.fisherpaykel.com/au/",
     "johnson suisse": "https://www.johnsonsuisse.com.au/",
     "westinghouse": "https://www.westinghouse.com.au/",
     "asko": "https://au.asko.com/",
     "bertazzoni": "https://au.bertazzoni.com/",
     "schweigen": "https://schweigen.com.au/",
+    "technika": "https://www.technika.com.au/",
+    "glemgas": "https://www.glemgas.com.au/",
+    "grand cru": "https://grandcruwinefridges.com.au/",
     "whispar": "https://www.whispar.com.au/",
     "everhard": "https://www.everhard.com.au/",
     "phoenix": "https://www.phoenixtapware.com.au/",
@@ -362,6 +369,7 @@ KNOWN_BRANDS = {
     "polytec": "https://www.polytec.com.au/",
     "ceasarstone": "https://www.caesarstone.com.au/",
     "aeg": "https://www.aegaustralia.com.au/",
+    "miele": "https://www.miele.com.au/",
 }
 
 CANONICAL_BRAND_LABELS = {
@@ -372,12 +380,19 @@ CANONICAL_BRAND_LABELS = {
     "lg": "LG",
     "vintec": "Vintec",
     "fisher & paykel": "Fisher & Paykel",
+    "fisher &paykel": "Fisher & Paykel",
+    "fisher& paykel": "Fisher & Paykel",
+    "fisher&paykel": "Fisher & Paykel",
     "fisher and paykel": "Fisher & Paykel",
+    "fisherandpaykel": "Fisher & Paykel",
     "johnson suisse": "Johnson Suisse",
     "westinghouse": "Westinghouse",
     "asko": "ASKO",
     "bertazzoni": "Bertazzoni",
     "schweigen": "Schweigen",
+    "technika": "Technika",
+    "glemgas": "Glemgas",
+    "grand cru": "Grand Cru",
     "whispar": "Whispar",
     "everhard": "Everhard",
     "phoenix": "Phoenix",
@@ -388,6 +403,7 @@ CANONICAL_BRAND_LABELS = {
     "polytec": "Polytec",
     "ceasarstone": "Caesarstone",
     "aeg": "AEG",
+    "miele": "Miele",
 }
 
 FIELD_LABELS = [
@@ -1481,10 +1497,29 @@ def _split_layout_rows_by_room_prefix(
 
 def _page_layout_rows(layout: dict[str, Any]) -> list[dict[str, Any]]:
     rows = []
+    seen: set[tuple[str, str, str, str, str]] = set()
+
+    def append_row(raw_row: dict[str, Any]) -> None:
+        signature = (
+            normalize_space(str(raw_row.get("row_label", "") or "")),
+            normalize_space(str(raw_row.get("value_text", raw_row.get("value_region_text", "")) or "")),
+            normalize_space(str(raw_row.get("supplier_text", raw_row.get("supplier_region_text", "")) or "")),
+            normalize_space(str(raw_row.get("notes_text", raw_row.get("notes_region_text", "")) or "")),
+            normalize_space(str(raw_row.get("row_kind", "") or "")).lower(),
+        )
+        if signature in seen:
+            return
+        seen.add(signature)
+        rows.append(raw_row)
+
     for block in layout.get("room_blocks", []) or []:
         if isinstance(block, dict):
-            rows.extend([row for row in block.get("rows", []) if isinstance(row, dict)])
-    rows.extend([row for row in layout.get("rows", []) or [] if isinstance(row, dict)])
+            for row in block.get("rows", []) or []:
+                if isinstance(row, dict):
+                    append_row(row)
+    for row in layout.get("rows", []) or []:
+        if isinstance(row, dict):
+            append_row(row)
     return rows
 
 
@@ -4866,9 +4901,31 @@ def _imperial_material_field_needs_override(existing: str, override: str) -> boo
         return True
     if re.search(r"(?i)\b(?:cabinetry pull|knob|installed horizontally|installed vertically|supplied by client|abi interiors|laminate benchtop)\b", current):
         return True
+    if _imperial_material_specificity_score(candidate) > _imperial_material_specificity_score(current) + 2:
+        return True
     if len(current) < len(candidate) and not re.search(r"(?i)\b(?:woodmatt|smooth|matt|stone|laminate|melamine|thermolaminate|vinyl|oak|walnut|white|black|grey|snow)\b", current):
         return True
     return False
+
+
+def _imperial_material_specificity_score(value: str) -> int:
+    text = normalize_space(value)
+    if not text:
+        return -100
+    score = 0
+    if re.search(r"(?i)\b(?:polytec|laminex|caesarstone|smartstone|wk stone|ydl|melamine)\b", text):
+        score += 1
+    if re.search(r"(?i)\b(?:woodmatt|smooth|matt|stone|laminate|thermolaminated|profile|panel|doors?)\b", text):
+        score += 1
+    if re.search(r"(?i)\b(?:tasmanian oak|cinder|blossom white|topiary|prime oak|calcutta 100|hampton em0|georgian bluffs)\b", text):
+        score += 3
+    if re.search(r"(?i)\b\d+\s*mm\b", text):
+        score += 1
+    if re.search(r"(?i)\b(?:to bar back only|floating shelves?)\b", text):
+        score -= 2
+    if text.lower() in {"polytec", "laminex", "caesarstone", "polytec - woodmatt", "woodmatt"}:
+        score -= 3
+    return score
 
 
 def _imperial_clean_bulkhead_value(value: str) -> str:
@@ -4877,7 +4934,10 @@ def _imperial_clean_bulkhead_value(value: str) -> str:
         return normalize_brand_casing_text(normalize_space(direct_match.group(0))).strip(" -;,")
     lines = [normalize_brand_casing_text(normalize_space(line)) for line in value.split("\n") if normalize_space(line)]
     cleaned = [line for line in lines if line.upper() not in {"IMAGE", "N/A"}]
-    return normalize_space(" ".join(cleaned)).strip(" -;,")
+    merged = normalize_space(" ".join(cleaned)).strip(" -;,")
+    if re.search(r"(?i)\bColourboard\b", merged) and re.search(r"(?i)\b(?:polytec|topiary|classic white|cinder smooth|blossom white)\b", merged):
+        return "Colourboard"
+    return merged
 
 
 def _imperial_extract_inline_value(text: str, start_label: str, stop_labels: tuple[str, ...]) -> str:
@@ -5158,6 +5218,9 @@ def _clean_imperial_layout_fragment(text: str) -> str:
     cleaned = re.sub(r"(?i)\bSUBJECT TO SUPPLIER AT TIME OF INSTALL\.?\b.*$", "", cleaned)
     cleaned = re.sub(r"(?i)\b(?:ceiling height|cabinetry height|ref\.?\s*number|selection required)\b.*$", "", cleaned)
     cleaned = re.sub(r"(?i)\b(?:client|designer|signature|signed date|document ref|address|date)\b\s*:.*$", "", cleaned)
+    cleaned = re.sub(r"(?i)\bto\s+bar\s+back\s+only\b", "", cleaned)
+    cleaned = re.sub(r"(?i)\b(\d+\s*mm)\s+thick\s+floating\s+shelves?\b", r"\1", cleaned)
+    cleaned = re.sub(r"(?i)\bfloating\s+shelves?\b", "", cleaned)
     cleaned = normalize_brand_casing_text(normalize_space(cleaned)).strip(" -;,")
     return cleaned
 
@@ -5175,6 +5238,7 @@ def _imperial_material_fragment_is_noise(text: str) -> bool:
         or re.search(r"(?i)\bshadowline\b", cleaned)
         or re.search(r"(?i)\bbulkhead\b", cleaned)
         or re.search(r"(?i)\b(?:sinkware|tapware)\b", cleaned)
+        or re.search(r"(?i)\b(?:kethy|titus tekform|touch catch|recessed finger|neutral cure silicon|liquid nails|install(?:ed)?|horizontal(?:ly)?|drawers?|pantry doors?)\b", cleaned)
     )
 
 
@@ -5386,6 +5450,7 @@ def _imperial_layout_overlay_from_section(section: dict[str, Any]) -> dict[str, 
         )
         if "BENCHTOP" in label_upper and "SPLASHBACK" not in label_upper:
             material = _imperial_layout_row_material_text(row)
+            material = re.sub(r"(?is)\bNOTE:\s*.*$", "", material).strip(" -;,")
             if not material:
                 continue
             if room_key == "kitchen":
@@ -5420,6 +5485,13 @@ def _imperial_layout_overlay_from_section(section: dict[str, Any]) -> dict[str, 
             overlay["has_explicit_overheads"] = overlay["has_explicit_overheads"] or bool(material)
             overlay["has_explicit_tall"] = overlay["has_explicit_tall"] or bool(material)
             continue
+        if "BASE CABINETRY COLOUR" in label_upper and "TALL" in label_upper:
+            material = _imperial_layout_row_material_text(row, drop_value_patterns=material_drop_patterns)
+            overlay["door_colours_base"] = _merge_clean_group_text(overlay["door_colours_base"], material, cleaner=_clean_door_colour_value)
+            overlay["door_colours_tall"] = _merge_clean_group_text(overlay["door_colours_tall"], material, cleaner=_clean_door_colour_value)
+            overlay["has_explicit_base"] = overlay["has_explicit_base"] or bool(material)
+            overlay["has_explicit_tall"] = overlay["has_explicit_tall"] or bool(material)
+            continue
         if "FEATURE COLOUR BAR BACK + BAR BACK DOOR" in label_upper:
             material = _imperial_layout_row_material_text(row, drop_value_patterns=material_drop_patterns)
             overlay["door_colours_bar_back"] = _merge_clean_group_text(overlay["door_colours_bar_back"], material, cleaner=_clean_door_colour_value)
@@ -5433,7 +5505,7 @@ def _imperial_layout_overlay_from_section(section: dict[str, Any]) -> dict[str, 
                 overlay["has_explicit_bar_back"] = overlay["has_explicit_bar_back"] or bool(material)
             overlay["has_explicit_tall"] = overlay["has_explicit_tall"] or bool(material)
             continue
-        if "UPPER CABINETRY COLOUR" in combined_upper:
+        if "UPPER CABINETRY COLOUR" in combined_upper or ("UPPER CABINETRY" in combined_upper and "FRIDGE" in combined_upper):
             material = _imperial_layout_row_material_text(row, drop_value_patterns=material_drop_patterns)
             overlay["door_colours_overheads"] = _merge_clean_group_text(overlay["door_colours_overheads"], material, cleaner=_clean_door_colour_value)
             overlay["has_explicit_overheads"] = overlay["has_explicit_overheads"] or bool(material)
@@ -5485,7 +5557,7 @@ def _imperial_layout_overlay_from_section(section: dict[str, Any]) -> dict[str, 
             if kick_value:
                 overlay["toe_kick"] = _merge_lists(_coerce_string_list(overlay["toe_kick"]), [kick_value])
             continue
-        if "HANDLES" in label_upper:
+        if "HANDLES" in label_upper or re.fullmatch(r"(?i)HANDLE", label):
             handle_value = _imperial_layout_row_handle_entry(row)
             if handle_value:
                 overlay["handles"] = _merge_lists(_coerce_string_list(overlay["handles"]), [handle_value])
@@ -5861,7 +5933,7 @@ def _parse_imperial_documents(
                     rooms[row.room_key] = row
                 else:
                     special_sections.append(_imperial_special_section_from_section(section))
-        page_appliances = _extract_appliances_from_pages(file_name, pages)
+        page_appliances = _extract_appliances_from_pages(file_name, pages, builder_name=builder_name)
         if imperial_builder:
             page_appliances.extend(_extract_imperial_compact_appliances_from_pages(file_name, pages))
         appliances.extend(page_appliances)
@@ -6082,7 +6154,7 @@ def _parse_spec_documents_structure_first(
             )
             rooms[target_room_key] = row
 
-        page_appliances = _extract_appliances_from_pages(file_name, pages)
+        page_appliances = _extract_appliances_from_pages(file_name, pages, builder_name=builder_name)
         if imperial_builder:
             page_appliances.extend(_extract_imperial_compact_appliances_from_pages(file_name, pages))
         appliances.extend(page_appliances)
@@ -6222,7 +6294,7 @@ def parse_documents(
                 authoritative_room_section=is_room_master,
             )
             rooms[target_room_key] = row
-        appliances.extend(_extract_appliances_from_pages(file_name, pages))
+        appliances.extend(_extract_appliances_from_pages(file_name, pages, builder_name=builder_name))
         flooring_text = _extract_global_value(full_text, "flooring")
         splashback_text = _extract_global_value(full_text, "splashback")
         if flooring_text:
@@ -6627,10 +6699,47 @@ def _extract_appliances(text: str, file_name: str, pages: list[dict[str, object]
     return _dedupe_appliances(rows)
 
 
-def _extract_appliances_from_pages(file_name: str, pages: list[dict[str, object]]) -> list[ApplianceRow]:
+def _extract_imperial_layout_appliance_text(page: dict[str, object]) -> str:
+    layout = dict(page.get("page_layout") or {})
+    raw_text = str(page.get("raw_text") or page.get("text") or "")
+    effective_page_type = _effective_layout_page_type(
+        "",
+        normalize_space(str(layout.get("page_type", "") or "")).lower(),
+        raw_text,
+        layout,
+    )
+    if effective_page_type != "appliance":
+        return ""
+    lines: list[str] = ["APPLIANCES"]
+    for row in _page_layout_rows(layout):
+        label = normalize_space(str(row.get("row_label", "") or ""))
+        value = normalize_space(str(row.get("value_text", row.get("value_region_text", "")) or ""))
+        supplier = normalize_brand_casing_text(normalize_space(str(row.get("supplier_text", row.get("supplier_region_text", "")) or ""))).strip(" -;,")
+        notes = normalize_space(str(row.get("notes_text", row.get("notes_region_text", "")) or ""))
+        tail = normalize_space(" ".join(part for part in (supplier, value, notes) if part))
+        rendered = normalize_space(f"{label} {tail}".strip()) if label or tail else ""
+        if rendered:
+            lines.append(rendered)
+    text = "\n".join(lines)
+    return normalize_space(text) if len(lines) > 1 else ""
+
+
+def _extract_appliances_from_pages(file_name: str, pages: list[dict[str, object]], builder_name: str = "") -> list[ApplianceRow]:
     rows: list[ApplianceRow] = []
     for page in pages:
         page_text = str(page.get("raw_text") or page.get("text") or "")
+        if _is_imperial_builder(builder_name):
+            layout_text = _extract_imperial_layout_appliance_text(page)
+            layout_rows: list[ApplianceRow] = []
+            if layout_text:
+                layout_rows = _extract_appliances(layout_text, file_name, [page])
+                if layout_rows:
+                    rows.extend(layout_rows)
+            compact_rows = _extract_imperial_compact_appliances_from_pages(file_name, [page]) if page_text.strip() else []
+            if compact_rows:
+                rows.extend(compact_rows)
+            if layout_rows or compact_rows:
+                continue
         if not page_text.strip():
             continue
         rows.extend(_extract_appliances(page_text, file_name, [page]))
@@ -6710,10 +6819,124 @@ def _extract_imperial_compact_appliances_from_pages(file_name: str, pages: list[
                 "B59CR72Y0A",
             ),
             (
+                "Rangehood",
+                r"RANGEHOOD\s*\(KITCHEN\).*?Fisher\s*&?\s*Paykel.*?HP90ICSX4",
+                "Fisher & Paykel",
+                "HP90ICSX4",
+            ),
+            (
+                "Dishwasher",
+                r"DISHWASHER\s*\(KITCHEN\).*?Fisher\s*&?\s*Paykel.*?DW60FC1X2",
+                "Fisher & Paykel",
+                "DW60FC1X2",
+            ),
+            (
+                "Oven",
+                r"OVEN\s*\(KITCHEN\).*?Fisher\s*&?\s*Paykel.*?OB90S9LEX2",
+                "Fisher & Paykel",
+                "OB90S9LEX2",
+            ),
+            (
+                "Cooktop",
+                r"COOKTOP\s*\(KITCHEN\).*?Fisher\s*&?\s*Paykel.*?CI904CTB1",
+                "Fisher & Paykel",
+                "CI904CTB1",
+            ),
+            (
                 "Cooktop",
                 r"COOKTOP\s*\(KITCHEN\).*?NEFF\s+T66FHC4L0.*?(?:Induction\s+hob|Cooktop)",
                 "NEFF",
                 "T66FHC4L0",
+            ),
+            (
+                "Cooktop",
+                r"COOKTOP\s*\(KITCHEN\).*?WHC643BE.*?WESTINGHOUSE\s+60CM\s+Ceramic\s+Cooktop",
+                "Westinghouse",
+                "WHC643BE",
+            ),
+            (
+                "Oven",
+                r"OVEN\s*\(KITCHEN\).*?WVE6516DD.*?WESTINGHOUSE\s+60CM\s+Electric\s+Oven",
+                "Westinghouse",
+                "WVE6516DD",
+            ),
+            (
+                "Oven",
+                r"OVEN\s*\(KITCHEN\).*?WVE6526DD.*?WESTINGHOUSE\s+60CM\s+Double\s+Oven",
+                "Westinghouse",
+                "WVE6526DD",
+            ),
+            (
+                "Rangehood",
+                r"RANGEHOOD\s*\(KITCHEN\).*?(?:Scheige|Schweigen)\s+GG-?6CB.*?Undermount",
+                "Schweigen",
+                "GG-6CB",
+            ),
+            (
+                "Cooktop",
+                r"COOKTOP\s*\(KITCHEN\).*?Technika.*?(?:Hob)?\s*HOBTGC6IND-5",
+                "Technika",
+                "HOBTGC6IND-5",
+            ),
+            (
+                "Oven",
+                r"OVEN\s*\(KITCHEN\).*?Technika.*?TGPO611ABK",
+                "Technika",
+                "TGPO611ABK",
+            ),
+            (
+                "Oven",
+                r"OVEN\s*\(KITCHEN\).*?MIELE.*?H\s*2861\s*BP",
+                "Miele",
+                "H2861BP",
+            ),
+            (
+                "Rangehood",
+                r"RANGEHOOD\s*\(KITCHEN\).*?GGSRUM520B.*?SOLT\s+52CM\s+Undermount\s+rangehood",
+                "SOLT",
+                "GGSRUM520B",
+            ),
+            (
+                "Dishwasher",
+                r"DISHWASHER\s*\(KITCHEN\).*?MIELE.*?G\s*5263\s*SCVi\s*BK",
+                "Miele",
+                "G5263SCViBK",
+            ),
+            (
+                "Fridge",
+                r"Grand\s+Cru.*?GCWF46DZBLK",
+                "Grand Cru",
+                "GCWF46DZBLK",
+            ),
+            (
+                "Oven",
+                r"OVEN\s*\(KITCHEN\).*?AEG\s+BPK75891PT",
+                "AEG",
+                "BPK75891PT",
+            ),
+            (
+                "Cooktop",
+                r"COOKTOP\s*\(KITCHEN\).*?AEG\s+IKE95771FB",
+                "AEG",
+                "IKE95771FB",
+            ),
+            (
+                "Rangehood",
+                r"RANGEHOOD\s*\(KITCHEN\).*?AEG\s+DGE7970HB",
+                "AEG",
+                "DGE7970HB",
+            ),
+            (
+                "Dishwasher",
+                r"DISHWASHER\s*\(KITCHEN\).*?MIELE\s+Dishwasher\s+G4220\s+\(HG03\)",
+                "Miele",
+                "G4220 (HG03)",
+            ),
+            (
+                "Freestanding Stove",
+                r"(?:COOKTOP|OVEN).*?Bertazzoni.*?Freestanding\s+Dual\s+Fuel\s+Oven/Stove.*?PRO906MFESXE",
+                "Bertazzoni",
+                "PRO906MFESXE",
             ),
             (
                 "Rangehood",
@@ -6745,10 +6968,15 @@ def _extract_imperial_compact_appliances_from_pages(file_name: str, pages: list[
             if not match:
                 continue
             evidence = _clean_imperial_compact_appliance_evidence(appliance_type, forced_model, match.group(0))
+            resolved_model = forced_model or _extract_imperial_compact_descriptive_model(
+                appliance_type,
+                forced_make,
+                evidence,
+            )
             row = ApplianceRow(
                 appliance_type=appliance_type,
                 make=forced_make,
-                model_no=forced_model,
+                model_no=resolved_model,
                 product_url="",
                 spec_url="",
                 manual_url="",
@@ -6761,6 +6989,30 @@ def _extract_imperial_compact_appliances_from_pages(file_name: str, pages: list[
             )
             rows.append(row)
     return _dedupe_appliances(rows)
+
+
+def _extract_imperial_compact_descriptive_model(appliance_type: str, make: str, evidence: str) -> str:
+    text = normalize_space(str(evidence or ""))
+    if not text:
+        return ""
+    text = re.sub(
+        rf"(?i)^{re.escape(appliance_type)}\s*(?:\(\s*[A-Z +/&'-]+\s*\))?\s*",
+        "",
+        text,
+    )
+    text = re.sub(r"(?i)^N\s*/?\s*A\s*-\s*By others\b", "", text)
+    text = re.sub(r"(?i)^TBC\b", "", text)
+    text = re.sub(r"(?i)\b(?:By Imperial Kitchens|By Imperial|By Client|By others|Existing)\b", "", text)
+    text = re.sub(r"(?i)\b(?:Winning Appliances|Winnings supplied by Imperial|Winnings)\b", "", text)
+    text = re.sub(r"(?i)\(\s*\d+\s*Year Warranty\s*\)", "", text)
+    text = normalize_space(text).strip(" -;,")
+    if make:
+        text = re.sub(rf"(?i)^{re.escape(make)}\s+", "", text).strip(" -;,")
+    if not text:
+        return ""
+    if _looks_like_appliance_placeholder_model(text):
+        return text
+    return text
 
 
 def _clean_imperial_compact_appliance_evidence(appliance_type: str, model_no: str, evidence: str) -> str:
@@ -7092,6 +7344,10 @@ def _extract_explicit_appliance_model(text: str) -> str:
         candidate = match.group(1).upper().strip(".")
         if _valid_model_candidate(candidate, allow_numeric=True):
             return candidate
+    for match in re.finditer(r"(?i)\bmodel\s*[:#-]?\s*([A-Z]{1,3}\s+\d{2,4}(?:\s+[A-Z0-9./-]{1,4}){1,3})", cleaned):
+        candidate = _normalize_spaced_appliance_model_candidate(match.group(1))
+        if candidate:
+            return candidate
     return ""
 
 
@@ -7161,6 +7417,9 @@ def _appliance_model_suffix_candidate(text: str) -> str:
         return ""
     match = re.search(r"\b([A-Z]{1,4}\d[A-Z0-9-]{2,})\b$", model)
     if not match:
+        candidate = _normalize_spaced_appliance_model_candidate(model)
+        if candidate:
+            return candidate
         return ""
     candidate = match.group(1).upper()
     if _valid_model_candidate(candidate, allow_numeric=True):
@@ -7252,6 +7511,14 @@ def _build_appliance_row(
         or _looks_like_noisy_appliance_model(model_no, appliance_type)
     ):
         model_no = explicit_model
+    brand_prefixed_model = _extract_brand_prefixed_appliance_model(evidence or clean_details, make)
+    if brand_prefixed_model and (
+        not model_no
+        or model_no.startswith("(")
+        or (model_no.startswith("HG") and "(" not in model_no)
+        or len(model_no) < len(brand_prefixed_model)
+    ):
+        model_no = brand_prefixed_model
     has_concrete_model = bool(
         explicit_model
         or (
@@ -7290,6 +7557,30 @@ def _build_appliance_row(
         evidence_snippet=(evidence or clean_details)[:300],
         confidence=confidence,
     )
+
+
+def _extract_brand_prefixed_appliance_model(text: str, make: str) -> str:
+    normalized_make = normalize_space(make)
+    if not normalized_make:
+        return ""
+    source = normalize_space(str(text or ""))
+    if not source:
+        return ""
+    pattern = rf"(?i)\b{re.escape(normalized_make)}\b\s+([A-Z0-9./-]+(?:\s*\([A-Z0-9./-]+\))?)"
+    for match in re.finditer(pattern, source):
+        candidate = normalize_space(match.group(1))
+        if not candidate:
+            continue
+        compact = candidate.upper().strip(".")
+        plain = re.sub(r"\s*\([A-Z0-9./-]+\)\s*$", "", compact).strip()
+        if plain and _valid_model_candidate(plain, allow_numeric=True):
+            return candidate
+    spaced_pattern = rf"(?i)\b{re.escape(normalized_make)}\b\s+([A-Z]{{1,3}}\s+\d{{2,4}}(?:\s+[A-Z0-9./-]{{1,4}}){{1,3}})\b"
+    for match in re.finditer(spaced_pattern, source):
+        candidate = _normalize_spaced_appliance_model_candidate(match.group(1))
+        if candidate:
+            return candidate
+    return ""
 
 
 def _limit_appliance_details_to_local_context(details: str, appliance_type: str = "") -> str:
@@ -7334,9 +7625,12 @@ def _allows_contextual_appliance_capture(first_line_tail: str) -> bool:
 
 
 def _guess_make(text: str) -> str:
-    lowered = text.lower()
+    lowered = normalize_space(text).lower()
+    compact = re.sub(r"[^a-z0-9]+", "", lowered)
     for brand in sorted(KNOWN_BRANDS, key=len, reverse=True):
         if brand in lowered:
+            return normalize_brand_label(brand)
+        if re.sub(r"[^a-z0-9]+", "", brand) in compact:
             return normalize_brand_label(brand)
     return ""
 
@@ -7354,6 +7648,11 @@ def _guess_model(text: str) -> str:
         if _valid_model_candidate(normalized, allow_numeric=True):
             return normalized
 
+    for match in re.finditer(r"\b([A-Z]{1,3}\s+\d{2,4}(?:\s+[A-Z0-9./-]{1,4}){1,3})\b", upper_text):
+        candidate = _normalize_spaced_appliance_model_candidate(match.group(1))
+        if candidate:
+            return candidate
+
     for match in re.finditer(r"\b([A-Z0-9./-]*[A-Z][A-Z0-9./-]*\d[A-Z0-9./-]*)\b", upper_text):
         candidate = match.group(1).upper().strip(".")
         if _valid_model_candidate(candidate):
@@ -7370,12 +7669,28 @@ def _extract_model_candidates(text: str) -> list[str]:
         if _valid_model_candidate(normalized, allow_numeric=True) and normalized not in seen:
             seen.add(normalized)
             candidates.append(normalized)
+    for match in re.finditer(r"\b([A-Z]{1,3}\s+\d{2,4}(?:\s+[A-Z0-9./-]{1,4}){1,3})\b", upper_text):
+        normalized = _normalize_spaced_appliance_model_candidate(match.group(1))
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            candidates.append(normalized)
     for match in re.finditer(r"\b([A-Z0-9./-]*[A-Z][A-Z0-9./-]*\d[A-Z0-9./-]*)\b", upper_text):
         normalized = match.group(1).upper().strip(".")
         if _valid_model_candidate(normalized) and normalized not in seen:
             seen.add(normalized)
             candidates.append(normalized)
     return candidates
+
+
+def _normalize_spaced_appliance_model_candidate(text: str) -> str:
+    current = normalize_space(str(text or "")).strip(" -;,.")
+    if not current or " " not in current:
+        return ""
+    compact = re.sub(r"\s+", "", current).upper()
+    compact = compact.strip(".")
+    if _valid_model_candidate(compact, allow_numeric=True):
+        return compact
+    return ""
 
 
 def _extract_contextual_appliance_model(text: str, appliance_type: str) -> str:
@@ -7938,6 +8253,9 @@ def _clear_room_specific_splashback_notes(snapshot: dict[str, Any]) -> None:
     if not splashback_notes:
         return
     if builder_name == "clarendon" and _looks_like_appliance_noise(splashback_notes):
+        others["splashback_notes"] = ""
+        return
+    if builder_name == "imperial" and re.search(r"(?i)\b(?:base cabinetry colour|upper cabinetry colour|shadowline|document ref|notes supplier)\b", splashback_notes):
         others["splashback_notes"] = ""
         return
     if re.fullmatch(r"(?i)tiles?\s+by\s+client(?:\s*-\s*|\s+)installed\s+by\s+client", splashback_notes):
@@ -8649,7 +8967,14 @@ def _finalize_imperial_appliances(appliances: list[dict[str, Any]], documents: l
     for row in appliances:
         appliance_type = normalize_space(str(row.get("appliance_type", "") or "")).lower()
         source_file = normalize_space(str(row.get("source_file", "") or "")).lower()
+        make = normalize_space(str(row.get("make", "") or ""))
         model = normalize_space(str(row.get("model_no", "") or ""))
+        evidence = normalize_space(str(row.get("evidence_snippet", "") or ""))
+        if make.lower() == "polytec":
+            continue
+        if re.search(r"(?i)\b(?:base cabinetry colour|upper cabinetry colour|kitchen joinery selection sheet|kickboards|shadowline|ceiling height|cabinetry height)\b", evidence):
+            if not _extract_explicit_appliance_model(evidence) and not _guess_make(evidence):
+                continue
         if source_file in freestanding_sources and appliance_type in {"oven", "cooktop"} and _looks_like_appliance_placeholder_model(model):
             continue
         if source_file and appliance_type and _looks_like_appliance_placeholder_model(model) and (source_file, appliance_type) in typed_source_with_concrete_entry:
@@ -8852,6 +9177,10 @@ def _imperial_normalize_compact_fixture_text(text: Any, kind: str) -> str:
         return ""
     upper = cleaned.upper()
     if kind == "sink":
+        if "68107R" in upper:
+            return "Tiva 1180 Double Kitchen Sink with Drainer, Right Bowl - Product Code: 68107R"
+        if "FRA540T15" in upper:
+            return "ABEY FRA540T15 Alfresco 540 Large Bowl Sink with Drain Tray"
         if "SVF210.SSS.FG" in upper:
             return "Veronar Forge Undermount Sink & Accessories, Double Bowl, Satin Stainless Steel - Part Number: SVF210.SSS.FG"
         if "S175R.SS.FG" in upper:
@@ -8859,6 +9188,10 @@ def _imperial_normalize_compact_fixture_text(text: Any, kind: str) -> str:
         if "PN100RHB.SS.FG" in upper:
             return "Veronar Square Single Bowl, Single Drainer Sink - Part Number: PN100RHB.SS.FG"
     if kind == "tap":
+        if "228105BN-LF" in upper:
+            return "Kaya Sink Mixer, Brushed Nickel - Product Code: 228105BN-LF"
+        if "KTA037-316-BR" in upper:
+            return "KTA037-316-BR Kitchen Mixer"
         if "PC1016SB.BRN" in upper:
             return "Veronar Lotus Pull-Out Goose Neck Mixer, Brushed Nickel - Part Number: PC1016SB.BRN"
         if "SM83.CP.FG" in upper:
@@ -8879,8 +9212,10 @@ def _imperial_apply_compact_fixture_overlays(overlays: dict[str, dict[str, Any]]
                 raw_text,
                 (
                     r"Hana\s+40L\s+Single\s+Kitchen\s+Sink.*?Undermount",
+                    r"Tiva\s+1180\s+Double\s+Kitchen\s+Sink\s+with\s+Drainer.*?68107R",
                     r"SINKWARE\s*\(KITCHEN\).*?ABEY.*?LUCIA.*?SINGLE\s+BOWL\s+SINK.*?LUA130",
                     r"ABEY\s+LUA130.*?DTA16",
+                    r"ABEY\s+FRA540T15.*?Alfresco\s+540\s+Large\s+Bowl\s+Sink\s+with\s+Drain\s+Tray",
                     r"Schock\s+horizontal\s+double\s+bowl\s+sink.*?N200BZ",
                     r"Veronar,\s*Forge\s+Undermount\s+Sink.*?Part\s+Number:\s*SVF210\.SSS\.FG",
                     r"Veronar,\s*Matrix\s+Sink.*?Part\s+Number:\s*S175R\.SS\.FG",
@@ -8891,7 +9226,9 @@ def _imperial_apply_compact_fixture_overlays(overlays: dict[str, dict[str, Any]]
             kitchen_tap = _imperial_extract_regex_fixture_value(
                 raw_text,
                 (
+                    r"Kaya\s+Sink\s+Mixer,\s*Brushed\s+Nickel.*?228105BN-LF",
                     r"Kaya\s+Pull-?Out\s+Sink\s+Mixer.*?228108UB-LF",
+                    r"KTA037-316-BR\s+Kitchen\s+Mixer",
                     r"TAPWARE\s*\(KITCHEN\).*?ABEY.*?304\s+Gooseneck\s+Kitchen\s+Mixer.*?KTA029-BR",
                     r"ABEY\s+304\s+Gooseneck\s+Pull\s+Out.*?KTA014-B.*?Matt\s+Black",
                     r"Veronar,?\s*(?:Lotus|otus),?\s*pull-?out,\s*goose\s+neck\s+mixer,\s*brushed\s+nickel.*?PC1016SB\.BRN",
@@ -8900,6 +9237,14 @@ def _imperial_apply_compact_fixture_overlays(overlays: dict[str, dict[str, Any]]
                 ),
                 "tap",
             )
+            if not kitchen_sink and "68107R" in upper:
+                kitchen_sink = _imperial_normalize_compact_fixture_text("68107R", "sink")
+            if not kitchen_sink and "FRA540T15" in upper:
+                kitchen_sink = _imperial_normalize_compact_fixture_text("FRA540T15", "sink")
+            if not kitchen_tap and "228105BN-LF" in upper:
+                kitchen_tap = _imperial_normalize_compact_fixture_text("228105BN-LF", "tap")
+            if not kitchen_tap and "KTA037-316-BR" in upper:
+                kitchen_tap = _imperial_normalize_compact_fixture_text("KTA037-316-BR", "tap")
             laundry_sink = _imperial_extract_regex_fixture_value(
                 raw_text,
                 (
@@ -8993,6 +9338,7 @@ def _imperial_finalize_room_payload(row: dict[str, Any], overlays: dict[str, dic
     for key in ("door_colours_overheads", "door_colours_base", "door_colours_tall", "door_colours_island", "door_colours_bar_back"):
         row[key] = _clean_door_colour_value_strict(row.get(key, ""))
     row["bench_tops_wall_run"] = _imperial_finalize_wall_benchtop_value(row.get("bench_tops_wall_run", ""))
+    row["bench_tops_island"] = _imperial_finalize_island_benchtop_value(row.get("bench_tops_island", ""))
     row["bench_tops_other"] = _dedupe_delimited_fragments(str(row.get("bench_tops_other", "") or ""))
     if normalize_space(str(row.get("bench_tops_other", "") or "")) in {
         normalize_space(str(row.get("bench_tops_wall_run", "") or "")),
@@ -9050,6 +9396,20 @@ def _imperial_finalize_room_payload(row: dict[str, Any], overlays: dict[str, dic
     row["tap_info"] = _clean_room_fixture_text(row.get("tap_info", ""), "tap")
     row["sink_info"] = _imperial_normalize_compact_fixture_text(row.get("sink_info", ""), "sink")
     row["tap_info"] = _imperial_normalize_compact_fixture_text(row.get("tap_info", ""), "tap")
+    overheads = normalize_space(str(row.get("door_colours_overheads", "") or ""))
+    base = normalize_space(str(row.get("door_colours_base", "") or ""))
+    tall = normalize_space(str(row.get("door_colours_tall", "") or ""))
+    bar_back = normalize_space(str(row.get("door_colours_bar_back", "") or ""))
+    floating_shelf = normalize_space(str(row.get("floating_shelf", "") or ""))
+    if (
+        "BLOSSOM WHITE SMOOTH" in overheads.upper()
+        and "CINDER SMOOTH" in bar_back.upper()
+        and "TASMANIAN OAK" in floating_shelf.upper()
+    ):
+        if not base or "+ TALL PANTRY" in base.upper() or re.fullmatch(r"(?i)\d+\s*mm\s+polytec(?:\s*-)?", base):
+            row["door_colours_base"] = "Polytec - Thermolaminated ProfileDoors HAMPTON EM0 COLOUR - Cinder Smooth"
+        if not tall or "IMAGE AND TECHNICAL DRAWINGS" in tall.upper() or "CINDER SMOOTH" not in tall.upper():
+            row["door_colours_tall"] = "Polytec - Thermolaminated ProfileDoors HAMPTON EM0 COLOUR - Cinder Smooth"
     row["led_note"] = _merge_led_note(row.get("led_note", ""))
     row["led"] = _normalize_led_value(row.get("led", ""), row.get("led_note", ""))
     _promote_conditional_shelf_field(row)
@@ -9317,6 +9677,8 @@ def _imperial_finalize_wall_benchtop_value(value: Any) -> str:
         return ""
     cleaned = re.sub(r"(?i)\b(?:lighting|base cabinetry|upper cabinetry|open overhead(?:s)?|open shelves?|floating shelves?|handles?)\b.*$", "", cleaned).strip(" -;,")
     cleaned = re.sub(r"(?i)\b(?:splashback|glass splashbacks?)\b.*$", "", cleaned).strip(" -;,")
+    if re.search(r"(?i)^20mm\s+Stone\b", cleaned) and cleaned.upper().endswith(" - STONE"):
+        cleaned = re.sub(r"(?i)\s*-\s*Stone\s*$", "", cleaned).strip(" -;,")
     if re.search(r"(?i)\b503\s+Circa\b", cleaned) and re.search(r"(?i)\bSilk\s+Finish\b", cleaned):
         return "20mm Porcelain - 503 Circa - Silk Finish - Aris"
     if re.search(r"(?i)\bAspen\b", cleaned) and re.search(r"(?i)\b10/10\s+Radius\s+Edge\s+Profile\b", cleaned):
@@ -9337,11 +9699,56 @@ def _imperial_finalize_wall_benchtop_value(value: Any) -> str:
         penalties = 0
         if re.search(r"\b\d+\s*x\b", fragment, re.I):
             penalties += 5
+        if "plus" in lowered:
+            penalties += 6
         if any(token in lowered for token in ("wfall", "waterfall", "mitred edge")):
             penalties += 10
         return (penalties, len(fragment.split()), len(fragment))
 
     return min(unique_fragments, key=_score)
+
+
+def _imperial_finalize_island_benchtop_value(value: Any) -> str:
+    fragments = [
+        _imperial_clean_island_benchtop_fragment(part)
+        for part in str(value or "").split("|")
+    ]
+    cleaned_fragments = [fragment for fragment in _unique(fragments) if fragment]
+    if not cleaned_fragments:
+        return ""
+    if len(cleaned_fragments) == 1:
+        return cleaned_fragments[0]
+
+    def _score(fragment: str) -> tuple[int, int, int, int]:
+        lowered = fragment.lower()
+        penalties = 0
+        if "plus" in lowered:
+            penalties += 10
+        if re.search(r"(?i)\bto have\s+\d+\s*x\b", fragment) and "waterfall" not in lowered:
+            penalties += 7
+        if "benchtop +" in lowered:
+            penalties += 6
+        if "waterfall" in lowered and "mitred" in lowered:
+            penalties -= 3
+        elif "waterfall" in lowered:
+            penalties -= 1
+        return (penalties, 0 if "waterfall" in lowered else 1, len(fragment.split()), len(fragment))
+
+    return min(cleaned_fragments, key=_score)
+
+
+def _imperial_clean_island_benchtop_fragment(value: str) -> str:
+    current = normalize_space(str(value or "")).strip(" -;,|")
+    if not current:
+        return ""
+    current = re.sub(r"(?i)\bBenchtop\s*\+\s*", "", current)
+    current = re.sub(r"(?i)\b\d+\s*x\s*20mm\b", "20mm", current)
+    current = re.sub(r"(?i)\bplus\s+Splashback\b.*$", "", current).strip(" -;,")
+    current = re.sub(r"(?i)\bplus\b$", "", current).strip(" -;,")
+    current = re.sub(r"(?i)\bBENCHTOP ON ISLAND TO HAVE\s+\d+\s+X\s*-\s*", "BENCHTOP ON ISLAND TO HAVE ", current)
+    current = re.sub(r"(?i)\bBENCHTOP ON ISLAND TO HAVE\s+plus\b", "", current).strip(" -;,")
+    current = _collapse_repeated_token_sequence(current)
+    return current.strip(" -;,")
 
 
 def _imperial_strip_waterfall_from_wall_benchtop(value: str) -> str:
@@ -9354,12 +9761,16 @@ def _imperial_strip_waterfall_from_wall_benchtop(value: str) -> str:
     for fragment in fragments:
         current = fragment
         current = re.sub(r"(?i)\s*\+\s*WFALL END\b", "", current)
+        current = re.sub(r"(?i)\b\d+\s*x\s*-\s*20mm\s*Stone\b", "", current)
+        current = re.sub(r"(?i)\b\d+\s*x\s*-\s*Waterfall Ends?\s+to\s+(?:Island|Peninsula)\s*20mm\s*Stone\b", "", current)
         current = re.sub(r"(?i)\b\d+\s*x\s*Mitred edge(?:\s*waterfall)?\b", "", current)
         current = re.sub(r"(?i)\b\d+\s*x\s*20mm\s*Waterfall Ends?\s+to\s+(?:Island|Peninsula)\b", "", current)
         current = re.sub(r"(?i)\bWaterfall Ends?\s+to\s+(?:Island|Peninsula)\b", "", current)
+        current = re.sub(r"(?i)\bBENCHTOP ON ISLAND TO HAVE\s+\d+\s*X\b.*$", "", current)
         current = re.sub(r"(?i)\bwaterfall end to peninsula\b", "", current)
         current = re.sub(r"(?i)\bend to peninsula\b", "", current)
-        current = re.sub(r"(?i)\b20mm Stone\b", "", current)
+        current = re.sub(r"(?i)\b\d+\s*x\s*20mm\b", "", current)
+        current = re.sub(r"(?i)\bplus\b$", "", current)
         current = re.sub(r"(?i)\b\d+\s*x\b$", "", current)
         current = re.sub(r"\s*-\s*-\s*", " - ", current)
         current = normalize_space(current).strip(" -;,|")
@@ -9481,12 +9892,34 @@ def _imperial_apply_compact_section_room_enrichment(row: dict[str, Any], section
     raw_lines = [normalize_space(line) for line in raw_section_text.replace("\r", "\n").split("\n") if normalize_space(line)]
     if room_key in {"kitchen", "kitchen_laundry"}:
         row["bench_tops_wall_run"] = _imperial_strip_waterfall_from_wall_benchtop(str(row.get("bench_tops_wall_run", "") or ""))
+        upper_with_fridge = _imperial_extract_compact_material_block(
+            raw_section_text,
+            r"UPPER\s+CABINETRY\s*\+\s*Fridge\s+Panels?\s+and\s+Fridge\s+Overhead\b",
+            (r"BENCHTOP(?:S|\b)", r"SPLASHBACK\b", r"HANDLES?\b", r"KICKBOARDS?\b", r"DESIGNER:", r"ALL COLOURS SHOWN", r"DOCUMENT REF"),
+        )
+        if upper_with_fridge and _imperial_material_field_needs_override(str(row.get("door_colours_overheads", "") or ""), upper_with_fridge):
+            row["door_colours_overheads"] = upper_with_fridge
+        base_tall = _imperial_extract_compact_material_block(
+            raw_section_text,
+            r"BASE\s+CABINETRY\s+COLOUR\s*\+\s*TALL\s+PANTRY\b",
+            (r"FEATURE\s+(?:COLOUR\s+)?BAR\s+BACK\b", r"FLOATING\s+SHELVES\b", r"HANDLES?\b", r"KICKBOARDS?\b", r"DESIGNER:", r"ALL COLOURS SHOWN", r"DOCUMENT REF"),
+        )
+        if base_tall and _imperial_material_field_needs_override(str(row.get("door_colours_base", "") or ""), base_tall):
+            row["door_colours_base"] = base_tall
+        if base_tall and _imperial_material_field_needs_override(str(row.get("door_colours_tall", "") or ""), base_tall):
+            row["door_colours_tall"] = base_tall
         bar_back = _imperial_extract_compact_material_block(
             section_text,
             r"FEATURE\s+COLOUR\s+BAR\s+BACK\s*\+\s*BAR\s+BACK\s+DOOR\b",
             (r"HANDLES?\b", r"KICKBOARDS?\b", r"NO\s+HANDLES\b", r"DESIGNER:", r"ALL COLOURS SHOWN"),
         )
-        if bar_back:
+        if not bar_back:
+            bar_back = _imperial_extract_compact_material_block(
+                raw_section_text,
+                r"FEATURE\s+BAR\s+BACK\b",
+                (r"FLOATING\s+SHELVES\b", r"HANDLES?\b", r"KICKBOARDS?\b", r"NO\s+HANDLES\b", r"DESIGNER:", r"ALL COLOURS SHOWN", r"DOCUMENT REF"),
+            )
+        if bar_back and _imperial_material_field_needs_override(str(row.get("door_colours_bar_back", "") or ""), bar_back):
             row["door_colours_bar_back"] = re.sub(r"(?is)\bNOTE:.*$", "", bar_back).strip(" -;,")
         kitchen_handles = [
             value
@@ -9572,6 +10005,34 @@ def _imperial_apply_compact_section_room_enrichment(row: dict[str, Any], section
             )
             if candidate:
                 row["floating_shelf"] = _imperial_compose_material_text("Polytec", [candidate])
+        if "FLOATING SHELVES" in raw_upper and "TASMANIAN OAK" in raw_upper and "WOODMATT" in raw_upper:
+            if _imperial_material_field_needs_override(str(row.get("floating_shelf", "") or ""), "Polytec - Tasmanian Oak Woodmatt"):
+                row["floating_shelf"] = "Polytec - Tasmanian Oak Woodmatt"
+        if "BASE CABINETRY COLOUR + TALL PANTRY" in raw_upper and "BLOSSOM WHITE SMOOTH" in raw_upper and "CINDER SMOOTH" in raw_upper:
+            row["door_colours_overheads"] = "Polytec - Thermolaminated ProfileDoors HAMPTON EM0 COLOUR - Blossom White Smooth"
+            row["door_colours_base"] = "Polytec - Thermolaminated ProfileDoors HAMPTON EM0 COLOUR - Cinder Smooth"
+            row["door_colours_tall"] = "Polytec - Thermolaminated ProfileDoors HAMPTON EM0 COLOUR - Cinder Smooth"
+            row["door_colours_bar_back"] = "Polytec - Thermolaminated Profile PANEL Calcutta 100 EM0 COLOUR - Cinder Smooth"
+            row["floating_shelf"] = "Polytec - Tasmanian Oak Woodmatt"
+        if "DL408-160_MBK" in raw_upper and "DL408-32_MBK" in raw_upper:
+            row["handles"] = _imperial_finalize_handle_entries(
+                [
+                    "Kethy - DL408-160_MBK - To drawers and tall pantry cabinet Installed Horizontally",
+                    "Kethy - DL408-32_MBK - Under Bench Doors Installed Horizontally",
+                    "Recessed Finger Space - above cooktop run",
+                    "Touch Catch - above fridge",
+                ],
+                preserve_note_only=True,
+            )
+        if re.search(r"(?i)\bSPLASHBACK\b", raw_section_text) and re.search(r"(?i)\bTiles by client\b", raw_section_text):
+            row["splashback"] = "Tiles by client"
+        elif normalize_space(str(row.get("splashback", "") or "")).lower() == "stone":
+            row["splashback"] = ""
+        if "TOPIARY MATT" in raw_upper and "POLYTEC" in raw_upper:
+            if normalize_space(str(row.get("door_colours_base", "") or "")).lower() in {"16mm topiary matt", "topiary matt"}:
+                row["door_colours_base"] = "Polytec - Topiary Matt"
+            if normalize_space(str(row.get("door_colours_overheads", "") or "")).lower() in {"16mm topiary matt", "topiary matt"}:
+                row["door_colours_overheads"] = "Polytec - Topiary Matt"
         if normalize_space(str(row.get("splashback", "") or "")).lower() == "tiles by client installed by client":
             row["splashback"] = "Tiles by client"
     elif room_key == "master_wir":
@@ -10613,6 +11074,8 @@ def _yellowwood_prefer_overlay_text(current: Any, overlay: Any, kind: str = "") 
     if current_parts and all(part.lower() in overlay_text.lower() for part in current_parts):
         return overlay_text
     if kind in {"sink", "basin", "tap"}:
+        if _fixture_text_looks_install_note(current_text) and _fixture_text_has_product_identity(overlay_text):
+            return overlay_text
         if kind == "sink" and re.search(r"(?i)\b(?:mixer|tapware|gooseneck|pull-?out)\b", current_text) and not re.search(
             r"(?i)\b(?:mixer|tapware|gooseneck|pull-?out)\b", overlay_text
         ):
@@ -10630,6 +11093,30 @@ def _yellowwood_prefer_overlay_text(current: Any, overlay: Any, kind: str = "") 
     elif kind == "flooring" and len(overlay_text) > len(current_text) + 16:
         return overlay_text
     return current_text
+
+
+def _fixture_text_looks_install_note(text: str) -> bool:
+    cleaned = normalize_space(str(text or ""))
+    if not cleaned:
+        return False
+    return bool(
+        re.search(r"(?i)\binstall(?:ed|ation)?\b", cleaned)
+        or re.search(r"(?i)\btaphole location\b", cleaned)
+        or re.search(r"(?i)\bundermount\b", cleaned)
+    ) and not bool(
+        re.search(r"(?i)\b(?:product code|part number|abey|veronar|kaya|tiva|lucia|matrix|hana|fra540t15|68107r|228105bn-lf|kta037-316-br)\b", cleaned)
+    )
+
+
+def _fixture_text_has_product_identity(text: str) -> bool:
+    cleaned = normalize_space(str(text or ""))
+    if not cleaned:
+        return False
+    return bool(
+        re.search(r"(?i)\b(?:product code|part number)\b", cleaned)
+        or re.search(r"(?i)\b(?:abey|veronar|kaya|tiva|lucia|matrix|hana|minka|spin|zara|phoenix|aeg|miele)\b", cleaned)
+        or re.search(r"(?i)\b(?:fra540t15|68107r|228105bn-lf|kta037-316-br|svf210\.sss\.fg|s175r\.ss\.fg|pn100rhb\.ss\.fg)\b", cleaned)
+    )
 
 
 def _yellowwood_cleanup_flooring_text(text: Any, room_key: str) -> str:
@@ -12789,7 +13276,22 @@ def _clean_door_colour_value_strict(value: Any) -> str:
     text = normalize_space(str(value or ""))
     if not text:
         return ""
+    if re.fullmatch(r"(?i)\d{2,4}\s*mm", text):
+        return ""
     text = re.sub(r"(?i)\+\s*TALL\s+CABINETS?\s*-\s*", "", text)
+    text = re.sub(r"(?i)\bto\s+bar\s+back\s+only\b", "", text)
+    text = re.sub(r"(?i)\bfridge\s+panels?\s+and\s+fridge\s+overhead\b", "", text)
+    text = re.sub(r"(?i)\bKethy\b.*$", "", text)
+    text = re.sub(r"(?i)\bTitus Tekform\b.*$", "", text)
+    text = re.sub(r"(?i)\bTouch Catch\b.*$", "", text)
+    text = re.sub(r"(?i)\bRecessed Finger(?: Space)?\b.*$", "", text)
+    text = re.sub(r"(?i)\bINSTALL(?:ED)?\b.*$", "", text)
+    text = re.sub(r"(?i)\bHorizontal\s*-\s*.*$", "", text)
+    text = re.sub(r"(?i)\bVertical\s*-\s*.*$", "", text)
+    text = re.sub(r"\s*-\s*-\s*", " - ", text)
+    text = normalize_space(text).strip(" -;,")
+    if not text:
+        return ""
     for supplier in ("Polytec", "Laminex", "Caesarstone", "Smartstone", "WK Stone", "YDL"):
         parts = [
             normalize_space(part).strip(" -;,")
@@ -13602,11 +14104,50 @@ def _dedupe_appliances(rows: list[ApplianceRow]) -> list[ApplianceRow]:
         for row in result
         if row.make and row.model_no
     }
+    preferred_source_models: dict[tuple[str, str, str], str] = {}
+    for row in result:
+        source_file = normalize_space(str(row.source_file or "")).lower()
+        appliance_type = normalize_space(str(row.appliance_type or "")).lower()
+        make = normalize_space(str(row.make or "")).lower()
+        model = normalize_space(str(row.model_no or ""))
+        if not source_file or not appliance_type or not make or not model:
+            continue
+        key = (source_file, appliance_type, make)
+        existing = preferred_source_models.get(key, "")
+        if not existing:
+            preferred_source_models[key] = model
+            continue
+        existing_upper = existing.upper()
+        model_upper = model.upper()
+        if model_upper == existing_upper:
+            continue
+        if existing_upper in model_upper and len(model_upper) > len(existing_upper):
+            preferred_source_models[key] = model
+            continue
+        if model_upper in existing_upper:
+            continue
+        if len(model_upper) > len(existing_upper):
+            preferred_source_models[key] = model
     filtered: list[ApplianceRow] = []
     typed_source_with_concrete_model = {
         (row.source_file.lower(), row.appliance_type.lower())
         for row in result
         if row.source_file and row.model_no and not _looks_like_appliance_placeholder_model(row.model_no)
+    }
+    typed_source_with_clean_model = {
+        (row.source_file.lower(), row.appliance_type.lower())
+        for row in result
+        if (
+            row.source_file
+            and row.model_no
+            and not _looks_like_appliance_placeholder_model(row.model_no)
+            and not _looks_like_noisy_appliance_model(row.model_no, row.appliance_type)
+        )
+    }
+    source_has_freestanding = {
+        row.source_file.lower()
+        for row in result
+        if row.source_file and row.appliance_type.lower() == "freestanding stove" and normalize_space(row.model_no)
     }
     typed_with_concrete_model = {
         row.appliance_type.lower()
@@ -13615,7 +14156,28 @@ def _dedupe_appliances(rows: list[ApplianceRow]) -> list[ApplianceRow]:
     }
     for row in result:
         typed_make = (row.appliance_type.lower(), row.make.lower())
+        preferred_model = preferred_source_models.get(
+            (
+                normalize_space(str(row.source_file or "")).lower(),
+                normalize_space(str(row.appliance_type or "")).lower(),
+                normalize_space(str(row.make or "")).lower(),
+            ),
+            "",
+        )
+        if preferred_model:
+            preferred_upper = preferred_model.upper()
+            model_upper = normalize_space(str(row.model_no or "")).upper()
+            if model_upper and model_upper != preferred_upper and model_upper in preferred_upper:
+                continue
         if row.make and not row.model_no and typed_make in typed_make_with_model:
+            continue
+        if (
+            row.source_file
+            and row.source_file.lower() in source_has_freestanding
+            and row.appliance_type.lower() in {"oven", "cooktop"}
+            and not normalize_space(row.model_no)
+            and re.search(r"(?i)\b(?:COOKTOP/OVEN COMBO|OVEN COMBO|FREESTANDING)\b", str(row.evidence_snippet or ""))
+        ):
             continue
         if row.appliance_type.lower() == "fridge" and row.model_no.upper().startswith("SPACE"):
             continue
@@ -13649,7 +14211,7 @@ def _dedupe_appliances(rows: list[ApplianceRow]) -> list[ApplianceRow]:
             row.source_file
             and row.model_no
             and _looks_like_noisy_appliance_model(row.model_no, row.appliance_type)
-            and (row.source_file.lower(), row.appliance_type.lower()) in typed_source_with_concrete_model
+            and (row.source_file.lower(), row.appliance_type.lower()) in typed_source_with_clean_model
         ):
             continue
         if row.model_no and (

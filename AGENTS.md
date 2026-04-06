@@ -44,7 +44,7 @@ If a change affects user-visible behavior, architecture, storage, deployment, wo
 14. Default runtime tool policy is speed-first:
     - `Clarendon`: heuristic-only
     - `Imperial / Simonds / Evoca / Yellowwood`: layout + row-local parser + selective Docling on difficult schedule/table pages
-    - default automatic `Heavy Vision`: off
+    - default automatic `Heavy Vision`: off, except Imperial joinery/material selection sheets where Vision is on by default as a table/grid boundary layer
     - default automatic `AI merge`: off
 15. Clarendon room names must come only from the `Drawings and Colours` room-master file when that file exists. AFC/supplement files may enrich existing rooms only and may not create new room names.
 16. Clarendon AFC flooring pages such as `CARPET & MAIN FLOOR TILE` must enrich existing room-master rooms only. Room-specific flooring should land on the relevant room cards, not in `others.flooring_notes`, and broad AFC labels such as `WIL/Linen/s Ground Floor` must not be inferred back into `LAUNDRY`.
@@ -60,10 +60,11 @@ If a change affects user-visible behavior, architecture, storage, deployment, wo
 26. Final room retention is global across builders: a room survives only when it has true joinery/material evidence such as bench tops, door colours, splashback, toe kick, bulkheads, floating shelf, or `Shelf`. Handles, plumbing fixtures, flooring, LED, accessories, and other notes do not keep a room alive.
 26. Fixture cleanup must not over-trim legitimate product wording. In particular, Clarendon tap values containing phrases like `Twin Handle Sink Mixer` must survive intact, and Imperial sinkware notes such as `UNDERMOUNT` or generic taphole hints must stay attached only to the correct same-room sink row.
 27. For Imperial, `CLIENT NAME`, `SIGNATURE`, and `SIGNED DATE` are section-break footer markers, not content. Treat glued forms such as `CLIENT NAME: SIGNATURE: SIGNED DATE:`, `CLIENTNAMESIGNATURESIGNEDDATE`, and related footer noise such as `NOTESSUPPLIER` as extraction-stop markers too.
-28. All new `spec` parse runs for all builders must enter field-level PDF QA automatically. Raw results may be viewed before signoff, but they are not formally accepted until PDF QA passes.
-29. Formal spec exports are locked behind PDF QA. Do not treat a raw spec snapshot as complete, export-ready, or fixed until the current raw snapshot verification is `passed`.
-30. Parser-accuracy work is only complete after the affected live rerun passes PDF QA against the source PDF page-by-page. Older webpages and older snapshots are reference material only.
-31. When adjusting shared frontend presentation, keep grouped vanity titles such as `VANITIES` in the same room-priority bucket as `Bathroom / Ensuite / Powder`, and preserve the tighter ~75% application-level UI density unless the user explicitly asks to change it.
+28. For Imperial, `DOCUMENT REF` is also footer noise. Imperial joinery/material pages must be treated as Excel-to-PDF tables first: Vision provides the visible grid, merged-cell, and footer boundary layer, and deterministic row-to-field mapping runs after that.
+29. All new `spec` parse runs for all builders must enter field-level PDF QA automatically. Raw results may be viewed before signoff, but they are not formally accepted until PDF QA passes.
+30. Formal spec exports are locked behind PDF QA. Do not treat a raw spec snapshot as complete, export-ready, or fixed until the current raw snapshot verification is `passed`.
+31. Parser-accuracy work is only complete after the affected live rerun passes PDF QA against the source PDF page-by-page. Older webpages and older snapshots are reference material only.
+32. When adjusting shared frontend presentation, keep grouped vanity titles such as `VANITIES` in the same room-priority bucket as `Bathroom / Ensuite / Powder`, and preserve the tighter ~75% application-level UI density unless the user explicitly asks to change it.
 
 ## Verification Expectations
 - The app should boot with `uvicorn App.main:app`

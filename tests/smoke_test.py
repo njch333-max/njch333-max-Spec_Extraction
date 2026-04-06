@@ -1261,7 +1261,7 @@ class SmokeTest(unittest.TestCase):
         )
         self.assertEqual(snapshot["appliances"][0]["appliance_type"], "Rangehood")
         self.assertEqual(snapshot["appliances"][0]["make"], "Westinghouse")
-        self.assertEqual(snapshot["appliances"][0]["model_no"], "")
+        self.assertEqual(snapshot["appliances"][0]["model_no"], "HP280L")
         self.assertEqual(parsing_module._limit_appliance_details_to_local_context("Westinghouse\nHP280L\n"), "Westinghouse")
 
     def test_match_loose_appliance_type_ignores_mid_line_spillover(self) -> None:
@@ -1497,18 +1497,16 @@ class SmokeTest(unittest.TestCase):
             ],
         )
         appliances = snapshot["appliances"]
-        oven_rows = [row for row in appliances if row["appliance_type"] == "Oven"]
-        self.assertEqual(len(oven_rows), 1)
-        self.assertEqual(oven_rows[0]["model_no"], "BY CLIENT")
         dishwasher_rows = [row for row in appliances if row["appliance_type"] == "Dishwasher"]
-        self.assertEqual(len(dishwasher_rows), 1)
-        self.assertEqual(dishwasher_rows[0]["make"], "ASKO")
-        cooktop_rows = [row for row in appliances if row["appliance_type"] == "Cooktop"]
-        self.assertEqual(len(cooktop_rows), 1)
-        self.assertIn(cooktop_rows[0]["model_no"], {"", "BY CLIENT"})
+        self.assertFalse(dishwasher_rows)
+        freestanding_rows = [row for row in appliances if row["appliance_type"] == "Freestanding Stove"]
+        self.assertEqual(len(freestanding_rows), 1)
+        self.assertEqual(freestanding_rows[0]["make"], "Bertazzoni")
+        self.assertEqual(freestanding_rows[0]["model_no"], "PRO906MFESXE")
         fridge_rows = [row for row in appliances if row["appliance_type"] == "Fridge"]
         self.assertEqual(len(fridge_rows), 1)
-        self.assertIn(fridge_rows[0]["model_no"], {"", "RF610ANUX5", "BY CLIENT PLUMBED IN FRIDGE"})
+        self.assertEqual(fridge_rows[0]["make"], "Fisher & Paykel")
+        self.assertEqual(fridge_rows[0]["model_no"], "RF610ANUX5")
         microwave_rows = [row for row in appliances if row["appliance_type"] == "Microwave"]
         self.assertEqual(len(microwave_rows), 1)
         self.assertEqual(microwave_rows[0]["model_no"], "LEAVE STANDARD SPACE BY CLIENT")
@@ -2099,6 +2097,7 @@ class SmokeTest(unittest.TestCase):
             mock.patch.object(extraction_service.runtime, "SPEC_DOCLING_BUILDERS", {"imperial", "simonds", "evoca"}),
             mock.patch("App.services.extraction_service._load_documents", return_value=documents),
             mock.patch("App.services.extraction_service._page_requires_vision", return_value=True),
+            mock.patch("App.services.extraction_service._page_requires_heavy_vision", return_value=False),
             mock.patch("App.services.extraction_service._docling_available", return_value=True),
             mock.patch("App.services.extraction_service._request_docling_page_layout") as request_docling_page_layout,
             mock.patch("App.services.extraction_service.parsing.parse_documents", return_value=heuristic_snapshot),
@@ -2228,7 +2227,7 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(extraction_service._infer_layout_row_kind("Basin", "sinkware_tapware"), "basin")
         self.assertEqual(extraction_service._infer_layout_row_kind("Sink Mixer", "sinkware_tapware"), "tap")
 
-    def test_build_spec_snapshot_uses_docling_without_heavy_vision_by_default_for_imperial(self) -> None:
+    def test_build_spec_snapshot_skips_heavy_vision_when_imperial_page_is_not_joinery_material(self) -> None:
         documents = [
             {
                 "file_name": "imperial.pdf",
@@ -2237,8 +2236,8 @@ class SmokeTest(unittest.TestCase):
                 "pages": [
                     {
                         "page_no": 1,
-                        "text": "BASE CABINETRY COLOURClassic White Matt Polytec",
-                        "raw_text": "BASE CABINETRY COLOURClassic White Matt Polytec",
+                        "text": "KITCHEN JOINERY SELECTION SHEET BASE CABINETRY COLOURClassic White Matt Polytec",
+                        "raw_text": "KITCHEN JOINERY SELECTION SHEET BASE CABINETRY COLOURClassic White Matt Polytec",
                         "needs_ocr": True,
                     }
                 ],
@@ -2266,6 +2265,7 @@ class SmokeTest(unittest.TestCase):
             mock.patch.object(extraction_service.runtime, "SPEC_DOCLING_BUILDERS", {"imperial", "simonds", "evoca"}),
             mock.patch("App.services.extraction_service._load_documents", return_value=documents),
             mock.patch("App.services.extraction_service._page_requires_vision", return_value=True),
+            mock.patch("App.services.extraction_service._page_requires_heavy_vision", return_value=False),
             mock.patch("App.services.extraction_service._docling_available", return_value=True),
             mock.patch(
                 "App.services.extraction_service._request_docling_page_layout",
@@ -2304,7 +2304,7 @@ class SmokeTest(unittest.TestCase):
         self.assertTrue(snapshot["analysis"]["docling_attempted"])
         self.assertTrue(snapshot["analysis"]["docling_succeeded"])
         self.assertFalse(snapshot["analysis"]["vision_attempted"])
-        self.assertIn("disabled by default for spec runs", snapshot["analysis"]["vision_note"])
+        self.assertIn("No pages matched the heavy vision layout rules.", snapshot["analysis"]["vision_note"])
 
     def test_build_spec_snapshot_applies_vision_layout_before_final_snapshot(self) -> None:
         documents = [
@@ -2315,8 +2315,8 @@ class SmokeTest(unittest.TestCase):
                 "pages": [
                     {
                         "page_no": 1,
-                        "text": "BASE CABINETRY COLOURClassic White Matt Polytec",
-                        "raw_text": "BASE CABINETRY COLOURClassic White Matt Polytec",
+                        "text": "KITCHEN JOINERY SELECTION SHEET BASE CABINETRY COLOURClassic White Matt Polytec",
+                        "raw_text": "KITCHEN JOINERY SELECTION SHEET BASE CABINETRY COLOURClassic White Matt Polytec",
                         "needs_ocr": True,
                     }
                 ],
@@ -2349,6 +2349,7 @@ class SmokeTest(unittest.TestCase):
             mock.patch.object(extraction_service.runtime, "OPENAI_VISION_MAX_PAGES", 4),
             mock.patch("App.services.extraction_service._load_documents", return_value=documents),
             mock.patch("App.services.extraction_service._page_requires_vision", return_value=True),
+            mock.patch("App.services.extraction_service._page_requires_heavy_vision", return_value=True),
             mock.patch("App.services.extraction_service._docling_available", return_value=False),
             mock.patch("App.services.extraction_service._render_pdf_page_png", return_value=b"png"),
             mock.patch(
@@ -2456,6 +2457,7 @@ class SmokeTest(unittest.TestCase):
             mock.patch.object(extraction_service.runtime, "OPENAI_VISION_MAX_PAGES", 4),
             mock.patch("App.services.extraction_service._load_documents", return_value=documents),
             mock.patch("App.services.extraction_service._page_requires_vision", return_value=True),
+            mock.patch("App.services.extraction_service._page_requires_heavy_vision", return_value=True),
             mock.patch("App.services.extraction_service._docling_available", return_value=True),
             mock.patch(
                 "App.services.extraction_service._request_docling_page_layout",
@@ -2530,8 +2532,8 @@ class SmokeTest(unittest.TestCase):
                 template_files=[],
             )
         self.assertEqual(snapshot["rooms"][0]["door_colours_base"], "Polytec - Classic White Matt")
-        self.assertEqual(snapshot["analysis"]["layout_mode"], "mixed")
-        self.assertEqual(snapshot["analysis"]["layout_provider"], "mixed")
+        self.assertEqual(snapshot["analysis"]["layout_mode"], "docling")
+        self.assertEqual(snapshot["analysis"]["layout_provider"], "docling")
         self.assertTrue(snapshot["analysis"]["docling_attempted"])
         self.assertTrue(snapshot["analysis"]["docling_succeeded"])
         self.assertEqual(snapshot["analysis"]["docling_pages"], [1])
@@ -2565,6 +2567,146 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("Kickboards", labels)
         base_row = next(row for row in rows if row["row_label"] == "Base Cabinetry Colour")
         self.assertEqual(base_row["row_kind"], "material")
+
+    def test_page_requires_heavy_vision_only_for_imperial_joinery_material_pages(self) -> None:
+        self.assertTrue(
+            extraction_service._page_requires_heavy_vision(
+                builder_name="Imperial",
+                source_kind="spec",
+                file_name="imperial.pdf",
+                page={"raw_text": "KITCHEN JOINERY SELECTION SHEET\nBENCHTOP\nBASE CABINETRY COLOUR", "text": ""},
+            )
+        )
+        self.assertFalse(
+            extraction_service._page_requires_heavy_vision(
+                builder_name="Imperial",
+                source_kind="spec",
+                file_name="imperial.pdf",
+                page={"raw_text": "APPLIANCES\nOVEN (KITCHEN) AEG BPK75891PT", "text": ""},
+            )
+        )
+        self.assertFalse(
+            extraction_service._page_requires_heavy_vision(
+                builder_name="Imperial",
+                source_kind="spec",
+                file_name="imperial.pdf",
+                page={"raw_text": "SINKWARE & TAPWARE\nSINKWARE (KITCHEN) ABEY FRA540T15", "text": ""},
+            )
+        )
+
+    def test_canonicalize_imperial_joinery_layout_flattens_field_like_blocks(self) -> None:
+        layout = {
+            "page_type": "joinery",
+            "section_label": "Cabinetry and Shelving Finishes",
+            "room_blocks": [
+                {
+                    "room_label": "BASE CABINETRY COLOUR + Tall Pantry",
+                    "rows": [
+                        {
+                            "row_label": "Material Description",
+                            "value_region_text": "HAMPTON EM0 Cinder Smooth",
+                            "supplier_region_text": "Polytec",
+                            "notes_region_text": "",
+                            "row_kind": "material",
+                        }
+                    ],
+                },
+                {
+                    "room_label": "FEATURE BAR BACK",
+                    "rows": [
+                        {
+                            "row_label": "Material Description",
+                            "value_region_text": "Calcutta 100 EM0 Cinder Smooth",
+                            "supplier_region_text": "Polytec",
+                            "notes_region_text": "To BAR BACK ONLY",
+                            "row_kind": "material",
+                        }
+                    ],
+                },
+                {
+                    "room_label": "FLOATING SHELVES",
+                    "rows": [
+                        {
+                            "row_label": "Material Description",
+                            "value_region_text": "Tasmanian Oak Woodmatt 51mm thick floating shelves",
+                            "supplier_region_text": "Polytec",
+                            "notes_region_text": "",
+                            "row_kind": "material",
+                        }
+                    ],
+                },
+            ],
+        }
+        canonical = extraction_service._canonicalize_imperial_joinery_material_layout(
+            layout,
+            raw_page_text="KITCHEN JOINERY SELECTION SHEET\nBASE CABINETRY COLOUR\nFEATURE BAR BACK\nFLOATING SHELVES",
+            provider="heavy_vision",
+        )
+        labels = [row["row_label"] for row in canonical["room_blocks"][0]["rows"]]
+        self.assertIn("BASE CABINETRY COLOUR + TALL PANTRY", labels)
+        self.assertIn("FEATURE COLOUR BAR BACK + BAR BACK DOOR", labels)
+        self.assertIn("FLOATING SHELVES", labels)
+
+    def test_page_layout_rows_dedupes_top_level_rows_mirrored_in_room_block(self) -> None:
+        layout = {
+            "room_blocks": [
+                {
+                    "room_label": "KITCHEN",
+                    "rows": [
+                        {
+                            "row_label": "BASE CABINETRY COLOUR",
+                            "value_region_text": "Classic White Matt",
+                            "supplier_region_text": "Polytec",
+                            "notes_region_text": "",
+                            "row_kind": "material",
+                        }
+                    ],
+                }
+            ],
+            "rows": [
+                {
+                    "row_label": "BASE CABINETRY COLOUR",
+                    "value_region_text": "Classic White Matt",
+                    "supplier_region_text": "Polytec",
+                    "notes_region_text": "",
+                    "row_kind": "material",
+                }
+            ],
+        }
+        rows = parsing_module._page_layout_rows(layout)
+        self.assertEqual(len(rows), 1)
+
+    def test_extract_appliances_from_imperial_layout_rows_prefers_real_model(self) -> None:
+        page = {
+            "page_no": 4,
+            "raw_text": "APPLIANCES",
+            "text": "",
+            "page_layout": {
+                "page_type": "appliance",
+                "rows": [
+                    {
+                        "row_label": "RANGEHOOD (KITCHEN)",
+                        "value_region_text": "Undermount Integrated Rangehood",
+                        "supplier_region_text": "AEG DGE7970HB",
+                        "notes_region_text": "N / A - By others By Client",
+                        "row_kind": "other",
+                    },
+                    {
+                        "row_label": "DISHWASHER (KITCHEN)",
+                        "value_region_text": "Dishwasher",
+                        "supplier_region_text": "MIELE G4220 (HG03)",
+                        "notes_region_text": "N / A - By others By Client",
+                        "row_kind": "other",
+                    },
+                ],
+            },
+        }
+        rows = parsing_module._extract_appliances_from_pages("imperial-appliances.pdf", [page], builder_name="Imperial")
+        by_type = {row.appliance_type: row for row in rows}
+        self.assertEqual(by_type["Rangehood"].make, "AEG")
+        self.assertEqual(by_type["Rangehood"].model_no, "DGE7970HB")
+        self.assertEqual(by_type["Dishwasher"].make, "Miele")
+        self.assertEqual(by_type["Dishwasher"].model_no, "G4220 (HG03)")
 
     def test_merge_page_layouts_combines_rows_and_drops_footer_noise(self) -> None:
         docling_layout = {
@@ -2669,6 +2811,7 @@ class SmokeTest(unittest.TestCase):
             mock.patch.object(extraction_service.runtime, "OPENAI_VISION_MAX_PAGES", 4),
             mock.patch("App.services.extraction_service._load_documents", return_value=documents),
             mock.patch("App.services.extraction_service._page_requires_vision", return_value=True),
+            mock.patch("App.services.extraction_service._page_requires_heavy_vision", return_value=True),
             mock.patch("App.services.extraction_service._docling_available", return_value=True),
             mock.patch(
                 "App.services.extraction_service._request_docling_page_layout",
@@ -2799,7 +2942,7 @@ class SmokeTest(unittest.TestCase):
         )
         page = documents[0]["pages"][0]
         self.assertEqual(mixed_pages, [])
-        self.assertEqual(docling_pages, [8])
+        self.assertEqual(docling_pages, [])
         self.assertEqual(vision_pages, [])
         self.assertEqual(page["layout_mode"], "lightweight")
         self.assertEqual(page["page_layout"]["room_blocks"][0]["room_label"], "KITCHEN")
@@ -9105,6 +9248,75 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(by_type["Oven"].model_no, "B59CR72Y0A")
         self.assertEqual(by_type["Cooktop"].model_no, "T66FHC4L0")
 
+    def test_imperial_compact_appliances_extract_fisher_paykel_family(self) -> None:
+        text = (
+            "APPLIANCES\n"
+            "RANGEHOOD (KITCHEN) N / A - By others By others Fisher & Paykel 90cm Ducted Rangehood (HP90ICSX4) - Undermount\n"
+            "DISHWASHER (KITCHEN) N / A - By others By others Fisher & Paykel 600mm DW60FC1X2\n"
+            "OVEN (KITCHEN) N / A - By others By others Fisher & Paykel 900mm Oven OB90S9LEX2 (Electric)\n"
+            "COOKTOP (KITCHEN) N / A - By others By others Fisher & Paykel 900mm 4 Zone Induction Cooktop CI904CTB1 (Electric)\n"
+        )
+        rows = parsing_module._extract_imperial_compact_appliances_from_pages(
+            "imperial-compact.pdf",
+            [{"page_no": 11, "raw_text": text, "text": text}],
+        )
+        by_type = {row.appliance_type: row for row in rows}
+        self.assertEqual(by_type["Rangehood"].make, "Fisher & Paykel")
+        self.assertEqual(by_type["Rangehood"].model_no, "HP90ICSX4")
+        self.assertEqual(by_type["Dishwasher"].model_no, "DW60FC1X2")
+        self.assertEqual(by_type["Oven"].model_no, "OB90S9LEX2")
+        self.assertEqual(by_type["Cooktop"].model_no, "CI904CTB1")
+
+    def test_imperial_compact_appliances_extract_technika_and_schweigen_family(self) -> None:
+        text = (
+            "APPLIANCES\n"
+            "RANGEHOOD (KITCHEN) N / A - By others By others 60mm Undermount -Scheige GG-6CB 60cm Undermount\n"
+            "COOKTOP (KITCHEN) N / A - By others By others 600mm Induction -Technika Induction HobTGC6IND-5\n"
+            "OVEN (KITCHEN) N / A - By others By others 600mm - Technika Multifunchtion 60cm oven TGPO611ABK\n"
+        )
+        rows = parsing_module._extract_imperial_compact_appliances_from_pages(
+            "imperial-compact.pdf",
+            [{"page_no": 2, "raw_text": text, "text": text}],
+        )
+        by_type = {row.appliance_type: row for row in rows}
+        self.assertEqual(by_type["Rangehood"].make, "Schweigen")
+        self.assertEqual(by_type["Rangehood"].model_no, "GG-6CB")
+        self.assertEqual(by_type["Cooktop"].make, "Technika")
+        self.assertEqual(by_type["Cooktop"].model_no, "HOBTGC6IND-5")
+        self.assertEqual(by_type["Oven"].make, "Technika")
+        self.assertEqual(by_type["Oven"].model_no, "TGPO611ABK")
+
+    def test_imperial_compact_appliances_extract_bertazzoni_freestanding_stove(self) -> None:
+        text = (
+            "APPLIANCES\n"
+            "OVEN BY CLIENT\n"
+            "COOKTOP BY CLIENT\n"
+            "Bertazzoni 90cm Professional Series Freestanding Dual Fuel Oven/Stove PRO906MFESXE as above\n"
+        )
+        rows = parsing_module._extract_imperial_compact_appliances_from_pages(
+            "imperial-compact.pdf",
+            [{"page_no": 5, "raw_text": text, "text": text}],
+        )
+        by_type = {row.appliance_type: row for row in rows}
+        self.assertEqual(by_type["Freestanding Stove"].make, "Bertazzoni")
+        self.assertEqual(by_type["Freestanding Stove"].model_no, "PRO906MFESXE")
+
+    def test_imperial_compact_appliances_keep_descriptive_model_when_pdf_has_no_explicit_code(self) -> None:
+        text = (
+            "APPLIANCES\n"
+            "RANGEHOOD Existing BY IMPERIAL KITCHENS RANGEHOOD - WESTINGHOUSE 60cm Slideout Rangehood (2 Year Warranty)\n"
+            "DISHWASHER Existing BY IMPERIAL KITCHENS DISHWASHER - BEKO 14PS Built Under Dishwasher (5 year warranty)\n"
+            "OVEN Existing BY IMPERIAL KITCHENS OVEN - BOSCH Series 2 60cm Oven (2 Year Warranty)\n"
+        )
+        rows = parsing_module._extract_imperial_compact_appliances_from_pages(
+            "imperial-compact.pdf",
+            [{"page_no": 3, "raw_text": text, "text": text}],
+        )
+        by_type = {row.appliance_type: row for row in rows}
+        self.assertEqual(by_type["Rangehood"].model_no, "60cm Slideout Rangehood")
+        self.assertEqual(by_type["Dishwasher"].model_no, "14PS Built Under Dishwasher")
+        self.assertEqual(by_type["Oven"].model_no, "Series 2 60cm Oven")
+
     def test_dedupe_appliances_drops_rows_whose_model_context_matches_other_type(self) -> None:
         rows = [
             parsing_module.ApplianceRow(
@@ -9139,6 +9351,98 @@ class SmokeTest(unittest.TestCase):
         deduped = parsing_module._dedupe_appliances(rows)
         self.assertEqual(len(deduped), 1)
         self.assertEqual(deduped[0].model_no, "S185HCX01A")
+
+    def test_dedupe_appliances_drops_blank_combo_oven_when_freestanding_row_exists(self) -> None:
+        rows = [
+            parsing_module.ApplianceRow(
+                appliance_type="Oven",
+                make="Glemgas",
+                model_no="",
+                product_url="",
+                spec_url="",
+                manual_url="",
+                website_url="",
+                overall_size="",
+                source_file="imperial-compact.pdf",
+                page_refs="2",
+                evidence_snippet="COOKTOP/OVEN COMBO (KITCHEN) Glemgas Freestanding Dual Fuel Cooker - 800mm",
+                confidence=0.72,
+            ),
+            parsing_module.ApplianceRow(
+                appliance_type="Freestanding Stove",
+                make="Glemgas",
+                model_no="Freestanding Dual Fuel Cooker - 800mm",
+                product_url="",
+                spec_url="",
+                manual_url="",
+                website_url="",
+                overall_size="",
+                source_file="imperial-compact.pdf",
+                page_refs="2",
+                evidence_snippet="COOKTOP/OVEN COMBO (KITCHEN) Glemgas Freestanding Dual Fuel Cooker - 800mm",
+                confidence=0.76,
+            ),
+        ]
+        deduped = parsing_module._dedupe_appliances(rows)
+        self.assertEqual(len(deduped), 1)
+        self.assertEqual(deduped[0].appliance_type, "Freestanding Stove")
+
+    def test_finalize_imperial_appliances_drops_polytec_false_positive(self) -> None:
+        appliances = [
+            {
+                "appliance_type": "Cooktop",
+                "make": "Polytec",
+                "model_no": "",
+                "product_url": "",
+                "spec_url": "",
+                "manual_url": "",
+                "website_url": "",
+                "overall_size": "",
+                "source_file": "imperial.pdf",
+                "page_refs": "",
+                "evidence_snippet": "COOKTOP TO BE REPLACED WITH FROSTY CARINA BASE CABINETRY COLOUR Polytec Classic White Matt",
+                "confidence": 0.72,
+            },
+            {
+                "appliance_type": "Cooktop",
+                "make": "Miele",
+                "model_no": "KM7373",
+                "product_url": "",
+                "spec_url": "",
+                "manual_url": "",
+                "website_url": "",
+                "overall_size": "",
+                "source_file": "imperial.pdf",
+                "page_refs": "",
+                "evidence_snippet": "COOKTOP (KITCHEN) BY CLIENT Miele KM7373 FL Induction Cooktop",
+                "confidence": 0.76,
+            },
+        ]
+        parsing_module._finalize_imperial_appliances(appliances, [])
+        self.assertEqual(len(appliances), 1)
+        self.assertEqual(appliances[0]["make"], "Miele")
+        self.assertEqual(appliances[0]["model_no"], "KM7373")
+
+    def test_clean_door_colour_value_strict_drops_dimension_only_values(self) -> None:
+        self.assertEqual(parsing_module._clean_door_colour_value_strict("320mm"), "")
+
+    def test_guess_model_normalizes_spaced_appliance_models(self) -> None:
+        self.assertEqual(
+            parsing_module._guess_model("Miele G 5263 SCVi BK Active Plus Fully integrated dishwasher"),
+            "G5263SCVIBK",
+        )
+        self.assertEqual(
+            parsing_module._extract_brand_prefixed_appliance_model(
+                "Miele G 5263 SCVi BK Active Plus Fully integrated dishwasher",
+                "Miele",
+            ),
+            "G5263SCVIBK",
+        )
+
+    def test_imperial_crosscheck_treats_bare_supplier_as_contaminated_door_colour(self) -> None:
+        self.assertTrue(
+            extraction_service._imperial_field_looks_crosscheck_contaminated("Polytec", "door_colours_base")
+        )
 
     def test_imperial_compact_non_joinery_overlay_recovers_kitchen_and_laundry_sink_tap(self) -> None:
         documents = [
@@ -9356,6 +9660,76 @@ class SmokeTest(unittest.TestCase):
             ),
             "20mm Caesarstone - Alpine Mist - Pencil Round edge",
         )
+        self.assertEqual(
+            parsing_module._imperial_strip_waterfall_from_wall_benchtop(
+                "20mm Caesarstone - Frosty Carrina (5141) - BENCHTOP ON ISLAND TO HAVE 2 X - Pencil Round Edge Benchtop + plus"
+            ),
+            "20mm Caesarstone - Frosty Carrina (5141)",
+        )
+
+    def test_imperial_finalize_island_benchtop_prefers_clean_waterfall_variant(self) -> None:
+        self.assertEqual(
+            parsing_module._imperial_finalize_island_benchtop_value(
+                "20mm Caesarstone - Frosty Carrina (5141) - Pencil Round Edge - BENCHTOP ON ISLAND TO HAVE 2 X WATERFALL ENDS MITRED JOINS | "
+                "20mm Caesarstone - Frosty Carrina (5141) - BENCHTOP ON ISLAND TO HAVE 2 X - Pencil Round Edge Benchtop + Waterfall ends | "
+                "20mm Caesarstone - Frosty Carrina (5141) - BENCHTOP ON ISLAND TO HAVE 2 X - Pencil Round Edge Benchtop + plus"
+            ),
+            "20mm Caesarstone - Frosty Carrina (5141) - Pencil Round Edge - BENCHTOP ON ISLAND TO HAVE 2 X WATERFALL ENDS MITRED JOINS",
+        )
+
+    def test_imperial_finalize_wall_benchtop_removes_duplicate_thickness_count(self) -> None:
+        self.assertEqual(
+            parsing_module._imperial_finalize_wall_benchtop_value(
+                "20mm Caesarstone - Stone 2141 Snow - PR 2 x 20mm"
+            ),
+            "20mm Caesarstone - Stone 2141 Snow - PR",
+        )
+
+    def test_imperial_compact_kitchen_enrichment_recovers_cornell_base_bar_back_and_handles(self) -> None:
+        row = {
+            "room_key": "kitchen",
+            "room_name": "KITCHEN",
+            "original_room_label": "KITCHEN",
+            "bench_tops_wall_run": "20mm Caesarstone - Calacatta Dreamwave",
+            "bench_tops_island": "",
+            "bench_tops_other": "",
+            "door_colours_overheads": "",
+            "door_colours_base": "+ Tall Pantry",
+            "door_colours_tall": "",
+            "door_colours_bar_back": "",
+            "floating_shelf": "",
+            "toe_kick": [],
+            "bulkheads": [],
+            "handles": [],
+            "splashback": "",
+            "sink_info": "",
+            "basin_info": "",
+            "tap_info": "",
+            "other_items": [],
+            "accessories": [],
+        }
+        raw_text = (
+            "KITCHEN JOINERY SELECTION SHEET\n"
+            "UPPER CABINETRY + Fridge Panels and Fridge Overhead Polytec Thermolaminated ProfileDoors HAMPTON EM0 COLOUR - Blossom White Smooth\n"
+            "BASE CABINETRY COLOUR + Tall Pantry FEATURE BAR BACK FLOATING SHELVES "
+            "Polytec Thermolaminated Profile PANEL Calcutta 100 EM0 COLOUR - Cinder Smooth "
+            "Polytec Thermolaminated ProfileDoors HAMPTON EM0 COLOUR - Cinder Smooth "
+            "Tasmanian Oak Woodmatt 51mm thick floating shelves Polytec To BAR BACK ONLY\n"
+            "HANDLES TO UNDER BENCH DOORS KETHY DL408-32_MBK INSTALL Horizontal- doors\n"
+            "HANDLES To drawers and tall pantry cabinet KETHY DL408-160_MBK INSTALL Horizontal - drawers\n"
+            "HANDLES to OVERHEADS Recessed Finger Space - above cooktop run Touch Catch - above fridge\n"
+        )
+        section = {
+            "text": raw_text,
+            "raw_page_texts": [{"raw_text": raw_text}],
+        }
+        parsing_module._imperial_apply_compact_section_room_enrichment(row, section)
+        self.assertIn("Blossom White Smooth", row["door_colours_overheads"])
+        self.assertIn("Cinder Smooth", row["door_colours_base"])
+        self.assertIn("Cinder Smooth", row["door_colours_bar_back"])
+        self.assertEqual(row["floating_shelf"], "Polytec - Tasmanian Oak Woodmatt")
+        self.assertTrue(any("DL408-160_MBK" in handle for handle in row["handles"]))
+        self.assertTrue(any("DL408-32_MBK" in handle for handle in row["handles"]))
 
     def test_imperial_section_lookup_merges_multi_page_room_sections(self) -> None:
         documents = [
@@ -9447,6 +9821,102 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(
             study["bench_tops_other"],
             "Polytec - Prime Oak Matt - Tight Form Edge - Laminate Benchtop",
+        )
+
+    def test_crosscheck_imperial_snapshot_keeps_clean_layout_joinery_fields_over_contaminated_raw(self) -> None:
+        layout_snapshot = {
+            "rooms": [
+                {
+                    "room_key": "kitchen",
+                    "room_name": "KITCHEN",
+                    "original_room_label": "KITCHEN",
+                    "bench_tops_wall_run": "20mm Caesarstone - Calacatta Dreamwave",
+                    "bench_tops_island": "",
+                    "bench_tops_other": "",
+                    "bench_tops": ["20mm Caesarstone - Calacatta Dreamwave"],
+                    "door_panel_colours": ["Polytec - Thermolaminated ProfileDoors HAMPTON EM0 COLOUR - Blossom White Smooth"],
+                    "door_colours_overheads": "Polytec - Thermolaminated ProfileDoors HAMPTON EM0 COLOUR - Blossom White Smooth",
+                    "door_colours_base": "Polytec - Thermolaminated ProfileDoors HAMPTON EM0 COLOUR - Cinder Smooth",
+                    "door_colours_tall": "Polytec - Thermolaminated ProfileDoors HAMPTON EM0 COLOUR - Cinder Smooth",
+                    "door_colours_island": "",
+                    "door_colours_bar_back": "Polytec - Thermolaminated Profile PANEL Calcutta 100 EM0 COLOUR - Cinder Smooth",
+                    "floating_shelf": "Polytec - Tasmanian Oak Woodmatt",
+                    "splashback": "Tiles by client",
+                    "toe_kick": [],
+                    "bulkheads": [],
+                    "handles": [],
+                    "shelf": "",
+                    "sink_info": "",
+                    "basin_info": "",
+                    "tap_info": "",
+                    "drawers_soft_close": "",
+                    "hinges_soft_close": "",
+                    "flooring": "",
+                    "led": "No",
+                    "led_note": "",
+                    "accessories": [],
+                    "other_items": [],
+                    "has_explicit_overheads": True,
+                    "has_explicit_base": True,
+                    "has_explicit_tall": True,
+                    "has_explicit_island": False,
+                    "has_explicit_bar_back": True,
+                }
+            ]
+        }
+        raw_snapshot = {
+            "rooms": [
+                {
+                    **layout_snapshot["rooms"][0],
+                    "door_colours_overheads": "20mm Caesarstone - Thermolaminated - ProfileDoors HAMPTON EM0 COLOUR Calacatta Dreamwave - Blossom White Smooth - pencil round edge",
+                    "floating_shelf": "Polytec - Woodmatt",
+                    "splashback": "Stone",
+                }
+            ]
+        }
+        merged = extraction_service._crosscheck_imperial_snapshot_with_raw(layout_snapshot, raw_snapshot)
+        kitchen = merged["rooms"][0]
+        self.assertEqual(
+            kitchen["door_colours_overheads"],
+            "Polytec - Thermolaminated ProfileDoors HAMPTON EM0 COLOUR - Blossom White Smooth",
+        )
+        self.assertEqual(kitchen["floating_shelf"], "Polytec - Tasmanian Oak Woodmatt")
+        self.assertEqual(kitchen["splashback"], "Tiles by client")
+
+    def test_imperial_finalize_room_payload_recovers_cornell_base_and_tall_from_bar_back_context(self) -> None:
+        row = {
+            "room_key": "kitchen",
+            "room_name": "KITCHEN",
+            "original_room_label": "KITCHEN",
+            "door_colours_overheads": "Polytec - Thermolaminated ProfileDoors HAMPTON EM0 COLOUR - Blossom White Smooth",
+            "door_colours_base": "51mm Polytec - + Tall Pantry",
+            "door_colours_tall": "Polytec - Thermolaminated ProfileDoors HAMPTON EM0 COLOUR - Cinder Smooth Image and technical drawings of handles",
+            "door_colours_bar_back": "Polytec - Thermolaminated Profile PANEL Calcutta 100 EM0 COLOUR - Cinder Smooth",
+            "floating_shelf": "Polytec - Tasmanian Oak Woodmatt",
+            "bench_tops_wall_run": "20mm Caesarstone - Calacatta Dreamwave",
+            "bench_tops_island": "",
+            "bench_tops_other": "",
+            "splashback": "Tiles by client",
+            "toe_kick": [],
+            "bulkheads": [],
+            "handles": [],
+            "shelf": "",
+            "sink_info": "",
+            "basin_info": "",
+            "tap_info": "",
+            "led": "No",
+            "led_note": "",
+            "accessories": [],
+            "other_items": [],
+        }
+        parsing_module._imperial_finalize_room_payload(row, {})
+        self.assertEqual(
+            row["door_colours_base"],
+            "Polytec - Thermolaminated ProfileDoors HAMPTON EM0 COLOUR - Cinder Smooth",
+        )
+        self.assertEqual(
+            row["door_colours_tall"],
+            "Polytec - Thermolaminated ProfileDoors HAMPTON EM0 COLOUR - Cinder Smooth",
         )
 
     def test_job_detail_and_spec_list_titles_show_snapshot_site_address(self) -> None:
@@ -11125,6 +11595,22 @@ class SmokeTest(unittest.TestCase):
             ["AS DOORS Polytec"],
         )
         self.assertEqual(selected, ["AS DOORS Polytec"])
+
+    def test_imperial_material_field_override_prefers_specific_species_over_generic_finish(self) -> None:
+        self.assertTrue(
+            parsing_module._imperial_material_field_needs_override(
+                "Polytec - Woodmatt",
+                "Polytec - Tasmanian Oak Woodmatt",
+            )
+        )
+
+    def test_clean_door_colour_value_strict_keeps_bar_back_material_after_scope_note(self) -> None:
+        self.assertEqual(
+            parsing_module._clean_door_colour_value_strict(
+                "Polytec - To BAR BACK ONLY - Thermolaminated Profile PANEL Calcutta 100 EM0 COLOUR - Cinder Smooth"
+            ),
+            "Polytec - Thermolaminated Profile PANEL Calcutta 100 EM0 COLOUR - Cinder Smooth",
+        )
 
     def test_clean_generic_fragment_strips_additional_section_and_feature_batten_noise(self) -> None:
         self.assertEqual(

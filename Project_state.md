@@ -41,6 +41,7 @@
   - Job Workspace now shows a PDF QA status card, and Raw Snapshot pages show a clear pending-QA warning when the latest spec has not been signed off
   - Clarendon-only deterministic post-polish that rebuilds cleaner room text from schedule and fixture pages while preserving source-driven room ownership
   - default runtime is now speed-first: all builders use `layout + row-local parser`, `Imperial / Simonds / Evoca / Yellowwood` may additionally use selective Docling, and automatic `Heavy Vision` / `AI merge` are disabled by default
+  - Imperial joinery/material selection sheets now override that default and use Vision-assisted table/grid boundary recovery by default, because these Excel-to-PDF schedules are more reliable when parsed as visible tables rather than free text
   - job-page Parse buttons with clearer run-status wording
   - live-polling run history with granular worker stage messages
   - extraction diagnostics showing the active runtime path, including heuristic-only vs selective Docling
@@ -65,6 +66,7 @@
   - Broad AFC area labels such as `WIL/Linen/s Ground Floor` no longer backfill inferred `LAUNDRY` flooring on Clarendon jobs unless the PDF explicitly uses a laundry room label
   - Yellowwood `FLOORING` and `TILING SCHEDULE` pages now act as room-local flooring overlays for retained rooms such as `Kitchen`, robe rooms, and vanity rooms, while contents-page flooring lines are excluded from `others.flooring_notes`
   - Imperial builder parsing now uses page-top `... JOINERY SELECTION SHEET` titles as authoritative section boundaries, keeps continuation pages with the current section, and ignores signature/footer blocks during field extraction, including glued footer markers such as `CLIENT NAME: SIGNATURE: SIGNED DATE:` / `CLIENTNAMESIGNATURESIGNEDDATE` and related footer noise such as `NOTESSUPPLIER`
+  - Imperial footer-noise handling now also treats `DOCUMENT REF` as a section-break/noise marker, and Vision-grid parsing isolates those footer/signature blocks before deterministic row mapping runs
   - Imperial room sections now also stop cleanly when later pages switch into non-joinery headings such as `APPLIANCES` or `SINKWARE & TAPWARE`, so office/joinery cards do not swallow appliance and tapware pages
   - Imperial room labels now preserve the currently extractable title body exactly, so names such as `WALK-BEHIND PANTRY`, `BENCH SEAT`, and `OFFICE` survive instead of collapsing to shortened room names
   - Imperial non-room sections such as `FEATURE TALL DOORS` are preserved as `special_sections` instead of being merged into nearby room cards
@@ -98,6 +100,7 @@
   - Imperial inline split logic now avoids splitting inside ordinary words such as `CABINETRY`, reducing false row breaks caused by OCR-glued all-caps text
   - Imperial `Hinges & Drawer Runners` rows now recover `Soft Close` even when OCR glues them to `Floor Type & Kick refacing required`
   - Imperial sink/tap pre-heading parsing now keeps local continuation lines such as finish/model notes while still resetting on explicit basin/tub labels, improving tap recovery without reintroducing cross-room sink contamination
+  - Imperial jobs `41–48` now form a fixed regression pack for the Excel-to-PDF selection-sheet family: long multi-space sheets, short kitchen-only sheets, combined-room sheets, and single-room compact sheets
   - Half-screen raw snapshot layout now explicitly removes fixed content minima and hides horizontal overflow so 1080p split-screen use can wrap long room values instead of forcing sideways dragging
   - snapshot and run metadata now record parser strategy, worker PID, and app build ID
   - single-worker lease guard to prevent stale local worker processes from racing newer code on queued jobs

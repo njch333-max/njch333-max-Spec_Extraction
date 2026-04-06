@@ -75,7 +75,7 @@
 4. Run the speed-first builder policy:
    - `Clarendon`: heuristic-only
    - `Imperial / Simonds / Evoca / Yellowwood`: `layout + row-local parser + selective Docling`
-   - default automatic `Heavy Vision`: disabled
+   - default automatic `Heavy Vision`: disabled except for Imperial joinery/material selection sheets
    - default automatic `AI merge`: disabled
 5. Apply `Docling` only to builder/page combinations that need structure recovery, such as grouped joinery schedules, cabinetry tables, vanity schedules, tiling schedules, and `Area / Item / Colour / Supplier` style pages. Docling runs per-page subset only and keeps OCR off by default.
 6. Run heuristic extraction into canonical schema, then rebuild shared fields through `layout_rows -> row-fragment -> row-local mapping` so supplier, model, profile, note, and value text stay attached to the owning row.
@@ -114,11 +114,13 @@
 13. For Imperial-only spec runs, apply a title-driven section parser before the generic cleanup stages:
   - use the page-top `... JOINERY SELECTION SHEET` title as the authoritative section start
   - use the currently extractable title body as the authoritative room label, preserving values such as `WALK-BEHIND PANTRY`, `BENCH SEAT`, or `OFFICE` without shorthand aliases
+  - treat joinery/material pages as table-first Excel-to-PDF layouts: Vision supplies the grid boundary layer for header rows, data rows, merged cells, and footer/signature isolation before deterministic mapping runs
   - use the title to identify the section, but do not discard same-page body text that appears before the title in extracted reading order
   - keep untitled continuation pages attached to the current section until the next top title appears
   - break the current joinery section when the next page switches into non-joinery full-page headings such as `APPLIANCES` or `SINKWARE & TAPWARE`
   - stop section text collection at footer markers such as `CLIENT NAME`, `SIGNATURE`, and `SIGNED DATE`, including glued variants like `CLIENT NAME: SIGNATURE: SIGNED DATE:`, `CLIENTNAMESIGNATURESIGNEDDATE`, and footer noise such as `NOTESSUPPLIER`
   - avoid turning `... TO TOP OF BENCHTOP` layout text plus a later `OFFICE JOINERY SELECTION SHEET` title into a fake benchtop field
+  - keep sinkware/tapware and appliance pages on deterministic text/overlay parsing by default; Vision on Imperial is for table-boundary recovery, not free-form final field generation
 
 ### 3.5 Source Control And Review
 - The repository is prepared for a GitHub-hosted workflow centered on pull-request review.

@@ -146,9 +146,11 @@ def _spec_docling_enabled(builder_name: str, source_kind: str) -> bool:
     return False
 
 
-def _spec_heavy_vision_enabled(job_no: str, source_kind: str) -> bool:
+def _spec_heavy_vision_enabled(job_no: str, source_kind: str, builder_name: str = "") -> bool:
     if source_kind != "spec":
         return runtime.OPENAI_VISION_ENABLED
+    if _is_imperial_builder_name(builder_name):
+        return True
     if runtime.SPEC_HEAVY_VISION_ENABLED:
         return True
     return _job_matches_runtime_override(job_no, runtime.FORCE_SPEC_HEAVY_VISION_JOBS)
@@ -160,6 +162,10 @@ def _spec_openai_merge_enabled(job_no: str, source_kind: str) -> bool:
     if runtime.SPEC_OPENAI_MERGE_ENABLED:
         return True
     return _job_matches_runtime_override(job_no, runtime.FORCE_SPEC_OPENAI_MERGE_JOBS)
+
+
+def _is_imperial_builder_name(builder_name: str) -> bool:
+    return _normalized_builder_key(builder_name) == "imperial"
 
 INVALID_ROOM_HEADING_TOKENS: tuple[str, ...] = (
     "manufacturer",
@@ -495,6 +501,7 @@ def _apply_layout_pipeline(
     job_no = str(job.get("job_no", "") or "")
     updated_documents: list[dict[str, object]] = []
     layout_pages: list[int] = []
+    layout_candidates: list[tuple[int, int]] = []
     heavy_candidates: list[tuple[int, int]] = []
 
     _report_progress(progress_callback, "layout_prepare", f"Building page layouts for {len(documents)} {source_kind} file(s)")
@@ -525,7 +532,14 @@ def _apply_layout_pipeline(
                 page=page,
                 heuristic={},
             ):
-                heavy_candidates.append((doc_index, page_index))
+                layout_candidates.append((doc_index, page_index))
+                if _page_requires_heavy_vision(
+                    builder_name=builder_name,
+                    source_kind=source_kind,
+                    file_name=str(updated_document.get("file_name", "") or ""),
+                    page=page,
+                ):
+                    heavy_candidates.append((doc_index, page_index))
         updated_documents.append(updated_document)
 
     layout_meta["layout_attempted"] = True
@@ -536,9 +550,9 @@ def _apply_layout_pipeline(
     layout_meta["layout_note"] = f"Lightweight structure analysis applied to {len(layout_meta['layout_pages'])} page(s)."
 
     docling_enabled = _spec_docling_enabled(builder_name, source_kind)
-    heavy_vision_enabled = _spec_heavy_vision_enabled(job_no, source_kind)
+    heavy_vision_enabled = _spec_heavy_vision_enabled(job_no, source_kind, builder_name=builder_name)
 
-    if not heavy_candidates:
+    if not layout_candidates:
         if source_kind == "spec" and not docling_enabled:
             layout_meta["docling_note"] = f"Docling is disabled by builder policy for {builder_name or 'this builder'}."
         else:
@@ -553,14 +567,15 @@ def _apply_layout_pipeline(
         return updated_documents, layout_meta
 
     max_pages = max(1, runtime.OPENAI_VISION_MAX_PAGES)
-    candidate_pages = heavy_candidates[:max_pages]
+    docling_candidate_pages = layout_candidates[:max_pages]
+    heavy_candidate_pages = heavy_candidates[:max_pages]
     docling_attempted_pages: list[int] = []
     docling_applied_pages: list[int] = []
     docling_notes: list[str] = []
     docling_layouts: dict[tuple[int, int], dict[str, Any]] = {}
     if source_kind == "spec" and docling_enabled and _docling_available():
         layout_meta["docling_attempted"] = True
-        for doc_index, page_index in candidate_pages:
+        for doc_index, page_index in docling_candidate_pages:
             document = updated_documents[doc_index]
             pages = list(document.get("pages", []))
             if page_index >= len(pages):
@@ -596,8 +611,8 @@ def _apply_layout_pipeline(
     if layout_meta["docling_attempted"] and not layout_meta["docling_note"]:
         if docling_applied_pages:
             note = f"Docling layout applied to {len(docling_applied_pages)} page(s): {', '.join(str(page_no) for page_no in _unique_page_numbers(docling_applied_pages))}."
-            if len(heavy_candidates) > max_pages:
-                note = f"{note} Skipped {len(heavy_candidates) - max_pages} candidate page(s) because of the configured page cap."
+            if len(layout_candidates) > max_pages:
+                note = f"{note} Skipped {len(layout_candidates) - max_pages} candidate page(s) because of the configured page cap."
             if docling_notes:
                 note = f"{note} Partial issues: {'; '.join(docling_notes)[:220]}"
             layout_meta["docling_note"] = note[:400]
@@ -616,19 +631,25 @@ def _apply_layout_pipeline(
             )
         else:
             layout_meta["vision_note"] = "OpenAI vision structure cross-check is disabled in runtime settings."
-        _apply_final_layout_pages(updated_documents, candidate_pages, docling_layouts=docling_layouts, vision_layouts={})
+        _apply_final_layout_pages(updated_documents, docling_candidate_pages, docling_layouts=docling_layouts, vision_layouts={}, builder_name=builder_name)
+        return updated_documents, layout_meta
+    if not heavy_candidate_pages:
+        if docling_applied_pages:
+            _apply_docling_layout_meta(layout_meta, docling_applied_pages)
+        layout_meta["vision_note"] = "No pages matched the heavy vision layout rules."
+        _apply_final_layout_pages(updated_documents, docling_candidate_pages, docling_layouts=docling_layouts, vision_layouts={}, builder_name=builder_name)
         return updated_documents, layout_meta
     if not runtime.OPENAI_ENABLED:
         if docling_applied_pages:
             _apply_docling_layout_meta(layout_meta, docling_applied_pages)
         layout_meta["vision_note"] = "OpenAI is disabled, so heavy vision structure cross-check was skipped."
-        _apply_final_layout_pages(updated_documents, candidate_pages, docling_layouts=docling_layouts, vision_layouts={})
+        _apply_final_layout_pages(updated_documents, docling_candidate_pages, docling_layouts=docling_layouts, vision_layouts={}, builder_name=builder_name)
         return updated_documents, layout_meta
     if not runtime.OPENAI_API_KEY:
         if docling_applied_pages:
             _apply_docling_layout_meta(layout_meta, docling_applied_pages)
         layout_meta["vision_note"] = "OPENAI_API_KEY is not configured, so heavy vision structure cross-check was skipped."
-        _apply_final_layout_pages(updated_documents, candidate_pages, docling_layouts=docling_layouts, vision_layouts={})
+        _apply_final_layout_pages(updated_documents, docling_candidate_pages, docling_layouts=docling_layouts, vision_layouts={}, builder_name=builder_name)
         return updated_documents, layout_meta
 
     attempted_pages: list[int] = []
@@ -637,7 +658,7 @@ def _apply_layout_pipeline(
     vision_layouts: dict[tuple[int, int], dict[str, Any]] = {}
     layout_meta["vision_attempted"] = True
 
-    for doc_index, page_index in candidate_pages:
+    for doc_index, page_index in heavy_candidate_pages:
         document = updated_documents[doc_index]
         pages = list(document.get("pages", []))
         if page_index >= len(pages):
@@ -675,7 +696,7 @@ def _apply_layout_pipeline(
 
     mixed_pages, final_docling_pages, final_vision_pages = _apply_final_layout_pages(
         updated_documents,
-        candidate_pages,
+        _ordered_page_candidates(docling_candidate_pages, heavy_candidate_pages),
         docling_layouts=docling_layouts,
         vision_layouts=vision_layouts,
         builder_name=builder_name,
@@ -792,12 +813,19 @@ def _request_docling_page_layout(
         _write_single_page_pdf(document_path, page_no=page_no, destination_path=subset_path)
         result = _get_docling_converter().convert(str(subset_path))
         markdown = result.document.export_to_markdown()
-    return _docling_markdown_to_layout(
-        markdown,
+    raw_page_text = str(page.get("raw_text", page.get("text", "")) or "")
+    return _postprocess_builder_layout(
         builder_name=builder_name,
         source_kind=source_kind,
-        file_name=file_name,
-        raw_page_text=str(page.get("raw_text", page.get("text", "")) or ""),
+        layout=_docling_markdown_to_layout(
+            markdown,
+            builder_name=builder_name,
+            source_kind=source_kind,
+            file_name=file_name,
+            raw_page_text=raw_page_text,
+        ),
+        raw_page_text=raw_page_text,
+        provider="docling",
     )
 
 
@@ -840,6 +868,161 @@ def _docling_markdown_to_layout(
             "file_name": file_name,
         }
     )
+
+
+_IMPERIAL_JOINERY_FIELD_ROOM_MAP: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"(?i)\bBENCHTOP(?:S)?\b"), "BENCHTOP"),
+    (re.compile(r"(?i)\bUPPER CABINETRY\b|\bOVERHEADS?\b"), "UPPER CABINETRY COLOUR"),
+    (re.compile(r"(?i)\bBASE CABINETRY COLOUR\b.*\bTALL\b|\bTALL PANTRY\b"), "BASE CABINETRY COLOUR + TALL PANTRY"),
+    (re.compile(r"(?i)\bBASE CABINETRY COLOUR\b"), "BASE CABINETRY COLOUR"),
+    (re.compile(r"(?i)\bFEATURE\b.*\bBAR BACK\b|\bBAR BACK\b"), "FEATURE COLOUR BAR BACK + BAR BACK DOOR"),
+    (re.compile(r"(?i)\bFLOATING SHELV"), "FLOATING SHELVES"),
+    (re.compile(r"(?i)\bOPEN SHELV"), "OPEN SHELVES"),
+    (re.compile(r"(?i)\bKICKBOARDS?\b"), "KICKBOARDS"),
+    (re.compile(r"(?i)\bBULKHEAD\b"), "BULKHEAD"),
+    (re.compile(r"(?i)\bSPLASHBACK\b"), "SPLASHBACK"),
+)
+
+_IMPERIAL_LAYOUT_NOISE_PATTERNS: tuple[str, ...] = (
+    r"(?i)\bCLIENT NAME\b",
+    r"(?i)\bSIGNATURE\b",
+    r"(?i)\bSIGNED DATE\b",
+    r"(?i)\bNOTES SUPPLIER\b",
+    r"(?i)\bDOCUMENT REF\b",
+    r"(?i)\bPAGE \d+\s+OF\s+\d+\b",
+    r"(?i)\bDESIGNER\b",
+)
+
+
+def _postprocess_builder_layout(
+    *,
+    builder_name: str,
+    source_kind: str,
+    layout: dict[str, Any],
+    raw_page_text: str,
+    provider: str = "",
+) -> dict[str, Any]:
+    normalized = _normalize_page_layout(layout)
+    if source_kind == "spec" and _is_imperial_builder_name(builder_name):
+        normalized = _canonicalize_imperial_joinery_material_layout(
+            normalized,
+            raw_page_text=raw_page_text,
+            provider=provider,
+        )
+    return _normalize_page_layout(normalized)
+
+
+def _canonicalize_imperial_joinery_material_layout(
+    layout: dict[str, Any],
+    *,
+    raw_page_text: str,
+    provider: str = "",
+) -> dict[str, Any]:
+    normalized = _normalize_page_layout(layout)
+    if not _imperial_layout_looks_like_joinery_material(normalized, raw_page_text):
+        return normalized
+    title = parsing._extract_imperial_section_title(raw_page_text) if hasattr(parsing, "_extract_imperial_section_title") else ""
+    section_room = parsing.normalize_space(re.sub(r"(?i)\s+JOINERY SELECTION SHEET\b", "", title)).strip(" -")
+    raw_blocks = list(normalized.get("room_blocks", []) or [])
+    if not raw_blocks:
+        raw_blocks = [{"room_label": str(normalized.get("room_label", "") or ""), "rows": list(normalized.get("rows", []) or [])}]
+    canonical_rows: list[dict[str, str]] = []
+    for raw_block in raw_blocks:
+        if not isinstance(raw_block, dict):
+            continue
+        block_label = parsing.normalize_space(str(raw_block.get("room_label", "") or ""))
+        for raw_row in raw_block.get("rows", []) or []:
+            if not isinstance(raw_row, dict):
+                continue
+            canonical_row = _canonicalize_imperial_joinery_row(block_label, raw_row)
+            if canonical_row:
+                canonical_rows.append(canonical_row)
+    canonical_rows = _normalize_layout_rows(canonical_rows)
+    if not canonical_rows:
+        return normalized
+    if section_room:
+        return _normalize_page_layout(
+            {
+                "page_type": "joinery",
+                "section_label": section_room,
+                "room_label": section_room,
+                "room_blocks": [{"room_label": section_room, "rows": canonical_rows}],
+                "rows": [],
+                "provider": provider,
+            }
+        )
+    return _normalize_page_layout(
+        {
+            "page_type": "joinery",
+            "section_label": str(normalized.get("section_label", "") or ""),
+            "room_label": "",
+            "room_blocks": [],
+            "rows": canonical_rows,
+            "provider": provider,
+        }
+    )
+
+
+def _canonicalize_imperial_joinery_row(block_label: str, raw_row: dict[str, Any]) -> dict[str, str] | None:
+    row = dict(raw_row)
+    label = parsing.normalize_space(str(row.get("row_label", "") or ""))
+    value = parsing.normalize_space(str(row.get("value_region_text", "") or ""))
+    supplier = parsing.normalize_space(str(row.get("supplier_region_text", "") or ""))
+    notes = parsing.normalize_space(str(row.get("notes_region_text", "") or ""))
+    merged_text = " ".join(part for part in (block_label, label, value, supplier, notes) if part)
+    if not merged_text:
+        return None
+    if any(re.search(pattern, merged_text) for pattern in _IMPERIAL_LAYOUT_NOISE_PATTERNS):
+        return None
+    canonical_label = _imperial_joinery_canonical_row_label(block_label, label)
+    if not canonical_label:
+        canonical_label = label
+    canonical_label = parsing.normalize_space(canonical_label)
+    if not canonical_label or any(re.search(pattern, canonical_label) for pattern in _IMPERIAL_LAYOUT_NOISE_PATTERNS):
+        return None
+    if canonical_label == "BENCHTOP" and supplier and supplier.upper() == "POLYTEC" and re.search(
+        r"(?i)\b(?:stone|caesarstone|georgian bluffs|dreamwave|calacatta)\b",
+        f"{value} {notes}",
+    ):
+        supplier = ""
+    if canonical_label == "SPLASHBACK":
+        value = re.sub(r"(?i)\b(?:handles?.*|recessed finger.*|touch catch.*)\b", "", value).strip(" -;,")
+        notes = re.sub(r"(?i)\b(?:handles?.*|recessed finger.*|touch catch.*)\b", "", notes).strip(" -;,")
+    return {
+        "row_label": canonical_label,
+        "value_region_text": value,
+        "supplier_region_text": supplier,
+        "notes_region_text": notes,
+        "row_kind": str(row.get("row_kind", "other") or "other"),
+    }
+
+
+def _imperial_joinery_canonical_row_label(block_label: str, row_label: str) -> str:
+    block = parsing.normalize_space(block_label)
+    label = parsing.normalize_space(row_label)
+    block_upper = block.upper()
+    label_upper = label.upper()
+    if label_upper in {"MATERIAL DESCRIPTION", "DESCRIPTION", "SPECS / DESCRIPTION", "ITEM", "AREA / ITEM"}:
+        label = ""
+        label_upper = ""
+    if "HANDLES" in label_upper:
+        if block_upper == "PANTRY":
+            return "PANTRY DOOR HANDLES"
+        if block_upper in {"OVERHEAD", "OVERHEADS"}:
+            return "HANDLES TO OVERHEADS"
+        if block_upper == "UNDER BENCH DOORS":
+            return "HANDLES TO UNDER BENCH DOORS"
+        return "HANDLES"
+    if label_upper == "SPLASHBACK" or block_upper == "SPLASHBACK":
+        return "SPLASHBACK"
+    for pattern, replacement in _IMPERIAL_JOINERY_FIELD_ROOM_MAP:
+        if pattern.search(block):
+            return replacement
+    if label and label == block and any(pattern.search(label) for pattern, _ in _IMPERIAL_JOINERY_FIELD_ROOM_MAP):
+        for pattern, replacement in _IMPERIAL_JOINERY_FIELD_ROOM_MAP:
+            if pattern.search(label):
+                return replacement
+    return label
 
 
 def _docling_heading_lines(markdown: str) -> list[str]:
@@ -1138,21 +1321,41 @@ def _apply_final_layout_pages(
         final_layout: dict[str, Any] | None = None
         layout_mode = "lightweight"
         if docling_layout and vision_layout:
-            merged_layout = _merge_page_layouts(
+            if _should_prefer_unmerged_imperial_joinery_layout(
+                builder_name,
+                raw_page_text,
+                heuristic_layout,
                 docling_layout,
                 vision_layout,
-                builder_name=builder_name,
-                raw_page_text=raw_page_text,
-            )
-            final_layout, layout_mode = _select_best_layout_candidate(
-                [
-                    ("mixed", merged_layout),
-                    ("docling", docling_layout),
-                    ("heavy_vision", vision_layout),
-                    ("lightweight", heuristic_layout),
-                ],
-                raw_page_text=raw_page_text,
-            )
+            ):
+                if _force_imperial_joinery_vision_layout(builder_name, raw_page_text, vision_layout):
+                    final_layout = _normalize_page_layout(vision_layout)
+                    layout_mode = "heavy_vision"
+                else:
+                    final_layout, layout_mode = _select_best_layout_candidate(
+                        [
+                            ("heavy_vision", vision_layout),
+                            ("docling", docling_layout),
+                            ("lightweight", heuristic_layout),
+                        ],
+                        raw_page_text=raw_page_text,
+                    )
+            else:
+                merged_layout = _merge_page_layouts(
+                    docling_layout,
+                    vision_layout,
+                    builder_name=builder_name,
+                    raw_page_text=raw_page_text,
+                )
+                final_layout, layout_mode = _select_best_layout_candidate(
+                    [
+                        ("mixed", merged_layout),
+                        ("docling", docling_layout),
+                        ("heavy_vision", vision_layout),
+                        ("lightweight", heuristic_layout),
+                    ],
+                    raw_page_text=raw_page_text,
+                )
         elif docling_layout:
             final_layout, layout_mode = _select_best_layout_candidate(
                 [
@@ -1181,11 +1384,74 @@ def _apply_final_layout_pages(
         page["docling_applied"] = bool(docling_layout)
         page["vision_applied"] = bool(vision_layout)
         page["text"] = _vision_layout_to_text(final_layout, fallback_text=raw_page_text)
-        if docling_layout:
+        if docling_layout and layout_mode in {"docling", "mixed"}:
             final_docling_pages.append(page_no)
-        if vision_layout:
+        if vision_layout and layout_mode in {"heavy_vision", "mixed"}:
             final_vision_pages.append(page_no)
     return _unique_page_numbers(mixed_pages), _unique_page_numbers(final_docling_pages), _unique_page_numbers(final_vision_pages)
+
+
+def _should_prefer_unmerged_imperial_joinery_layout(
+    builder_name: str,
+    raw_page_text: str,
+    *candidate_layouts: dict[str, Any],
+) -> bool:
+    if not _is_imperial_builder_name(builder_name):
+        return False
+    if _looks_like_imperial_joinery_material_page(raw_page_text):
+        return True
+    return any(_imperial_layout_looks_like_joinery_material(layout, raw_page_text) for layout in candidate_layouts)
+
+
+def _force_imperial_joinery_vision_layout(
+    builder_name: str,
+    raw_page_text: str,
+    vision_layout: dict[str, Any],
+) -> bool:
+    if not _is_imperial_builder_name(builder_name):
+        return False
+    if not _looks_like_imperial_joinery_material_page(raw_page_text):
+        return False
+    return _imperial_layout_looks_like_joinery_material(vision_layout, raw_page_text)
+
+
+def _imperial_layout_looks_like_joinery_material(layout: dict[str, Any], raw_page_text: str = "") -> bool:
+    normalized = _normalize_page_layout(layout)
+    page_type = parsing._effective_layout_page_type(
+        "Imperial",
+        str(normalized.get("page_type", "") or ""),
+        raw_page_text,
+        normalized,
+    )
+    if page_type != "joinery":
+        return False
+    if _looks_like_imperial_joinery_material_page(raw_page_text):
+        return True
+    text_bits = [
+        parsing.normalize_space(str(normalized.get("section_label", "") or "")),
+        parsing.normalize_space(str(normalized.get("room_label", "") or "")),
+    ]
+    for block in list(normalized.get("room_blocks", []) or []):
+        if isinstance(block, dict):
+            text_bits.append(parsing.normalize_space(str(block.get("room_label", "") or "")))
+    for row in parsing._page_layout_rows(normalized):
+        text_bits.append(parsing.normalize_space(str(row.get("row_label", "") or "")))
+    joined = " ".join(part for part in text_bits if part).upper()
+    return any(
+        marker in joined
+        for marker in (
+            "BENCHTOP",
+            "BASE CABINETRY",
+            "UPPER CABINETRY",
+            "OVERHEAD",
+            "KICKBOARD",
+            "HANDLES",
+            "SPLASHBACK",
+            "FLOATING SHELV",
+            "BAR BACK",
+            "BULKHEAD",
+        )
+    )
 
 
 def _prefer_more_complete_layout(
@@ -1225,6 +1491,11 @@ def _layout_completeness_score(layout: dict[str, Any], raw_page_text: str = "") 
         for row in parsing._page_layout_rows(normalized_layout)
         if _layout_row_is_mergeable(row)
     ]
+    row_labels = [
+        parsing.normalize_space(str(row.get("row_label", "") or "")).upper()
+        for row in rows
+        if parsing.normalize_space(str(row.get("row_label", "") or ""))
+    ]
     room_blocks = normalized_layout.get("room_blocks", []) or []
     plausible_room_blocks = [
         block
@@ -1242,20 +1513,66 @@ def _layout_completeness_score(layout: dict[str, Any], raw_page_text: str = "") 
         raw_page_text,
         normalized_layout,
     )
+    imperial_joinery_probe = _looks_like_imperial_joinery_material_page(raw_page_text)
+    if page_type == "unknown" and imperial_joinery_probe:
+        page_type = "joinery"
+    core_row_count = sum(1 for label in row_labels if _is_joinery_core_row_label(label)) if page_type == "joinery" else 0
     joinery_penalty = 0
+    joinery_core_bonus = 0
+    field_like_room_penalty = 0
     if page_type == "joinery" and not plausible_room_blocks and not title_bonus:
-        joinery_penalty = 500
+        if imperial_joinery_probe and core_row_count >= 2:
+            joinery_penalty = 0
+        else:
+            joinery_penalty = 100 if core_row_count >= 2 else 500
     if page_type == "joinery" and room_blocks and not plausible_room_blocks:
-        joinery_penalty += 20000
+        joinery_penalty += 1200 if core_row_count >= 2 else 20000
     elif page_type == "joinery" and room_blocks and len(plausible_room_blocks) < len(room_blocks):
         joinery_penalty += 250 * (len(room_blocks) - len(plausible_room_blocks))
+    if page_type == "joinery":
+        joinery_core_bonus = 180 * core_row_count
+        if imperial_joinery_probe and core_row_count >= 2 and not plausible_room_blocks and not title_bonus:
+            joinery_core_bonus += 400
+        if core_row_count == 0:
+            joinery_penalty += 900
+        if room_label and _looks_like_field_like_room_label(room_label):
+            field_like_room_penalty += 600
+        field_like_room_penalty += 400 * sum(
+            1
+            for block in room_blocks
+            if _looks_like_field_like_room_label(str(block.get("room_label", "") or ""))
+        )
+    elif imperial_joinery_probe:
+        joinery_penalty += 1800
     header_noise_penalty = 0
     noisy_rows = sum(1 for row in rows if _layout_row_has_header_noise(row))
     if noisy_rows:
         header_noise_penalty = noisy_rows * (1500 if page_type == "joinery" else 500)
     if not rows and not raw_page_text.strip():
         return 0
-    return room_bonus + title_bonus + sum(_layout_row_score(row) for row in rows) - joinery_penalty - header_noise_penalty
+    return room_bonus + title_bonus + joinery_core_bonus + sum(_layout_row_score(row) for row in rows) - joinery_penalty - header_noise_penalty - field_like_room_penalty
+
+
+def _is_joinery_core_row_label(label: str) -> bool:
+    upper = parsing.normalize_space(label).upper()
+    if not upper:
+        return False
+    return any(
+        marker in upper
+        for marker in (
+            "BENCHTOP",
+            "BASE CABINETRY",
+            "UPPER CABINETRY",
+            "OVERHEAD",
+            "TALL",
+            "PANTRY",
+            "KICKBOARD",
+            "SPLASHBACK",
+            "FLOATING SHELV",
+            "BAR BACK",
+            "BULKHEAD",
+        )
+    )
 
 
 def _layout_row_has_header_noise(row: dict[str, Any]) -> bool:
@@ -1273,6 +1590,12 @@ def _layout_row_has_header_noise(row: dict[str, Any]) -> bool:
             "client initials",
             "page ",
             "job number",
+            "area / item",
+            "specs / description",
+            "ceiling height",
+            "cabinetry height",
+            "floor type & kick refacing required",
+            "hinges & drawer runners",
         )
     )
 
@@ -1419,7 +1742,7 @@ def _layout_room_title_score(label: str) -> int:
     noise_checker = getattr(parsing, "_looks_like_structured_room_noise", None)
     if callable(noise_checker) and noise_checker(cleaned):
         score -= 120
-    if re.search(r"(?i)\b(?:manufacturer|colour|type|model|sink|tapware|notes|supplier|document ref|selection required)\b", cleaned):
+    if _looks_like_field_like_room_label(cleaned):
         score -= 80
     return score
 
@@ -1428,10 +1751,24 @@ def _is_plausible_merged_room_label(label: str) -> bool:
     cleaned = _clean_merged_room_label(label)
     if not cleaned:
         return False
+    if _looks_like_field_like_room_label(cleaned):
+        return False
     checker = getattr(parsing, "_looks_like_plausible_room_label", None)
     if callable(checker):
         return bool(checker(cleaned))
-    return bool(cleaned) and not re.search(r"(?i)\b(?:manufacturer|colour|type|model|sink|tapware|notes|supplier|document ref)\b", cleaned)
+    return bool(cleaned) and not _looks_like_field_like_room_label(cleaned)
+
+
+def _looks_like_field_like_room_label(text: str) -> bool:
+    cleaned = _clean_merged_room_label(text)
+    if not cleaned:
+        return False
+    return bool(
+        re.search(
+            r"(?i)\b(?:manufacturer|colour|type|model|sink|tapware|notes|supplier|document ref|selection required|base cabinetry|upper cabinetry|overhead|benchtop|kickboard|bulkhead|floating shelves?|bar back|handles?|splashback)\b",
+            cleaned,
+        )
+    )
 
 
 def _coerce_layout_blocks_for_merge(layout: dict[str, Any], *, section_label: str = "", room_label: str = "") -> list[dict[str, Any]]:
@@ -1626,7 +1963,9 @@ def _layout_row_score(row: dict[str, str]) -> int:
     value = parsing.normalize_space(str(row.get("value_region_text", "") or ""))
     supplier = parsing.normalize_space(str(row.get("supplier_region_text", "") or ""))
     notes = parsing.normalize_space(str(row.get("notes_region_text", "") or ""))
-    return (100 if label else 0) + (80 if value else 0) + (40 if supplier else 0) + (30 if notes else 0) + len(value) + len(supplier) + len(notes)
+    if label and not any((value, supplier, notes)):
+        return 10
+    return (80 if label else 0) + (90 if value else 0) + (45 if supplier else 0) + (30 if notes else 0) + len(value) + len(supplier) + len(notes)
 
 
 def _layout_row_is_mergeable(row: dict[str, str]) -> bool:
@@ -1641,7 +1980,14 @@ def _layout_row_is_mergeable(row: dict[str, str]) -> bool:
     notes = parsing.normalize_space(str(row.get("notes_region_text", "") or ""))
     if not any((label, value, supplier, notes)):
         return False
+    if label and not any((value, supplier, notes)):
+        return False
     if label and re.match(r"(?i)^(?:client|date|signature|designer|document ref|image|notes|supplier|ref\.?\s*number)$", label):
+        return False
+    if label and re.match(
+        r"(?i)^(?:area\s*/\s*item|specs\s*/\s*description|ceiling height|cabinetry height|floor type(?:\s*&\s*kick refacing required)?|hinges(?:\s*&\s*drawer runners)?|shadowline)$",
+        label,
+    ):
         return False
     merged_text = " ".join(part for part in (label, value, supplier, notes) if part)
     return not re.search(r"(?i)\b(?:client name|signed date|signature|all colours shown|product availability)\b", merged_text)
@@ -3096,6 +3442,59 @@ def _page_requires_vision(
     return False
 
 
+def _page_requires_heavy_vision(
+    builder_name: str,
+    source_kind: str,
+    file_name: str,
+    page: dict[str, Any],
+) -> bool:
+    _ = file_name
+    text = str(page.get("raw_text", page.get("text", "")) or "")
+    if not text:
+        return False
+    if source_kind != "spec":
+        return _page_requires_vision(builder_name, source_kind, file_name, page, heuristic={})
+    if _is_imperial_builder_name(builder_name):
+        return _looks_like_imperial_joinery_material_page(text)
+    return _page_requires_vision(builder_name, source_kind, file_name, page, heuristic={})
+
+
+def _looks_like_imperial_joinery_material_page(text: str) -> bool:
+    upper = str(text or "").upper()
+    if "APPLIANCES" in upper or "SINKWARE & TAPWARE" in upper or "SINKWARE (" in upper or "TAPWARE (" in upper:
+        return False
+    if "JOINERY SELECTION SHEET" in upper:
+        return True
+    if "COLOUR SCHEDULE" in upper and any(
+        marker in upper
+        for marker in (
+            "BENCHTOP",
+            "BASE CABINETRY",
+            "UPPER CABINETRY",
+            "KICKBOARDS",
+            "HANDLES",
+            "FLOATING SHELV",
+            "SPLASHBACK",
+        )
+    ):
+        return True
+    joinery_markers = (
+        "BENCHTOP",
+        "BASE CABINETRY",
+        "UPPER CABINETRY",
+        "OVERHEAD",
+        "KICKBOARD",
+        "HANDLES",
+        "SPLASHBACK",
+        "FLOATING SHELV",
+        "FEATURE BAR BACK",
+        "BULKHEAD",
+    )
+    if sum(1 for marker in joinery_markers if marker in upper) >= 2:
+        return True
+    return False
+
+
 def _looks_like_glued_field_page(text: str) -> bool:
     glue_patterns = (
         r"(?i)(?:HANDLES|BENCHTOPS?|SPLASHBACK|KICKBOARDS?|BASE CABINETRY COLOUR|UPPER CABINETRY COLOUR|TALL CABINETRY COLOUR|FLOATING SHELV(?:ES|ING)|GPO'?S|BIN|HAMPER)(?=[A-Z])",
@@ -3185,6 +3584,17 @@ def _request_page_layout(
     page_text: str,
     image_bytes: bytes,
 ) -> dict[str, Any]:
+    imperial_joinery_hint = ""
+    if _is_imperial_builder_name(builder_name) and _looks_like_imperial_joinery_material_page(page_text):
+        imperial_joinery_hint = (
+            " For Imperial joinery/material selection sheets, prioritize the visible table grid over OCR order. "
+            "Do not invent room blocks named Benchtop, Splashback, Pantry, Overheads, Under Bench Doors, "
+            "Base Cabinetry Colour, Upper Cabinetry, Floating Shelves, or Feature Bar Back when the page already belongs "
+            "to one room. Treat those as row labels or field groups instead. "
+            "If the page is a continuation sheet with cabinetry/handles/splashback only, you may leave room_label blank "
+            "rather than inventing a field-like room block. "
+            "Treat CLIENT NAME, SIGNATURE, SIGNED DATE, NOTES SUPPLIER, and DOCUMENT REF as footer noise."
+        )
     prompt = {
         "job_no": job_no,
         "builder_name": builder_name,
@@ -3207,6 +3617,7 @@ def _request_page_layout(
             "If OCR text order is scrambled, use the visual row alignment from the image to keep values with the correct row, not the nearest OCR line. "
             "Use row_kind only from: material, handle, accessory, sink, tap, basin, metadata, footer, other. "
             "Treat disclaimers, signatures, dates, and client blocks as metadata or footer, not material rows."
+            f"{imperial_joinery_hint}"
         ),
         "ocr_text": page_text,
     }
@@ -3225,7 +3636,13 @@ def _request_page_layout(
         parsed = parsed["page_layout"]
     if not isinstance(parsed, dict):
         raise RuntimeError("OpenAI vision returned a non-object page layout.")
-    return _normalize_page_layout(parsed)
+    return _postprocess_builder_layout(
+        builder_name=builder_name,
+        source_kind=source_kind,
+        layout=parsed,
+        raw_page_text=page_text,
+        provider="heavy_vision",
+    )
 
 
 def _normalize_page_layout(layout: dict[str, Any]) -> dict[str, Any]:
@@ -4181,6 +4598,18 @@ IMPERIAL_RAW_LIST_FIELDS: tuple[str, ...] = (
     "accessories",
 )
 
+IMPERIAL_LAYOUT_FIRST_SCALAR_FIELDS: tuple[str, ...] = (
+    "bench_tops_wall_run",
+    "bench_tops_island",
+    "door_colours_overheads",
+    "door_colours_base",
+    "door_colours_tall",
+    "door_colours_island",
+    "door_colours_bar_back",
+    "floating_shelf",
+    "splashback",
+)
+
 
 def _crosscheck_imperial_snapshot_with_raw(layout_snapshot: dict[str, Any], raw_snapshot: dict[str, Any]) -> dict[str, Any]:
     if not raw_snapshot:
@@ -4223,12 +4652,19 @@ def _prefer_imperial_raw_scalar(field_name: str, layout_value: Any, raw_value: A
         return layout_value
     if not layout_text:
         return raw_value
+    layout_score = _imperial_field_quality(layout_text, field_name)
+    raw_score = _imperial_field_quality(raw_text, field_name)
+    if _imperial_field_looks_crosscheck_contaminated(raw_text, field_name) and not _imperial_field_looks_crosscheck_contaminated(layout_text, field_name):
+        return layout_value
+    if field_name in IMPERIAL_LAYOUT_FIRST_SCALAR_FIELDS and not _imperial_field_looks_crosscheck_contaminated(layout_text, field_name):
+        if raw_score <= layout_score + 25:
+            return layout_value
     if field_name.startswith("bench_tops_"):
         layout_dedup = parsing._dedupe_delimited_fragments(layout_text)
         raw_dedup = parsing._dedupe_delimited_fragments(raw_text)
         if layout_dedup and raw_dedup and layout_dedup == raw_dedup and layout_text != raw_text:
             return layout_value
-    if _imperial_field_quality(raw_text, field_name) > _imperial_field_quality(layout_text, field_name):
+    if raw_score > layout_score:
         return raw_value
     return layout_value
 
@@ -4314,18 +4750,45 @@ def _imperial_field_quality(text: str, field_name: str) -> int:
         )
     ):
         score -= 120
+    if field_name.startswith("door_colours_") and any(
+        token in lowered
+        for token in (
+            "caesarstone",
+            "smartstone",
+            "wk stone",
+            "stone",
+            "benchtop",
+            "pencil round",
+            "waterfall",
+            "undermount sink",
+            "to bar back only",
+        )
+    ):
+        score -= 180
     if field_name.startswith("bench_tops_") and any(token in lowered for token in ("base cabinetry", "upper cabinetry", "kickboard", "handle")):
         score -= 140
+    if field_name.startswith("bench_tops_") and any(token in lowered for token in ("lighting", "shadowline", "splashback", "ceiling height", "cabinetry height")):
+        score -= 160
     if field_name == "bench_tops_wall_run" and any(token in lowered for token in ("wfall", "waterfall")):
         score -= 180
     if field_name == "bench_tops_wall_run" and re.search(r"\b\d+\s*x\b", cleaned, re.I):
         score -= 40
+    if field_name == "bench_tops_wall_run" and re.fullmatch(r"(?i)\d{3,4}\s*mm", cleaned):
+        score -= 220
     if field_name in {"sink_info", "tap_info", "basin_info"} and any(token in lowered for token in ("client", "date", "signature", "designer", "document ref", "private")):
         score -= 160
     if field_name in {"toe_kick", "bulkheads"} and any(token in lowered for token in ("soft close", "floor type", "handle", "benchtop")):
         score -= 140
     if field_name == "door_colours_bar_back" and "note:" in lowered:
         score -= 140
+    if field_name == "floating_shelf" and re.fullmatch(r"(?i)(?:\d+\s*mm\s+)?polytec\s*-\s*woodmatt", cleaned.strip(" -;,")):
+        score -= 120
+    if field_name == "floating_shelf" and "floating shelves" in lowered and "tasmanian oak" not in lowered:
+        score -= 80
+    if field_name == "splashback" and lowered in {"stone", "polytec"}:
+        score -= 180
+    if field_name == "splashback" and any(token in lowered for token in ("shadowline", "base cabinetry colour", "document ref", "notes supplier")):
+        score -= 180
     if field_name == "toe_kick" and any(token in lowered for token in ("cabinetry colour", "mirrored shaving cabinet", "external panels only")):
         score -= 160
     if field_name == "handles" and any(token in lowered for token in ("base cabinetry colour", "upper cabinetry colour", "benchtop", "kickboard")):
@@ -4341,6 +4804,49 @@ def _imperial_field_quality(text: str, field_name: str) -> int:
     if re.search(r"\b\d{2,4}mm\b", cleaned, re.I):
         score += 10
     return score
+
+
+def _imperial_field_looks_crosscheck_contaminated(text: str, field_name: str) -> bool:
+    lowered = parsing.normalize_space(str(text or "")).lower()
+    if not lowered:
+        return False
+    if field_name.startswith("door_colours_"):
+        return lowered in {"polytec", "laminex", "caesarstone", "smartstone", "wk stone"} or bool(
+            re.fullmatch(r"\d{2,4}\s*mm", lowered)
+        ) or any(
+            token in lowered
+            for token in (
+                "caesarstone",
+                "smartstone",
+                "wk stone",
+                "pencil round",
+                "waterfall",
+                "undermount sink",
+                "to bar back only",
+                "feature bar back",
+            )
+        )
+    if field_name.startswith("bench_tops_"):
+        return bool(
+            re.fullmatch(r"\d{3,4}\s*mm", lowered)
+            or any(
+                token in lowered
+                for token in (
+                    "base cabinetry",
+                    "upper cabinetry",
+                    "overhead cabinetry",
+                    "lighting",
+                    "shadowline",
+                    "ceiling height",
+                    "cabinetry height",
+                )
+            )
+        )
+    if field_name == "floating_shelf":
+        return lowered in {"polytec - woodmatt", "woodmatt", "polytec"}
+    if field_name == "splashback":
+        return lowered in {"stone", "polytec"} or any(token in lowered for token in ("shadowline", "document ref", "notes supplier"))
+    return False
 
 
 def _merge_soft_close_field(left: Any, right: Any, keyword: str) -> str:
@@ -5901,6 +6407,20 @@ def _ordered_generic_fragments_from_parts(
             continue
         seen.add(lowered)
         ordered.append(text)
+    return ordered
+
+
+def _ordered_page_candidates(*candidate_lists: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    ordered: list[tuple[int, int]] = []
+    seen: set[tuple[int, int]] = set()
+    for candidate_list in candidate_lists:
+        for candidate in candidate_list:
+            if not isinstance(candidate, tuple) or len(candidate) != 2:
+                continue
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            ordered.append(candidate)
     return ordered
 
 
@@ -8151,6 +8671,9 @@ def _enrich_snapshot_appliances(snapshot: dict[str, Any], progress_callback: Pro
     appliances = [row for row in snapshot.get("appliances", []) if isinstance(row, dict)]
     if not appliances:
         snapshot["appliances"] = []
+        return snapshot
+    if _is_imperial_builder_name(str(snapshot.get("builder_name", "") or "")):
+        snapshot["appliances"] = appliances
         return snapshot
     snapshot["appliances"] = appliance_official.enrich_appliance_rows(appliances, progress_callback=progress_callback, rule_flags=rule_flags)
     return snapshot
