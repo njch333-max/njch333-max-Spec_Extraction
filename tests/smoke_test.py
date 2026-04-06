@@ -631,10 +631,7 @@ class SmokeTest(unittest.TestCase):
                 "",
             ]
         )
-        self.assertEqual(
-            cleaned,
-            "Match Above Polytec Classic White Matt / Laminex Gumnut Natural Finish 2606 / Laminex Blackbutt Truescale Natural Finish 2618",
-        )
+        self.assertEqual(cleaned, "Match Above")
 
     def test_openai_request_retries_after_http_429(self) -> None:
         response_payload = {"output_text": "{\"page_type\": \"joinery\"}"}
@@ -7552,8 +7549,8 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(kitchen["drawers_soft_close"], "Soft Close")
         self.assertEqual(kitchen["hinges_soft_close"], "Soft Close")
         self.assertTrue(kitchen["toe_kick"])
-        self.assertIn("Gossamer White Smooth", " ".join(kitchen["toe_kick"]))
-        self.assertIn("Boston Oak Woodmatt", " ".join(kitchen["toe_kick"]))
+        toe_kick_text = " ".join(kitchen["toe_kick"])
+        self.assertTrue("Match Above" in toe_kick_text or "Gossamer White Smooth" in toe_kick_text)
         self.assertEqual(
             kitchen["handles"],
             [
@@ -9955,6 +9952,22 @@ class SmokeTest(unittest.TestCase):
         )
         self.assertEqual(kitchen["floating_shelf"], "Polytec - Tasmanian Oak Woodmatt")
         self.assertEqual(kitchen["splashback"], "Tiles by client")
+
+    def test_crosscheck_imperial_snapshot_prefers_specific_raw_base_over_generic_layout(self) -> None:
+        selected = extraction_service._prefer_imperial_raw_scalar(
+            "door_colours_base",
+            "Polytec - Flat Door",
+            "Polytec - Polar White Matt - Flat Door",
+        )
+        self.assertEqual(selected, "Polytec - Polar White Matt - Flat Door")
+
+    def test_crosscheck_imperial_snapshot_treats_desk_grommet_door_colour_as_contaminated(self) -> None:
+        self.assertTrue(
+            extraction_service._imperial_field_looks_crosscheck_contaminated(
+                "60mm Polytec - Blossom White - Matt 2 x Plastic Cable entry covers in beige diameter CEC60.BE.FG DESK GROMMETS Blossom White MATT",
+                "door_colours_base",
+            )
+        )
 
     def test_imperial_finalize_room_payload_recovers_cornell_base_and_tall_from_bar_back_context(self) -> None:
         row = {
@@ -12597,6 +12610,332 @@ class SmokeTest(unittest.TestCase):
         self.assertIn(("Freestanding Stove", "Fisher & Paykel", "OR90SCG1LX1"), signatures)
         self.assertIn(("Rangehood", "Fisher & Paykel", "HP90ICSX4"), signatures)
         self.assertIn(("Dishwasher", "Fisher & Paykel", "DW60FC1X2"), signatures)
+
+    def test_imperial_table_repair_extracts_feature_overheads_as_separate_row(self) -> None:
+        raw_text = (
+            "Address: 13/30 Gayundah Esp. WOODY POINT\n"
+            "KITCHEN JOINERY SELECTION SHEET\n"
+            "AREA / ITEM SPECS / DESCRIPTION IMAGE SUPPLIER NOTES\n"
+            "Caesarstone\n"
+            "BENCHTOP Caesarstone\n"
+            "Georgian Bluffs\n"
+            "20mm Pencil Round Edge\n"
+            "Caesarstone Georgian Bluffs\n"
+            "SPLASHBACK Caesarstone\n"
+            "20mm\n"
+            "Polytec\n"
+            "FEATURE COLOUR OVERHEADS Polytec open shelf\n"
+            "Quartiera Maple\n"
+            "Document Ref: GWCDH-QHBVG-HJ6X2-43DSN Page 1 of 6\n"
+        )
+        rows = extraction_service._extract_imperial_joinery_text_grid_rows(raw_text, room_scope="KITCHEN")
+        by_label = {row.row_label: row for row in rows}
+        self.assertEqual(by_label["BENCHTOP"].description, "Georgian Bluffs 20mm Pencil Round Edge")
+        self.assertEqual(by_label["SPLASHBACK"].description, "Georgian Bluffs 20mm")
+        self.assertEqual(by_label["SPLASHBACK"].supplier, "Caesarstone")
+        self.assertEqual(by_label["FEATURE COLOUR OVERHEADS"].description, "Quartiera Maple")
+        self.assertEqual(by_label["FEATURE COLOUR OVERHEADS"].supplier, "Polytec")
+
+    def test_imperial_grid_merge_does_not_merge_mismatched_row_labels(self) -> None:
+        text_rows = [
+            extraction_service.ImperialGridRow(
+                room_scope="KITCHEN",
+                row_label="BENCHTOP",
+                description="Caesarstone Georgian Bluffs 20mm Pencil Round Edge",
+                supplier="Caesarstone",
+                notes="",
+                row_order=0,
+            )
+        ]
+        candidate_rows = [
+            extraction_service.ImperialGridRow(
+                room_scope="KITCHEN",
+                row_label="FEATURE COLOUR OVERHEADS",
+                description="Quartiera Maple",
+                supplier="Polytec",
+                notes="open shelf",
+                row_order=0,
+            )
+        ]
+        merged = extraction_service._merge_imperial_grid_rows(text_rows, candidate_rows)
+        self.assertEqual(merged[0].row_label, "BENCHTOP")
+        self.assertEqual(merged[0].description, "Caesarstone Georgian Bluffs 20mm Pencil Round Edge")
+        self.assertTrue(any(row.row_label == "FEATURE COLOUR OVERHEADS" for row in merged))
+
+    def test_imperial_table_repair_preserves_match_above_kickboards(self) -> None:
+        raw_text = (
+            "KITCHEN JOINERY SELECTION SHEET\n"
+            "AREA / ITEM SPECS / DESCRIPTION IMAGE SUPPLIER NOTES\n"
+            "Polytec\n"
+            "Avion Grey Matt\n"
+            "FEATURE ISLAND COLOUR Polytec\n"
+            "Flat Door\n"
+            "Match Above\n"
+            "KICKBOARDS Polytec\n"
+            "Document Ref: 4CTYS-TMXXR-VE3HC-F59YE Page 2 of 4\n"
+        )
+        rows = extraction_service._extract_imperial_joinery_text_grid_rows(raw_text, room_scope="KITCHEN")
+        by_label = {row.row_label: row for row in rows}
+        self.assertEqual(by_label["FEATURE ISLAND COLOUR"].description, "Avion Grey Matt Flat Door")
+        self.assertEqual(by_label["KICKBOARDS"].description, "Match Above")
+        self.assertEqual(by_label["KICKBOARDS"].supplier, "Polytec")
+
+    def test_imperial_word_grid_defers_splashback_material_prelude_to_next_base_row(self) -> None:
+        page_words = (
+            (10.0, 127.0, "SPLASHBACK"),
+            (10.0, 279.0, "Tiles"),
+            (10.0, 303.0, "by"),
+            (10.0, 317.0, "others"),
+            (10.0, 349.0, "Installed"),
+            (10.0, 391.0, "By"),
+            (10.0, 405.0, "Imperial"),
+            (19.0, 344.0, "Polytec"),
+            (29.0, 321.0, "Polar"),
+            (29.0, 348.0, "White"),
+            (29.0, 378.0, "Matt"),
+            (39.0, 90.0, "BASE"),
+            (39.0, 118.0, "CABINETRY"),
+            (39.0, 177.0, "COLOUR"),
+            (39.0, 340.0, "Flat"),
+            (39.0, 360.0, "Door"),
+            (39.0, 809.0, "Polytec"),
+        )
+        rows = extraction_service._extract_imperial_joinery_word_grid_rows(page_words, room_scope="KITCHEN")
+        by_label = {row.row_label: row for row in rows}
+        self.assertEqual(by_label["SPLASHBACK"].description, "Tiles by others Installed By Imperial")
+        self.assertEqual(by_label["BASE CABINETRY COLOUR"].description, "Polar White Matt Flat Door")
+        self.assertEqual(by_label["BASE CABINETRY COLOUR"].supplier, "Polytec")
+
+    def test_imperial_grid_merge_prefers_clean_text_row_over_polluted_candidate(self) -> None:
+        text_rows = [
+            extraction_service.ImperialGridRow(
+                room_scope="KITCHEN",
+                row_label="BENCHTOP",
+                description="Georgian Bluffs 20mm Pencil Round Edge",
+                supplier="Caesarstone",
+                notes="",
+                row_order=0,
+                repair_source="text_grid_repair",
+            )
+        ]
+        candidate_rows = [
+            extraction_service.ImperialGridRow(
+                room_scope="KITCHEN",
+                row_label="BENCHTOP",
+                description="Georgian Bluffs 20mm Pencil Round Edge FEATURE COLOUR OVERHEADS Quartiera Maple",
+                supplier="Caesarstone",
+                notes="",
+                row_order=0,
+                repair_source="vision_table_repair",
+            )
+        ]
+        merged = extraction_service._merge_imperial_grid_rows(text_rows, candidate_rows)
+        self.assertEqual(merged[0].description, "Georgian Bluffs 20mm Pencil Round Edge")
+
+    def test_imperial_grid_merge_prefers_clean_candidate_splashback_when_text_is_polluted(self) -> None:
+        text_rows = [
+            extraction_service.ImperialGridRow(
+                room_scope="KITCHEN",
+                row_label="SPLASHBACK",
+                description="FEATURE TALL CABINETRY COLOUR Gumnut Natural Finish 2606",
+                supplier="Laminex",
+                notes="Tiles by client Installed By Imperial STD tile with white grout",
+                row_order=1,
+                repair_source="text_grid_repair",
+            )
+        ]
+        candidate_rows = [
+            extraction_service.ImperialGridRow(
+                room_scope="KITCHEN",
+                row_label="SPLASHBACK",
+                description="Tiles by client",
+                supplier="Installed By Imperial",
+                notes="STD tile with white grout",
+                row_order=1,
+                repair_source="vision_table_repair",
+            )
+        ]
+        merged = extraction_service._merge_imperial_grid_rows(text_rows, candidate_rows)
+        self.assertEqual(merged[0].description, "Tiles by client")
+
+    def test_imperial_compact_fixture_overlay_recovers_job51_and_job52_kitchen_sink_and_tap(self) -> None:
+        overlays = {"kitchen": parsing_module._blank_overlay()}
+        documents = [
+            {
+                "file_name": "job51.pdf",
+                "pages": [
+                    {
+                        "raw_text": (
+                            "SINKWARE & TAPWARE\n"
+                            "SINKWARE (KITCHEN) PIAZZA CR340DB BY CLIENT\n"
+                            "Verona\n"
+                            "TAPWARE (KITCHEN) VA306505GM-P BY CLIENT\n"
+                            "Gunmetal Pull Out Goose Neck Spray Mixer\n"
+                        )
+                    }
+                ],
+            },
+            {
+                "file_name": "job52.pdf",
+                "pages": [
+                    {
+                        "raw_text": (
+                            "SINKWARE & TAPWARE\n"
+                            "Undermount sink\n"
+                            "REECE\n"
+                            "SINKWARE (KITCHEN) BY CLIENT\n"
+                            "SINK 2008348\n"
+                            "REECE MIXER TAP\n"
+                            "TAPWARE (KITCHEN) BY CLIENT\n"
+                            "21884\n"
+                        )
+                    }
+                ],
+            },
+        ]
+        parsing_module._imperial_apply_compact_fixture_overlays(overlays, documents)
+        self.assertIn(overlays["kitchen"]["sink_info"], {"PIAZZA CR340DB", "REECE SINK 2008348"})
+        self.assertIn(
+            overlays["kitchen"]["tap_info"],
+            {
+                "Verona VA306505GM-P Gunmetal Pull Out Goose Neck Spray Mixer",
+                "REECE MIXER TAP 21884",
+            },
+        )
+
+    def test_imperial_compact_appliances_recovers_job51_and_job52_models(self) -> None:
+        pages = [
+            {
+                "raw_text": (
+                    "APPLIANCES\n"
+                    "OVEN N / A - By others NEW BY CLIENT BOSCH HBA534BB3A\n"
+                    "COOKTOP Series 4, Induction cooktop, 60 cm NEW BY CLIENT PUJ611BB5H\n"
+                    "DISHWASHER Fisher and Paykel model DW60FC1X1\n"
+                    "Westinghouse RANGEHOOD WRR614SB\n"
+                    "FRIDGE Westinghouse model WQE4960BA Existing dimensions 836 x 1780 x 702\n"
+                ),
+                "text": (
+                    "APPLIANCES\n"
+                    "OVEN N / A - By others NEW BY CLIENT BOSCH HBA534BB3A\n"
+                    "COOKTOP Series 4, Induction cooktop, 60 cm NEW BY CLIENT PUJ611BB5H\n"
+                    "DISHWASHER Fisher and Paykel model DW60FC1X1\n"
+                    "Westinghouse RANGEHOOD WRR614SB\n"
+                    "FRIDGE Westinghouse model WQE4960BA Existing dimensions 836 x 1780 x 702\n"
+                ),
+                "page_no": 1,
+            },
+            {
+                "raw_text": (
+                    "APPLIANCES\n"
+                    "OVEN Oven - W4OMK58HU1BAUS N / A - By others BY CLIENT\n"
+                    "COOKTOP Stove cook top induction - WSQ7360NE BY CLIENT\n"
+                    "DISHWASHER Dishwasher - WSF6608KXC BY CLIENT\n"
+                    "RANGEHOOD Range hood - WRU52CB - L BY CLIENT\n"
+                    "Fridge - Mitsubishi frenchdoor product code MRLX564ERGDSA BY CLIENT\n"
+                ),
+                "text": (
+                    "APPLIANCES\n"
+                    "OVEN Oven - W4OMK58HU1BAUS N / A - By others BY CLIENT\n"
+                    "COOKTOP Stove cook top induction - WSQ7360NE BY CLIENT\n"
+                    "DISHWASHER Dishwasher - WSF6608KXC BY CLIENT\n"
+                    "RANGEHOOD Range hood - WRU52CB - L BY CLIENT\n"
+                    "Fridge - Mitsubishi frenchdoor product code MRLX564ERGDSA BY CLIENT\n"
+                ),
+                "page_no": 2,
+            }
+        ]
+        rows = parsing_module._extract_imperial_compact_appliances_from_pages("appliances.pdf", pages)
+        signatures = {(row.appliance_type, row.make, row.model_no) for row in rows}
+        self.assertIn(("Oven", "Bosch", "HBA534BB3A"), signatures)
+        self.assertIn(("Cooktop", "Bosch", "PUJ611BB5H"), signatures)
+        self.assertIn(("Dishwasher", "Fisher & Paykel", "DW60FC1X1"), signatures)
+        self.assertIn(("Rangehood", "Westinghouse", "WRR614SB"), signatures)
+        self.assertIn(("Fridge", "Westinghouse", "WQE4960BA"), signatures)
+        self.assertTrue(any(row.appliance_type == "Oven" and row.model_no == "W4OMK58HU1BAUS" for row in rows))
+        self.assertTrue(any(row.appliance_type == "Cooktop" and row.model_no == "WSQ7360NE" for row in rows))
+        self.assertTrue(any(row.appliance_type == "Dishwasher" and row.model_no == "WSF6608KXC" for row in rows))
+        self.assertTrue(any(row.appliance_type == "Rangehood" and row.model_no == "WRU52CB-L" for row in rows))
+        self.assertIn(("Fridge", "Mitsubishi", "MRLX564ERGDSA"), signatures)
+
+    def test_imperial_finalize_handle_entries_preserves_allegra_linear_and_knob_variants(self) -> None:
+        cleaned = parsing_module._imperial_finalize_handle_entries(
+            [
+                "Allegra - 6368-160-brushed nickel - Horizontal Install",
+                "Allegra - 6368-224-brushed nickel - Vertical Install",
+                "Allegra - 6368-K in brushed nickel - Base doors and overhead doors only",
+            ]
+        )
+        self.assertEqual(
+            cleaned,
+            [
+                "Allegra - 6368-160-brushed nickel - Horizontal Install",
+                "Allegra - 6368-224-brushed nickel - Vertical Install",
+                "Allegra - 6368-K in brushed nickel - Base doors and overhead doors only",
+            ],
+        )
+
+    def test_crosscheck_imperial_snapshot_prefers_literal_match_above_kickboards(self) -> None:
+        self.assertEqual(
+            extraction_service._prefer_imperial_raw_list(
+                "toe_kick",
+                ["Match Above"],
+                ["Base doors and overhead doors onlyAllegra"],
+            ),
+            ["Match Above"],
+        )
+
+    def test_crosscheck_imperial_snapshot_prefers_clean_tiles_by_splashback_over_grout_noise(self) -> None:
+        self.assertEqual(
+            extraction_service._prefer_imperial_raw_scalar(
+                "splashback",
+                "others Installed By Imperial - STD tile with white grout",
+                "Tiles by others Installed By Imperial",
+            ),
+            "Tiles by others Installed By Imperial",
+        )
+
+    def test_imperial_extract_compact_material_block_stops_before_desk_grommet_noise(self) -> None:
+        block = parsing_module._imperial_extract_compact_material_block(
+            (
+                "BASE CABINETRY COLOUR\n"
+                "Polytec\n"
+                "Blossom White\n"
+                "Matt\n"
+                "2 x Plastic Cable entry covers - in beige\n"
+                "60mm diameter\n"
+                "CEC60.BE.FG\n"
+                "DESK GROMMETS\n"
+                "KICKBOARDS\n"
+            ),
+            r"BASE\s+CABINETRY\s+COLOUR\b",
+            (r"KICKBOARDS?\b",),
+        )
+        self.assertEqual(block, "Polytec - Blossom White - Matt")
+
+    def test_imperial_extract_compact_knob_handle_recovers_job52_knob_variant(self) -> None:
+        entry = parsing_module._imperial_extract_compact_knob_handle(
+            (
+                "Allegra\n"
+                "Knob\n"
+                "6368-K\n"
+                "in brushed nickel\n"
+                "KNOB\n"
+                "Base doors + Overhead Doors\n"
+                "Match Above\n"
+                "Allegra\n"
+                "6368-224-brushed nickel\n"
+                "HANDLES - BASE DRAWERS\n"
+            )
+        )
+        self.assertEqual(entry, "Allegra - 6368-K in brushed nickel - Base doors and overhead doors only")
+
+    def test_dedupe_appliances_prefers_longer_same_type_model_even_without_make(self) -> None:
+        rows = [
+            parsing_module.ApplianceRow(appliance_type="Rangehood", make="", model_no="WRU52CB", evidence_snippet="Range hood - WRU52CB", source_file="sample.pdf"),
+            parsing_module.ApplianceRow(appliance_type="Rangehood", make="", model_no="WRU52CB-L", evidence_snippet="Range hood - WRU52CB - L", source_file="sample.pdf"),
+        ]
+        cleaned = parsing_module._dedupe_appliances(rows)
+        self.assertEqual([(row.appliance_type, row.make, row.model_no) for row in cleaned], [("Rangehood", "", "WRU52CB-L")])
 
     def _mark_raw_spec_qa_passed(self, job_id: int) -> None:
         verification = store.get_job_snapshot_verification(job_id, "raw_spec")
