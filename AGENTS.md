@@ -46,6 +46,22 @@ If a change affects user-visible behavior, architecture, storage, deployment, wo
     - `Imperial / Simonds / Evoca / Yellowwood`: layout + row-local parser + selective Docling on difficult schedule/table pages
     - default automatic `Heavy Vision`: off, except Imperial joinery/material selection sheets where Vision is on by default as a table/grid boundary layer
     - default automatic `AI merge`: off
+14a. Builder × page-family extraction matrix is now explicit:
+    - `Imperial`
+      - `joinery/material/colour schedule`: Vision-grid-first, then Docling, then `pdfplumber`, then heuristic text-grid
+      - `sinkware & tapware`: table/grid-first with Docling/`pdfplumber`/deterministic row parsing; Vision is not default
+      - `appliances`: deterministic row parser first, with table/grid support when page structure is available; Vision is not default
+    - `Yellowwood`
+      - cabinetry/joinery, vanity, flooring, and tiling schedules: table/grid-first via Docling/`pdfplumber`/heuristic text-grid
+      - sinkware/appliances: deterministic row parser first, still source-text driven
+    - `Simonds`
+      - grouped-row/property-row schedules: table/grid-first so `Manufacturer / Finish / Profile / Colour / Model / Supplier` are treated as columns before mapping
+    - `Evoca`
+      - finishes/flooring/plumbing/appliance schedules: table/grid-first, then room-local mapping
+    - `Clarendon`
+      - `Drawings and Colours / Colour Schedule`: heuristic-grid-first, not Vision-first
+      - AFC/supplement `sinkware / appliances / flooring`: table/grid-first without default Vision
+      - drawing pages remain heuristic-only
 15. Clarendon room names must come only from the `Drawings and Colours` room-master file when that file exists. AFC/supplement files may enrich existing rooms only and may not create new room names.
 16. Clarendon AFC flooring pages such as `CARPET & MAIN FLOOR TILE` must enrich existing room-master rooms only. Room-specific flooring should land on the relevant room cards, not in `others.flooring_notes`, and broad AFC labels such as `WIL/Linen/s Ground Floor` must not be inferred back into `LAUNDRY`.
 17. Yellowwood room names must prefer the concrete joinery/spec title, and rooms without joinery/material evidence must be dropped. `robe` and `media` rooms stay only when they contain real material evidence such as `Polytec` or `Laminex`.

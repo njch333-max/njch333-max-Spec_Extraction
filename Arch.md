@@ -78,6 +78,23 @@
    - default automatic `Heavy Vision`: disabled except for Imperial joinery/material selection sheets
    - default automatic `AI merge`: disabled
 5. Apply `Docling` only to builder/page combinations that need structure recovery, such as grouped joinery schedules, cabinetry tables, vanity schedules, tiling schedules, and `Area / Item / Colour / Supplier` style pages. Docling runs per-page subset only and keeps OCR off by default.
+5a. Builder × page-family provider order is fixed:
+  - `Imperial joinery/material`: `Vision -> Docling -> pdfplumber -> heuristic text-grid`
+  - `Imperial sinkware/appliances`: `Docling/pdfplumber -> deterministic row parser`, with Vision only as a later single-page fallback
+  - `Yellowwood cabinetry/vanity/flooring/tiling`: `Docling -> pdfplumber -> heuristic text-grid`
+  - `Simonds grouped property schedules`: `Docling -> pdfplumber -> heuristic text-grid`
+  - `Evoca finishes/flooring/plumbing/appliances`: `Docling -> pdfplumber -> heuristic text-grid`
+  - `Clarendon colour schedule`: `heuristic-grid-first -> pdfplumber -> text-grid`
+  - `Clarendon AFC sinkware/appliances/flooring`: `pdfplumber -> Docling -> heuristic text-grid`
+  - `Clarendon drawing pages`: heuristic-only
+5b. The shared extraction order for non-drawing pages is now:
+  - classify `page_family`
+  - recover `GridPage / GridRow / GridCell` style structure
+  - apply merged-cell carry-forward
+  - map grid rows to room/appliance fields
+  - run room-local overlay merge
+  - run the builder finalizer
+  - render and sort fields only after extraction is complete
 6. Run heuristic extraction into canonical schema, then rebuild shared fields through `layout_rows -> row-fragment -> row-local mapping` so supplier, model, profile, note, and value text stay attached to the owning row.
 7. Run a builder-finalizer dispatch stage:
    - the shared layer owns page classification, room/row block detection, room-local overlays, and generic noise cleanup
@@ -121,6 +138,7 @@
   - stop section text collection at footer markers such as `CLIENT NAME`, `SIGNATURE`, and `SIGNED DATE`, including glued variants like `CLIENT NAME: SIGNATURE: SIGNED DATE:`, `CLIENTNAMESIGNATURESIGNEDDATE`, and footer noise such as `NOTESSUPPLIER`
   - avoid turning `... TO TOP OF BENCHTOP` layout text plus a later `OFFICE JOINERY SELECTION SHEET` title into a fake benchtop field
   - keep sinkware/tapware and appliance pages on deterministic text/overlay parsing by default; Vision on Imperial is for table-boundary recovery, not free-form final field generation
+  - `CLIENT NAME`, `SIGNATURE`, `SIGNED DATE`, `NOTES SUPPLIER`, and `DOCUMENT REF` are always treated as footer-noise markers on Imperial pages and must never enter room/appliance fields
 
 ### 3.5 Source Control And Review
 - The repository is prepared for a GitHub-hosted workflow centered on pull-request review.

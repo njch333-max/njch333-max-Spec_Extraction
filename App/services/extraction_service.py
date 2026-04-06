@@ -130,6 +130,71 @@ def _normalized_builder_key(builder_name: str) -> str:
     return parsing.normalize_space(builder_name).lower()
 
 
+PAGE_FAMILY_PROVIDER_MATRIX: dict[str, dict[str, dict[str, bool | str]]] = {
+    "imperial": {
+        "joinery_material_sheet": {"table_grid_first": True, "vision_grid_default": True, "docling_default": True},
+        "sinkware_tapware_sheet": {"table_grid_first": True, "vision_grid_default": False, "docling_default": True},
+        "appliance_sheet": {"table_grid_first": True, "vision_grid_default": False, "docling_default": True},
+    },
+    "yellowwood": {
+        "joinery_material_sheet": {"table_grid_first": True, "vision_grid_default": False, "docling_default": True},
+        "colour_schedule": {"table_grid_first": True, "vision_grid_default": False, "docling_default": True},
+        "sinkware_tapware_sheet": {"table_grid_first": True, "vision_grid_default": False, "docling_default": True},
+        "appliance_sheet": {"table_grid_first": True, "vision_grid_default": False, "docling_default": True},
+    },
+    "simonds": {
+        "grouped_property_schedule": {"table_grid_first": True, "vision_grid_default": False, "docling_default": True},
+        "sinkware_tapware_sheet": {"table_grid_first": True, "vision_grid_default": False, "docling_default": True},
+        "appliance_sheet": {"table_grid_first": True, "vision_grid_default": False, "docling_default": True},
+    },
+    "evoca": {
+        "grouped_property_schedule": {"table_grid_first": True, "vision_grid_default": False, "docling_default": True},
+        "sinkware_tapware_sheet": {"table_grid_first": True, "vision_grid_default": False, "docling_default": True},
+        "appliance_sheet": {"table_grid_first": True, "vision_grid_default": False, "docling_default": True},
+    },
+    "clarendon": {
+        "colour_schedule": {"table_grid_first": True, "vision_grid_default": False, "docling_default": False},
+        "sinkware_tapware_sheet": {"table_grid_first": True, "vision_grid_default": False, "docling_default": False},
+        "appliance_sheet": {"table_grid_first": True, "vision_grid_default": False, "docling_default": False},
+        "drawing_page": {"table_grid_first": False, "vision_grid_default": False, "docling_default": False},
+    },
+}
+
+
+def _classify_spec_page_family(builder_name: str, text: str) -> str:
+    upper = str(text or "").upper()
+    builder_key = _normalized_builder_key(builder_name)
+    if not upper:
+        return "unknown"
+    if "DRAWINGS AND COLOURS" in upper or ("AMENDED DRAWINGS" in upper and builder_key == "clarendon"):
+        return "drawing_page"
+    if "SINKWARE & TAPWARE" in upper or "SINKWARE (" in upper or "TAPWARE (" in upper or "PLUMBING FIXTURES & TAPWARE" in upper:
+        return "sinkware_tapware_sheet"
+    if "APPLIANCES" in upper or "17 APPLIANCES" in upper:
+        return "appliance_sheet"
+    if builder_key == "imperial" and _looks_like_imperial_joinery_material_page(upper):
+        return "joinery_material_sheet"
+    if builder_key == "yellowwood" and any(marker in upper for marker in ("JOINERY", "CABINETRY", "COLOUR SCHEDULE", "BASE CUPBOARDS", "OVERHEAD CUPBOARDS")):
+        return "joinery_material_sheet"
+    if builder_key == "clarendon" and "COLOUR SCHEDULE" in upper:
+        return "colour_schedule"
+    if builder_key in {"simonds", "evoca"} and any(marker in upper for marker in ("15 CABINETS", "MANUFACTURER", "COLOUR & FINISH", "PROFILE", "CATEGORY")):
+        return "grouped_property_schedule"
+    if "COLOUR SCHEDULE" in upper or "JOINERY SELECTION SHEET" in upper:
+        return "joinery_material_sheet"
+    return "unknown"
+
+
+def _page_family_strategy(builder_name: str, text: str) -> dict[str, bool | str]:
+    builder_key = _normalized_builder_key(builder_name)
+    family = _classify_spec_page_family(builder_name, text)
+    defaults: dict[str, bool | str] = {"page_family": family, "table_grid_first": False, "vision_grid_default": False, "docling_default": False}
+    strategy = PAGE_FAMILY_PROVIDER_MATRIX.get(builder_key, {}).get(family)
+    if strategy:
+        return {**defaults, **strategy}
+    return defaults
+
+
 def _job_matches_runtime_override(job_no: str, overrides: set[str]) -> bool:
     return parsing.normalize_space(job_no).lower() in overrides
 
@@ -3403,7 +3468,10 @@ def _page_requires_vision(
     text = str(page.get("raw_text", page.get("text", "")) or "")
     if not text:
         return False
+    strategy = _page_family_strategy(builder_name, text) if source_kind == "spec" else {}
     upper = text.upper()
+    if bool(strategy.get("vision_grid_default")):
+        return True
     if source_kind == "spec" and any(
         marker in upper
         for marker in (
@@ -3454,8 +3522,11 @@ def _page_requires_heavy_vision(
         return False
     if source_kind != "spec":
         return _page_requires_vision(builder_name, source_kind, file_name, page, heuristic={})
-    if _is_imperial_builder_name(builder_name):
-        return _looks_like_imperial_joinery_material_page(text)
+    strategy = _page_family_strategy(builder_name, text)
+    if bool(strategy.get("vision_grid_default")):
+        return True
+    if str(strategy.get("page_family", "") or "") != "unknown":
+        return False
     return _page_requires_vision(builder_name, source_kind, file_name, page, heuristic={})
 
 

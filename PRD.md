@@ -80,8 +80,18 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
   - default automatic `Heavy Vision` is disabled for every builder except Imperial joinery/material selection sheets
   - Imperial joinery/material pages now default to Vision-assisted table/grid boundary detection so Excel-style PDFs are parsed as visible tables instead of free text
   - default automatic `AI merge` is disabled
+- Builder × page-family extraction matrix is now explicit:
+  - `Imperial joinery/material`: Vision-grid-first
+  - `Imperial sinkware/appliances`: deterministic row parser first, with table/grid recovery when available
+  - `Yellowwood cabinetry/vanity/flooring/tiling`: table/grid-first without default Vision
+  - `Simonds grouped property schedules`: table/grid-first without default Vision
+  - `Evoca finishes/flooring/plumbing/appliances`: table/grid-first without default Vision
+  - `Clarendon colour schedule`: heuristic-grid-first
+  - `Clarendon AFC sinkware/appliances/flooring`: table/grid-first without default Vision
+  - `Clarendon drawing pages`: heuristic-only
 - OpenAI-powered `AI merge` remains a manual rescue tool for targeted parser-debug or QA-failed jobs; it is not part of the normal production pipeline.
 - Imperial joinery/material Vision is a boundary-recognition layer, not a free-form final extractor. It is used to recover header rows, column boundaries, merged-cell carry-forward, and footer/signature isolation before deterministic field mapping runs.
+- For all non-drawing table/grid-first page families, values must be read from the recovered table/grid rows first and only lightly normalized afterward. Field ordering and UI presentation must happen after extraction, not before it.
 - Layout analysis must emit `page_type`, `section_label`, `room_label`, `room_blocks`, and `rows`, and later extraction stages may only read values from those matched blocks instead of scanning freely across the page.
 - After shared structure extraction, every builder must pass through a builder-specific finalizer stage. The shared layer owns page classification, room/row block detection, and common noise cleanup; builder finalizers own final room-title preservation, overlay merge priority, fixture blacklist enforcement, and grouped-row/property-row cleanup.
 - All builders must use the fixed `Global Conservative` profile based on the accepted `37016` output style.
@@ -143,6 +153,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - For Yellowwood, non-wet-area `FLOORING` pages and wet-area `TILING SCHEDULE` pages must enrich the retained room cards as room-local overlays. Room flooring should land on `Kitchen`, robe rooms, and vanity rooms when the schedule area labels match, and contents-page flooring lines must never populate `others.flooring_notes`.
 - For Yellowwood kitchens, builder-specific finalization must keep wall-run, island, and other benchtops separate, preserve `Overhead Cupboards`, treat `*To Bulkhead*` text as a note rather than a bulkhead material value, and repopulate kitchen `Sink` / `Tap` from the plumbing overlay when the joinery page itself is sparse.
 - Imperial-style joinery selection sheets must use page-top section titles as authoritative section boundaries, keep continuation pages with the current section until the next section title, and stop extraction at footer section-break markers such as `CLIENT NAME / SIGNATURE / SIGNED DATE`, their glued variants like `CLIENT NAME: SIGNATURE: SIGNED DATE:` or `CLIENTNAMESIGNATURESIGNEDDATE`, and related footer noise such as `NOTESSUPPLIER`.
+- `DOCUMENT REF` is also Imperial footer noise and must never be treated as appliance, sinkware, or material content.
 - Imperial joinery/material selection sheets must be treated as table-first Excel-to-PDF layouts. Vision is enabled by default on those pages to recover the visible table grid, column boundaries, merged cells, and footer/signature isolation before deterministic row-to-field mapping runs.
 - Imperial section parsing must treat obvious in-section row labels such as `ISLAND CABINETRY COLOUR`, `GPO'S`, `BIN`, `HAMPER`, `HANGING RAIL`, `MIRRORED SHAVING CABINET`, and `EXTRA TOP IN ...` as row boundaries even when they are not final business fields, so preceding benchtop, floating-shelf, handle, and cabinetry rows do not continue through them.
 - Imperial OCR-glued lines must not split inside ordinary words such as `CABINETRY`; inline marker detection should only split at real row starts or glued lowercase-to-uppercase row transitions.
@@ -154,6 +165,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Imperial sinkware semantic parsing must ignore unrelated pre-heading basin/tub noise, keep mounting suffixes such as `UNDERMOUNT` attached to the correct sink row, and apply generic taphole notes to the correct sink cluster without cross-room leakage.
 - Orientation-only notes such as `Vertical on Tall doors only` or `Horizontal on all` must not be treated as room-material values.
 - Imperial fixture overlay pages should be preferred over AI guesses for sink, basin, and tap text whenever the builder-specific overlay parser can read a cleaner local value.
+- Yellowwood cabinetry/joinery pages must now be treated as table/grid-first schedules as well, so rows such as `BENCHTOP`, `BASE CABINETRY COLOUR`, `UPPER CABINETRY COLOUR`, `ISLAND CABINETRY COLOUR`, `HANDLES`, `BIN`, `LIGHTING`, and `KICKBOARDS` are split before field mapping.
 - Under the conservative merge profile, accessory lists and door-colour subgroup values should prefer clean heuristic output over noisier AI-only guesses when the AI result appears to come from another row or section.
 - Joinery schedule parsing must ignore non-cabinet finish pages and exclude colours that only appear in paint, Colorbond, garage-door, entry-door, window-frame, or other non-joinery contexts.
 - Drawer and hinge states must normalize to `Soft Close`, `Not Soft Close`, or blank.

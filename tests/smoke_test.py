@@ -9517,6 +9517,58 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("FL135INSET-W", overlays["bath_ensuite"]["basin_info"])
         self.assertIn("SP136-220-CH", overlays["bath_ensuite"]["tap_info"])
 
+    def test_imperial_compact_non_joinery_overlay_separates_alfresco_sink_and_tap_models(self) -> None:
+        documents = [
+            {
+                "file_name": "imperial-compact.pdf",
+                "role": "spec",
+                "pages": [
+                    {
+                        "page_no": 4,
+                        "raw_text": (
+                            "ALFRESCO SINKWARE & TAPWARE\n"
+                            "AREA / ITEM SPECS / DESCRIPTION IMAGE SUPPLIER NOTES\n"
+                            "Taphole location: Centred to back\n"
+                            "Undermount sink\n"
+                            "ABEY Alfresco 540 Large Bowl Sink with\n"
+                            "Drain Tray & KTA037-316-BR Kitchen Mixer\n"
+                            "SINKWARE (KITCHEN) BY IMPERIAL\n"
+                            "Tap FRA540T15 in marine grade Stainless\n"
+                            "Steel\n"
+                        ),
+                        "text": "",
+                        "needs_ocr": False,
+                    }
+                ],
+            }
+        ]
+        overlays = parsing_module._collect_imperial_room_overlays(documents)
+        self.assertEqual(
+            overlays["kitchen"]["sink_info"],
+            "ABEY FRA540T15 Alfresco 540 Large Bowl Sink with Drain Tray",
+        )
+        self.assertEqual(overlays["kitchen"]["tap_info"], "KTA037-316-BR Kitchen Mixer")
+
+    def test_imperial_compact_appliances_extract_alfresco_bbq_side_burner_and_bar_fridge(self) -> None:
+        text = (
+            "ALFRESCO APPLIANCES\n"
+            "INSET BBQ Tucker Horizon Marine Grade BBQ\n"
+            "Built In with Slimline Hood\n"
+            "SKU-os-horbbqz2+m1+pk-5 BY CLIENT\n"
+            "SIDE BURNER Tucker s Wok Built In BY CLIENT\n"
+            "BAR FRIDGE Rhino 248L Envy Marine Grade Outdoor Beverage Centre ENV2H-SS BY CLIENT\n"
+        )
+        rows = parsing_module._extract_imperial_compact_appliances_from_pages(
+            "imperial-compact.pdf",
+            [{"page_no": 3, "raw_text": text, "text": text}],
+        )
+        by_type = {row.appliance_type: row for row in rows}
+        self.assertEqual(by_type["Inset BBQ"].make, "Tucker")
+        self.assertEqual(by_type["Inset BBQ"].model_no, "SKU-os-horbbqz2+m1+pk-5")
+        self.assertEqual(by_type["Side Burner"].make, "Tucker")
+        self.assertEqual(by_type["Side Burner"].model_no, "Wok Built In")
+        self.assertEqual(by_type["Fridge"].model_no, "ENV2H-SS")
+
     def test_finalize_imperial_rooms_splits_laundry_and_storage_nook(self) -> None:
         room = {
             "room_key": "laundry",
@@ -9647,6 +9699,12 @@ class SmokeTest(unittest.TestCase):
             ["As Doors Polytec"],
         )
 
+    def test_imperial_finalize_toe_kick_entries_strips_repeated_supplier_suffix(self) -> None:
+        self.assertEqual(
+            parsing_module._imperial_finalize_toe_kick_entries(["StyleLex - Alabaster StyleLex"]),
+            ["StyleLex - Alabaster"],
+        )
+
     def test_imperial_strip_waterfall_from_wall_benchtop_removes_waterfall_and_count_noise(self) -> None:
         self.assertEqual(
             parsing_module._imperial_strip_waterfall_from_wall_benchtop(
@@ -9684,6 +9742,21 @@ class SmokeTest(unittest.TestCase):
             ),
             "20mm Caesarstone - Stone 2141 Snow - PR",
         )
+
+    def test_clear_room_specific_splashback_notes_drops_imperial_duplicate_room_splashback(self) -> None:
+        snapshot = {
+            "builder_name": "Imperial",
+            "rooms": [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "splashback": "150mm High Splashback in Pantry - Stone Splashback",
+                }
+            ],
+            "others": {"splashback_notes": "(Incl Pantry-150mm) Caesarstone 150mm High Splashback in Pantry"},
+        }
+        parsing_module._clear_room_specific_splashback_notes(snapshot)
+        self.assertEqual(snapshot["others"]["splashback_notes"], "")
 
     def test_imperial_compact_kitchen_enrichment_recovers_cornell_base_bar_back_and_handles(self) -> None:
         row = {
@@ -12132,6 +12205,398 @@ class SmokeTest(unittest.TestCase):
         self.assertIsNotNone(verification)
         fields = {item["field_name"] for item in verification["checklist"]}
         self.assertIn("shelf", fields)
+
+    def test_clarendon_false_appliance_filter_rejects_drawing_noise_with_bulkhead_tokens(self) -> None:
+        self.assertTrue(
+            parsing_module._looks_like_clarendon_false_appliance(
+                {
+                    "appliance_type": "Dishwasher",
+                    "make": "",
+                    "model_no": "BUILDER20MM",
+                    "evidence_snippet": "DISHWASHER BULKHEAD SHADOWLINE AS MATCHING MELAMINE KICKBOARD AS MATCHING MELAMINE 20MM STONE BENCHTOP",
+                }
+            )
+        )
+
+    def test_clarendon_finalize_appliances_promotes_real_dishwasher_from_placeholder_line(self) -> None:
+        appliances = [
+            {
+                "appliance_type": "Dishwasher",
+                "make": "",
+                "model_no": "BUILDER20MM",
+                "product_url": "",
+                "spec_url": "",
+                "manual_url": "",
+                "website_url": "",
+                "overall_size": "",
+                "source_file": "drawings.pdf",
+                "page_refs": "",
+                "evidence_snippet": "DISHWASHER BULKHEAD SHADOWLINE AS MATCHING MELAMINE KICKBOARD AS MATCHING MELAMINE 20MM STONE BENCHTOP",
+                "confidence": 0.72,
+            }
+        ]
+        documents = [
+            {
+                "file_name": "49906511 COLOURS AFC .pdf",
+                "pages": [
+                    {
+                        "raw_text": "APPLIANCES\nDishwasher Make: WESTINGHOUSE Freestanding (WSF6608X) 600mm S/S\nMicrowave Make: N/A",
+                        "text": "APPLIANCES\nDishwasher Make: WESTINGHOUSE Freestanding (WSF6608X) 600mm S/S\nMicrowave Make: N/A",
+                    }
+                ],
+            }
+        ]
+        parsing_module._finalize_clarendon_appliances(appliances, documents)
+        dishwasher = next(row for row in appliances if str(row.get("appliance_type", "")).lower() == "dishwasher")
+        self.assertEqual(dishwasher["make"], "Westinghouse")
+        self.assertIn("WSF6608X", dishwasher["model_no"])
+
+    def test_clarendon_collect_afc_fixture_overlays_recovers_pina_laundry_tap(self) -> None:
+        documents = [
+            {
+                "file_name": "49906511 COLOURS AFC .pdf",
+                "pages": [
+                    {
+                        "raw_text": (
+                            "LAUNDRY SUPPLIER DESCRIPTION DESIGN COMMENTS\n"
+                            "Drop in Tub: EVERHARD INDUSTRIES CLASSIC 45L UTILITY SINK (71245)\n"
+                            "Tap Style: PHOENIX PINA SINK MIXER GOOSENECK 200MM_CHROME (153-7330-00)\n"
+                            "Washing Machine Taps: 15MM CP QUARTER TURN"
+                        ),
+                        "text": (
+                            "LAUNDRY SUPPLIER DESCRIPTION DESIGN COMMENTS\n"
+                            "Drop in Tub: EVERHARD INDUSTRIES CLASSIC 45L UTILITY SINK (71245)\n"
+                            "Tap Style: PHOENIX PINA SINK MIXER GOOSENECK 200MM_CHROME (153-7330-00)\n"
+                            "Washing Machine Taps: 15MM CP QUARTER TURN"
+                        ),
+                    }
+                ],
+            }
+        ]
+        overlays = parsing_module._clarendon_collect_afc_fixture_overlays(documents)
+        self.assertIn("laundry", overlays)
+        self.assertIn("PINA SINK MIXER", overlays["laundry"]["tap_info"].upper())
+        self.assertIn("153-7330-00", overlays["laundry"]["tap_info"])
+
+    def test_evoca_finalize_rooms_recovers_clean_table_rows_and_clears_not_applicable_sections(self) -> None:
+        rooms = [
+            {
+                "room_key": "kitchen",
+                "original_room_label": "Kitchen",
+                "room_name": "Kitchen",
+                "bench_tops": [],
+                "bench_tops_wall_run": "",
+                "bench_tops_island": "",
+                "bench_tops_other": "",
+                "floating_shelf": "",
+                "shelf": "",
+                "door_panel_colours": [],
+                "door_colours_overheads": "Overhead Cupboards Polytec Belgian Oak Matt",
+                "door_colours_base": "Not Applicable Polytec Belgian Oak Matt",
+                "door_colours_tall": "",
+                "door_colours_island": "",
+                "door_colours_bar_back": "",
+                "has_explicit_overheads": False,
+                "has_explicit_base": False,
+                "has_explicit_tall": False,
+                "has_explicit_island": False,
+                "has_explicit_bar_back": False,
+                "toe_kick": [],
+                "bulkheads": [],
+                "handles": [],
+                "led": "No",
+                "led_note": "",
+                "accessories": [],
+                "other_items": [],
+                "sink_info": "",
+                "basin_info": "",
+                "tap_info": "",
+                "drawers_soft_close": "",
+                "hinges_soft_close": "",
+                "splashback": "",
+                "flooring": "",
+                "source_file": "",
+                "page_refs": "",
+                "evidence_snippet": "",
+                "confidence": 0.55,
+            },
+            {
+                "room_key": "butlers",
+                "original_room_label": "Butlers",
+                "room_name": "Butlers",
+                "bench_tops": [],
+                "bench_tops_wall_run": "",
+                "bench_tops_island": "",
+                "bench_tops_other": "Not Applicable | 20mm - Quantum Quartz Champagne - Arissed",
+                "floating_shelf": "",
+                "shelf": "",
+                "door_panel_colours": [],
+                "door_colours_overheads": "Overhead Cupboards Not Applicable Handles Handles",
+                "door_colours_base": "Not Applicable Polytec Belgian Oak Matt",
+                "door_colours_tall": "",
+                "door_colours_island": "",
+                "door_colours_bar_back": "",
+                "has_explicit_overheads": False,
+                "has_explicit_base": False,
+                "has_explicit_tall": False,
+                "has_explicit_island": False,
+                "has_explicit_bar_back": False,
+                "toe_kick": [],
+                "bulkheads": [],
+                "handles": ["Handles Door Handle Door Handle Drawer Handle"],
+                "led": "No",
+                "led_note": "",
+                "accessories": [],
+                "other_items": [],
+                "sink_info": "Not Applicable",
+                "basin_info": "",
+                "tap_info": "Not Applicable Location",
+                "drawers_soft_close": "",
+                "hinges_soft_close": "",
+                "splashback": "",
+                "flooring": "",
+                "source_file": "",
+                "page_refs": "",
+                "evidence_snippet": "",
+                "confidence": 0.55,
+            },
+        ]
+        documents = [
+            {
+                "file_name": "evoca.pdf",
+                "pages": [
+                    {
+                        "raw_text": (
+                            "15 CABINETS\n"
+                            "Kitchen\n"
+                            "No shelf to cupboard underneath sink\n"
+                            "- Benchtops\nManufacturer Quantum Quartz\nColour Champagne\nIsland Colour As Above\nEdge Profile 20mm Arissed\nIsland Edge Profile 40mm Arissed\nWaterfall End to Island Not Applicable\n"
+                            "- Underbench including Island\nManufacturer Polytec\nColour & Finish Belgian Oak Matt\nKickboard Laminate\nHandles 4062-128-TG\nDoor Handle Vertical\nDrawer Handle Horizontal\nPantry Door Handle** #N/A\nBin & Pot Drawers Handle** #N/A\n"
+                            "- Contrasting Facings Not Applicable\nManufacturer\nType\nColour\nLocation\n"
+                            "Overhead Cupboards\nManufacturer Polytec\nColour & Finish Belgian Oak Matt\nHandles Finger Grip\n"
+                            "- Pantry Doors\nManufacturer Polytec\nColour & Finish Belgian Oak Matt\nKickboard Laminate\n"
+                            "15 CABINETS\n"
+                            "Butlers\n- Benchtops Not Applicable\nManufacturer\nColour\nEdge Profile\n- Underbench Not Applicable\nManufacturer\nColour & Finish\nHandles\nDoor Handle\nDrawer Handle**\n"
+                            "Laundry\nNo shelf to cupboard underneath trough & washing machine taps located inside cupboards\n- Benchtops\nManufacturer Quantum Quartz\nColour Champagne\nEdge Profile 20mm Arissed\n"
+                            "- Underbench\nManufacturer Polytec\nColour & Finish Belgian Oak Matt\nDrawers Not Included\nHandles 4062-128-TG\nDoor Handle Vertical\nDrawer Handle** Horizontal\n"
+                            "- Overhead Cupboards Not Applicable\nManufacturer\nColour & Finish\nHandles\n"
+                            "Bathroom\n- Benchtops\nManufacturer Quantum Quartz\nColour Champagne\nEdge Profile 20mm Arissed\n"
+                            "- Underbench\nManufacturer Polytec\nColour & Finish Belgian Oak Matt\nShaving Cabinets Not Included\nHandles 4062-128-TG\nDoor Handle Vertical\nDrawer Handle** Horizontal\n"
+                            "15 CABINETS\n"
+                            "Ensuite\n- Benchtops\nManufacturer Quantum Quartz\nColour Champagne\nEdge Profile 20mm Arissed\n"
+                            "- Underbench\nManufacturer Polytec\nColour & Finish Belgian Oak Matt\nShaving Cabinets Not Included\nHandles 4062-128-TG\nDoor Handle Vertical\nDrawer Handle** Horizontal\n"
+                            "Ensuite 2\n- Benchtops Not Applicable\nManufacturer\nColour\nEdge Profile\n- Underbench Not Applicable\nManufacturer\nColour & Finish\nShaving Cabinets\nHandles\nDoor Handle\nDrawer Handle**\n"
+                        ),
+                        "text": "",
+                    },
+                    {
+                        "raw_text": (
+                            "20 PLUMBING FIXTURES & TAPWARE\n"
+                            "Kitchen\n- Sink\nModel Burazzo 450mm Gun Metal Single Bowl Sink (BU454525S-GM) ($370)\nType #N/A\n"
+                            "- Sink Mixer\nType Zara Gun Metal Pull-Out (ZA120-GM)\nLocation Centre of Sink\n"
+                            "Butlers\n- Sink Not Applicable\nModel\nType\nAccessories\n- Sink Mixer Not Applicable\nType\nLocation\n"
+                            "Laundry\n- Tub\nModel Stella Inset Stainless Steel 45 Litre (YH236C)\nType Overmount\n"
+                            "- Tub Mixer\nType Spin Gun Metal Gooseneck (SP120-GM)\nLocation Corner of Tub\n"
+                            "- Washing Machine Taps Chrome Washing Machine Stops, Located inside of cupboard\n"
+                            "Powder\n- Basin Not Applicable\nModel\nType\n- Basin Mixer Not Applicable\nType\nLocation\n"
+                            "Bathroom\n- Basin\nModel Eden Bench Mount Gloss White (FL135-W)\nType Overmount\n"
+                            "- Basin Mixer\nType Spin Gun Metal Tall Basin Mixer (SP110-GM)\nLocation Centre of Basin\n"
+                            "Ensuite\n- Basin\nModel Eden Bench Mount Gloss White (FL135-W)\nType Overmount\n"
+                            "- Basin Mixer\nType Spin Gun Metal Tall Basin Mixer (SP110-GM)\nLocation Centre of Basin\n"
+                        ),
+                        "text": "",
+                    },
+                    {
+                        "raw_text": "23 TILING / HARD FLOORING\nKitchen & Laundry Splashback Champagne Quantum Zero Stone Splashback",
+                        "text": "",
+                    },
+                ],
+            }
+        ]
+        parsing_module._finalize_evoca_rooms(rooms, {}, documents)
+        kitchen = next(row for row in rooms if row["room_key"] == "kitchen")
+        self.assertTrue(kitchen["bench_tops_wall_run"].startswith("20mm Quantum Quartz - Champagne"))
+        self.assertEqual(kitchen["door_colours_base"], "Polytec - Belgian Oak Matt")
+        self.assertIn("Finger Grip", " | ".join(kitchen["handles"]))
+        self.assertEqual(kitchen["splashback"], "Champagne Quantum Zero Stone Splashback")
+        laundry = next(row for row in rooms if row["room_key"] == "laundry")
+        self.assertEqual(laundry["door_colours_base"], "Polytec - Belgian Oak Matt")
+        self.assertIn("Spin Gun Metal Gooseneck", laundry["tap_info"])
+        bathroom = next(row for row in rooms if row["room_key"] == "bathroom")
+        self.assertIn("Eden Bench Mount", bathroom["basin_info"])
+        butlers = next(row for row in rooms if row["room_key"] == "butlers")
+        self.assertEqual(butlers["bench_tops_other"], "")
+        self.assertEqual(butlers["door_colours_base"], "")
+        self.assertEqual(butlers["sink_info"], "")
+
+    def test_evoca_finalize_appliances_recovers_freestanding_cooker_and_dishwasher(self) -> None:
+        appliances = [
+            {
+                "appliance_type": "Dishwasher",
+                "make": "Fisher & Paykel",
+                "model_no": "",
+                "product_url": "",
+                "spec_url": "",
+                "manual_url": "",
+                "website_url": "",
+                "overall_size": "",
+                "source_file": "evoca.pdf",
+                "page_refs": "",
+                "evidence_snippet": "Dishwasher - Hot Water Unit - Accessories Water Filter",
+                "confidence": 0.72,
+            }
+        ]
+        documents = [
+            {
+                "file_name": "evoca.pdf",
+                "pages": [
+                    {
+                        "raw_text": (
+                            "17 APPLIANCES, ACCESSORIES & HOT WATER UNIT\n"
+                            "- Appliances\n"
+                            "Freestanding Cooker Fisher & Paykel 900mm Dual Fuel OR90SCG1LX1 (Electric & Gas)\n"
+                            "Rangehood Fisher & Paykel 900mm Undermount Rangehood (HP90ICSX4)\n"
+                            "Dishwasher Fisher & Paykel 600mm Freestanding (DW60FC1X2)\n"
+                        ),
+                        "text": "",
+                    }
+                ],
+            }
+        ]
+        parsing_module._finalize_evoca_appliances(appliances, documents)
+        signatures = {(row["appliance_type"], row["make"], row["model_no"]) for row in appliances}
+        self.assertIn(("Freestanding Stove", "Fisher & Paykel", "OR90SCG1LX1"), signatures)
+        self.assertIn(("Rangehood", "Fisher & Paykel", "HP90ICSX4"), signatures)
+        self.assertIn(("Dishwasher", "Fisher & Paykel", "DW60FC1X2"), signatures)
+
+    def test_evoca_finalize_rooms_prefers_table_rows_for_clean_fixture_recovery(self) -> None:
+        rooms = [
+            parsing_module._evoca_blank_room("kitchen", "Kitchen"),
+            parsing_module._evoca_blank_room("butlers", "Butlers"),
+            parsing_module._evoca_blank_room("laundry", "Laundry"),
+            parsing_module._evoca_blank_room("bathroom", "Bathroom"),
+        ]
+        documents = [
+            {
+                "file_name": "evoca.pdf",
+                "pages": [
+                    {
+                        "page_no": 8,
+                        "raw_text": "15 CABINETS Kitchen Butlers Laundry Bathroom",
+                        "text": "",
+                        "table_rows": [
+                            [
+                                ["15 CABINETS", None, None, ""],
+                                ["", "Kitchen", None, None],
+                                ["-", "Benchtops\nManufacturer\nColour\nIsland Colour\nEdge Profile\nIsland Edge Profile", "Quantum Quartz\nChampagne", None],
+                                [None, None, "As Above\n20mm Arissed\n40mm Arissed", None],
+                                ["-", "Underbench including Island\nManufacturer\nColour & Finish\nKickboard\nHandles\nDoor Handle\nDrawer Handle", "Polytec", None],
+                                [None, None, "Belgian Oak Matt", None],
+                                [None, None, "Laminate\n4062-128-TG\nVertical\nHorizontal", None],
+                                ["", "Overhead Cupboards", None, None],
+                                [None, None, "Polytec", None],
+                                [None, None, "Belgian Oak Matt", None],
+                                [None, None, "Finger Grip", None],
+                                ["", "Butlers", None, None],
+                                ["-", "Benchtops\nManufacturer\nColour\nEdge Profile", "Not Applicable", None],
+                                ["-", "Underbench\nManufacturer\nColour & Finish", "Not Applicable", None],
+                                ["", "Laundry", None, None],
+                                ["-", "Benchtops\nManufacturer\nColour\nEdge Profile", "Quantum Quartz\nChampagne\n20mm Arissed", None],
+                                ["-", "Underbench\nManufacturer\nColour & Finish\nHandles\nDoor Handle\nDrawer Handle", "Polytec", None],
+                                [None, None, "Belgian Oak Matt", None],
+                                [None, None, "4062-128-TG\nVertical\nHorizontal", None],
+                                ["", "Bathroom", None, None],
+                                ["-", "Benchtops\nManufacturer\nColour\nEdge Profile", "Quantum Quartz\nChampagne\n20mm Arissed", None],
+                                ["-", "Underbench\nManufacturer\nColour & Finish\nHandles\nDoor Handle\nDrawer Handle", "Polytec", None],
+                                [None, None, "Belgian Oak Matt", None],
+                                [None, None, "4062-128-TG\nVertical\nHorizontal", None],
+                            ]
+                        ],
+                    },
+                    {
+                        "page_no": 12,
+                        "raw_text": "20 PLUMBING FIXTURES & TAPWARE Kitchen Laundry Bathroom",
+                        "text": "",
+                        "table_rows": [
+                            [
+                                ["20 PLUMBING FIXTURES & TAPWARE", None, None, ""],
+                                ["", "Kitchen", None, None],
+                                ["-", "Sink\nModel\nType\nAccessories", "", None],
+                                [None, None, "Burazzo 450mm Gun Metal Single Bowl Sink (BU454525S-GM) ($370)", None],
+                                [None, None, "#N/A\nNot Applicable", None],
+                                ["-", "Sink Mixer\nType\nLocation", "", None],
+                                [None, None, "Zara Gun Metal Pull-Out (ZA120-GM)", None],
+                                [None, None, "Centre of Sink", None],
+                                ["", "Laundry", None, None],
+                                ["-", "Tub\nModel\nType", "", None],
+                                [None, None, "Stella Inset Stainless Steel 45 Litre (YH236C)", None],
+                                [None, None, "Overmount", None],
+                                ["-", "Tub Mixer\nType\nLocation", "", None],
+                                [None, None, "Spin Gun Metal Gooseneck (SP120-GM)", None],
+                                [None, None, "Corner of Tub", None],
+                                ["", "Bathroom", None, None],
+                                ["-", "Basin\nModel\nType", "", None],
+                                [None, None, "Eden Bench Mount Gloss White (FL135-W)", None],
+                                [None, None, "Overmount", None],
+                                ["-", "Basin Mixer\nType\nLocation", "", None],
+                                [None, None, "Spin Gun Metal Tall Basin Mixer (SP110-GM)", None],
+                                [None, None, "Centre of Basin", None],
+                            ]
+                        ],
+                    },
+                    {
+                        "page_no": 15,
+                        "raw_text": "23 TILING / HARD FLOORING Kitchen & Laundry Splashback Champagne Quantum Zero Stone Splashback",
+                        "text": "",
+                    },
+                ],
+            }
+        ]
+        parsing_module._finalize_evoca_rooms(rooms, {}, documents)
+        kitchen = next(row for row in rooms if row["room_key"] == "kitchen")
+        self.assertEqual(kitchen["door_colours_base"], "Polytec - Belgian Oak Matt")
+        self.assertIn("Burazzo 450mm Gun Metal Single Bowl Sink", kitchen["sink_info"])
+        self.assertIn("Zara Gun Metal Pull-Out", kitchen["tap_info"])
+        laundry = next(row for row in rooms if row["room_key"] == "laundry")
+        self.assertIn("Stella Inset Stainless Steel 45 Litre", laundry["sink_info"])
+        self.assertIn("Spin Gun Metal Gooseneck", laundry["tap_info"])
+        bathroom = next(row for row in rooms if row["room_key"] == "bathroom")
+        self.assertIn("Eden Bench Mount Gloss White", bathroom["basin_info"])
+        self.assertIn("Spin Gun Metal Tall Basin Mixer", bathroom["tap_info"])
+        butlers = next(row for row in rooms if row["room_key"] == "butlers")
+        self.assertEqual(butlers["door_colours_base"], "")
+        self.assertEqual(butlers["bench_tops_other"], "")
+
+    def test_evoca_finalize_appliances_recovers_from_table_rows(self) -> None:
+        appliances: list[dict[str, object]] = []
+        documents = [
+            {
+                "file_name": "evoca.pdf",
+                "pages": [
+                    {
+                        "page_no": 11,
+                        "raw_text": "17 APPLIANCES, ACCESSORIES & HOT WATER UNIT",
+                        "text": "",
+                        "table_rows": [
+                            [
+                                ["17 APPLIANCES, ACCESSORIES & HOT WATER UNIT", None, None, ""],
+                                ["-", "Appliances\nFreestanding Cooker\nHot Plate\nSecond Hot Plate\nOven\nSecond Oven\nMicrowave\nRangehood\nDishwasher", "", None],
+                                [None, None, "Fisher & Paykel 900mm Dual Fuel OR90SCG1LX1 (Electric & Gas)", None],
+                                [None, None, "Not Applicable\nNot Applicable", None],
+                                [None, None, "Not Applicable", None],
+                                [None, None, "Fisher & Paykel 900mm Undermount Rangehood (HP90ICSX4)", None],
+                                [None, None, "Fisher & Paykel 600mm Freestanding (DW60FC1X2)", None],
+                            ]
+                        ],
+                    }
+                ],
+            }
+        ]
+        parsing_module._finalize_evoca_appliances(appliances, documents)
+        signatures = {(row["appliance_type"], row["make"], row["model_no"]) for row in appliances}
+        self.assertIn(("Freestanding Stove", "Fisher & Paykel", "OR90SCG1LX1"), signatures)
+        self.assertIn(("Rangehood", "Fisher & Paykel", "HP90ICSX4"), signatures)
+        self.assertIn(("Dishwasher", "Fisher & Paykel", "DW60FC1X2"), signatures)
 
     def _mark_raw_spec_qa_passed(self, job_id: int) -> None:
         verification = store.get_job_snapshot_verification(job_id, "raw_spec")

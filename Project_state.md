@@ -16,6 +16,15 @@
   - `GITHUB_SETUP.md`
 - The current remote is `git@github.com:njch333-max/njch333-max-Spec_Extraction.git`
 - The repo is ready for Codex-centered PR review on short-lived feature branches.
+- The Builder × Page-Family table/grid-first matrix is now implemented:
+  - `Imperial joinery/material`: Vision-grid-first
+  - `Imperial sinkware/appliances`: deterministic row parser first
+  - `Yellowwood cabinetry/vanity/flooring/tiling`: table/grid-first
+  - `Simonds grouped property schedules`: table/grid-first
+  - `Evoca finishes/flooring/plumbing/appliances`: table/grid-first
+  - `Clarendon colour schedule`: heuristic-grid-first
+  - `Clarendon AFC sinkware/appliances/flooring`: table/grid-first
+  - `Clarendon drawing pages`: heuristic-only
 - Workflow rule is now explicit:
   - default to `fix this bug` for specific live defects that are already PDF-grounded
   - use `review this PR` for shared parser, grouped-row, builder-finalizer, or PDF-QA state-flow changes
@@ -144,8 +153,8 @@
 - The production stack is running through `nginx + systemd + uvicorn`, with `spec-extraction-web.service` and `spec-extraction-worker.service` active on the server.
 - HTTPS for `spec.lxtransport.online` is now issued by Certbot and terminates correctly at Nginx.
 - The current live PDF QA state for the active 11-job regression matrix is:
-  - `passed`: `job 1`, `job 19`, `job 23`, `job 24`, `job 25`, `job 34`, `job 35`, `job 36`, `job 37`, `job 38`, `job 39`
-- The latest live reruns now also include:
+  - `passed`: `job 1`, `job 12`, `job 14`, `job 19`, `job 24`, `job 28`, `job 39`, `job 41`, `job 46`, `job 49`, `job 50`
+- The latest live reruns and PDF-QA acceptance now also include:
   - Yellowwood kitchen `Shelf` is suppressed unless the same room has explicit shelf-source wording
   - Yellowwood handle strings with a prefixed pantry/base note are reformatted into a cleaner handle value instead of leaving the note in front of the model
   - grouped-row builders such as Evoca now re-run benchtop-other dedupe after display cleaning, preventing wall-run/island values from being reintroduced into `bench_tops_other`
@@ -153,6 +162,7 @@
   - Clarendon tap cleanup preserves full source wording such as `Twin Handle Sink Mixer` instead of truncating valid model names at the word `Handle`
   - Imperial appliance dedupe now keeps `N / A - By others` dishwasher placeholders and merges make-bearing/noisy oven rows into clean `Westinghouse + WVE6516DD` output
   - Imperial sinkware semantic parsing now keeps laundry / powder / ensuite ownership separated while preserving sink mounting details such as `UNDERMOUNT`
+  - Imperial `job 49 / 50` now pass PDF QA on the latest build after Vision-grid-first joinery parsing, sink/tap recovery, appliance row cleanup, and the backend correction that classifies `job 50` as `Imperial`
   - Simonds grouped-row recovery now restores clean benchtop/shelf/sink/tap/handle values for `Study`, `Butlers/WIP`, `Laundry`, `Bathroom`, `Powder`, and `Rumpus`
 
 ## Current Goals
@@ -186,11 +196,11 @@
 - Improve room-section detection for more builder formats
 - Improve official product URL lookup accuracy, size extraction coverage, and brand coverage
 - Continue checking the new `LED Note` rollout on live reruns so true LED evidence such as `LED STRIP LIGHTING`, `LED LIGHTING`, or `LED's As per drawings` lands on the right room without reintroducing false positives from sinkware noise such as `LED Topmount` or `LED UNDERMOUTNED`
-- Keep the active 5-builder core / 11-job PDF-QA matrix green after future parser changes:
-  - `Clarendon`: `job 1`, `job 23`, `job 25`
-  - `Yellowwood`: `job 24`, `job 37`
-  - `Imperial`: `job 34`, `job 35`, `job 36`, `job 38`
-  - `Simonds`: `job 19`
+- Keep the active 5-builder / 11-job PDF-QA matrix green after future parser changes:
+  - `Clarendon`: `job 1`, `job 46`
+  - `Yellowwood`: `job 12`, `job 24`
+  - `Imperial`: `job 28`, `job 41`, `job 49`, `job 50`
+  - `Simonds`: `job 14`, `job 19`
   - `Evoca`: `job 39`
 - Continue validating the new builder-finalizer split on Yellowwood-heavy grouped schedule jobs such as `job 24`, especially pantry/WIP suppression, robe-fit-out title preservation, powder-room separation, kitchen plumbing reinjection, and vanity-room plumbing cleanup
 - Continue tightening noisy field cleanup inside the fixed global conservative profile without reintroducing per-builder configuration
