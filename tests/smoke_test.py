@@ -9152,7 +9152,7 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(dining["toe_kick"], ["Polytec - Classic White Matt"])
         self.assertEqual(
             dining["handles"],
-            ["ABI Interiors - Rappana Cabinetry Pull 50mm Brushed Copper - SUPPLIED BY CLIENT Installed Horizontally"],
+            ["Base Cabinets: ABI Interiors - Rappana Cabinetry Pull 50mm Brushed Copper - SUPPLIED BY CLIENT Installed Horizontally"],
         )
 
     def test_imperial_title_prefix_rejects_glued_section_break_markers(self) -> None:
@@ -13003,6 +13003,383 @@ class SmokeTest(unittest.TestCase):
         ]
         cleaned = parsing_module._dedupe_appliances(rows)
         self.assertEqual([(row.appliance_type, row.make, row.model_no) for row in cleaned], [("Rangehood", "", "WRU52CB-L")])
+
+    def test_evoca_collect_subsection_lines_accepts_inline_overhead_heading_note(self) -> None:
+        lines = [
+            "- Underbench including Island",
+            "Manufacturer Polytec",
+            "Colour & Finish Amaro Matt",
+            "Overhead Cupboards * Overhead Cupboard above Oven to be Push to Open",
+            "Manufacturer Polytec",
+            "Colour & Finish Rojo Walnut Woodmatt",
+            "Handles Finger Grip",
+            "- Pantry Doors",
+            "Manufacturer Polytec",
+        ]
+        collected = parsing_module._evoca_collect_subsection_lines(lines, ("- Overhead Cupboards", "Overhead Cupboards"))
+        self.assertEqual(
+            collected,
+            [
+                "Manufacturer Polytec",
+                "Colour & Finish Rojo Walnut Woodmatt",
+                "Handles Finger Grip",
+            ],
+        )
+
+    def test_evoca_collect_room_recovery_data_from_text_recovers_overhead_section_material_and_handle(self) -> None:
+        documents = [
+            {
+                "file_name": "evoca.pdf",
+                "pages": [
+                    {
+                        "raw_text": (
+                            "15 CABINETS\n"
+                            "Kitchen\n"
+                            "- Underbench including Island\n"
+                            "Manufacturer Polytec\n"
+                            "Colour & Finish Amaro Matt\n"
+                            "Handles 7298-128-TG\n"
+                            "Door Handle Vertical\n"
+                            "Drawer Handle Horizontal\n"
+                            "Overhead Cupboards * Overhead Cupboard above Oven to be Push to Open\n"
+                            "Manufacturer Polytec\n"
+                            "Colour & Finish Rojo Walnut Woodmatt\n"
+                            "Handles Finger Grip\n"
+                            "- Pantry Doors Not Applicable\n"
+                            "Manufacturer\n"
+                            "Colour & Finish\n"
+                        ),
+                        "text": "",
+                    }
+                ],
+            }
+        ]
+        recovered = parsing_module._evoca_collect_room_recovery_data_from_text(documents)
+        kitchen = recovered["kitchen"]
+        self.assertEqual(kitchen["door_colours_base"], "Polytec - Amaro Matt")
+        self.assertEqual(kitchen["door_colours_overheads"], "Polytec - Rojo Walnut Woodmatt")
+        self.assertIn("7298-128-TG", " | ".join(kitchen["handles"]))
+        self.assertIn("Finger Grip", " | ".join(kitchen["handles"]))
+
+    def test_evoca_merge_handle_entries_prefers_modelled_entries_over_direction_only_noise(self) -> None:
+        merged = parsing_module._evoca_merge_handle_entries(
+            ["Door Handle Vertical Drawer Handle Horizontal"],
+            ["7298-128-TG Door Handle Vertical Drawer Handle Horizontal", "Finger Grip"],
+        )
+        self.assertEqual(
+            merged,
+            [
+                "7298-128-TG Door Vertical Drawer Horizontal",
+                "Finger Grip",
+            ],
+        )
+
+    def test_evoca_align_table_labels_trailing_handle_values_do_not_fill_base_colour_slots(self) -> None:
+        mapping = parsing_module._evoca_align_table_labels(
+            [
+                "Manufacturer",
+                "Colour & Finish",
+                "Handles",
+                "Door Handle",
+                "Drawer Handle",
+                "Pantry Door Handle",
+                "Bin & Pot Drawers Handle",
+            ],
+            ["7298-128-TG", "Vertical", "Horizontal", "#N/A", "#N/A"],
+        )
+        self.assertEqual(mapping["Manufacturer"], "")
+        self.assertEqual(mapping["Colour & Finish"], "")
+        self.assertEqual(mapping["Handles"], "7298-128-TG")
+        self.assertEqual(mapping["Door Handle"], "Vertical")
+        self.assertEqual(mapping["Drawer Handle"], "Horizontal")
+
+    def test_evoca_collect_room_recovery_data_from_tables_uses_section_handle_rows_and_extra_ensuites(self) -> None:
+        documents = [
+            {
+                "file_name": "evoca.pdf",
+                "pages": [
+                    {
+                        "raw_text": "15 CABINETS",
+                        "table_rows": [
+                            [
+                                ["15 CABINETS", None, None, ""],
+                                ["", "Butlers", None, None],
+                                ["-", "Benchtops\nManufacturer\nColour\nEdge Profile", "Quantum Quartz", None],
+                                [None, None, "Polar", None],
+                                [None, None, "20mm Arissed", None],
+                                ["-", "Underbench\nManufacturer\nColour & Finish\nHandles\nDoor Handle\nDrawer Handle\nPantry Door Handle\nBin & Pot Drawers Handle", "7298-128-TG\nVertical\nHorizontal\n#N/A\n#N/A", None],
+                                ["-", "Overhead Cupboards\nManufacturer\nColour & Finish", "Polytec", None],
+                                [None, None, "Rojo Walnut Woodmatt", None],
+                                [None, "Handles", "Finger Grip", None],
+                                ["", "Ensuite 3", None, None],
+                                ["-", "Benchtops\nManufacturer\nColour\nEdge Profile", "Quantum Quartz", None],
+                                [None, None, "Polar", None],
+                                [None, None, "20mm Arissed", None],
+                                ["-", "Underbench\nManufacturer\nColour & Finish\nShaving Cabinets\nHandles\nDoor Handle\nDrawer Handle**", "Polytec", None],
+                                [None, None, "Rojo Walnut Woodmatt", None],
+                                [None, None, "Not Included", None],
+                                [None, None, "7298-128-TG", None],
+                                [None, None, "Vertical\nHorizontal", None],
+                            ]
+                        ],
+                    }
+                ],
+            }
+        ]
+        recovered = parsing_module._evoca_collect_room_recovery_data_from_tables(documents)
+        self.assertNotIn("door_colours_base", recovered["butlers"])
+        self.assertEqual(recovered["butlers"]["door_colours_overheads"], "Polytec - Rojo Walnut Woodmatt")
+        self.assertIn("Finger Grip", " | ".join(recovered["butlers"]["handles"]))
+        self.assertIn("7298-128-TG", " | ".join(recovered["ensuite_3"]["handles"]))
+
+    def test_imperial_text_grid_repair_preserves_multiple_handle_row_roles(self) -> None:
+        raw_text = (
+            "KITCHEN JOINERY SELECTION SHEET\n"
+            "AREA / ITEM SPECS / DESCRIPTION IMAGE SUPPLIER NOTES\n"
+            "HANDLES - BASE DRAWERS\n"
+            "KETHY\n"
+            "PM2817 / 288 / MSIL\n"
+            "Matt Silver\n"
+            "288 Hole centres - 312 OA SIZE\n"
+            "Polytec Horizontal Install\n"
+            "HANDLES - BASE DOORS\n"
+            "KETHY\n"
+            "PM2817 / 192 / MSIL\n"
+            "Matt Silver\n"
+            "192 Hole centres - 216 OA SIZE\n"
+            "KETHY Vertical Install\n"
+            "NO HANDLES OVERHEADS\n"
+            "Recessed finger space cooktop overheads.\n"
+            "Touch catch - Overheads above fridge\n"
+            "KICKBOARDS\n"
+            "Polytec\n"
+        )
+        rows = extraction_service._extract_imperial_joinery_text_grid_rows(raw_text, room_scope="KITCHEN")
+        by_label = {row.row_label: row for row in rows}
+        self.assertEqual(by_label["HANDLES - BASE DRAWERS"].position_scope, "Base Drawers")
+        self.assertEqual(by_label["HANDLES - BASE DOORS"].position_scope, "Base Doors")
+        self.assertEqual(by_label["NO HANDLES OVERHEADS"].position_scope, "Overheads")
+
+    def test_imperial_layout_overlay_preserves_position_scoped_handles_as_separate_entries(self) -> None:
+        section = {
+            "section_key": "kitchen",
+            "layout_rows": [
+                {
+                    "row_label": "HANDLES - BASE DRAWERS",
+                    "value_region_text": "PM2817 / 288 / MSIL Matt Silver",
+                    "supplier_region_text": "KETHY",
+                    "notes_region_text": "288 Hole centres - 312 OA SIZE Polytec Horizontal Install",
+                    "row_kind": "handle",
+                    "position_scope": "Base Drawers",
+                },
+                {
+                    "row_label": "HANDLES - BASE DOORS",
+                    "value_region_text": "PM2817 / 192 / MSIL Matt Silver",
+                    "supplier_region_text": "KETHY",
+                    "notes_region_text": "192 Hole centres - 216 OA SIZE KETHY Vertical Install",
+                    "row_kind": "handle",
+                    "position_scope": "Base Doors",
+                },
+                {
+                    "row_label": "NO HANDLES OVERHEADS",
+                    "value_region_text": "",
+                    "supplier_region_text": "",
+                    "notes_region_text": "Recessed finger space cooktop overheads Touch catch above fridge",
+                    "row_kind": "handle",
+                    "position_scope": "Overheads",
+                },
+            ],
+        }
+        overlay = parsing_module._imperial_layout_overlay_from_section(section)
+        self.assertTrue(any("Base Drawers:" in entry and "PM2817 / 288 / MSIL" in entry for entry in overlay["handles"]))
+        self.assertTrue(any("Base Doors:" in entry and "PM2817 / 192 / MSIL" in entry for entry in overlay["handles"]))
+        self.assertTrue(any("Overheads:" in entry and "Recessed finger space" in entry for entry in overlay["handles"]))
+
+    def test_imperial_apply_compact_section_room_enrichment_recovers_job56_laundry_handle_roles(self) -> None:
+        row = parsing_module._imperial_blank_split_room({}, "laundry", "LAUNDRY", "")
+        raw_text = (
+            "HANDLES BASE DOORS\n"
+            "KETHY\n"
+            "HT576 -128 - BKO\n"
+            "Darwen Cabinet Pull Handle\n"
+            "- Black Olive Colour\n"
+            "Kethy Vertical on doors\n"
+            "HANDLES to OVERHEADS\n"
+            "no handles to overheads - finger space above laundry benchtop\n"
+            "HANDLES TALL + PANTRY DRAWERS\n"
+            "KETHY\n"
+            "HT576 -192 - BKO\n"
+            "Darwen Cabinet Pull Handle\n"
+            "- Black Olive Colour\n"
+            "Kethy Horizontal on drawers\n"
+            "Vertical on doors\n"
+        )
+        parsing_module._imperial_apply_compact_section_room_enrichment(
+            row,
+            {"text": raw_text, "raw_page_texts": [{"text": raw_text}]},
+        )
+        self.assertTrue(any("Base Doors:" in entry and "HT576 -128 - BKO" in entry for entry in row["handles"]))
+        self.assertTrue(any("Overheads:" in entry and "no handles to overheads" in entry.lower() for entry in row["handles"]))
+        self.assertTrue(any("Tall + Pantry Drawers:" in entry and "HT576 -192 - BKO" in entry for entry in row["handles"]))
+
+    def test_imperial_apply_compact_section_room_enrichment_recovers_job56_kitchen_generic_handle_scope_and_clean_floating_shelf(self) -> None:
+        row = parsing_module._imperial_blank_split_room({}, "kitchen", "KITCHEN", "")
+        row["handles"] = [
+            "Darwen Cabinet Pull Handle - Black Olive Colour",
+            "Kethy Horizontal/Vertical",
+            "touch catch above fridge. Horizontal/Vertical",
+        ]
+        row["floating_shelf"] = "51mm Polytec - Polar White Matt | Kethy"
+        raw_text = (
+            "FLOATING SHELVES\n"
+            "Polytec Polar White Matt\n"
+            "51mm thick floating shelves\n"
+            "Above Coffe/Appliance area\n"
+            "HANDLES\n"
+            "KETHY\n"
+            "HT576 -128 - BKO\n"
+            "Darwen Cabinet Pull Handle\n"
+            "- Black Olive Colour\n"
+            "Kethy Horizontal/Vertical\n"
+            "HANDLES to OVERHEADS\n"
+            "no handles to overheads - finger space above cooktop and touch catch above fridge.\n"
+            "SPLASHBACK tiled by client\n"
+        )
+        parsing_module._imperial_apply_compact_section_room_enrichment(
+            row,
+            {"text": raw_text, "raw_page_texts": [{"text": raw_text}]},
+        )
+        self.assertTrue(any("Doors / Drawers:" in entry and "HT576 -128 - BKO" in entry for entry in row["handles"]))
+        self.assertTrue(any("Overheads:" in entry and "no handles to overheads" in entry.lower() for entry in row["handles"]))
+        self.assertNotIn("Kethy", row["floating_shelf"])
+
+    def test_imperial_extract_compact_handle_after_label_keeps_job55_base_drawer_details(self) -> None:
+        raw_text = (
+            "HANDLES - BASE DRAWERS\n"
+            "KETHY\n"
+            "PM2817 / 288 / MSIL\n"
+            "Matt Silver\n"
+            "288 Hole centres - 312 OA SIZE\n"
+            "Polytec Horizontal Install\n"
+            "KICKBOARDS\n"
+        )
+        entry = parsing_module._imperial_extract_compact_handle_after_label(
+            raw_text,
+            r"HANDLES\s*-\s*BASE\s*DRAWERS\b",
+            "Base Drawers",
+        )
+        finalized = parsing_module._imperial_finalize_handle_entries([entry])
+        self.assertEqual(
+            finalized,
+            ["Base Drawers: KETHY PM2817 / 288 / MSIL Matt Silver 288 Hole centres - 312 OA SIZE - Polytec Horizontal Install"],
+        )
+
+    def test_evoca_collect_subsection_lines_stops_at_next_room_heading(self) -> None:
+        lines = [
+            "Laundry",
+            "- Overhead Cupboards",
+            "Manufacturer Polytec",
+            "Colour & Finish Rojo Walnut Woodmatt",
+            "Handles Finger Grip",
+            "Ensuite 1",
+            "- Benchtops",
+        ]
+        self.assertEqual(
+            parsing_module._evoca_collect_subsection_lines(lines, ("- Overhead Cupboards", "Overhead Cupboards")),
+            [
+                "Manufacturer Polytec",
+                "Colour & Finish Rojo Walnut Woodmatt",
+                "Handles Finger Grip",
+            ],
+        )
+
+    def test_imperial_finalize_material_field_text_cleans_job55_atterra_blanca_splashback(self) -> None:
+        value = (
+            "20mm Polytec - and sink and peninsula area. high on appliance area splashback. "
+            "- 650mm high splashback to cooktop area and sink and peninsula area. "
+            "445mm high on appliance area splashback. - Aterra Blanca Pencil Round"
+        )
+        self.assertEqual(
+            parsing_module._imperial_finalize_material_field_text(value, drop_note_lines=True),
+            "Caesarstone - Aterra Blanca - 20mm Pencil Round - 650mm high splashback to cooktop area and sink and peninsula area - 445mm high on appliance area splashback",
+        )
+
+    def test_yellowwood_prefer_overlay_text_prefers_clean_sink_over_cross_room_mix(self) -> None:
+        current = "Piazza Double Square Bowl Black Pearl ABEY - LT120 45 Litre Single Bowl with Overflow Black Pearl"
+        overlay = "PIAZZA CR340DB"
+        self.assertEqual(parsing_module._yellowwood_prefer_overlay_text(current, overlay, "sink"), "PIAZZA CR340DB")
+
+    def test_clarendon_clean_handle_entries_dedupes_case_variants(self) -> None:
+        cleaned = parsing_module._clarendon_clean_handle_entries(
+            [
+                "Hettich - Messana 115157 Gloss Chrome Knob",
+                "Hettich - MESSANA 115157 GLOSS CHROME KNOB",
+            ]
+        )
+        self.assertEqual(cleaned, ["Hettich - Messana 115157 Gloss Chrome Knob"])
+
+    def test_imperial_compact_fixture_overlays_keep_job56_kitchen_and_laundry_separate(self) -> None:
+        overlays = {"kitchen": parsing_module._blank_overlay(), "laundry": parsing_module._blank_overlay()}
+        documents = [
+            {
+                "file_name": "job56.pdf",
+                "pages": [
+                    {
+                        "raw_text": (
+                            "SINKWARE & TAPWARE\n"
+                            "TAPWARE (KITCHEN) ABEY by Imperial\n"
+                            "Taphole location: Centred to back\n"
+                            "UNDERMOUNTED SINK\n"
+                            "SINKWARE (KITCHEN)\n"
+                            "ABEY\n"
+                            "CR340DB\n"
+                            "Piazza Double Square Bowl Black Pearl\n"
+                            "ABEY by Imperial\n"
+                            "ABEY\n"
+                            "KTA014-BP\n"
+                            "304 Gooseneck Pull Out with Dual Spray Function Kitchen Mixer\n"
+                            "SINKWARE (LAUNDRY) ABEY - LT120 45 Litre Single Bowl with Overflow Black Pearl ABEY by Imperial UNDERMOUNTED SINK\n"
+                        )
+                    },
+                    {
+                        "raw_text": (
+                            "TAPWARE (LAUNDRY)\n"
+                            "ABEY\n"
+                            "KTA014-BP\n"
+                            "304 Gooseneck Pull Out with Dual Spray Function Kitchen Mixer\n"
+                        )
+                    },
+                ],
+            }
+        ]
+        parsing_module._imperial_apply_compact_fixture_overlays(overlays, documents)
+        self.assertEqual(overlays["kitchen"]["sink_info"], "PIAZZA CR340DB")
+        self.assertIn("KTA014-BP", overlays["kitchen"]["tap_info"])
+        self.assertIn("LT120", overlays["laundry"]["sink_info"])
+        self.assertIn("KTA014-BP", overlays["laundry"]["tap_info"])
+
+    def test_clarendon_collect_afc_fixture_overlays_recovers_harmony_meno_laundry_tap(self) -> None:
+        documents = [
+            {
+                "file_name": "COLOURS_AFC.pdf",
+                "pages": [
+                    {
+                        "raw_text": (
+                            "LAUNDRY SUPPLIER DESCRIPTION DESIGN COMMENTS\n"
+                            "Drop in Tub: EVERHARD\n"
+                            "Tap Style: HARMONY\n"
+                            "Washing Machine Taps:\n"
+                            "MENO MIXER (50000)\n"
+                            "AUSTWORLD QUICK FIT WASHING MACHINE COCK PAIR CHROME SD20SNC\n"
+                            "EVERHARD INDUSTRIES CLASSIC 45L UTILITY SINK (71245)\n"
+                            "Client Signature\n"
+                        )
+                    }
+                ],
+            }
+        ]
+        overlays = parsing_module._clarendon_collect_afc_fixture_overlays(documents)
+        self.assertEqual(overlays["laundry"]["tap_info"], "HARMONY MENO MIXER (50000)")
 
     def _mark_raw_spec_qa_passed(self, job_id: int) -> None:
         verification = store.get_job_snapshot_verification(job_id, "raw_spec")

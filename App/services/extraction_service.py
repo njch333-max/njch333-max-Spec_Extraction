@@ -977,6 +977,7 @@ class ImperialGridRow:
     page_no: int = 0
     row_order: int = 0
     repair_source: str = ""
+    position_scope: str = ""
 
     def to_layout_row(self) -> dict[str, Any]:
         return {
@@ -989,6 +990,7 @@ class ImperialGridRow:
             "page_no": int(self.page_no or 0),
             "row_order": int(self.row_order or 0),
             "repair_source": parsing.normalize_space(self.repair_source),
+            "position_scope": parsing.normalize_space(self.position_scope),
         }
 
 
@@ -1047,12 +1049,18 @@ _IMPERIAL_TABLE_REPAIR_ROW_SPECS: tuple[tuple[str, str, str], ...] = (
     (r"(?i)^TO\s+BE\s+OPEN\s+SHELVES?\b", "TO BE OPEN SHELVES", "other"),
     (r"(?i)^NO\s+HANDLES?\s*-\s*FEATURE\s+OVERHEADS?\b", "NO HANDLES - FEATURE OVERHEADS", "handle"),
     (r"(?i)^FEATURE\s+OVERHEADS?\s*-\s*NO\s+HANDLES?\b", "FEATURE OVERHEADS - NO HANDLES", "handle"),
+    (r"(?i)^NO\s+HANDLES?\s+OVERHEADS?\b", "NO HANDLES OVERHEADS", "handle"),
+    (r"(?i)^HANDLES?\s+TO\s+OVERHEADS?\b", "HANDLES to OVERHEADS", "handle"),
     (r"(?i)^(?:HANLDES|HANDLES)\s*-\s*BASE\s*CABS?\s*\+\s*DRAWERS\b", "HANDLES - BASE CABS + DRAWERS", "handle"),
     (r"(?i)^(?:HANLDES|HANDLES)\s*-\s*BASE\s*DRAWERS\s*\+\s*TALL\s+PANTRY\s+DOORS\b", "HANDLES - BASE DRAWERS + TALL PANTRY DOORS", "handle"),
     (r"(?i)^(?:HANLDES|HANDLES)\s*-\s*BASE\s*DRAWERS\b", "HANDLES - BASE DRAWERS", "handle"),
+    (r"(?i)^(?:HANLDES|HANDLES)\s*-\s*BASE\s*DOORS\b", "HANDLES - BASE DOORS", "handle"),
+    (r"(?i)^(?:HANLDES|HANDLES)\s+BASE\s*DOORS\b", "HANDLES BASE DOORS", "handle"),
     (r"(?i)^(?:HANLDES|HANDLES)\s*-\s*BASE\s*CABS?\b", "HANDLES - BASE CABS", "handle"),
+    (r"(?i)^(?:HANLDES|HANDLES)\s*-\s*DRAWERS\b", "HANDLES - DRAWERS", "handle"),
     (r"(?i)^(?:HANLDES|HANDLES)\s*-\s*TALL\s+CABS?\s*/\s*PANTRY\s+CABS?\s*ONLY\b", "HANDLES - TALL CABS / PANTRY CABS ONLY", "handle"),
     (r"(?i)^(?:HANLDES|HANDLES)\s*-\s*TALL\s+CABS?\b", "HANDLES - TALL CABS", "handle"),
+    (r"(?i)^(?:HANLDES|HANDLES)\s+TALL\s*\+\s*PANTRY\s+DRAWERS\b", "HANDLES TALL + PANTRY DRAWERS", "handle"),
     (r"(?i)^KNOB\b", "KNOB", "handle"),
     (r"(?i)^KICKBOARDS?\b", "KICKBOARDS", "material"),
     (r"(?i)^SPLASHBACK\b", "SPLASHBACK", "material"),
@@ -1403,6 +1411,7 @@ def _build_imperial_grid_row_from_word_entry(entry: dict[str, Any], *, room_scop
         row_kind=row_kind,
         row_order=int(entry.get("row_order", 0) or 0),
         repair_source="word_grid_repair",
+        position_scope=_imperial_grid_row_position_scope(label, row_kind),
     )
 
 
@@ -1417,6 +1426,7 @@ def _imperial_grid_row_from_layout_row(raw_row: dict[str, Any], *, room_scope: s
         page_no=int(raw_row.get("page_no", 0) or 0),
         row_order=int(raw_row.get("row_order", row_order) or row_order),
         repair_source=parsing.normalize_space(str(raw_row.get("repair_source", "") or "")),
+        position_scope=parsing.normalize_space(str(raw_row.get("position_scope", "") or "")),
     )
 
 
@@ -1580,6 +1590,7 @@ def _build_imperial_grid_row_from_text_entry(
         row_kind=row_kind,
         row_order=row_order,
         repair_source="text_grid_repair",
+        position_scope=_imperial_grid_row_position_scope(label, row_kind),
     )
 
 
@@ -1643,7 +1654,38 @@ def _prefer_imperial_grid_row(text_row: ImperialGridRow, candidate: ImperialGrid
         page_no=preferred.page_no or secondary.page_no,
         row_order=preferred.row_order or secondary.row_order,
         repair_source=preferred.repair_source or secondary.repair_source or "vision_table_repair",
+        position_scope=preferred.position_scope or secondary.position_scope or _imperial_grid_row_position_scope(row_label, preferred.row_kind or secondary.row_kind),
     )
+
+
+def _imperial_grid_row_position_scope(row_label: str, row_kind: str) -> str:
+    label = _normalized_imperial_grid_label(row_label)
+    kind = parsing.normalize_space(row_kind).lower()
+    if kind != "handle" and "HANDLE" not in label and label != "KNOB":
+        return ""
+    if "BASE DRAWERS + TALL PANTRY DOORS" in label:
+        return "Base Drawers + Tall Pantry Doors"
+    if "TALL + PANTRY DRAWERS" in label:
+        return "Tall + Pantry Drawers"
+    if "TALL CABS / PANTRY CABS ONLY" in label:
+        return "Tall + Pantry Cabs"
+    if "TALL CABS" in label:
+        return "Tall Cabinets"
+    if "BASE DOORS" in label:
+        return "Base Doors"
+    if "BASE DRAWERS" in label:
+        return "Base Drawers"
+    if "BASE CABS + DRAWERS" in label:
+        return "Base Cabinets + Drawers"
+    if "BASE CABS" in label:
+        return "Base Cabinets"
+    if "DRAWERS" in label:
+        return "Drawers"
+    if "OVERHEAD" in label:
+        return "Overheads"
+    if label == "KNOB":
+        return "Knob"
+    return ""
 
 
 def _normalized_imperial_grid_label(label: str) -> str:
@@ -5601,6 +5643,10 @@ def _prefer_imperial_raw_list(field_name: str, layout_value: Any, raw_value: Any
         if cleaned_raw and all(re.fullmatch(r"(?i)(?:n/?a\s+)?open above|n/?a|na|tbc", item) for item in cleaned_raw):
             return layout_items
     if field_name == "handles":
+        layout_scoped = sum(1 for item in layout_items if re.match(r"(?i)^(?:base drawers|base doors|overheads|tall \+ pantry drawers|doors / drawers|drawers|tall cabinets|base cabinets|knob):", parsing.normalize_space(str(item or ""))))
+        raw_scoped = sum(1 for item in raw_items if re.match(r"(?i)^(?:base drawers|base doors|overheads|tall \+ pantry drawers|doors / drawers|drawers|tall cabinets|base cabinets|knob):", parsing.normalize_space(str(item or ""))))
+        if layout_scoped and layout_scoped >= raw_scoped:
+            return layout_items
         if any(_imperial_handle_entry_looks_compound(item) for item in layout_items) and raw_items:
             return raw_items
     if field_name == "toe_kick":
@@ -5751,6 +5797,12 @@ def _imperial_field_looks_crosscheck_contaminated(text: str, field_name: str) ->
     lowered = parsing.normalize_space(str(text or "")).lower()
     if not lowered:
         return False
+    if field_name == "sink_info":
+        if ("cr340db" in lowered and "lt120" in lowered) or ("kitchen" in lowered and "laundry" in lowered):
+            return True
+    if field_name == "tap_info":
+        if "kitchen" in lowered and "laundry" in lowered:
+            return True
     if field_name.startswith("door_colours_"):
         return lowered in {"polytec", "laminex", "caesarstone", "smartstone", "wk stone"} or bool(
             re.fullmatch(r"\d{2,4}\s*mm", lowered)
@@ -5791,7 +5843,9 @@ def _imperial_field_looks_crosscheck_contaminated(text: str, field_name: str) ->
             )
         )
     if field_name == "floating_shelf":
-        return lowered in {"polytec - woodmatt", "woodmatt", "polytec"}
+        return lowered in {"polytec - woodmatt", "woodmatt", "polytec"} or bool(
+            re.search(r"(?i)\b(?:kethy|allegra|furnware|darwen|handle|horizontal|vertical)\b", lowered)
+        )
     if field_name == "splashback":
         return lowered in {"stone", "polytec"} or any(token in lowered for token in ("shadowline", "document ref", "notes supplier"))
     return False
