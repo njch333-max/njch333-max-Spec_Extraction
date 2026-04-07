@@ -4437,6 +4437,29 @@ class SmokeTest(unittest.TestCase):
             ["as Polytec CLASSIC WHITE MATT Finish MELAMINE"],
         )
 
+    def test_clarendon_clean_room_material_text_drops_docusign_sink_cutout_noise_and_keeps_material_tail(self) -> None:
+        cleaned = parsing_module._clarendon_clean_room_material_text(
+            "SINK CUT OUT10060C 35MM DIA. TAPHOLE CUT OUT Docusign Envelope ID: ABC-123 | Quantum Zero Luna White - 20MM Pencil Round Edge - Cooktop Run / 40MM Mitred Apron Edge - Island Stone",
+            "butlers_pantry",
+            "bench_tops_other",
+        )
+        self.assertEqual(
+            cleaned,
+            "Quantum Zero Luna White - 20MM Pencil Round Edge - Cooktop Run / 40MM Mitred Apron Edge - Island Stone",
+        )
+
+    def test_clarendon_clean_material_list_reduces_toe_kick_docusign_noise_to_match_above_style_value(self) -> None:
+        self.assertEqual(
+            parsing_module._clarendon_clean_material_list(
+                [
+                    "AS DOOR COLOUR600MM OVEN600MM OVENDOOR LEGEND :PS - Polytec PALLIDO 'SMOOTH' FINISH Docusign Envelope ID: ABC-123",
+                    "9:40 AM AEST Forstan Pty Ltd. T/AYour Home Kitchens BULKHEAD SHADOWLINE AS DOOR COLOUR",
+                ],
+                "toe_kick",
+            ),
+            ["as Door Colour"],
+        )
+
     def test_clean_room_fixture_text_strips_compact_fixture_headings(self) -> None:
         self.assertEqual(
             parsing_module._clean_room_fixture_text(
@@ -12227,6 +12250,50 @@ class SmokeTest(unittest.TestCase):
                     "make": "",
                     "model_no": "BUILDER20MM",
                     "evidence_snippet": "DISHWASHER BULKHEAD SHADOWLINE AS MATCHING MELAMINE KICKBOARD AS MATCHING MELAMINE 20MM STONE BENCHTOP",
+                }
+            )
+        )
+
+    def test_clarendon_false_appliance_filter_rejects_hob_and_dimension_only_models(self) -> None:
+        self.assertTrue(
+            parsing_module._looks_like_clarendon_false_appliance(
+                {
+                    "appliance_type": "Cooktop",
+                    "make": "SMEG",
+                    "model_no": "HOB90CM",
+                    "evidence_snippet": "Cooktop SMEG HOB90CM",
+                }
+            )
+        )
+
+    def test_clarendon_false_appliance_filter_rejects_rangehood_drawing_depth_and_ducting_noise(self) -> None:
+        self.assertTrue(
+            parsing_module._looks_like_clarendon_false_appliance(
+                {
+                    "appliance_type": "Rangehood",
+                    "make": "",
+                    "model_no": "DEPTH650",
+                    "evidence_snippet": "RANGEHOOD 690 REF. DEPTH 600 DEPTH650 NIB",
+                }
+            )
+        )
+        self.assertTrue(
+            parsing_module._looks_like_clarendon_false_appliance(
+                {
+                    "appliance_type": "Rangehood",
+                    "make": "LG",
+                    "model_no": "",
+                    "evidence_snippet": "Rangehood Ducting: YES Hot Water Heater: CHROMAGEN HP280L HEAT PUMP Gas connection: NATURAL GAS CONNECTION",
+                }
+            )
+        )
+        self.assertTrue(
+            parsing_module._looks_like_clarendon_false_appliance(
+                {
+                    "appliance_type": "Fridge",
+                    "make": "",
+                    "model_no": "X29L",
+                    "evidence_snippet": "Fridge X29L",
                 }
             )
         )

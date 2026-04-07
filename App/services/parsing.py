@@ -8994,8 +8994,63 @@ def _clarendon_documents_contain_butlers_pantry(documents: list[dict[str, object
     return False
 
 
-def _clarendon_clean_room_material_text(value: Any, room_key: str, field_name: str) -> str:
+def _clarendon_material_fragment_has_meaningful_content(text: str, field_name: str = "") -> bool:
+    normalized = normalize_space(text)
+    if not normalized:
+        return False
+    if field_name == "toe_kick" and re.search(r"(?i)\bas door colour\b", normalized):
+        return True
+    if field_name == "bulkheads" and re.search(r"(?i)\b(?:bulkhead|shadowline|mdf|cornic(?:e|ing)|melamine)\b", normalized):
+        return True
+    return bool(
+        re.search(
+            r"(?i)\b(?:quantum zero|caesarstone|smartstone|wk stone|ydl|polytec|laminex|melamine|laminate|stone|woodmatt|smooth|matt|thermolaminate|pencil round edge|mitred apron edge|tightform edge|classic white)\b",
+            normalized,
+        )
+        or re.search(r"(?i)\b\d+\s*mm\b", normalized)
+    )
+
+
+def _clarendon_strip_material_noise(value: Any, field_name: str = "") -> str:
     cleaned = normalize_space(str(value or ""))
+    if not cleaned:
+        return ""
+    if field_name == "toe_kick" and re.search(r"(?i)\bas door colour(?:\b|(?=\d))", cleaned):
+        return "as Door Colour"
+    material_anchor = r"(?:Quantum Zero|Caesarstone|Smartstone|WK Stone|YDL|Polytec|Laminex)"
+    cleaned = re.sub(r"(?i)\bDocusign Envelope ID\b.*?(?=(?:\b" + material_anchor + r"\b|\||$))", "", cleaned).strip(" -;,|")
+    cleaned = re.sub(r"(?i)\b\d{1,2}:\d{2}\s*[AP]M\s+A(?:ED|ES)T\b.*?(?=(?:\b" + material_anchor + r"\b|\||$))", "", cleaned).strip(" -;,|")
+    cleaned = re.sub(r"(?i)\b(?:client signature|date of signed dwgs|signed date)\b.*?(?=(?:\b" + material_anchor + r"\b|\||$))", "", cleaned).strip(" -;,|")
+    cleaned = re.sub(r"(?i)\bDOOR LEGEND\b.*$", "", cleaned).strip(" -;,|")
+    cleaned = re.sub(r"(?i)\bSINK CUT OUT\b.*?(?=(?:\b" + material_anchor + r"\b|\||$))", "", cleaned).strip(" -;,|")
+    cleaned = re.sub(r"(?i)\b35MM\s+DIA\.?\s+TAPHOLE\s+CUT\s+OUT\b", "", cleaned).strip(" -;,|")
+    cleaned = re.sub(r"(?i)\b100MM\s+DISTANCE\s+BETWEEN\b.*?(?=(?:\b" + material_anchor + r"\b|\||$))", "", cleaned).strip(" -;,|")
+    cleaned = re.sub(r"(?i)^(?:EDGE|SINK CUT OUT|35MM DIA\.?\s*TAPHOLE CUT OUT)\b(?:\s*\|\s*)?", "", cleaned).strip(" -;,|")
+    cleaned = re.sub(
+        r"(?i)\b(?:Forstan Pty Ltd\.?|T/?A\s*Your Home Kitchens|P\.?\s*O\.?\s*Box\s*\d+.*?|Phone\s*:.*?|Fax\s*:.*?|ABN\s*:.*?|REV\s+[A-Z]\s+\d{2}/\d{2}/\d{2}.*?)\b(?=(?:\b"
+        + material_anchor
+        + r"\b|\||$))",
+        "",
+        cleaned,
+    ).strip(" -;,|")
+    parts = [
+        normalize_space(part).strip(" -;,")
+        for part in cleaned.split("|")
+        if normalize_space(part).strip(" -;,")
+    ]
+    if parts and field_name in {"bench_tops_wall_run", "bench_tops_island", "bench_tops_other", "bulkheads"}:
+        meaningful_parts = [part for part in parts if _clarendon_material_fragment_has_meaningful_content(part, field_name)]
+        if meaningful_parts:
+            cleaned = " | ".join(meaningful_parts)
+        elif field_name.startswith("bench_tops"):
+            cleaned = ""
+        else:
+            cleaned = " | ".join(parts)
+    return normalize_space(cleaned).strip(" -;,|")
+
+
+def _clarendon_clean_room_material_text(value: Any, room_key: str, field_name: str) -> str:
+    cleaned = _clarendon_strip_material_noise(value, field_name)
     if not cleaned:
         return ""
     if room_key in {"kitchen", "butlers_pantry", "laundry", "vanity"} or _clarendon_is_vanity_room_key(room_key):
@@ -9144,12 +9199,18 @@ def _looks_like_clarendon_false_appliance(row: dict[str, Any]) -> bool:
         return True
     if model.upper() in {"DRW630", "SPACE20MM", "SPACE", "M/W SPACE", "MW SPACE", "BUILDER20MM"}:
         return True
+    if re.fullmatch(r"(?i)HOB\d+CM", model) or re.fullmatch(r"(?i)X\d+(?:L|CM|MM)", model):
+        return True
+    if re.fullmatch(r"(?i)(?:depth|width|height)\d+(?:mm|cm)?", model):
+        return True
     if re.search(r"(?i)\b(?:dishwasher space|m/w(?:ave)? space|space20mm|drw630)\b", f"{model} {evidence}"):
         return True
     if re.search(
         r"(?i)\b(?:bulkhead|kickboard|shadowline|matching melamine|stone benchtop|doors?/panels?\s+colour|drawer profile|10mm door overhang)\b",
         evidence,
     ):
+        return True
+    if re.search(r"(?i)\b(?:rangehood ducting|hot water heater|gas connection|ref\.\s*depth)\b", evidence):
         return True
     if appliance_type in {"cooktop", "dishwasher", "microwave"} and re.search(r"(?i)\b(?:space|m/w space|900mm|20mm|polytec)\b", f"{make} {model} {evidence}"):
         if not _guess_model(f"{make} {model} {evidence}") and "provision only" not in evidence.lower():
@@ -9251,10 +9312,14 @@ def _clarendon_cleanup_utility_room_fixture_fields(row: dict[str, Any]) -> None:
         row["tap_info"] = ""
 
 
-def _clarendon_clean_material_list(values: Any) -> list[str]:
+def _clarendon_clean_material_list(values: Any, field_name: str = "") -> list[str]:
     cleaned: list[str] = []
     for value in _coerce_string_list(values):
-        text = _clean_door_colour_value(value) or normalize_space(str(value or ""))
+        raw_text = _clarendon_strip_material_noise(value, field_name)
+        if field_name == "toe_kick" and re.search(r"(?i)\bas door colour\b", raw_text):
+            text = "as Door Colour"
+        else:
+            text = _clean_door_colour_value(raw_text) or normalize_space(str(raw_text or ""))
         text = normalize_space(text).strip(" -;,")
         if text:
             cleaned.append(text)
@@ -9283,8 +9348,8 @@ def _finalize_clarendon_rooms(
         room_key = normalize_room_key(str(row.get("room_key", "") or ""))
         overlay = _match_room_overlay(row, overlays)
         row["accessories"] = _clarendon_clean_accessory_entries(row.get("accessories", []))
-        row["toe_kick"] = _clarendon_clean_material_list(row.get("toe_kick", []))
-        row["bulkheads"] = _clarendon_clean_material_list(row.get("bulkheads", []))
+        row["toe_kick"] = _clarendon_clean_material_list(row.get("toe_kick", []), "toe_kick")
+        row["bulkheads"] = _clarendon_clean_material_list(row.get("bulkheads", []), "bulkheads")
         row["handles"] = _clarendon_clean_handle_entries(row.get("handles", []))
         if room_key == "kitchen":
             wall_run = normalize_space(kitchen_benchtops.get("wall_run", ""))
