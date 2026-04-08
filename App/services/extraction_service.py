@@ -135,6 +135,7 @@ def _normalized_builder_key(builder_name: str) -> str:
 PAGE_FAMILY_PROVIDER_MATRIX: dict[str, dict[str, dict[str, bool | str]]] = {
     "imperial": {
         "joinery_material_sheet": {"table_grid_first": True, "vision_grid_default": True, "docling_default": True},
+        "special_section_page": {"table_grid_first": True, "vision_grid_default": True, "docling_default": True},
         "sinkware_tapware_sheet": {"table_grid_first": True, "vision_grid_default": False, "docling_default": True},
         "appliance_sheet": {"table_grid_first": True, "vision_grid_default": False, "docling_default": True},
     },
@@ -174,6 +175,13 @@ def _classify_spec_page_family(builder_name: str, text: str) -> str:
         return "sinkware_tapware_sheet"
     if "APPLIANCES" in upper or "17 APPLIANCES" in upper:
         return "appliance_sheet"
+    if builder_key == "imperial" and (
+        "FEATURE TALL DOORS" in upper
+        or "FEATURE TALL CABINETS" in upper
+        or "FEATURE JOINERY SELECTION SHEET" in upper
+        or "CUSTOM HANDLES" in upper
+    ):
+        return "special_section_page"
     if builder_key == "imperial" and _looks_like_imperial_joinery_material_page(upper):
         return "joinery_material_sheet"
     if builder_key == "yellowwood" and any(marker in upper for marker in ("JOINERY", "CABINETRY", "COLOUR SCHEDULE", "BASE CUPBOARDS", "OVERHEAD CUPBOARDS")):
@@ -995,6 +1003,76 @@ class ImperialGridRow:
 
 
 @dataclass
+class ImperialColumnModel:
+    label_right: float = 240.0
+    description_right: float = 780.0
+    supplier_right: float = 940.0
+
+    def role_for_x(self, x0: float) -> str:
+        if x0 < self.label_right:
+            return "label"
+        if x0 < self.description_right:
+            return "description"
+        if x0 < self.supplier_right:
+            return "supplier"
+        return "notes"
+
+
+@dataclass
+class ImperialCell:
+    text: str
+    col_role: str
+    row_band: int
+    x0: float = 0.0
+    x1: float = 0.0
+    top: float = 0.0
+    bottom: float = 0.0
+    source: str = ""
+
+
+@dataclass
+class ImperialLogicalRow:
+    room_scope: str
+    row_label: str
+    description_parts: list[str]
+    supplier_parts: list[str]
+    note_parts: list[str]
+    row_kind: str = "other"
+    page_no: int = 0
+    row_order: int = 0
+    repair_source: str = ""
+    position_scope: str = ""
+
+    def to_grid_row(self) -> ImperialGridRow:
+        description = parsing.normalize_brand_casing_text(
+            parsing.normalize_space(" ".join(_dedupe_preserve_order(self.description_parts)))
+        ).strip(" -;,")
+        notes = parsing.normalize_brand_casing_text(
+            parsing.normalize_space(" ".join(_dedupe_preserve_order(self.note_parts)))
+        ).strip(" -;,")
+        supplier = next(
+            (
+                parsing.normalize_brand_casing_text(parsing.normalize_space(value))
+                for value in self.supplier_parts
+                if parsing.normalize_space(value)
+            ),
+            "",
+        ).strip(" -;,")
+        return ImperialGridRow(
+            room_scope=self.room_scope,
+            row_label=self.row_label,
+            description=description,
+            supplier=supplier,
+            notes=notes,
+            row_kind=self.row_kind,
+            page_no=self.page_no,
+            row_order=self.row_order,
+            repair_source=self.repair_source,
+            position_scope=self.position_scope or _imperial_grid_row_position_scope(self.row_label, self.row_kind),
+        )
+
+
+@dataclass
 class ImperialGridPage:
     room_scope: str
     rows: list[ImperialGridRow]
@@ -1061,6 +1139,7 @@ _IMPERIAL_TABLE_REPAIR_ROW_SPECS: tuple[tuple[str, str, str], ...] = (
     (r"(?i)^(?:HANLDES|HANDLES)\s*-\s*TALL\s+CABS?\s*/\s*PANTRY\s+CABS?\s*ONLY\b", "HANDLES - TALL CABS / PANTRY CABS ONLY", "handle"),
     (r"(?i)^(?:HANLDES|HANDLES)\s*-\s*TALL\s+CABS?\b", "HANDLES - TALL CABS", "handle"),
     (r"(?i)^(?:HANLDES|HANDLES)\s+TALL\s*\+\s*PANTRY\s+DRAWERS\b", "HANDLES TALL + PANTRY DRAWERS", "handle"),
+    (r"(?i)^CUSTOM\s+HANDLES?\b", "CUSTOM HANDLES", "handle"),
     (r"(?i)^KNOB\b", "KNOB", "handle"),
     (r"(?i)^KICKBOARDS?\b", "KICKBOARDS", "material"),
     (r"(?i)^SPLASHBACK\b", "SPLASHBACK", "material"),
@@ -1107,6 +1186,8 @@ def _canonicalize_imperial_joinery_material_layout(
         return normalized
     title = parsing._extract_imperial_section_title(raw_page_text) if hasattr(parsing, "_extract_imperial_section_title") else ""
     section_room = parsing.normalize_space(re.sub(r"(?i)\s+JOINERY SELECTION SHEET\b", "", title)).strip(" -")
+    if not section_room and document_path and page_no > 1:
+        section_room = _infer_imperial_continuation_room_scope(str(document_path), page_no, raw_page_text)
     raw_blocks = list(normalized.get("room_blocks", []) or [])
     if not raw_blocks:
         raw_blocks = [{"room_label": str(normalized.get("room_label", "") or ""), "rows": list(normalized.get("rows", []) or [])}]
@@ -1215,11 +1296,55 @@ def _load_pdfplumber_page_words(document_path: str, page_no: int) -> tuple[tuple
     return tuple(normalized_words)
 
 
-def _extract_imperial_joinery_word_grid_rows(
+@functools.lru_cache(maxsize=256)
+def _load_pdfplumber_page_text(document_path: str, page_no: int) -> str:
+    path = str(document_path or "").strip()
+    if not path or page_no <= 0:
+        return ""
+    try:
+        import pdfplumber  # type: ignore
+    except Exception:
+        return ""
+    try:
+        with pdfplumber.open(path) as pdf:
+            if page_no - 1 < 0 or page_no - 1 >= len(pdf.pages):
+                return ""
+            return parsing.normalize_space(pdf.pages[page_no - 1].extract_text() or "")
+    except Exception:
+        return ""
+
+
+def _infer_imperial_continuation_room_scope(document_path: str, page_no: int, raw_page_text: str) -> str:
+    upper = str(raw_page_text or "").upper()
+    if not any(
+        marker in upper
+        for marker in (
+            "CUSTOM HANDLES",
+            "HANDLES",
+            "KICKBOARDS",
+            "SPLASHBACK",
+            "BENCHTOP",
+            "BASE CABINETRY",
+            "UPPER CABINETRY",
+            "FLOATING SHELV",
+        )
+    ):
+        return ""
+    for previous_page in range(page_no - 1, max(0, page_no - 4), -1):
+        previous_text = _load_pdfplumber_page_text(document_path, previous_page)
+        if not previous_text:
+            continue
+        title = parsing._extract_imperial_section_title(previous_text) if hasattr(parsing, "_extract_imperial_section_title") else ""
+        if title:
+            return parsing.normalize_space(re.sub(r"(?i)\s+JOINERY SELECTION SHEET\b", "", title)).strip(" -")
+    return ""
+
+
+def _group_imperial_word_row_bands(
     page_words: tuple[tuple[float, float, str], ...],
     *,
-    room_scope: str,
-) -> list[ImperialGridRow]:
+    tolerance: float = 8.0,
+) -> list[dict[str, Any]]:
     if not page_words:
         return []
     sorted_words = sorted(page_words, key=lambda item: (item[0], item[1]))
@@ -1227,100 +1352,340 @@ def _extract_imperial_joinery_word_grid_rows(
     current_row: list[tuple[float, float, str]] = []
     current_top: float | None = None
     for top, x0, text in sorted_words:
-        if current_top is None or abs(top - current_top) <= 8.0:
+        if current_top is None or abs(top - current_top) <= tolerance:
             current_row.append((top, x0, text))
             current_top = top if current_top is None else min(current_top, top)
             continue
-        grouped_rows.append(current_row)
+        grouped_rows.append(sorted(current_row, key=lambda item: item[1]))
         current_row = [(top, x0, text)]
         current_top = top
     if current_row:
-        grouped_rows.append(current_row)
+        grouped_rows.append(sorted(current_row, key=lambda item: item[1]))
+    row_bands: list[dict[str, Any]] = []
+    for row_band, words in enumerate(grouped_rows):
+        row_bands.append(
+            {
+                "row_band": row_band,
+                "words": words,
+                "text": parsing.normalize_space(" ".join(word for _, _, word in words)),
+                "top": min(float(top) for top, _, _ in words) if words else 0.0,
+            }
+        )
+    return row_bands
 
-    entries: list[dict[str, Any]] = []
-    pending_rows: list[tuple[str, str, str, str]] = []
-    current: dict[str, Any] | None = None
-    for row_order, row_words in enumerate(grouped_rows):
-        label_fragments: list[str] = []
-        desc_fragments: list[str] = []
-        supplier_fragments: list[str] = []
-        note_fragments: list[str] = []
-        for _, x0, text in sorted(row_words, key=lambda item: item[1]):
-            if x0 < 240:
-                label_fragments.append(text)
-            elif x0 < 780:
-                desc_fragments.append(text)
-            elif x0 < 940:
-                supplier_fragments.append(text)
-            else:
-                note_fragments.append(text)
-        label_text = parsing.normalize_space(" ".join(label_fragments))
-        description_text = parsing.normalize_space(" ".join(desc_fragments))
-        supplier_text = parsing.normalize_space(" ".join(supplier_fragments))
-        note_text = parsing.normalize_space(" ".join(note_fragments))
-        combined_row_text = parsing.normalize_space(" ".join(part for part in (label_text, description_text, supplier_text, note_text) if part))
-        if any(marker in combined_row_text.upper() for marker in ("ALL COLOURS SHOWN", "DESIGNER:", "CLIENT NAME:", "SIGNATURE:", "SIGNED DATE:", "DOCUMENT REF:", "PAGE ")):
+
+def _looks_like_imperial_table_header_row(text: str) -> bool:
+    upper = parsing.normalize_space(text).upper()
+    if not upper:
+        return False
+    has_label = "AREA / ITEM" in upper or re.search(r"(?i)\bITEM\b", upper)
+    has_description = "SPECS / DESCRIPTION" in upper or re.search(r"(?i)\bDESCRIPTION\b", upper)
+    has_supplier = "SUPPLIER" in upper or "MANUFACTURER" in upper
+    return bool(has_label and has_description and has_supplier)
+
+
+def _split_imperial_word_page_regions(
+    row_bands: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], int | None, list[dict[str, Any]], list[dict[str, Any]]]:
+    if not row_bands:
+        return [], None, [], []
+    table_header_index = next(
+        (
+            index
+            for index, row in enumerate(row_bands)
+            if _looks_like_imperial_table_header_row(str(row.get("text", "") or ""))
+        ),
+        None,
+    )
+    content_start = table_header_index + 1 if table_header_index is not None else 0
+    header_rows = row_bands[:content_start]
+    content_rows: list[dict[str, Any]] = []
+    footer_rows: list[dict[str, Any]] = []
+    for index, row in enumerate(row_bands[content_start:], start=content_start):
+        row_text = parsing.normalize_space(str(row.get("text", "") or ""))
+        upper = row_text.upper()
+        if any(
+            marker in upper
+            for marker in (
+                "ALL COLOURS SHOWN",
+                "PRODUCT AVAILABILITY",
+                "DESIGNER:",
+                "CLIENT NAME:",
+                "SIGNATURE:",
+                "SIGNED DATE:",
+                "DOCUMENT REF:",
+                "PAGE ",
+            )
+        ):
+            footer_rows = row_bands[index:]
             break
-        label, remainder, row_kind = _match_imperial_table_repair_row(label_text)
-        next_label = ""
-        for look_ahead in range(row_order + 1, min(len(grouped_rows), row_order + 4)):
-            next_label_fragments: list[str] = []
-            for _, next_x0, next_text in sorted(grouped_rows[look_ahead], key=lambda item: item[1]):
-                if next_x0 < 240:
-                    next_label_fragments.append(next_text)
-            next_label, _, _ = _match_imperial_table_repair_row(parsing.normalize_space(" ".join(next_label_fragments)))
-            if next_label:
-                break
+        if _looks_like_layout_metadata_line(row_text):
+            footer_rows.append(row)
+            continue
+        content_rows.append(row)
+    return header_rows, table_header_index, content_rows, footer_rows
+
+
+def _infer_imperial_column_model(
+    row_bands: list[dict[str, Any]],
+    *,
+    table_header_index: int | None,
+) -> ImperialColumnModel:
+    model = ImperialColumnModel()
+    if table_header_index is None or table_header_index >= len(row_bands):
+        return model
+    header_words = list(row_bands[table_header_index].get("words", []) or [])
+    if not header_words:
+        return model
+    description_start: float | None = None
+    supplier_start: float | None = None
+    notes_start: float | None = None
+    for _, x0, text in header_words:
+        upper = parsing.normalize_space(text).upper()
+        if not upper:
+            continue
+        if (
+            "SPECS" in upper
+            or "DESCRIPTION" in upper
+            or "SELECTION LEVEL" in upper
+        ):
+            description_start = x0 if description_start is None else min(description_start, x0)
+        elif "SUPPLIER" in upper or "MANUFACTURER" in upper:
+            supplier_start = x0 if supplier_start is None else min(supplier_start, x0)
+        elif "NOTES" in upper or "COMMENT" in upper:
+            notes_start = x0 if notes_start is None else min(notes_start, x0)
+    if description_start is not None and description_start > 120:
+        model.label_right = max(160.0, description_start - 18.0)
+    if supplier_start is not None and supplier_start > model.label_right + 120:
+        model.description_right = supplier_start - 18.0
+    if notes_start is not None and notes_start > model.description_right + 80:
+        model.supplier_right = notes_start - 18.0
+    if model.description_right <= model.label_right:
+        model.description_right = max(model.label_right + 260.0, 780.0)
+    if model.supplier_right <= model.description_right:
+        model.supplier_right = max(model.description_right + 120.0, 940.0)
+    return model
+
+
+def _extract_imperial_cells_from_word_rows(
+    row_bands: list[dict[str, Any]],
+    *,
+    column_model: ImperialColumnModel,
+) -> list[ImperialCell]:
+    cells: list[ImperialCell] = []
+    for row in row_bands:
+        row_band = int(row.get("row_band", 0) or 0)
+        top = float(row.get("top", 0.0) or 0.0)
+        for _, x0, text in list(row.get("words", []) or []):
+            cleaned = parsing.normalize_space(text)
+            if not cleaned:
+                continue
+            cells.append(
+                ImperialCell(
+                    text=cleaned,
+                    col_role=column_model.role_for_x(float(x0)),
+                    row_band=row_band,
+                    x0=float(x0),
+                    top=top,
+                    source="word_grid",
+                )
+            )
+    return cells
+
+
+def _match_imperial_row_from_cell_text(
+    label_text: str,
+    description_text: str,
+) -> tuple[str, str, str, str]:
+    label, remainder, row_kind = _match_imperial_table_repair_row(label_text)
+    if label:
+        return label, remainder, row_kind, "label"
+    combined = parsing.normalize_space(" ".join(part for part in (label_text, description_text) if parsing.normalize_space(part)))
+    if not combined:
+        return "", "", "", ""
+    label, remainder, row_kind = _match_imperial_table_repair_row(combined)
+    if label:
+        return label, remainder, row_kind, "combined"
+    return "", "", "", ""
+
+
+def _append_imperial_fragment_to_logical_row(
+    row: ImperialLogicalRow,
+    fragment: str,
+    *,
+    prefer_supplier: bool = False,
+    prefer_note: bool = False,
+) -> None:
+    cleaned = parsing.normalize_space(fragment)
+    if not cleaned:
+        return
+    if prefer_supplier:
+        row.supplier_parts.append(cleaned)
+        return
+    supplier, remainder = _extract_imperial_grid_supplier_fragment(cleaned)
+    if supplier and not prefer_note:
+        row.supplier_parts.append(supplier)
+        cleaned = parsing.normalize_space(remainder)
+        if not cleaned:
+            return
+    if prefer_note or _imperial_grid_fragment_is_note(cleaned, row_label=row.row_label):
+        row.note_parts.append(cleaned)
+        return
+    row.description_parts.append(cleaned)
+
+
+def _append_imperial_supplier_fragment_to_logical_row(
+    row: ImperialLogicalRow,
+    fragment: str,
+) -> None:
+    cleaned = parsing.normalize_space(fragment)
+    if not cleaned:
+        return
+    supplier, remainder = _extract_imperial_grid_supplier_fragment(cleaned)
+    if supplier:
+        if remainder:
+            _append_imperial_fragment_to_logical_row(row, remainder)
+        row.supplier_parts.append(supplier)
+        return
+    if _looks_like_supplier_only_line(cleaned):
+        row.supplier_parts.append(cleaned)
+        return
+    _append_imperial_fragment_to_logical_row(row, cleaned)
+
+
+def _should_defer_imperial_cell_row_to_next_logical_row(
+    *,
+    current: ImperialLogicalRow,
+    description_text: str,
+    supplier_text: str,
+    note_text: str,
+    next_label: str,
+) -> bool:
+    return _should_defer_imperial_word_grid_fragment_to_next_row(
+        current={"row_label": current.row_label, "description_parts": list(current.description_parts)},
+        description_text=description_text,
+        supplier_text=supplier_text,
+        note_text=note_text,
+        next_label=next_label,
+    )
+
+
+def _build_imperial_logical_rows_from_cells(
+    cells: list[ImperialCell],
+    *,
+    room_scope: str,
+) -> list[ImperialLogicalRow]:
+    if not cells:
+        return []
+    grouped: dict[int, list[ImperialCell]] = {}
+    for cell in cells:
+        grouped.setdefault(cell.row_band, []).append(cell)
+    row_items: list[dict[str, Any]] = []
+    for row_band in sorted(grouped):
+        row_cells = sorted(grouped[row_band], key=lambda item: (item.x0, item.text))
+        label_text = parsing.normalize_space(" ".join(cell.text for cell in row_cells if cell.col_role == "label"))
+        description_text = parsing.normalize_space(" ".join(cell.text for cell in row_cells if cell.col_role == "description"))
+        supplier_text = parsing.normalize_space(" ".join(cell.text for cell in row_cells if cell.col_role == "supplier"))
+        note_text = parsing.normalize_space(" ".join(cell.text for cell in row_cells if cell.col_role == "notes"))
+        combined_text = parsing.normalize_space(" ".join(part for part in (label_text, description_text, supplier_text, note_text) if part))
+        if not combined_text:
+            continue
+        if _looks_like_imperial_table_header_row(combined_text) or _looks_like_layout_metadata_line(combined_text):
+            continue
+        label, remainder, row_kind, match_source = _match_imperial_row_from_cell_text(label_text, description_text)
+        row_items.append(
+            {
+                "row_band": row_band,
+                "label_text": label_text,
+                "description_text": description_text,
+                "supplier_text": supplier_text,
+                "note_text": note_text,
+                "combined_text": combined_text,
+                "label": label,
+                "remainder": remainder,
+                "row_kind": row_kind,
+                "match_source": match_source,
+            }
+        )
+    logical_rows: list[ImperialLogicalRow] = []
+    pending_items: list[dict[str, Any]] = []
+    current: ImperialLogicalRow | None = None
+    for index, item in enumerate(row_items):
+        next_label = next(
+            (str(candidate.get("label", "") or "") for candidate in row_items[index + 1 :] if str(candidate.get("label", "") or "")),
+            "",
+        )
+        label = str(item.get("label", "") or "")
+        description_text = str(item.get("description_text", "") or "")
+        supplier_text = str(item.get("supplier_text", "") or "")
+        note_text = str(item.get("note_text", "") or "")
         if label:
             if current is not None:
-                entries.append(current)
-            description_parts = [part for part in (remainder, description_text) if parsing.normalize_space(part)]
-            supplier_parts = [supplier_text] if supplier_text else []
-            note_parts = [note_text] if note_text else []
-            for pending_label, pending_desc, pending_supplier, pending_note in pending_rows[-3:]:
-                if pending_label:
+                logical_rows.append(current)
+            current = ImperialLogicalRow(
+                room_scope=room_scope,
+                row_label=label,
+                description_parts=[],
+                supplier_parts=[],
+                note_parts=[],
+                row_kind=str(item.get("row_kind", "other") or "other"),
+                row_order=int(item.get("row_band", index) or index),
+                repair_source="cell_grid_repair",
+                position_scope=_imperial_grid_row_position_scope(label, str(item.get("row_kind", "other") or "other")),
+            )
+            for pending in pending_items[-3:]:
+                if str(pending.get("label", "") or ""):
                     continue
-                if pending_desc:
-                    description_parts.insert(0, pending_desc)
-                if pending_supplier:
-                    supplier_parts.insert(0, pending_supplier)
-                if pending_note:
-                    note_parts.insert(0, pending_note)
-            current = {
-                "row_label": label,
-                "row_kind": row_kind,
-                "description_parts": description_parts,
-                "supplier_parts": supplier_parts,
-                "note_parts": note_parts,
-                "row_order": row_order,
-            }
-            pending_rows = []
+                _append_imperial_fragment_to_logical_row(current, str(pending.get("description_text", "") or ""))
+                _append_imperial_supplier_fragment_to_logical_row(current, str(pending.get("supplier_text", "") or ""))
+                _append_imperial_fragment_to_logical_row(current, str(pending.get("note_text", "") or ""), prefer_note=True)
+            pending_items = []
+            if str(item.get("match_source", "") or "") == "combined":
+                _append_imperial_fragment_to_logical_row(current, str(item.get("remainder", "") or ""))
+            else:
+                _append_imperial_fragment_to_logical_row(current, str(item.get("remainder", "") or ""))
+                _append_imperial_fragment_to_logical_row(current, description_text)
+            _append_imperial_supplier_fragment_to_logical_row(current, supplier_text)
+            _append_imperial_fragment_to_logical_row(current, note_text, prefer_note=True)
             continue
         if current is None:
-            pending_rows.append((label_text, description_text, supplier_text, note_text))
+            pending_items.append(item)
             continue
-        if _should_defer_imperial_word_grid_fragment_to_next_row(
+        if _should_defer_imperial_cell_row_to_next_logical_row(
             current=current,
             description_text=description_text,
             supplier_text=supplier_text,
             note_text=note_text,
             next_label=next_label,
         ):
-            pending_rows.append((label_text, description_text, supplier_text, note_text))
+            pending_items.append(item)
             continue
-        if description_text:
-            current.setdefault("description_parts", []).append(description_text)
-        if supplier_text:
-            current.setdefault("supplier_parts", []).append(supplier_text)
-        if note_text:
-            current.setdefault("note_parts", []).append(note_text)
+        _append_imperial_fragment_to_logical_row(current, description_text)
+        _append_imperial_supplier_fragment_to_logical_row(current, supplier_text)
+        _append_imperial_fragment_to_logical_row(current, note_text, prefer_note=True)
     if current is not None:
-        entries.append(current)
+        logical_rows.append(current)
+    return logical_rows
 
+
+def _extract_imperial_joinery_word_grid_rows(
+    page_words: tuple[tuple[float, float, str], ...],
+    *,
+    room_scope: str,
+) -> list[ImperialGridRow]:
+    if not page_words:
+        return []
+    row_bands = _group_imperial_word_row_bands(page_words)
+    _, table_header_index, content_rows, _ = _split_imperial_word_page_regions(row_bands)
+    if not content_rows:
+        return []
+    column_model = _infer_imperial_column_model(row_bands, table_header_index=table_header_index)
+    cells = _extract_imperial_cells_from_word_rows(content_rows, column_model=column_model)
+    logical_rows = _build_imperial_logical_rows_from_cells(cells, room_scope=room_scope)
     rows: list[ImperialGridRow] = []
-    for entry in entries:
-        built = _build_imperial_grid_row_from_word_entry(entry, room_scope=room_scope)
-        if built:
+    for logical_row in logical_rows:
+        built = logical_row.to_grid_row()
+        if built.description or built.notes:
             rows.append(built)
     return rows
 
@@ -1600,12 +1965,12 @@ def _merge_imperial_grid_rows(text_rows: list[ImperialGridRow], candidate_rows: 
     merged: list[ImperialGridRow] = []
     used: set[int] = set()
     for text_row in text_rows:
-        text_label = _normalized_imperial_grid_label(text_row.row_label)
+        text_key = _imperial_grid_row_merge_key(text_row)
         candidate_index = next(
             (
                 index
                 for index, candidate in enumerate(candidate_rows)
-                if index not in used and _normalized_imperial_grid_label(candidate.row_label) == text_label
+                if index not in used and _imperial_grid_row_merge_key(candidate) == text_key
             ),
             None,
         )
@@ -1617,9 +1982,10 @@ def _merge_imperial_grid_rows(text_rows: list[ImperialGridRow], candidate_rows: 
         if candidate_index in used:
             continue
         normalized_label = _normalized_imperial_grid_label(candidate.row_label)
+        candidate_key = _imperial_grid_row_merge_key(candidate)
         if not normalized_label:
             continue
-        if any(_normalized_imperial_grid_label(existing.row_label) == normalized_label for existing in merged):
+        if any(_imperial_grid_row_merge_key(existing) == candidate_key for existing in merged):
             continue
         if _imperial_grid_row_is_redundant_candidate(candidate, merged):
             continue
@@ -1631,13 +1997,16 @@ def _merge_imperial_grid_rows(text_rows: list[ImperialGridRow], candidate_rows: 
 def _prefer_imperial_grid_row(text_row: ImperialGridRow, candidate: ImperialGridRow | None) -> ImperialGridRow:
     if candidate is None:
         return text_row
-    if candidate.row_label and text_row.row_label and candidate.row_label != text_row.row_label:
+    if _imperial_grid_row_merge_key(candidate) != _imperial_grid_row_merge_key(text_row):
         return text_row
     text_score = _imperial_grid_row_quality(text_row)
     candidate_score = _imperial_grid_row_quality(candidate)
     preferred = text_row
     secondary = candidate
-    if candidate_score > text_score + 35:
+    if candidate_score > text_score + 12:
+        preferred = candidate
+        secondary = text_row
+    elif candidate_score >= text_score and parsing.normalize_space(candidate.description):
         preferred = candidate
         secondary = text_row
     row_label = preferred.row_label or secondary.row_label
@@ -1656,6 +2025,15 @@ def _prefer_imperial_grid_row(text_row: ImperialGridRow, candidate: ImperialGrid
         repair_source=preferred.repair_source or secondary.repair_source or "vision_table_repair",
         position_scope=preferred.position_scope or secondary.position_scope or _imperial_grid_row_position_scope(row_label, preferred.row_kind or secondary.row_kind),
     )
+
+
+def _imperial_grid_row_merge_key(row: ImperialGridRow) -> tuple[str, str]:
+    label = _normalized_imperial_grid_label(row.row_label)
+    position_scope = parsing.normalize_space(row.position_scope).upper()
+    row_kind = parsing.normalize_space(row.row_kind).lower()
+    if row_kind == "handle" or "HANDLE" in label or label == "KNOB":
+        return label, position_scope
+    return label, ""
 
 
 def _imperial_grid_row_position_scope(row_label: str, row_kind: str) -> str:
@@ -1683,6 +2061,8 @@ def _imperial_grid_row_position_scope(row_label: str, row_kind: str) -> str:
         return "Drawers"
     if "OVERHEAD" in label:
         return "Overheads"
+    if label == "CUSTOM HANDLES":
+        return "Custom Handles"
     if label == "KNOB":
         return "Knob"
     return ""
@@ -1725,7 +2105,9 @@ def _imperial_grid_row_quality(row: ImperialGridRow) -> int:
     score = _imperial_field_quality(combined or row.description or row.notes, field_name)
     if row.supplier:
         score += 5
-    if row.repair_source == "word_grid_repair":
+    if row.repair_source == "cell_grid_repair":
+        score += 44
+    elif row.repair_source == "word_grid_repair":
         score += 32
     elif row.repair_source == "text_grid_repair":
         score += 20
@@ -1735,14 +2117,26 @@ def _imperial_grid_row_quality(row: ImperialGridRow) -> int:
         score -= 220
     if field_name == "handles" and "NO HANDLES" in label:
         score -= 80
+    if field_name == "handles" and re.search(r"(?i)\b(?:waste\s*bin|avantech|bin\b|spice\s*tray|corner\s*unit|drawer\s*gpo|grommet|lighting|led\s*strip|hinges?|runners?)\b", combined):
+        score -= 320
+    if field_name == "handles" and parsing.normalize_space(row.supplier).lower() in {"polytec", "laminex", "caesarstone", "wk stone", "smartstone"}:
+        score -= 180
     if field_name == "toe_kick" and re.search(r"(?i)\b(?:base doors?|overhead doors?|allegra|kethy)\b", combined):
         score -= 220
+    if field_name == "toe_kick" and re.search(r"(?i)\b(?:touch catch|horizontal|vertical|waste\s*bin|avantech|drawer|doors?)\b", combined):
+        score -= 260
     if field_name.startswith("bench_tops_") and re.search(r"(?i)\b(?:feature colour overheads?|feature tall cabinetry colour|open shelves?)\b", combined):
+        score -= 220
+    if field_name.startswith("bench_tops_") and re.search(r"(?i)\b(?:profiledoors?|hampton|classic white smooth|quartiera maple|allegra|kethy)\b", combined):
         score -= 220
     if field_name.startswith("door_colours_") and re.search(r"(?i)\b(?:desk grommets?|cable entry covers?|furnware|knob|allegra|kethy)\b", combined):
         score -= 200
+    if field_name.startswith("door_colours_") and re.search(r"(?i)\b\d{2,4}\s*mm\b", combined):
+        score -= 120
     if field_name == "floating_shelf" and re.search(r"(?i)\b(?:allegra|install|brushed nickel|6368-)\b", combined):
         score -= 220
+    if field_name == "floating_shelf" and re.search(r"(?i)\b(?:kethy|handles?|touch catch|no handles?)\b", combined):
+        score -= 260
     return score
 
 
@@ -4400,6 +4794,8 @@ def _looks_like_imperial_joinery_material_page(text: str) -> bool:
     if "APPLIANCES" in upper or "SINKWARE & TAPWARE" in upper or "SINKWARE (" in upper or "TAPWARE (" in upper:
         return False
     if "JOINERY SELECTION SHEET" in upper:
+        return True
+    if "CUSTOM HANDLES" in upper:
         return True
     if "COLOUR SCHEDULE" in upper and any(
         marker in upper

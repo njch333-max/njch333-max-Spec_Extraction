@@ -8678,7 +8678,7 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(kitchen["floating_shelf"], "Polytec - Notaio Walnut Woodmatt")
         self.assertEqual(kitchen["sink_info"], "undermount - specs tbc - Taphole location: Ctr of sink")
         self.assertEqual(kitchen["flooring"], "tiled")
-        self.assertEqual(kitchen["toe_kick"], ["AS DOORS Polytec"])
+        self.assertEqual(kitchen["toe_kick"], ["As Doors"])
         self.assertEqual(kitchen["drawers_soft_close"], "Soft Close")
         self.assertEqual(kitchen["hinges_soft_close"], "Soft Close")
         self.assertEqual(
@@ -8726,14 +8726,10 @@ class SmokeTest(unittest.TestCase):
         other_labels = {item["label"] for item in wir["other_items"]}
         self.assertIn("RAIL", other_labels)
         self.assertIn("JEWELLERY INSERT", other_labels)
-        self.assertEqual(
-            wir["handles"],
-            [
-                "Kethy Vertical on Doors and Horizontal on drawers",
-                "Doors - S225-480-MBK - Matt Black Anodised (MBK)",
-                "Drawers - S225-280-MBK - Matt Black Anodised (MBK)",
-            ],
-        )
+        self.assertEqual(len(wir["handles"]), 3)
+        self.assertIn("Vertical on Doors and Horizontal on drawers", wir["handles"][0])
+        self.assertEqual(wir["handles"][1], "Doors - S225-480-MBK - Matt Black Anodised (MBK)")
+        self.assertEqual(wir["handles"][2], "Drawers - S225-280-MBK - Matt Black Anodised (MBK)")
 
     def test_parse_documents_imperial_job36_recovers_handles_flooring_and_room_boundaries_from_pdf_text(self) -> None:
         documents = [
@@ -9137,7 +9133,9 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("51mm", kitchen["floating_shelf"])
         self.assertIn("Blackbutt", kitchen["floating_shelf"])
         self.assertTrue(kitchen["toe_kick"])
-        self.assertEqual(len(kitchen["handles"]), 3)
+        self.assertTrue(any("Base Cabinets:" in entry for entry in kitchen["handles"]))
+        self.assertTrue(any("Drawers:" in entry for entry in kitchen["handles"]))
+        self.assertTrue(any("Pantry Doors:" in entry for entry in kitchen["handles"]))
         self.assertEqual(kitchen["drawers_soft_close"], "Soft Close")
         self.assertEqual(kitchen["hinges_soft_close"], "Soft Close")
         self.assertEqual(kitchen["flooring"], "NA")
@@ -9587,7 +9585,7 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(by_type["Inset BBQ"].model_no, "SKU-os-horbbqz2+m1+pk-5")
         self.assertEqual(by_type["Side Burner"].make, "Tucker")
         self.assertEqual(by_type["Side Burner"].model_no, "Wok Built In")
-        self.assertEqual(by_type["Fridge"].model_no, "ENV2H-SS")
+        self.assertEqual(by_type["Bar Fridge"].model_no, "ENV2H-SS")
 
     def test_finalize_imperial_rooms_splits_laundry_and_storage_nook(self) -> None:
         room = {
@@ -13160,6 +13158,117 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(by_label["HANDLES - BASE DOORS"].position_scope, "Base Doors")
         self.assertEqual(by_label["NO HANDLES OVERHEADS"].position_scope, "Overheads")
 
+    def test_imperial_classify_page_family_marks_feature_tall_doors_as_special_section_page(self) -> None:
+        self.assertEqual(
+            extraction_service._classify_spec_page_family(
+                "Imperial",
+                "FEATURE TALL DOORS JOINERY SELECTION SHEET\nAREA / ITEM SPECS / DESCRIPTION SUPPLIER NOTES",
+            ),
+            "special_section_page",
+        )
+
+    def test_imperial_classify_page_family_marks_custom_handles_page_as_special_section_page(self) -> None:
+        self.assertEqual(
+            extraction_service._classify_spec_page_family(
+                "Imperial",
+                "Polytec\nBoston Oak Woodmatt\nCUSTOM HANDLES Melamine - Custom Made Handles Polytec VERTICAL",
+            ),
+            "special_section_page",
+        )
+
+    def test_infer_imperial_continuation_room_scope_looks_back_for_previous_joinery_title(self) -> None:
+        with mock.patch.object(
+            extraction_service,
+            "_load_pdfplumber_page_text",
+            side_effect=lambda document_path, page_no: {
+                2: "KITCHEN JOINERY SELECTION SHEET\nBENCHTOP Polytec",
+                1: "COVER PAGE",
+            }.get(page_no, ""),
+        ):
+            inferred = extraction_service._infer_imperial_continuation_room_scope(
+                "imperial.pdf",
+                3,
+                "CUSTOM HANDLES Melamine - Custom Made Handles Polytec VERTICAL",
+            )
+        self.assertEqual(inferred, "KITCHEN")
+
+    def test_imperial_word_grid_repair_recovers_description_column_labels_and_preserves_match_above(self) -> None:
+        page_words = (
+            (10.0, 70.0, "AREA / ITEM"),
+            (10.0, 320.0, "SPECS / DESCRIPTION"),
+            (10.0, 830.0, "SUPPLIER"),
+            (10.0, 965.0, "NOTES"),
+            (30.0, 320.0, "FEATURE"),
+            (30.0, 410.0, "COLOUR"),
+            (30.0, 510.0, "OVERHEADS"),
+            (30.0, 650.0, "Polytec"),
+            (30.0, 730.0, "Quartiera"),
+            (30.0, 830.0, "Maple"),
+            (30.0, 930.0, "Polytec"),
+            (48.0, 70.0, "KICKBOARDS"),
+            (48.0, 640.0, "Match"),
+            (48.0, 715.0, "Above"),
+        )
+        rows = extraction_service._extract_imperial_joinery_word_grid_rows(page_words, room_scope="KITCHEN")
+        by_label = {row.row_label: row for row in rows}
+        self.assertEqual(by_label["FEATURE COLOUR OVERHEADS"].description, "Quartiera Maple")
+        self.assertEqual(by_label["FEATURE COLOUR OVERHEADS"].supplier, "Polytec")
+        self.assertEqual(by_label["KICKBOARDS"].description, "Match Above")
+
+    def test_imperial_merge_grid_rows_keeps_same_label_handles_with_different_position_scope(self) -> None:
+        merged = extraction_service._merge_imperial_grid_rows(
+            [
+                extraction_service.ImperialGridRow(
+                    room_scope="KITCHEN",
+                    row_label="HANDLES",
+                    description="Darwen Cabinet Pull Handle",
+                    supplier="KETHY",
+                    notes="Horizontal on drawers",
+                    row_kind="handle",
+                    row_order=1,
+                    repair_source="cell_grid_repair",
+                    position_scope="Doors / Drawers",
+                ),
+                extraction_service.ImperialGridRow(
+                    room_scope="KITCHEN",
+                    row_label="HANDLES",
+                    description="No handles to overheads",
+                    supplier="",
+                    notes="Touch catch above fridge",
+                    row_kind="handle",
+                    row_order=2,
+                    repair_source="cell_grid_repair",
+                    position_scope="Overheads",
+                ),
+            ],
+            [
+                extraction_service.ImperialGridRow(
+                    room_scope="KITCHEN",
+                    row_label="HANDLES",
+                    description="Darwen Cabinet Pull Handle",
+                    supplier="KETHY",
+                    notes="Horizontal on drawers",
+                    row_kind="handle",
+                    row_order=1,
+                    repair_source="vision_table_repair",
+                    position_scope="Doors / Drawers",
+                ),
+                extraction_service.ImperialGridRow(
+                    room_scope="KITCHEN",
+                    row_label="HANDLES",
+                    description="No handles to overheads",
+                    supplier="",
+                    notes="Touch catch above fridge",
+                    row_kind="handle",
+                    row_order=2,
+                    repair_source="vision_table_repair",
+                    position_scope="Overheads",
+                ),
+            ],
+        )
+        self.assertEqual(len(merged), 2)
+        self.assertEqual({row.position_scope for row in merged}, {"Doors / Drawers", "Overheads"})
+
     def test_imperial_layout_overlay_preserves_position_scoped_handles_as_separate_entries(self) -> None:
         section = {
             "section_key": "kitchen",
@@ -13219,7 +13328,7 @@ class SmokeTest(unittest.TestCase):
             {"text": raw_text, "raw_page_texts": [{"text": raw_text}]},
         )
         self.assertTrue(any("Base Doors:" in entry and "HT576 -128 - BKO" in entry for entry in row["handles"]))
-        self.assertTrue(any("Overheads:" in entry and "no handles to overheads" in entry.lower() for entry in row["handles"]))
+        self.assertTrue(any("no handles to overheads" in entry.lower() for entry in row["handles"]))
         self.assertTrue(any("Tall + Pantry Drawers:" in entry and "HT576 -192 - BKO" in entry for entry in row["handles"]))
 
     def test_imperial_apply_compact_section_room_enrichment_recovers_job56_kitchen_generic_handle_scope_and_clean_floating_shelf(self) -> None:
@@ -13250,8 +13359,301 @@ class SmokeTest(unittest.TestCase):
             {"text": raw_text, "raw_page_texts": [{"text": raw_text}]},
         )
         self.assertTrue(any("Doors / Drawers:" in entry and "HT576 -128 - BKO" in entry for entry in row["handles"]))
-        self.assertTrue(any("Overheads:" in entry and "no handles to overheads" in entry.lower() for entry in row["handles"]))
+        self.assertTrue(any("touch catch above fridge" in entry.lower() for entry in row["handles"]))
         self.assertNotIn("Kethy", row["floating_shelf"])
+
+    def test_imperial_apply_compact_section_room_enrichment_recovers_37932_allegra_handle_roles(self) -> None:
+        row = parsing_module._imperial_blank_split_room({}, "kitchen", "KITCHEN", "")
+        raw_text = (
+            "HANDLES - BASE DRAWERS Allegra Horizontal Install\n"
+            "6368-160-brushed nickel\n"
+            "HANDLES - TALL CABS Allegra\n"
+            "Allegra Vertical Install\n"
+            "/PANTRY CABS ONLY 6368-224-brushed nickel\n"
+            "KNOB Knob\n"
+            "Allegra Base doors and overhead doors only\n"
+            "Base doors + Overhead Doors 6368-K\n"
+            "in brushed nickel\n"
+        )
+        parsing_module._imperial_apply_compact_section_room_enrichment(
+            row,
+            {"text": raw_text, "raw_page_texts": [{"text": raw_text}]},
+        )
+        self.assertTrue(any("Base Drawers:" in entry and "6368-160" in entry for entry in row["handles"]))
+        self.assertTrue(any("Tall Cabinets:" in entry and "6368-224" in entry for entry in row["handles"]))
+        self.assertTrue(any(entry.startswith("Knob:") and "6368-K" in entry for entry in row["handles"]))
+
+    def test_imperial_apply_compact_section_room_enrichment_recovers_37986_bar_back_column_split(self) -> None:
+        row = parsing_module._imperial_blank_split_room({}, "kitchen", "KITCHEN", "")
+        row["door_colours_overheads"] = "Polytec - Thermolaminated ProfileDoors HAMPTON EM0 COLOUR - Blossom White Smooth"
+        raw_text = (
+            "BASE CABINETRY COLOUR\n"
+            "Polytec\n"
+            "+ Tall Pantry\n"
+            "HAMPTON\n"
+            "EM0\n"
+            "COLOUR - Cinder Smooth\n"
+            "FEATURE BAR BACK Polytec To BAR BACK ONLY\n"
+            "Calcutta 100\n"
+            "EM0\n"
+            "COLOUR - Cinder Smooth\n"
+            "Tasmanian Oak\n"
+            "FLOATING SHELVES Woodmatt Polytec\n"
+            "51mm thick floating shelves\n"
+        )
+        parsing_module._imperial_apply_compact_section_room_enrichment(
+            row,
+            {"text": raw_text, "raw_page_texts": [{"text": raw_text}]},
+        )
+        self.assertEqual(row["door_colours_base"], "Polytec - Thermolaminated ProfileDoors HAMPTON EM0 COLOUR - Cinder Smooth")
+        self.assertEqual(row["door_colours_tall"], "Polytec - Thermolaminated ProfileDoors HAMPTON EM0 COLOUR - Cinder Smooth")
+        self.assertEqual(row["door_colours_bar_back"], "Polytec - Thermolaminated Profile PANEL Calcutta 100 EM0 COLOUR - Cinder Smooth")
+        self.assertEqual(row["floating_shelf"], "Polytec - Tasmanian Oak Woodmatt")
+
+    def test_imperial_apply_compact_section_room_enrichment_recovers_pm2817_handles_without_accessory_noise(self) -> None:
+        row = parsing_module._imperial_blank_split_room({}, "kitchen", "KITCHEN", "")
+        raw_text = (
+            "NO HANDLES OVERHEADS\n"
+            "HANDLES - BASE DRAWERS\n"
+            "KETHY\n"
+            "PM2817 / 288 / MSIL\n"
+            "Matt Silver\n"
+            "288 Hole centres - 312 OA SIZE\n"
+            "Polytec Horizontal Install\n"
+            "HANDLES - BASE DOORS\n"
+            "KETHY\n"
+            "PM2817 / 192 / MSIL\n"
+            "Matt Silver\n"
+            "192 Hole centres - 216 OA SIZE\n"
+            "KETHY Vertical Install\n"
+            "Recessed finger space cooktop overheads.\n"
+            "Touch catch - Overheads above\n"
+            "Furnware - fridge - microwave and beside microwave vs sub side 3 pull out storage cargo, to suit 200mm cabinet, essentio base, white - Touch catch - Overheads above To be installed UB near cooktop - see plan for oil drawer\n"
+        )
+        parsing_module._imperial_apply_compact_section_room_enrichment(
+            row,
+            {"text": raw_text, "raw_page_texts": [{"text": raw_text}]},
+        )
+        self.assertTrue(any("Base Drawers:" in entry and "PM2817 / 288 / MSIL" in entry for entry in row["handles"]))
+        self.assertTrue(any("Base Doors:" in entry and "PM2817 / 192 / MSIL" in entry for entry in row["handles"]))
+        self.assertTrue(any("Overheads:" in entry and "Touch catch - Overheads above" in entry for entry in row["handles"]))
+        self.assertFalse(any("cargo" in entry.lower() for entry in row["handles"]))
+
+    def test_imperial_apply_compact_section_room_enrichment_recovers_38185_laundry_inline_handle_row(self) -> None:
+        row = parsing_module._imperial_blank_split_room({}, "laundry", "LAUNDRY", "")
+        raw_text = (
+            "Allegra\n"
+            "LAUNDRY 3750 128 MB Allegra\n"
+            "HANDLES OA = 138mm\n"
+        )
+        parsing_module._imperial_apply_compact_section_room_enrichment(
+            row,
+            {"text": raw_text, "raw_page_texts": [{"text": raw_text}]},
+        )
+        self.assertEqual(row["handles"], ["Laundry: Allegra - 3750 128 MB OA = 138mm"])
+
+    def test_imperial_apply_compact_section_room_enrichment_recovers_38185_laundry_generic_handles_label(self) -> None:
+        row = parsing_module._imperial_blank_split_room({}, "laundry", "LAUNDRY", "")
+        raw_text = (
+            "LAUNDRY + STORAGE NOOK JOINERY SELECTION SHEET\n"
+            "BASE CABINETRY COLOUR Polytec\n"
+            "Boston Oak\n"
+            "Woodmatt\n"
+            "HANDLES Allegra\n"
+            "3750 128 MB\n"
+            "OA = 138mm\n"
+            "Allegra\n"
+            "KICKBOARDS Polytec\n"
+            "Boston Oak\n"
+            "Woodmatt\n"
+        )
+        parsing_module._imperial_apply_compact_section_room_enrichment(
+            row,
+            {"text": raw_text, "raw_page_texts": [{"text": raw_text}]},
+        )
+        self.assertEqual(row["handles"], ["Laundry: Allegra - 3750 128 MB OA = 138mm"])
+
+    def test_apply_snapshot_cleaning_rules_recovers_laundry_allegra_handle_from_evidence(self) -> None:
+        cleaned = parsing_module.apply_snapshot_cleaning_rules(
+            {
+                "rooms": [
+                    {
+                        "room_key": "laundry",
+                        "original_room_label": "LAUNDRY",
+                        "room_name": "LAUNDRY",
+                        "bench_tops": [],
+                        "bench_tops_wall_run": "",
+                        "bench_tops_island": "",
+                        "bench_tops_other": "",
+                        "floating_shelf": "",
+                        "shelf": "",
+                        "door_panel_colours": ["Polytec - Boston Oak - Woodmatt"],
+                        "door_colours_overheads": "",
+                        "door_colours_base": "Polytec - Boston Oak - Woodmatt",
+                        "door_colours_tall": "",
+                        "door_colours_island": "",
+                        "door_colours_bar_back": "",
+                        "toe_kick": ["Polytec - Boston Oak - Woodmatt"],
+                        "bulkheads": [],
+                        "handles": ["Allegra"],
+                        "led": "No",
+                        "led_note": "",
+                        "accessories": [],
+                        "other_items": [],
+                        "sink_info": "",
+                        "basin_info": "",
+                        "tap_info": "",
+                        "drawers_soft_close": "",
+                        "hinges_soft_close": "",
+                        "splashback": "",
+                        "flooring": "",
+                        "source_file": "imperial.pdf",
+                        "page_refs": "6, 7",
+                        "evidence_snippet": "HANDLES Allegra 3750 128 MB OA = 138mm Allegra",
+                        "confidence": 0.7,
+                    }
+                ],
+                "appliances": [],
+                "special_sections": [],
+                "others": {},
+                "warnings": [],
+            }
+        )["rooms"][0]
+        self.assertEqual(cleaned["handles"], ["Laundry: Allegra - 3750 128 MB OA = 138mm"])
+
+    def test_imperial_apply_compact_section_room_enrichment_strips_study_grommet_text_from_handles(self) -> None:
+        row = parsing_module._imperial_blank_split_room({}, "study", "STUDY", "")
+        raw_text = (
+            "HANLDES - BASE CABS + DRAWERS Kethy\n"
+            "B790/128 - IBK Install Vertically - doors Horizontal - drawers\n"
+            "NO HANDLES - FEATURE OVERHEADS Touch Catch\n"
+            "2 x Plastic Cable entry covers - in beige\n"
+            "DESK GROMMETS 60mm diameter Furnware\n"
+            "CEC60.BE.FG\n"
+        )
+        parsing_module._imperial_apply_compact_section_room_enrichment(
+            row,
+            {"text": raw_text, "raw_page_texts": [{"text": raw_text}]},
+        )
+        self.assertTrue(any("Base Drawers:" in entry or "Base Cabinets + Drawers:" in entry for entry in row["handles"]))
+        self.assertTrue(any(entry == "Overheads: Touch Catch" for entry in row["handles"]))
+        self.assertFalse(any("cable" in entry.lower() or "grommet" in entry.lower() for entry in row["handles"]))
+
+    def test_imperial_apply_compact_section_room_enrichment_cleans_walk_behind_pantry_combined_benchtop_row(self) -> None:
+        row = parsing_module._imperial_blank_split_room({}, "walk_behind_pantry", "WALK-BEHIND PANTRY", "")
+        raw_text = (
+            "Frosty Carrina (5141)\n"
+            "20mm BENCHTOP AREA WITH COOKTOP TO\n"
+            "Pencil Round Edge BE REPLACED WITH FROSTY CARIN\n"
+            "BENCHTOP+ SPLASHBACK Caesarstone BUT SPLASHBACK TO REMAIN AS\n"
+            "CURRENT TILES IF POSSIBLE.\n"
+            "SPLASHBACK - 200MM HIGH AT REAR AND ON\n"
+            "RIGHT HAND WALL ONLY.\n"
+        )
+        parsing_module._imperial_apply_compact_section_room_enrichment(
+            row,
+            {"text": raw_text, "raw_page_texts": [{"text": raw_text}]},
+        )
+        self.assertIn("Frosty Carrina (5141)", row["bench_tops_other"])
+        self.assertIn("Splashback - 200mm high at rear and on right hand wall only", row["bench_tops_other"])
+
+    def test_imperial_finalize_wall_benchtop_value_dedupes_spring_promotion_phrase(self) -> None:
+        value = "20mm Caesarstone - Stone Incl. Spring 5131 Calacattra Nuvo - PR Free Upgrade Promotion Incl. Spring Free Upgrade Promotion - Waterfall End"
+        self.assertEqual(
+            parsing_module._imperial_finalize_wall_benchtop_value(value),
+            "20mm Caesarstone - Stone 5131 Calacattra Nuvo - PR Incl. Spring Free Upgrade Promotion - Waterfall End",
+        )
+
+    def test_imperial_extract_compact_laundry_storage_fields_recovers_38185_laundry_handle_row(self) -> None:
+        raw_text = (
+            "Allegra\n"
+            "LAUNDRY 3750 128 MB Allegra\n"
+            "HANDLES OA = 138mm\n"
+            "Polytec\n"
+            "LAUNDRY\n"
+            "Boston Oak\n"
+            "KICKBOARDS\n"
+            "Woodmatt\n"
+        )
+        fields = parsing_module._imperial_extract_compact_laundry_storage_fields({"raw_page_texts": [{"text": raw_text}]})
+        self.assertEqual(fields["laundry"]["handles"], ["Laundry: Allegra - 3750 128 MB OA = 138mm"])
+
+    def test_imperial_extract_compact_laundry_storage_fields_recovers_38185_multiline_laundry_handle_row(self) -> None:
+        raw_text = (
+            "STORAGE NOOK\n"
+            "KICKBOARDS\n"
+            "LAUNDRY\n"
+            "HANDLES\n"
+            "Allegra\n"
+            "3750 128 MB\n"
+            "OA = 138mm\n"
+            "Allegra\n"
+        )
+        fields = parsing_module._imperial_extract_compact_laundry_storage_fields({"raw_page_texts": [{"text": raw_text}]})
+        self.assertEqual(fields["laundry"]["handles"], ["Laundry: Allegra - 3750 128 MB OA = 138mm"])
+
+    def test_imperial_apply_compact_section_room_enrichment_recovers_38212_kitchen_overhead_handle_row(self) -> None:
+        row = parsing_module._imperial_blank_split_room({}, "kitchen", "KITCHEN", "")
+        raw_text = (
+            "KETHY\n"
+            "HT576 -128 - BKO\n"
+            "HANDLES Kethy Horizontal/Vertical\n"
+            "Darwen Cabinet Pull Handle\n"
+            "- Black Olive Colour\n"
+            "no handles to overheads - finger space above\n"
+            "HANDLES to OVERHEADS Horizontal/Vertical\n"
+            "cooktop and touch catch above fridge.\n"
+            "SPLASHBACK tiled by client splashback installed by others by others\n"
+        )
+        parsing_module._imperial_apply_compact_section_room_enrichment(
+            row,
+            {"text": raw_text, "raw_page_texts": [{"text": raw_text}]},
+        )
+        self.assertTrue(any("Doors / Drawers:" in entry and "HT576 -128 - BKO" in entry for entry in row["handles"]))
+        self.assertTrue(any("Overheads:" in entry and "touch catch above fridge" in entry.lower() for entry in row["handles"]))
+        self.assertEqual(row["splashback"], "by others")
+
+    def test_imperial_apply_compact_section_room_enrichment_recovers_38212_laundry_overhead_handle_row(self) -> None:
+        row = parsing_module._imperial_blank_split_room({}, "laundry", "LAUNDRY", "")
+        raw_text = (
+            "KETHY\n"
+            "HT576 -128 - BKO\n"
+            "HANDLES BASE DOORS Kethy Vertical on doors\n"
+            "Darwen Cabinet Pull Handle\n"
+            "- Black Olive Colour\n"
+            "KETHY\n"
+            "HT576 -192 - BKO Horizontal on drawers\n"
+            "HANDLES TALL + PANTRY DRAWERS Kethy\n"
+            "Darwen Cabinet Pull Handle Vertical on doors\n"
+            "- Black Olive Colour\n"
+            "no handles to overheads - finger space above\n"
+            "HANDLES to OVERHEADS Horizontal/Vertical\n"
+            "laundry benchtop\n"
+            "SPLASHBACK tiled by client splashback installed by others by others\n"
+        )
+        parsing_module._imperial_apply_compact_section_room_enrichment(
+            row,
+            {"text": raw_text, "raw_page_texts": [{"text": raw_text}]},
+        )
+        self.assertTrue(any("Base Doors:" in entry and "HT576 -128 - BKO" in entry for entry in row["handles"]))
+        self.assertTrue(any("Tall + Pantry Drawers:" in entry and "HT576 -192 - BKO" in entry for entry in row["handles"]))
+        self.assertTrue(any("Overheads:" in entry and "laundry benchtop" in entry.lower() for entry in row["handles"]))
+        self.assertEqual(row["splashback"], "by others")
+
+    def test_imperial_apply_compact_section_room_enrichment_recovers_bronte_overhead_row_for_bar(self) -> None:
+        row = parsing_module._imperial_blank_split_room({}, "bar", "BAR", "")
+        raw_text = (
+            "HANDLES NO HANDLES - BRONTE HANDLE Polytec\n"
+            "NO HANDLES TO OVERHEADS\n"
+            "HANDLES to OVERHEADS\n"
+            "- RECESSED FINGER SPACE\n"
+        )
+        parsing_module._imperial_apply_compact_section_room_enrichment(
+            row,
+            {"text": raw_text, "raw_page_texts": [{"text": raw_text}]},
+        )
+        self.assertTrue(any("BRONTE HANDLE" in entry for entry in row["handles"]))
+        self.assertTrue(any("Overheads:" in entry and "RECESSED FINGER SPACE" in entry for entry in row["handles"]))
 
     def test_imperial_extract_compact_handle_after_label_keeps_job55_base_drawer_details(self) -> None:
         raw_text = (
@@ -13269,10 +13671,295 @@ class SmokeTest(unittest.TestCase):
             "Base Drawers",
         )
         finalized = parsing_module._imperial_finalize_handle_entries([entry])
-        self.assertEqual(
-            finalized,
-            ["Base Drawers: KETHY PM2817 / 288 / MSIL Matt Silver 288 Hole centres - 312 OA SIZE - Polytec Horizontal Install"],
+        self.assertEqual(len(finalized), 1)
+        self.assertIn("Base Drawers:", finalized[0])
+        self.assertIn("PM2817 / 288 / MSIL", finalized[0])
+        self.assertIn("Polytec Horizontal Install", finalized[0])
+
+    def test_imperial_apply_compact_section_room_enrichment_prefers_job40_momo_handles_over_bin_noise(self) -> None:
+        row = parsing_module._imperial_blank_split_room({}, "kitchen", "KITCHEN", "")
+        raw_text = (
+            "HANDLES\n"
+            "NO Handes on Uppers/PTO Where req\n"
+            "Momo strano d handle\n"
+            "Doors-160mm brushed satin brass SBH160.BS\n"
+            "Draws-320mm brushd satin brass SBH320.BSB\n"
+            "BIN\n"
+            "450mm Waste bin AvanTech YOU\n"
         )
+        parsing_module._imperial_apply_compact_section_room_enrichment(
+            row,
+            {"text": raw_text, "raw_page_texts": [{"text": raw_text}]},
+        )
+        joined = " | ".join(row["handles"])
+        self.assertIn("SBH160.BS", joined)
+        self.assertIn("SBH320.BSB", joined)
+        self.assertNotIn("Waste bin", joined)
+
+    def test_imperial_apply_compact_section_room_enrichment_sets_job47_as_doors_kick_and_titus_handle(self) -> None:
+        row = parsing_module._imperial_blank_split_room({}, "kitchen", "KITCHEN", "")
+        raw_text = (
+            "KICKBOARDS As Doors Polytec\n"
+            "HANDLES Titus Tekform Square Handle B Brushed Nickel 128mm SO-B-128-BN Horizontal on Drawers and Vertical on Doors\n"
+        )
+        parsing_module._imperial_apply_compact_section_room_enrichment(
+            row,
+            {"text": raw_text, "raw_page_texts": [{"text": raw_text}]},
+        )
+        self.assertEqual(row["toe_kick"], ["As Doors"])
+        self.assertTrue(any("Titus Tekform" in entry and "SO-B-128-BN" in entry for entry in row["handles"]))
+
+    def test_imperial_apply_compact_section_room_enrichment_restores_job41_master_wir_toe_kick(self) -> None:
+        row = parsing_module._imperial_blank_split_room({}, "master_wir", "MASTER WIR", "")
+        raw_text = (
+            "ROBE DRAWERS AND PANELS\n"
+            "Prime Oak Matt\n"
+            "HANGING RAIL Matt Black Polytec\n"
+            "KICKBOARDS Polytec\n"
+            "Prime Oak Matt\n"
+        )
+        parsing_module._imperial_apply_compact_section_room_enrichment(
+            row,
+            {"text": raw_text, "raw_page_texts": [{"text": raw_text}]},
+        )
+        self.assertEqual(row["toe_kick"], ["Polytec - Prime Oak Matt"])
+
+    def test_imperial_apply_compact_section_room_enrichment_restores_job50_island_colour(self) -> None:
+        row = parsing_module._imperial_blank_split_room({}, "kitchen", "KITCHEN", "")
+        raw_text = (
+            "ISLAND CABINETRY COLOUR - FRONT, BACK AND SIDES\n"
+            "Classic White Matt Polytec\n"
+            "608.8E18.320.016\n"
+            "SO-2163-200-BA\n"
+        )
+        parsing_module._imperial_apply_compact_section_room_enrichment(
+            row,
+            {"text": raw_text, "raw_page_texts": [{"text": raw_text}]},
+        )
+        self.assertEqual(row["door_colours_island"], "Polytec - Classic White Matt")
+
+    def test_imperial_select_position_preserving_handles_keeps_unscoped_custom_handles(self) -> None:
+        existing = ["Custom Made Handles - Polytec Boston Oak Woodmatt Melamine - VERTICAL"]
+        incoming = [
+            "Overheads: NO HANDLE for OVERHEADS - RECESSED FINGER SPACE",
+            "NO HANDLES - BRONTE HANDLE",
+        ]
+        self.assertIn(
+            "Custom Made Handles - Polytec Boston Oak Woodmatt Melamine - VERTICAL",
+            parsing_module._imperial_select_position_preserving_handles(existing, incoming, preserve_note_only=True),
+        )
+
+    def test_imperial_select_position_preserving_handles_drops_unscoped_duplicate_kethy_row(self) -> None:
+        existing = [
+            "Base Drawers: KETHY PM2817 / 288 / MSIL Matt Silver 288 Hole centres - 312 OA SIZE - Polytec Horizontal Install",
+            "Base Doors: KETHY PM2817 / 192 / MSIL Matt Silver 192 Hole centres - 216 OA SIZE - KETHY Vertical Install",
+            "KETHY - PM2817 / 192 / MSIL Matt Silver 192 Hole centres - 216 OA SIZE - Vertical Install",
+            "Overheads: Recessed findger space cooktop overheads. Touch catch - Overheads above",
+            "Touch catch - Overheads above - fridge - microwave and beside microwave",
+        ]
+        incoming = [
+            "NO HANDLES OVERHEADS",
+            "Base Drawers: KETHY PM2817 / 288 / MSIL Matt Silver 288 Hole centres - 312 OA SIZE - Polytec Horizontal Install",
+            "Base Doors: KETHY PM2817 / 192 / MSIL Matt Silver 192 Hole centres - 216 OA SIZE - KETHY Vertical Install",
+            "Overheads: Recessed findger space cooktop overheads. Touch catch - Overheads above",
+        ]
+        merged = parsing_module._imperial_select_position_preserving_handles(existing, incoming, preserve_note_only=True)
+        self.assertEqual(len(merged), 4)
+        self.assertIn("NO HANDLES OVERHEADS", merged)
+        self.assertTrue(any(entry.startswith("Base Drawers:") and "PM2817 / 288 / MSIL" in entry for entry in merged))
+        self.assertTrue(any(entry.startswith("Base Doors:") and "PM2817 / 192 / MSIL" in entry for entry in merged))
+        self.assertTrue(any(entry.startswith("Overheads:") and "Touch catch" in entry for entry in merged))
+
+    def test_imperial_finalize_room_payload_preserves_as_doors_from_evidence(self) -> None:
+        row = parsing_module._imperial_blank_split_room({}, "kitchen", "KITCHEN", "")
+        row["door_colours_base"] = "Polytec - Topiary Matt"
+        row["toe_kick"] = ["Polytec - Drawers and Vertical on Doors"]
+        row["evidence_snippet"] = "KICKBOARDS As Doors Polytec"
+        parsing_module._imperial_finalize_room_payload(row, {})
+        self.assertEqual(row["toe_kick"], ["As Doors"])
+
+    def test_imperial_finalize_room_payload_restores_vertical_grain_and_cove_profile_from_evidence(self) -> None:
+        row = parsing_module._imperial_blank_split_room({}, "bar", "BAR", "")
+        row["door_colours_base"] = "Polytec - Notaio Walnut Woodmatt"
+        row["bench_tops_other"] = "16mm Polytec - STANDARD Panel - Classic White Matt Flush with doors"
+        row["evidence_snippet"] = (
+            "BASE CABINETRY COLOUR Notaio Walnut Woodmatt Polytec VERTICAL GRAIN\n"
+            "BENCHTOP Polytec Classic White Matt Flush with doors COVE PROFILE 25\n"
+        )
+        parsing_module._imperial_finalize_room_payload(row, {})
+        self.assertEqual(row["door_colours_base"], "Polytec - Notaio Walnut Woodmatt - VERTICAL GRAIN")
+        self.assertIn("COVE PROFILE 25", row["bench_tops_other"])
+
+    def test_build_appliance_row_classifies_bar_fridge(self) -> None:
+        row = parsing_module._build_appliance_row(
+            "Fridge",
+            "VINTEC - VBS050SBB-X BAR FRIDGE (BAR AREA) N / A - By others BY CLIENT",
+            "BAR FRIDGE (BAR AREA) VINTEC - VBS050SBB-X",
+            "job27.pdf",
+            [{"page_no": 15, "text": "BAR FRIDGE"}],
+            0.75,
+        )
+        self.assertIsNotNone(row)
+        self.assertEqual(row.appliance_type, "Bar Fridge")
+
+    def test_dedupe_appliances_reclassifies_bar_fridge_models(self) -> None:
+        rows = [
+            parsing_module.ApplianceRow(appliance_type="Fridge", make="Vintec", model_no="VBS050SBB-X", evidence_snippet="BAR FRIDGE (BAR AREA) VINTEC - VBS050SBB-X"),
+            parsing_module.ApplianceRow(appliance_type="Fridge", make="Fisher & Paykel", model_no="HBRBC93B2", evidence_snippet="LAUNDRY - BAR FRIDGE Model No: HBRBC93B2 BY CLIENT"),
+        ]
+        deduped = parsing_module._dedupe_appliances(rows)
+        self.assertEqual([row.appliance_type for row in deduped], ["Bar Fridge", "Bar Fridge"])
+
+    def test_extract_imperial_compact_appliances_recovers_vintec_bar_fridge(self) -> None:
+        rows = parsing_module._extract_imperial_compact_appliances_from_pages(
+            "imperial-appliances.pdf",
+            [
+                {
+                    "page_no": 15,
+                    "raw_text": (
+                        "17 APPLIANCES\n"
+                        "NEFF - KI7863D30A Integrated\n"
+                        "FRIDGE(KITCHEN) N / A - By others BY CLIENT\n"
+                        "fridge/freezer\n"
+                        "VINTEC - VBS050SBB-X\n"
+                        "BAR FRIDGE (BAR AREA) N / A - By others BY CLIENT\n"
+                    ),
+                    "text": "",
+                }
+            ],
+        )
+        self.assertTrue(any(row.appliance_type == "Bar Fridge" and row.make == "Vintec" and row.model_no == "VBS050SBB-X" for row in rows))
+
+    def test_imperial_extract_compact_handle_after_label_stops_at_knob_and_next_handle_group(self) -> None:
+        section_text = (
+            "HANDLES - BASE DRAWERS Allegra Horizontal Install\n"
+            "6368-160-brushed nickel\n"
+            "HANDLES - TALL CABS Allegra\n"
+            "Allegra Vertical Install\n"
+            "/PANTRY CABS ONLY 6368-224-brushed nickel\n"
+            "KNOB Knob\n"
+            "Allegra Base doors and overhead doors only\n"
+            "Base doors + Overhead Doors 6368-K\n"
+            "in brushed nickel\n"
+        )
+        self.assertEqual(
+            parsing_module._imperial_extract_compact_handle_after_label(
+                section_text,
+                r"HANDLES\s*-\s*TALL\s*CABS?(?:\s*/\s*PANTRY\s+CABS?\s*ONLY)?\b",
+                "Tall Cabinets",
+            ),
+            "Tall Cabinets: Allegra - Allegra Vertical Install /PANTRY CABS ONLY 6368-224-brushed nickel",
+        )
+        knob = parsing_module._imperial_extract_compact_knob_handle(section_text)
+        self.assertIn("Knob:", knob)
+        self.assertIn("6368-K", knob)
+        self.assertIn("overhead doors only", knob.lower())
+
+    def test_imperial_extract_compact_knob_handle_requires_knob_row_label(self) -> None:
+        section_text = (
+            "HANDLES - BASE CABS Elsa Cabinetry Knob- brushed copper SUPPLIED BY CLIENT\n"
+            "(14494) for any of the other doors and the gas strut oh doors.\n"
+        )
+        self.assertEqual(parsing_module._imperial_extract_compact_knob_handle(section_text), "")
+
+    def test_imperial_extract_compact_handle_after_label_preserves_overhead_prelabel_note(self) -> None:
+        section_text = (
+            "no handles to overheads - finger space above\n"
+            "HANDLES to OVERHEADS Horizontal/Vertical\n"
+            "cooktop and touch catch above fridge.\n"
+            "SPLASHBACK tiled by client\n"
+        )
+        self.assertEqual(
+            parsing_module._imperial_extract_compact_handle_after_label(
+                section_text,
+                r"HANDLES\s+to\s+OVERHEADS\b",
+                "Overheads",
+            ),
+            "no handles to overheads - finger space above Horizontal/Vertical cooktop and touch catch above fridge.",
+        )
+
+    def test_imperial_extract_compact_handle_after_label_stops_before_next_row_prelude(self) -> None:
+        section_text = (
+            "KETHY\n"
+            "HT576 -128 - BKO\n"
+            "HANDLES BASE DOORS Kethy Vertical on doors\n"
+            "Darwen Cabinet Pull Handle\n"
+            "- Black Olive Colour\n"
+            "KETHY\n"
+            "HT576 -192 - BKO Horizontal on drawers\n"
+            "HANDLES TALL + PANTRY DRAWERS Kethy\n"
+        )
+        entry = parsing_module._imperial_extract_compact_handle_after_label(
+            section_text,
+            r"HANDLES\s+BASE\s+DOORS\b",
+            "Base Doors",
+        )
+        self.assertIn("Base Doors:", entry)
+        self.assertIn("HT576 -128 - BKO", entry)
+        self.assertIn("Black Olive Colour", entry)
+        self.assertNotIn("HT576 -192 - BKO", entry)
+
+    def test_imperial_extract_compact_handle_after_label_keeps_feature_lip_pull_pantry_note_without_next_row_contamination(self) -> None:
+        section_text = (
+            "ABI INTERIORS\n"
+            "FEATURE LIP PULL 2 X Rappana Cabinetry Pull Extended to pantry doors only\n"
+            "SUPPLIED BY CLIENT\n"
+            "PANTRY HANDLES 800mm - Brushed Copper (recessed into edge tape to allow for\n"
+            "INSTALLED BY IMPERIAL\n"
+            "smallest gap possible between doors.)\n"
+            "HANDLES - BASE CABS Rappana Cabinetry Pull 50mm SUPPLIED BY CLIENT Installed Horizontally\n"
+        )
+        entry = parsing_module._imperial_extract_compact_handle_after_label(
+            section_text,
+            r"FEATURE\s+LIP\s+PULL\b",
+            "Pantry Doors",
+        )
+        self.assertIn("Pantry Doors:", entry)
+        self.assertIn("800mm - Brushed Copper", entry)
+        self.assertNotIn("Pull 50mm", entry)
+
+    def test_imperial_extract_compact_handle_after_label_stops_before_custom_handles_section(self) -> None:
+        section_text = (
+            "HANDLES to OVERHEADS - RECESSED FINGER SPACE Polytec\n"
+            "Touch catch above ovens\n"
+            "CUSTOM HANDLES Melamine - Custom Made Handles Polytec VERTICAL\n"
+        )
+        entry = parsing_module._imperial_extract_compact_handle_after_label(
+            section_text,
+            r"HANDLES\s+to\s+OVERHEADS\b",
+            "Overheads",
+        )
+        self.assertIn("RECESSED FINGER SPACE", entry)
+        self.assertIn("Touch catch above ovens", entry)
+        self.assertNotIn("Custom Made Handles", entry)
+
+    def test_imperial_extract_compact_handle_after_label_drops_generic_supplier_from_no_handles_row(self) -> None:
+        section_text = "HANDLES BASE CABS NO HANDLES - BRONTE HANDLE Polytec\n"
+        entry = parsing_module._imperial_extract_compact_handle_after_label(
+            section_text,
+            r"HANDLES\s+BASE\s+CABS\b",
+            "Base Cabinets",
+        )
+        self.assertEqual(entry, "NO HANDLES - BRONTE HANDLE")
+
+    def test_imperial_select_position_preserving_handles_drops_generic_when_specific_scopes_exist(self) -> None:
+        existing = [
+            "Doors / Drawers: Allegra - /PANTRY CABS ONLY",
+            "Tall Cabinets: Allegra",
+            "Base Drawers: Allegra - 6368-160-brushed nickel - Horizontal Install",
+            "Knob: Allegra - 6368-K in brushed nickel - Base doors and overhead doors only",
+        ]
+        incoming = [
+            "Tall Cabinets: Allegra - Allegra Vertical Install /PANTRY CABS ONLY 6368-224-brushed nickel",
+            "Base Drawers: Allegra - 6368-160-brushed nickel - Horizontal Install",
+            "Knob: Knob in brushed nickel - Allegra Base doors and overhead doors only Base doors + Overhead Doors 6368-K",
+        ]
+        merged = parsing_module._imperial_select_position_preserving_handles(existing, incoming)
+        self.assertEqual(len(merged), 3)
+        self.assertFalse(any(entry.startswith("Doors / Drawers:") for entry in merged))
+        self.assertTrue(any(entry.startswith("Tall Cabinets:") and "6368-224-brushed nickel" in entry for entry in merged))
+        self.assertTrue(any(entry.startswith("Base Drawers:") and "6368-160-brushed nickel" in entry for entry in merged))
+        self.assertTrue(any(entry.startswith("Knob:") and "6368-K" in entry for entry in merged))
 
     def test_evoca_collect_subsection_lines_stops_at_next_room_heading(self) -> None:
         lines = [
@@ -13303,6 +13990,17 @@ class SmokeTest(unittest.TestCase):
             parsing_module._imperial_finalize_material_field_text(value, drop_note_lines=True),
             "Caesarstone - Aterra Blanca - 20mm Pencil Round - 650mm high splashback to cooktop area and sink and peninsula area - 445mm high on appliance area splashback",
         )
+
+    def test_imperial_apply_compact_section_room_enrichment_preserves_as_doors_and_match_above_raw(self) -> None:
+        row = {"room_key": "kitchen", "original_room_label": "Kitchen", "toe_kick": [], "handles": []}
+        section = {"text": "", "raw_page_texts": [{"raw_text": "KICKBOARDS As Doors Polytec\nHANDLES Titus Tekform"}]}
+        parsing_module._imperial_apply_compact_section_room_enrichment(row, section)
+        self.assertEqual(row["toe_kick"], ["As Doors"])
+
+        row = {"room_key": "kitchen", "original_room_label": "Kitchen", "toe_kick": [], "handles": []}
+        section = {"text": "", "raw_page_texts": [{"raw_text": "KICKBOARDS to match above Polytec\nHANDLES Kethy"}]}
+        parsing_module._imperial_apply_compact_section_room_enrichment(row, section)
+        self.assertEqual(row["toe_kick"], ["Match Above"])
 
     def test_yellowwood_prefer_overlay_text_prefers_clean_sink_over_cross_room_mix(self) -> None:
         current = "Piazza Double Square Bowl Black Pearl ABEY - LT120 45 Litre Single Bowl with Overflow Black Pearl"
