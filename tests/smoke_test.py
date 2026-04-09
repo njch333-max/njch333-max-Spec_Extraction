@@ -2591,6 +2591,81 @@ class SmokeTest(unittest.TestCase):
             )
         )
 
+    def test_imperial_enrich_snapshot_appliances_backfills_make_from_evidence(self) -> None:
+        snapshot = {
+            "builder_name": "Imperial",
+            "appliances": [
+                {
+                    "appliance_type": "Cooktop",
+                    "make": "",
+                    "model_no": "PIV931HC1E",
+                    "evidence_snippet": "COOKTOP (KITCHEN) N / A - By others 900mm induction\nBosch - PIV931HC1E",
+                },
+                {
+                    "appliance_type": "Dishwasher",
+                    "make": "",
+                    "model_no": "SMV6HCX01A",
+                    "evidence_snippet": "DISHWASHER X 2(KITCHEN)\nBOSCH - SMV6HCX01A",
+                },
+            ],
+        }
+        enriched = extraction_service._enrich_snapshot_appliances(snapshot)
+        rows = enriched["appliances"]
+        self.assertEqual(rows[0]["make"], "Bosch")
+        self.assertEqual(rows[1]["make"], "Bosch")
+
+    def test_imperial_normalize_compact_sink_keeps_mrg110_model_and_taphole(self) -> None:
+        value = "in bench centre behind sink UNDERMOUNT - FRANKE MARIS MRG110-52 MB - Taphole location: in bench centre behind sink"
+        self.assertEqual(
+            parsing_module._imperial_normalize_compact_fixture_text(value, "sink"),
+            "UNDERMOUNT - FRANKE MARIS MRG110-52 MB - Taphole location: in bench centre behind sink",
+        )
+
+    def test_imperial_extract_non_joinery_blocks_keeps_sinkware_room_alignment(self) -> None:
+        text = """
+SINKWARE & TAPWARE
+AREA / ITEM SPECS / DESCRIPTION IMAGE SUPPLIER NOTES
+UNDERMOUNT - FRANKE MARIS MRG110- Taphole location:
+SINKWARE (KITCHEN) N/A BY OTHERS BY OTHERS
+52 MB in bench centre behind sink
+UNDERMOUNT - FRANKE MARIS MRG110- Taphole location:
+SINKWARE (PANTRY) N/A BY OTHERS BY OTHERS
+72 MB in bench centre behind sink
+UNDERMOUNT - FRANKE MARIS MRG110- Taphole location:
+SINKWARE (LAUNDRY) N/A BY OTHERS BY OTHERS
+52 MB in bench centre behind sink
+""".strip()
+        blocks = parsing_module._imperial_extract_non_joinery_blocks(text, "sinkware")
+        normalized = [
+            (room, parsing_module._imperial_normalize_compact_fixture_text(value, "sink"))
+            for room, value in blocks
+        ]
+        self.assertEqual(
+            normalized,
+            [
+                ("KITCHEN", "UNDERMOUNT - FRANKE MARIS MRG110-52 MB - Taphole location: in bench centre behind sink"),
+                ("PANTRY", "UNDERMOUNT - FRANKE MARIS MRG110-72 MB - Taphole location: in bench centre behind sink"),
+                ("LAUNDRY", "UNDERMOUNT - FRANKE MARIS MRG110-52 MB - Taphole location: in bench centre behind sink"),
+            ],
+        )
+
+    def test_imperial_extract_non_joinery_blocks_keeps_zip_tap_product_line(self) -> None:
+        text = """
+SINKWARE & TAPWARE
+HYDROTAP G5 CLASSIC PLUS MATTE BLACK -
+ZIP TAP (PANTRY) N/A BY OTHERS BY OTHERS
+H55784Z03AU
+""".strip()
+        blocks = parsing_module._imperial_extract_non_joinery_blocks(text, "tapware")
+        normalized = [
+            (room, parsing_module._imperial_normalize_compact_fixture_text(value, "tap"))
+            for room, value in blocks
+        ]
+        self.assertEqual(
+            normalized,
+            [("PANTRY", "HYDROTAP G5 CLASSIC PLUS MATTE BLACK - H55784Z03AU")],
+        )
+
     def test_canonicalize_imperial_joinery_layout_flattens_field_like_blocks(self) -> None:
         layout = {
             "page_type": "joinery",
@@ -3385,6 +3460,70 @@ class SmokeTest(unittest.TestCase):
         self.assertTrue(flattened["kitchen"]["show_split_benchtops"])
         self.assertFalse(flattened["laundry"]["show_split_benchtops"])
         self.assertEqual(flattened["laundry"]["bench_tops_other"], "20mm YDL Classic White Polished")
+
+    def test_flatten_rooms_exposes_feature_colour(self) -> None:
+        rows = _flatten_rooms(
+            {
+                "rooms": [
+                    {
+                        "room_key": "kitchen",
+                        "original_room_label": "KITCHEN",
+                        "feature_colour": "Polytec Perugian Walnut Woodmatt",
+                        "bench_tops": [],
+                        "bench_tops_wall_run": "",
+                        "bench_tops_island": "",
+                        "bench_tops_other": "",
+                    }
+                ]
+            }
+        )
+        self.assertEqual(rows[0]["feature_colour"], "Polytec Perugian Walnut Woodmatt")
+        self.assertTrue(rows[0]["show_feature_colour"])
+
+    def test_flatten_rooms_preserves_imperial_room_order_and_material_rows(self) -> None:
+        rows = _flatten_rooms(
+            {
+                "builder_name": "Imperial",
+                "rooms": [
+                    {
+                        "room_key": "pantry",
+                        "original_room_label": "PANTRY",
+                        "room_order": 2,
+                        "material_rows": [
+                            {
+                                "area_or_item": "FRAME",
+                                "supplier": "Polytec",
+                                "specs_or_description": "Perugian Walnut Woodmatt",
+                                "notes": "",
+                                "tags": ["door_colours"],
+                                "page_no": 2,
+                                "row_order": 2,
+                            }
+                        ],
+                    },
+                    {
+                        "room_key": "kitchen",
+                        "original_room_label": "KITCHEN",
+                        "room_order": 1,
+                        "material_rows": [
+                            {
+                                "area_or_item": "COOKTOP RUN BENCHTOP",
+                                "supplier": "Caesarstone",
+                                "specs_or_description": "Raw Concrete - Aris",
+                                "notes": "",
+                                "tags": ["bench_tops"],
+                                "page_no": 1,
+                                "row_order": 1,
+                            }
+                        ],
+                    },
+                ],
+            }
+        )
+        self.assertEqual([row["room_key"] for row in rows], ["kitchen", "pantry"])
+        self.assertTrue(rows[0]["is_imperial_raw_rows"])
+        self.assertEqual(rows[0]["material_rows"][0]["title"], "COOKTOP RUN BENCHTOP")
+        self.assertEqual(rows[0]["material_rows"][0]["value"], "Caesarstone - Raw Concrete - Aris")
 
     def test_build_spec_snapshot_keeps_global_conservative_room_shape_when_openai_splits_rooms(self) -> None:
         base_snapshot = {
@@ -6410,6 +6549,121 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("No handles - Bronte Handle (Kitchen / WIP)", handle_display)
         self.assertIn("Polytec Classic White Matt (Kitchen / WIP)", door_display)
 
+    def test_material_summary_uses_imperial_material_rows_tags(self) -> None:
+        summary = _build_material_summary(
+            {
+                "builder_name": "Imperial",
+                "rooms": [
+                    {
+                        "room_key": "kitchen",
+                        "original_room_label": "KITCHEN",
+                        "room_order": 1,
+                        "material_rows": [
+                            {
+                                "area_or_item": "FEATURE COLOUR OVERHEADS",
+                                "supplier": "Polytec",
+                                "specs_or_description": "Perugian Walnut Woodmatt",
+                                "notes": "",
+                                "tags": ["door_colours"],
+                                "page_no": 1,
+                                "row_order": 1,
+                            },
+                            {
+                                "area_or_item": "HANDLES - BASE DOORS",
+                                "supplier": "Kethy",
+                                "specs_or_description": "Darwen Cabinet Pull Handle",
+                                "notes": "Vertical",
+                                "tags": ["handles"],
+                                "page_no": 1,
+                                "row_order": 2,
+                            },
+                            {
+                                "area_or_item": "ISLAND BENCHTOP",
+                                "supplier": "CDK Stone",
+                                "specs_or_description": "20MM Natural Stone",
+                                "notes": "2X WFE",
+                                "tags": ["bench_tops"],
+                                "page_no": 1,
+                                "row_order": 3,
+                            },
+                        ],
+                    }
+                ],
+            }
+        )
+        self.assertEqual(summary["door_colours"]["count"], 1)
+        self.assertEqual(summary["handles"]["count"], 1)
+        self.assertEqual(summary["bench_tops"]["count"], 1)
+        self.assertIn(
+            "KITCHEN: FEATURE COLOUR OVERHEADS -> Polytec - Perugian Walnut Woodmatt",
+            [entry["display_text"] for entry in summary["door_colours"]["entries"]],
+        )
+        self.assertIn(
+            "KITCHEN: HANDLES - BASE DOORS -> Kethy - Darwen Cabinet Pull Handle - Vertical",
+            [entry["display_text"] for entry in summary["handles"]["entries"]],
+        )
+
+    def test_material_summary_dedupes_imperial_bucket_entries_by_room_and_value(self) -> None:
+        summary = _build_material_summary(
+            {
+                "builder_name": "Imperial",
+                "rooms": [
+                    {
+                        "room_key": "kitchen",
+                        "original_room_label": "KITCHEN",
+                        "room_order": 1,
+                        "material_rows": [
+                            {
+                                "area_or_item": "BASE, UPPER & TALL CABINETRY COLOUR",
+                                "supplier": "Laminex",
+                                "specs_or_description": "Black - PureGrain",
+                                "notes": "",
+                                "tags": ["door_colours"],
+                                "page_no": 1,
+                                "row_order": 1,
+                            },
+                            {
+                                "area_or_item": "BASE + OVERHEAD + OPEN OVERHEADS + TALLS",
+                                "supplier": "Laminex",
+                                "specs_or_description": "Black - PureGrain",
+                                "notes": "COLOURED",
+                                "tags": ["door_colours"],
+                                "page_no": 1,
+                                "row_order": 2,
+                            },
+                        ],
+                    }
+                ],
+            }
+        )
+        self.assertEqual(summary["door_colours"]["count"], 1)
+
+    def test_material_summary_omits_imperial_door_colour_fragments_that_are_not_real_materials(self) -> None:
+        summary = _build_material_summary(
+            {
+                "builder_name": "Imperial",
+                "rooms": [
+                    {
+                        "room_key": "kitchen",
+                        "original_room_label": "KITCHEN",
+                        "room_order": 1,
+                        "material_rows": [
+                            {
+                                "area_or_item": "BASE CABINETRY COLOUR",
+                                "supplier": "",
+                                "specs_or_description": "INCL OPEN",
+                                "notes": "",
+                                "tags": ["door_colours"],
+                                "page_no": 1,
+                                "row_order": 1,
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+        self.assertEqual(summary["door_colours"]["count"], 0)
+
     def test_parse_documents_recovers_glued_schedule_headings_from_room_master(self) -> None:
         snapshot = parse_documents(
             job_no="37869",
@@ -7956,6 +8210,7 @@ class SmokeTest(unittest.TestCase):
                     "door_colours_overheads": "Polytec Valla Profile Door in Boston Oak Woodmatt EM0",
                     "door_colours_base": "Polytec Ascot Profile Door in Gossamer White Smooth EM0",
                     "door_colours_tall": "Polytec Valla Profile Door in Boston Oak Woodmatt EM0",
+                    "feature_colour": "Polytec Boston Oak Woodmatt",
                     "toe_kick": [],
                     "bulkheads": [],
                     "handles": [],
@@ -7997,9 +8252,12 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("door_colours_tall", headers)
         self.assertIn("floating_shelf", headers)
         self.assertIn("shelf", headers)
+        self.assertIn("feature_colour", headers)
         self.assertIn("led_note", headers)
         self.assertIn("accessories", headers)
         self.assertIn("other_items", headers)
+        row_values = [cell.value for cell in next(rooms_sheet.iter_rows(min_row=2, max_row=2))]
+        self.assertEqual(row_values[headers.index("feature_colour")], "Polytec Boston Oak Woodmatt")
         special_sheet = workbook["Special Sections"]
         self.assertEqual(special_sheet["A2"].value, "feature_tall_doors")
         self.assertEqual(special_sheet["C2"].value, "Tall")
@@ -8206,7 +8464,7 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(kitchen["splashback"], "20mm Caesarstone - Frosty Carrina (5141) - Pencil Round Edge - up to overheads.")
         self.assertIn("Taphole location: Centred to back", kitchen["sink_info"])
         self.assertIn("Undermounted", kitchen["sink_info"])
-        self.assertEqual(kitchen["tap_info"], "2 x 304 Gooseneck Pull Out with Dual Spray Function Kitchen Mixer in Eureka Gold finish KTA014-G")
+        self.assertEqual(kitchen["tap_info"], "")
         office = rooms["office"]
         self.assertEqual(office["bench_tops_other"], "Tasmanian Oak Matt - Laminate Benchtop - 33mm square edge")
         self.assertEqual(
@@ -8288,7 +8546,7 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("5131 Calacattra Nuvo - PR", kitchen["bench_tops_wall_run"])
         self.assertEqual(kitchen["door_colours_tall"], "")
         self.assertEqual(kitchen["bulkheads"], ["None"])
-        self.assertEqual(kitchen["tap_info"], "Mixer Tap Clients own | Water Filter Tap Clients own")
+        self.assertEqual(kitchen["tap_info"], "")
         self.assertEqual(kitchen["accessories"], [])
         self.assertEqual(kitchen["drawers_soft_close"], "Soft Close")
         self.assertEqual(kitchen["hinges_soft_close"], "Soft Close")
@@ -8301,6 +8559,69 @@ class SmokeTest(unittest.TestCase):
             ],
         )
         self.assertNotIn("IMAGE N/A", " ".join(kitchen["bulkheads"]))
+
+    def test_collect_imperial_room_overlays_recovers_sinkware_from_text_blocks(self) -> None:
+        documents = [
+            {
+                "file_name": "36458 Imperial.pdf",
+                "role": "spec",
+                "pages": [
+                    {
+                        "page_no": 6,
+                        "raw_text": (
+                            "SINKWARE (LAUNDRY) UNDERMOUNT - FRANKE MARIS MRG110-\n"
+                            "52 MB\n"
+                            "N/A BY OTHERS BY OTHERS\n"
+                            "in bench centre behind sink\n"
+                            "Taphole location:\n"
+                            "SINKWARE (KITCHEN)\n"
+                            "SINKWARE (PANTRY)\n"
+                            "UNDERMOUNT - FRANKE MARIS MRG110-\n"
+                            "72 MB N/A BY OTHERS BY OTHERS\n"
+                            "ZIP TAP (PANTRY) HYDROTAP G5 CLASSIC PLUS MATTE BLACK -\n"
+                            "H55784Z03AU\n"
+                            "DESIGNER: CHLOE PARKER CLIENT NAME: SIGNATURE: SIGNED DATE:\n"
+                        ),
+                        "text_blocks": [
+                            {"x0": 100.8, "y0": 262.8, "text": "Taphole location:\nin bench centre behind sink\nSINKWARE (KITCHEN)"},
+                            {"x0": 264.0, "y0": 262.4, "text": "UNDERMOUNT - FRANKE MARIS MRG110-"},
+                            {"x0": 346.3, "y0": 276.9, "text": "52 MB"},
+                            {"x0": 968.9, "y0": 279.8, "text": "in bench centre behind sink"},
+                            {"x0": 992.3, "y0": 265.3, "text": "Taphole location:"},
+                            {"x0": 102.2, "y0": 327.1, "text": "SINKWARE (PANTRY)"},
+                            {"x0": 264.0, "y0": 320.5, "text": "UNDERMOUNT - FRANKE MARIS MRG110-"},
+                            {"x0": 346.3, "y0": 327.7, "text": "72 MB\nN/A BY OTHERS\nBY OTHERS"},
+                            {"x0": 968.9, "y0": 320.9, "text": "Taphole location: \nin bench centre behind sink"},
+                            {"x0": 98.3, "y0": 387.8, "text": "SINKWARE (LAUNDRY)"},
+                            {"x0": 264.0, "y0": 381.0, "text": "UNDERMOUNT - FRANKE MARIS MRG110-"},
+                            {"x0": 346.3, "y0": 395.5, "text": "52 MB"},
+                            {"x0": 992.3, "y0": 381.4, "text": "Taphole location:"},
+                            {"x0": 968.9, "y0": 396.0, "text": "in bench centre behind sink"},
+                            {"x0": 110.5, "y0": 445.9, "text": "ZIP TAP (PANTRY)\nHYDROTAP G5 CLASSIC PLUS MATTE BLACK -"},
+                            {"x0": 328.3, "y0": 453.6, "text": "H55784Z03AU"},
+                            {"x0": 53.5, "y0": 725.4, "text": "DESIGNER: CHLOE PARKER\nCLIENT NAME:\nSIGNATURE:\nSIGNED DATE:"},
+                        ],
+                    }
+                ],
+            }
+        ]
+        overlays = parsing_module._collect_imperial_room_overlays(documents)
+        self.assertEqual(
+            overlays["kitchen"]["sink_info"],
+            "UNDERMOUNT - FRANKE MARIS MRG110 52 MB - Taphole location: in bench centre behind sink",
+        )
+        self.assertEqual(
+            overlays["pantry"]["sink_info"],
+            "UNDERMOUNT - FRANKE MARIS MRG110 72 MB - Taphole location: in bench centre behind sink",
+        )
+        self.assertEqual(
+            overlays["laundry"]["sink_info"],
+            "UNDERMOUNT - FRANKE MARIS MRG110 52 MB - Taphole location: in bench centre behind sink",
+        )
+        self.assertEqual(
+            overlays["pantry"]["tap_info"],
+            "HYDROTAP G5 CLASSIC PLUS MATTE BLACK H55784Z03AU",
+        )
 
     def test_parse_documents_imperial_job35_recovers_address_handle_fragments_and_sink_tap_from_pdf_text(self) -> None:
         documents = [
@@ -8457,7 +8778,7 @@ class SmokeTest(unittest.TestCase):
             kitchen["sink_info"],
             "Veronar, Forge Undermount Sink, Double Bowl, Satin Stainless Steel Part Number: SVF210SINK.SSS.FG UNDERMOUNT",
         )
-        self.assertEqual(kitchen["tap_info"], "Veronar Lotus Pull-Out Goose Neck Mixer, Brushed Nickel - Part Number: PC1016SB.BRN")
+        self.assertEqual(kitchen["tap_info"], "")
 
     def test_parse_documents_imperial_job34_row_boundaries_keep_sections_clean(self) -> None:
         documents = [
@@ -9140,8 +9461,7 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(kitchen["hinges_soft_close"], "Soft Close")
         self.assertEqual(kitchen["flooring"], "NA")
         self.assertNotIn("FEATURE TALL", kitchen["bench_tops_wall_run"])
-        self.assertNotIn("Foxover", kitchen["tap_info"])
-        self.assertIn("Franke Eos Neo", kitchen["tap_info"])
+        self.assertEqual(kitchen["tap_info"], "")
         dining = rooms["dining_banquette"]
         self.assertEqual(dining["original_room_label"], "DINING BANQUETTE")
         self.assertEqual(dining["door_colours_base"], "Polytec - Classic White Matt")
@@ -10154,6 +10474,21 @@ class SmokeTest(unittest.TestCase):
             grouped["door_colours_tall"],
             "Polytec Classic White Matt Finsih Melamine with Matching 1MM ABSE Edges - to Tall Open Shelves",
         )
+
+    def test_split_door_colour_groups_extracts_cabinetry_feature_colour_only(self) -> None:
+        grouped = parsing_module._split_door_colour_groups(
+            [
+                "FEATURE COLOUR OVERHEADS Polytec Quartiera Maple",
+                "FEATURE ISLAND COLOUR Polytec Perugian Walnut Woodmatt",
+                "FEATURE SPLASHBACK 20mm Stone",
+            ]
+        )
+        self.assertEqual(
+            grouped["feature_colour"],
+            "Polytec Quartiera Maple | Polytec Perugian Walnut Woodmatt",
+        )
+        self.assertEqual(grouped["door_colours_overheads"], "")
+        self.assertEqual(grouped["door_colours_island"], "")
 
     def test_stable_hybrid_room_merge_keeps_base_accessories_and_rejects_orientation_only_ai_groups(self) -> None:
         merged = extraction_service._merge_single_room(
@@ -12239,6 +12574,85 @@ class SmokeTest(unittest.TestCase):
         self.assertIsNotNone(verification)
         fields = {item["field_name"] for item in verification["checklist"]}
         self.assertIn("shelf", fields)
+        self.assertIn("feature_colour", fields)
+
+    def test_imperial_snapshot_verification_checklist_uses_material_rows_and_omits_tap(self) -> None:
+        checklist = store._build_snapshot_verification_checklist(
+            {
+                "builder_name": "Imperial",
+                "rooms": [
+                    {
+                        "room_key": "kitchen",
+                        "original_room_label": "KITCHEN",
+                        "room_order": 1,
+                        "page_refs": "1",
+                        "tap_info": "Should be ignored",
+                        "sink_info": "Franke sink",
+                        "drawers_soft_close": "Blum soft close",
+                        "hinges_soft_close": "Blum soft close",
+                        "flooring": "Oak flooring",
+                        "material_rows": [
+                            {
+                                "area_or_item": "FRAME",
+                                "supplier": "Polytec",
+                                "specs_or_description": "Perugian Walnut Woodmatt",
+                                "notes": "",
+                                "tags": ["door_colours"],
+                                "page_no": 1,
+                                "row_order": 1,
+                            },
+                            {
+                                "area_or_item": "HANDLES - BASE DOORS",
+                                "supplier": "Kethy",
+                                "specs_or_description": "Darwen",
+                                "notes": "Vertical",
+                                "tags": ["handles"],
+                                "page_no": 1,
+                                "row_order": 2,
+                            },
+                            {
+                                "area_or_item": "ACCESSORIES",
+                                "supplier": "Furnware",
+                                "specs_or_description": "Spice tray insert",
+                                "notes": "",
+                                "tags": ["other_material"],
+                                "page_no": 1,
+                                "row_order": 3,
+                            },
+                        ],
+                    }
+                ],
+                "appliances": [
+                    {
+                        "appliance_type": "Dishwasher",
+                        "make": "Bosch",
+                        "model_no": "SMV6HCX01A",
+                        "page_refs": "5",
+                    }
+                ],
+                "special_sections": [
+                    {
+                        "section_key": "feature_tall_doors",
+                        "original_section_label": "FEATURE TALL DOORS",
+                        "fields": "Should be ignored for Imperial checklist",
+                        "page_refs": "2",
+                    }
+                ],
+            }
+        )
+        fields = {item["field_name"] for item in checklist}
+        self.assertIn("door_colours: FRAME", fields)
+        self.assertIn("handles: HANDLES - BASE DOORS", fields)
+        self.assertNotIn("other_material: ACCESSORIES", fields)
+        self.assertIn("Door Colours", fields)
+        self.assertIn("Handles", fields)
+        self.assertIn("sink", fields)
+        self.assertIn("drawers", fields)
+        self.assertIn("hinges", fields)
+        self.assertIn("flooring", fields)
+        self.assertNotIn("tap", fields)
+        self.assertNotIn("appliance", fields)
+        self.assertNotIn("fields", fields)
 
     def test_clarendon_false_appliance_filter_rejects_drawing_noise_with_bulkhead_tokens(self) -> None:
         self.assertTrue(
@@ -12251,6 +12665,349 @@ class SmokeTest(unittest.TestCase):
                 }
             )
         )
+
+    def test_imperial_room_from_section_builds_material_rows_and_clears_tap(self) -> None:
+        row = parsing_module._imperial_room_from_section(
+            {
+                "section_key": "kitchen",
+                "original_section_label": "KITCHEN",
+                "section_order": 3,
+                "file_name": "imperial.pdf",
+                "page_nos": [1],
+                "text": "KITCHEN JOINERY SELECTION SHEET",
+                "layout_rows": [
+                    {
+                        "row_label": "FRAME",
+                        "value_region_text": "Perugian Walnut Woodmatt",
+                        "supplier_region_text": "Polytec",
+                        "notes_region_text": "",
+                        "page_no": 1,
+                        "row_order": 1,
+                        "confidence": 0.91,
+                        "provenance": {"source": "cell"},
+                    },
+                    {
+                        "row_label": "HANDLES - BASE DOORS",
+                        "value_region_text": "Darwen Cabinet Pull Handle",
+                        "supplier_region_text": "Kethy",
+                        "notes_region_text": "Vertical",
+                        "page_no": 1,
+                        "row_order": 2,
+                        "confidence": 0.9,
+                        "provenance": {"source": "cell"},
+                    },
+                    {
+                        "row_label": "ISLAND BENCHTOP",
+                        "value_region_text": "20MM Natural Stone",
+                        "supplier_region_text": "CDK Stone",
+                        "notes_region_text": "2X WFE",
+                        "page_no": 1,
+                        "row_order": 3,
+                        "confidence": 0.92,
+                        "provenance": {"source": "cell"},
+                    },
+                    {
+                        "row_label": "TAPWARE (KITCHEN)",
+                        "value_region_text": "Hydrotap",
+                        "supplier_region_text": "Zip",
+                        "notes_region_text": "",
+                        "row_kind": "tap",
+                        "page_no": 1,
+                        "row_order": 4,
+                        "confidence": 0.85,
+                        "provenance": {"source": "cell"},
+                    },
+                ],
+            }
+        )
+        self.assertEqual(row.room_order, 3)
+        self.assertEqual(row.tap_info, "")
+        self.assertEqual(
+            [(item["area_or_item"], item["tags"][0]) for item in row.material_rows],
+            [
+                ("FRAME", "door_colours"),
+                ("HANDLES - BASE DOORS", "handles"),
+                ("ISLAND BENCHTOP", "bench_tops"),
+            ],
+        )
+
+    def test_imperial_material_rows_prefer_original_colour_labels_and_normalize_handle_scope(self) -> None:
+        rows = parsing_module._imperial_material_rows_from_section(
+            {
+                "page_nos": [1],
+                "layout_rows": [
+                    {
+                        "row_label": "BASE, UPPER & TALL CABINETRY COLOUR",
+                        "value_region_text": "Black - PureGrain",
+                        "supplier_region_text": "Laminex",
+                        "notes_region_text": "",
+                        "page_no": 1,
+                        "row_order": 1,
+                        "confidence": 0.91,
+                        "provenance": {"source": "cell"},
+                    },
+                    {
+                        "row_label": "BASE + OVERHEAD + OPEN OVERHEADS + TALLS",
+                        "value_region_text": "COLOURED Black - PureGrain",
+                        "supplier_region_text": "Laminex",
+                        "notes_region_text": "BOTTOMS TO OVERHEADS",
+                        "page_no": 1,
+                        "row_order": 2,
+                        "confidence": 0.7,
+                        "provenance": {"source": "cell"},
+                    },
+                    {
+                        "row_label": "UPPER / FEATURE CABINETRY COLOUR",
+                        "value_region_text": "Perugian Walnut - Woodmatt",
+                        "supplier_region_text": "Polytec",
+                        "notes_region_text": "",
+                        "page_no": 1,
+                        "row_order": 3,
+                        "confidence": 0.9,
+                        "provenance": {"source": "cell"},
+                    },
+                    {
+                        "row_label": "FEATURE COLOUR OVERHEADS",
+                        "value_region_text": "Perugian Walnut - Woodmatt",
+                        "supplier_region_text": "Polytec",
+                        "notes_region_text": "REFER TO DRAWINGS",
+                        "page_no": 1,
+                        "row_order": 4,
+                        "confidence": 0.7,
+                        "provenance": {"source": "cell"},
+                    },
+                    {
+                        "row_label": "to OVERHEADS",
+                        "value_region_text": "NO HANDLES TO OVERHEADS - RECESSED FINGER SPACE",
+                        "supplier_region_text": "",
+                        "notes_region_text": "",
+                        "page_no": 1,
+                        "row_order": 5,
+                        "confidence": 0.8,
+                        "provenance": {"source": "cell"},
+                    },
+                ],
+            }
+        )
+        labels = [item["area_or_item"] for item in rows]
+        self.assertIn("BASE, UPPER & TALL CABINETRY COLOUR", labels)
+        self.assertIn("UPPER / FEATURE CABINETRY COLOUR", labels)
+        self.assertIn("HANDLES to OVERHEADS", labels)
+        self.assertNotIn("BASE + OVERHEAD + OPEN OVERHEADS + TALLS", labels)
+        self.assertNotIn("FEATURE COLOUR OVERHEADS", labels)
+
+    def test_imperial_material_rows_merge_fragmented_follow_on_labels(self) -> None:
+        rows = parsing_module._imperial_material_rows_from_section(
+            {
+                "page_nos": [1],
+                "layout_rows": [
+                    {
+                        "row_label": "FLOATING SHELVING COLOUR (WITH INTERNAL STEEL SUPPORTS)",
+                        "value_region_text": "Notaio Walnut Woodmatt",
+                        "supplier_region_text": "Polytec",
+                        "notes_region_text": "VERTICAL GRAIN",
+                        "page_no": 1,
+                        "row_order": 1,
+                        "confidence": 0.9,
+                        "provenance": {"source": "cell"},
+                    },
+                    {
+                        "row_label": "INTERNAL STEEL SUPPORTS)",
+                        "value_region_text": "Notaio Walnut Woodmatt",
+                        "supplier_region_text": "Polytec",
+                        "notes_region_text": "GRAIN",
+                        "page_no": 1,
+                        "row_order": 2,
+                        "confidence": 0.7,
+                        "provenance": {"source": "cell"},
+                    },
+                    {
+                        "row_label": "GPO'S",
+                        "value_region_text": "Island Drawer GPO 1",
+                        "supplier_region_text": "",
+                        "notes_region_text": "",
+                        "page_no": 1,
+                        "row_order": 3,
+                        "confidence": 0.85,
+                        "provenance": {"source": "cell"},
+                    },
+                    {
+                        "row_label": "GPO'S Island",
+                        "value_region_text": "Drawer GPO 2",
+                        "supplier_region_text": "",
+                        "notes_region_text": "",
+                        "page_no": 1,
+                        "row_order": 4,
+                        "confidence": 0.65,
+                        "provenance": {"source": "cell"},
+                    },
+                    {
+                        "row_label": "Drawer",
+                        "value_region_text": "Hafele Trio 822.53.151",
+                        "supplier_region_text": "",
+                        "notes_region_text": "",
+                        "page_no": 1,
+                        "row_order": 5,
+                        "confidence": 0.65,
+                        "provenance": {"source": "cell"},
+                    },
+                ],
+            }
+        )
+        labels = [item["area_or_item"] for item in rows]
+        self.assertEqual(labels, ["FLOATING SHELVING COLOUR (WITH INTERNAL STEEL SUPPORTS)", "GPO'S"])
+        self.assertIn("Hafele Trio 822.53.151", rows[1]["specs_or_description"])
+        self.assertIn("GPO'S Island", rows[1]["provenance"]["fragment_area_or_items"])
+
+    def test_imperial_material_rows_merge_non_adjacent_fragments_and_dedupe_weaker_rows(self) -> None:
+        rows = parsing_module._imperial_material_rows_from_section(
+            {
+                "page_nos": [1],
+                "layout_rows": [
+                    {
+                        "row_label": "LIGHTING",
+                        "value_region_text": "Allow chanels and plastic covers only. NO LIGHTS",
+                        "supplier_region_text": "",
+                        "notes_region_text": "LIGHTS AND DRIVERS BY CLIENT",
+                        "page_no": 1,
+                        "row_order": 1,
+                        "confidence": 0.88,
+                        "provenance": {"source": "cell"},
+                    },
+                    {
+                        "row_label": "KICKBOARDS",
+                        "value_region_text": "As doors",
+                        "supplier_region_text": "Polytec",
+                        "notes_region_text": "",
+                        "page_no": 1,
+                        "row_order": 2,
+                        "confidence": 0.82,
+                        "provenance": {"source": "cell"},
+                    },
+                    {
+                        "row_label": "LIGHTING Allow",
+                        "value_region_text": "chanels and plastic covers only. LIGHTS NO LIGHTS",
+                        "supplier_region_text": "",
+                        "notes_region_text": "AND DRIVERS BY CLIENT",
+                        "page_no": 1,
+                        "row_order": 3,
+                        "confidence": 0.61,
+                        "provenance": {"source": "cell"},
+                    },
+                    {
+                        "row_label": "ISLAND CABINETRY COLOUR (incl. BACK OF ISLAND CURVE AND COLUMN)",
+                        "value_region_text": "Notaio Walnut Woodmatt",
+                        "supplier_region_text": "Polytec",
+                        "notes_region_text": "VERTICAL GRAIN",
+                        "page_no": 1,
+                        "row_order": 4,
+                        "confidence": 0.91,
+                        "provenance": {"source": "cell"},
+                    },
+                    {
+                        "row_label": "ISLAND CABINETRY COLOUR",
+                        "value_region_text": "(incl. BACK OF Notaio Walnut Woodmatt VERTICAL",
+                        "supplier_region_text": "Polytec",
+                        "notes_region_text": "GRAIN",
+                        "page_no": 1,
+                        "row_order": 5,
+                        "confidence": 0.66,
+                        "provenance": {"source": "cell"},
+                    },
+                ],
+            }
+        )
+        labels = [item["area_or_item"] for item in rows]
+        self.assertIn("LIGHTING", labels)
+        self.assertNotIn("LIGHTING Allow", labels)
+        lighting = next(item for item in rows if item["area_or_item"] == "LIGHTING")
+        self.assertIn("chanels and plastic covers only", lighting["specs_or_description"])
+        self.assertIn("AND DRIVERS BY CLIENT", lighting["notes"])
+        self.assertIn("ISLAND CABINETRY COLOUR (incl. BACK OF ISLAND CURVE AND COLUMN)", labels)
+        self.assertNotIn("ISLAND CABINETRY COLOUR", labels)
+
+    def test_imperial_material_row_tags_cover_plural_combo_and_typo_labels(self) -> None:
+        self.assertEqual(parsing_module._imperial_material_row_tags("BENCHTOPS COLOUR"), ["bench_tops"])
+        self.assertEqual(parsing_module._imperial_material_row_tags("BASE + OVERHEAD + OPEN OVERHEADS + TALLS"), ["door_colours"])
+        self.assertEqual(parsing_module._imperial_material_row_tags("HANLDES - BASE CABS"), ["handles"])
+        self.assertEqual(parsing_module._imperial_material_row_tags("FEATURE ISLAND COLOUR"), ["door_colours"])
+        self.assertEqual(parsing_module._imperial_material_row_tags("OPEN CABINETRY + DRAWER COLOUR"), ["door_colours"])
+        self.assertEqual(parsing_module._imperial_material_row_tags("FEATURE TIMBER LOOK CABINETRY"), ["door_colours"])
+        self.assertEqual(parsing_module._imperial_material_row_tags("SHELVING CABINETRY COLOUR"), ["other_material"])
+        self.assertEqual(
+            parsing_module._imperial_material_row_tags(
+                "BASE CABS",
+                "Kethy",
+                "NO HANDLES - BRONTE HANDLE",
+                "",
+            ),
+            ["handles"],
+        )
+
+    def test_extract_imperial_joinery_word_grid_rows_preserves_low_confidence_benchtop_and_label_continuation(self) -> None:
+        cells = [
+            extraction_service.ImperialCell(text="BENCHTOPS COLOUR", col_role="label", row_band=1, x0=100.0, source="word_grid"),
+            extraction_service.ImperialCell(text="Organic White", col_role="description", row_band=1, x0=320.0, source="word_grid"),
+            extraction_service.ImperialCell(text="Caesarstone", col_role="supplier", row_band=1, x0=820.0, source="word_grid"),
+            extraction_service.ImperialCell(text="UPPER CABINETRY COLOUR", col_role="label", row_band=3, x0=100.0, source="word_grid"),
+            extraction_service.ImperialCell(text="Valla Profile", col_role="description", row_band=3, x0=320.0, source="word_grid"),
+            extraction_service.ImperialCell(text="+ TALL CABINETS", col_role="label", row_band=4, x0=110.0, source="word_grid"),
+            extraction_service.ImperialCell(text="Boston Oak Woodmatt", col_role="description", row_band=4, x0=320.0, source="word_grid"),
+            extraction_service.ImperialCell(text="Polytec", col_role="supplier", row_band=4, x0=820.0, source="word_grid"),
+            extraction_service.ImperialCell(text="EM0 Edge", col_role="notes", row_band=4, x0=980.0, source="word_grid"),
+        ]
+
+        rows = [
+            row.to_grid_row().to_layout_row()
+            for row in extraction_service._build_imperial_logical_rows_from_cells(
+                cells,
+                room_scope="KITCHEN",
+                page_no=1,
+            )
+        ]
+
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["row_label"], "BENCHTOPS COLOUR")
+        self.assertEqual(rows[0]["supplier_region_text"], "Caesarstone")
+        self.assertEqual(rows[1]["provenance"]["raw_area_or_item"], "UPPER CABINETRY COLOUR + TALL CABINETS")
+        self.assertIn("Boston Oak Woodmatt", rows[1]["value_region_text"])
+
+    def test_enrich_snapshot_rooms_clears_imperial_tap_info(self) -> None:
+        snapshot = {
+            "builder_name": "Imperial",
+            "rooms": [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "room_name": "KITCHEN",
+                    "tap_info": "Should not survive",
+                    "sink_info": "Sink stays",
+                    "handles": [],
+                    "bench_tops": [],
+                    "door_panel_colours": [],
+                    "accessories": [],
+                    "other_items": [],
+                    "material_rows": [
+                        {
+                            "area_or_item": "BENCHTOP",
+                            "supplier": "Caesarstone",
+                            "specs_or_description": "20mm Organic White",
+                            "notes": "",
+                            "tags": ["bench_tops"],
+                            "page_no": 1,
+                            "row_order": 1,
+                            "confidence": 0.9,
+                            "provenance": {"page_no": 1, "row_order": 1},
+                        }
+                    ],
+                }
+            ],
+            "appliances": [],
+            "special_sections": [],
+            "others": {},
+        }
+        enriched = parsing_module.enrich_snapshot_rooms(snapshot, documents=[])
+        self.assertEqual(enriched["rooms"][0]["tap_info"], "")
 
     def test_clarendon_false_appliance_filter_rejects_hob_and_dimension_only_models(self) -> None:
         self.assertTrue(
@@ -12765,11 +13522,14 @@ class SmokeTest(unittest.TestCase):
             (39.0, 360.0, "Door"),
             (39.0, 809.0, "Polytec"),
         )
-        rows = extraction_service._extract_imperial_joinery_word_grid_rows(page_words, room_scope="KITCHEN")
+        rows, unresolved_rows = extraction_service._extract_imperial_joinery_word_grid_rows(page_words, room_scope="KITCHEN")
         by_label = {row.row_label: row for row in rows}
         self.assertEqual(by_label["SPLASHBACK"].description, "Tiles by others Installed By Imperial")
         self.assertEqual(by_label["BASE CABINETRY COLOUR"].description, "Polar White Matt Flat Door")
         self.assertEqual(by_label["BASE CABINETRY COLOUR"].supplier, "Polytec")
+        self.assertTrue(unresolved_rows)
+        self.assertTrue(all(not row["area_or_item"] for row in unresolved_rows))
+        self.assertTrue(any("Polytec" in row["specs_or_description"] for row in unresolved_rows))
 
     def test_imperial_grid_merge_prefers_clean_text_row_over_polluted_candidate(self) -> None:
         text_rows = [
@@ -13209,11 +13969,44 @@ class SmokeTest(unittest.TestCase):
             (48.0, 640.0, "Match"),
             (48.0, 715.0, "Above"),
         )
-        rows = extraction_service._extract_imperial_joinery_word_grid_rows(page_words, room_scope="KITCHEN")
+        rows, unresolved_rows = extraction_service._extract_imperial_joinery_word_grid_rows(page_words, room_scope="KITCHEN")
         by_label = {row.row_label: row for row in rows}
         self.assertEqual(by_label["FEATURE COLOUR OVERHEADS"].description, "Quartiera Maple")
         self.assertEqual(by_label["FEATURE COLOUR OVERHEADS"].supplier, "Polytec")
         self.assertEqual(by_label["KICKBOARDS"].description, "Match Above")
+        self.assertEqual(unresolved_rows, [])
+
+    def test_imperial_grid_row_from_layout_row_coerces_string_confidence_and_non_dict_provenance(self) -> None:
+        row = extraction_service._imperial_grid_row_from_layout_row(
+            {
+                "room_scope": "Kitchen",
+                "row_label": "BENCHTOP",
+                "value_region_text": "20mm Stone",
+                "supplier_region_text": "Caesarstone",
+                "confidence": "High",
+                "provenance": ["vision row repair"],
+            },
+            room_scope="KITCHEN",
+        )
+        self.assertAlmostEqual(row.confidence, 0.9)
+        self.assertEqual(row.provenance, {"items": ["vision row repair"]})
+
+    def test_normalize_layout_rows_coerces_string_confidence_and_string_provenance(self) -> None:
+        rows = extraction_service._normalize_layout_rows(
+            [
+                {
+                    "room_scope": "Kitchen",
+                    "row_label": "FEATURE COLOUR OVERHEADS",
+                    "value_region_text": "Quartiera Maple",
+                    "supplier_region_text": "Polytec",
+                    "confidence": "medium",
+                    "provenance": "vision-table-repair",
+                }
+            ]
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertAlmostEqual(rows[0]["confidence"], 0.65)
+        self.assertEqual(rows[0]["provenance"], {"raw": "vision-table-repair"})
 
     def test_imperial_merge_grid_rows_keeps_same_label_handles_with_different_position_scope(self) -> None:
         merged = extraction_service._merge_imperial_grid_rows(

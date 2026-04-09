@@ -61,6 +61,8 @@ class RoomRow(BaseModel):
     room_key: str = ""
     original_room_label: str = ""
     room_name: str = ""
+    room_order: int = 0
+    material_rows: list[dict[str, object]] = Field(default_factory=list)
     bench_tops: list[str] = Field(default_factory=list)
     bench_tops_wall_run: str = ""
     bench_tops_island: str = ""
@@ -73,6 +75,7 @@ class RoomRow(BaseModel):
     door_colours_tall: str = ""
     door_colours_island: str = ""
     door_colours_bar_back: str = ""
+    feature_colour: str = ""
     has_explicit_overheads: bool = False
     has_explicit_base: bool = False
     has_explicit_tall: bool = False

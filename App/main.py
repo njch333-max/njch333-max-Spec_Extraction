@@ -747,6 +747,12 @@ def _present_files(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _flatten_rooms(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    if parsing._is_imperial_builder(str(snapshot.get("builder_name", "") or "")) and any(
+        isinstance(row, dict) and isinstance(row.get("material_rows", []), list) and row.get("material_rows")
+        for row in snapshot.get("rooms", [])
+        if isinstance(row, dict)
+    ):
+        return _flatten_imperial_rooms(snapshot)
     rows: list[dict[str, Any]] = []
     for row in snapshot.get("rooms", []):
         if not isinstance(row, dict):
@@ -772,11 +778,13 @@ def _flatten_rooms(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
                 "door_colours_tall": door_groups["door_colours_tall"],
                 "door_colours_island": door_groups["door_colours_island"],
                 "door_colours_bar_back": door_groups["door_colours_bar_back"],
+                "feature_colour": door_groups["feature_colour"],
                 "show_door_colours_overheads": bool(door_groups["door_colours_overheads"]) and (room_key_normalized == "kitchen" or has_explicit_overheads),
                 "show_door_colours_base": bool(door_groups["door_colours_base"]),
                 "show_door_colours_tall": True,
                 "show_door_colours_island": room_key_normalized == "kitchen" and bool(door_groups["door_colours_island"]),
                 "show_door_colours_bar_back": room_key_normalized == "kitchen" and bool(door_groups["door_colours_bar_back"]),
+                "show_feature_colour": bool(door_groups["feature_colour"]),
                 "toe_kick": _display_value(row.get("toe_kick", [])),
                 "bulkheads": _display_value(row.get("bulkheads", [])),
                 "handles": _display_value(row.get("handles", [])),
@@ -808,6 +816,120 @@ def _flatten_rooms(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
     return _sort_room_rows_by_priority(rows)
+
+
+def _flatten_imperial_rooms(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    flattened: list[dict[str, Any]] = []
+    rooms = [row for row in snapshot.get("rooms", []) if isinstance(row, dict)]
+    ordered_rooms = sorted(
+        rooms,
+        key=lambda row: (
+            int(row.get("room_order", 0) or 0),
+            _display_value(row.get("original_room_label", "")) or _display_value(row.get("room_key", "")),
+        ),
+    )
+    for row in ordered_rooms:
+        material_rows = _flatten_imperial_material_rows(row)
+        flattened.append(
+            {
+                "is_imperial_raw_rows": True,
+                "room_key": _display_value(row.get("room_key", "")),
+                "original_room_label": _display_value(row.get("original_room_label", "")),
+                "room_order": int(row.get("room_order", 0) or 0),
+                "material_rows": material_rows,
+                "sink_info": _display_value(row.get("sink_info", "")),
+                "drawers_soft_close": _normalize_soft_close_display(row.get("drawers_soft_close", ""), "drawer"),
+                "hinges_soft_close": _normalize_soft_close_display(row.get("hinges_soft_close", ""), "hinge"),
+                "flooring": _display_value(row.get("flooring", "")),
+                "source_file": _display_value(row.get("source_file", "")),
+                "page_refs": _display_value(row.get("page_refs", "")),
+                "evidence_snippet": _display_value(row.get("evidence_snippet", "")),
+                "confidence": _display_value(row.get("confidence", "")),
+            }
+        )
+    return flattened
+
+
+def _flatten_imperial_material_rows(room: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    material_rows = room.get("material_rows", [])
+    if not isinstance(material_rows, list):
+        return rows
+    ordered_rows = sorted(
+        [item for item in material_rows if isinstance(item, dict)],
+        key=lambda item: (
+            int(item.get("page_no", 0) or 0),
+            int(item.get("row_order", 0) or 0),
+            _display_value(item.get("area_or_item", "")),
+        ),
+    )
+    for item in ordered_rows:
+        title = _display_value(item.get("area_or_item", ""))
+        supplier = _display_value(item.get("supplier", ""))
+        description = _display_value(item.get("specs_or_description", ""))
+        notes = _display_value(item.get("notes", ""))
+        value = " - ".join(part for part in (supplier, description, notes) if part)
+        if not title or not value:
+            continue
+        tags = [
+            _display_value(tag)
+            for tag in (item.get("tags", []) or [])
+            if _display_value(tag)
+        ]
+        rows.append(
+            {
+                "title": title,
+                "value": value,
+                "tags": tags,
+                "page_no": int(item.get("page_no", 0) or 0),
+                "row_order": int(item.get("row_order", 0) or 0),
+                "confidence": _display_value(item.get("confidence", "")),
+                "needs_review": bool(item.get("needs_review", False)),
+            }
+        )
+    return rows
+
+
+def _imperial_summary_bucket_key(tags: list[str]) -> str:
+    normalized = {str(tag).strip().lower() for tag in tags if str(tag).strip()}
+    if "door_colours" in normalized:
+        return "door_colours"
+    if "handles" in normalized:
+        return "handles"
+    if "bench_tops" in normalized:
+        return "bench_tops"
+    return ""
+
+
+def _imperial_material_row_is_summary_worthy(item: dict[str, Any], bucket_key: str) -> bool:
+    title = _display_value(item.get("title", ""))
+    value = _display_value(item.get("value", ""))
+    title_upper = title.upper()
+    value_upper = value.upper()
+    normalized_value = {
+        "door_colours": _normalize_door_colour_summary_value(value),
+        "handles": _normalize_handle_summary_value(value),
+        "bench_tops": _normalize_benchtop_summary_value(value),
+    }.get(bucket_key, value)
+    if not title or not value or bool(item.get("needs_review", False)):
+        return False
+    if not normalized_value or re.match(r"(?i)^(?:incl|include|open|split|allow|note)\b", normalized_value):
+        return False
+    if bucket_key == "bench_tops":
+        return "BENCHTOP" in title_upper
+    if bucket_key == "handles":
+        if not re.search(r"(?i)\b(?:handles?|knob)\b", title):
+            return False
+        if re.search(r"(?i)\b(?:gpo|spice tray|drawer gpo|lighting|led strip|bin\b|casters?)\b", value):
+            return False
+        return True
+    if bucket_key == "door_colours":
+        if not re.search(r"(?i)\b(?:colour|frame|bar back|panel)\b", title):
+            return False
+        if re.search(r"(?i)\b(?:gpo|spice tray|drawer gpo|lighting|led strip|bin\b|casters?|handle|fingerpull|knob)\b", value):
+            return False
+        return True
+    return False
 
 
 def _sort_room_rows_by_priority(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -955,6 +1077,7 @@ def _split_room_door_groups(row: dict[str, Any]) -> dict[str, str]:
         "door_colours_tall": tall,
         "door_colours_island": island,
         "door_colours_bar_back": bar_back,
+        "feature_colour": parsing._merge_clean_group_text(row.get("feature_colour", ""), derived.get("feature_colour", ""), cleaner=parsing._clean_door_colour_value),
     }
 
 
@@ -1439,6 +1562,8 @@ def _normalize_soft_close_display(value: Any, keyword: str) -> str:
 
 
 def _build_material_summary(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    if parsing._is_imperial_builder(str(snapshot.get("builder_name", "") or "")):
+        return _build_imperial_material_summary(snapshot)
     rooms = _flatten_rooms(snapshot)
     return {
         "door_colours": _material_bucket_with_rooms(
@@ -1480,6 +1605,54 @@ def _build_material_summary(snapshot: dict[str, Any]) -> dict[str, dict[str, Any
             _normalize_benchtop_summary_value,
         ),
     }
+
+
+def _build_imperial_material_summary(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    buckets: dict[str, dict[str, Any]] = {
+        "door_colours": {"label": "Door Colours", "entries": []},
+        "handles": {"label": "Handles", "entries": []},
+        "bench_tops": {"label": "Bench Tops", "entries": []},
+    }
+    seen: dict[str, set[str]] = {key: set() for key in buckets}
+    bucket_normalizers = {
+        "door_colours": _normalize_door_colour_summary_value,
+        "handles": _normalize_handle_summary_value,
+        "bench_tops": _normalize_benchtop_summary_value,
+    }
+    rooms = sorted(
+        [room for room in snapshot.get("rooms", []) if isinstance(room, dict)],
+        key=lambda room: (
+            int(room.get("room_order", 0) or 0),
+            _display_value(room.get("original_room_label", "")) or _display_value(room.get("room_key", "")),
+        ),
+    )
+    for room in rooms:
+        room_label = _display_value(room.get("original_room_label", "")) or _display_value(room.get("room_key", "")) or "Room"
+        for item in _flatten_imperial_material_rows(room):
+            bucket_key = _imperial_summary_bucket_key(item.get("tags", []))
+            if not bucket_key:
+                continue
+            if not _imperial_material_row_is_summary_worthy(item, bucket_key):
+                continue
+            normalized_value = bucket_normalizers[bucket_key](item["value"])
+            summary_text = normalized_value or item["value"]
+            display_text = f"{room_label}: {item['title']} -> {summary_text}"
+            dedupe_basis = summary_text
+            dedupe_key = f"{room_label}|{bucket_key}|{dedupe_basis}".lower()
+            if dedupe_key in seen[bucket_key]:
+                continue
+            seen[bucket_key].add(dedupe_key)
+            buckets[bucket_key]["entries"].append(
+                {
+                    "text": summary_text,
+                    "display_text": display_text,
+                    "room_label": room_label,
+                    "area_or_item": item["title"],
+                }
+            )
+    for bucket in buckets.values():
+        bucket["count"] = len(bucket["entries"])
+    return buckets
 
 
 def _material_bucket_with_rooms(
@@ -1527,6 +1700,13 @@ def _split_material_values(value: Any) -> list[str]:
 
 def _normalize_door_colour_summary_value(value: str) -> str:
     text = parsing.normalize_space(value)
+    text = re.sub(r"(?i)\bCOLOURED?\b", "", text)
+    text = re.sub(r"(?i)\bREFER TO DRAWINGS(?: FOR ALLOCATIONS)?\b.*$", "", text)
+    text = re.sub(r"(?i)\bBLUM\s+AVENTOS\b.*$", "", text)
+    text = re.sub(r"(?i)\bNOTE:\s*.*$", "", text)
+    text = re.sub(r"(?i)\b(?:COLOURED\s+)?BOTTOMS TO OVERHEADS\b.*$", "", text)
+    text = re.sub(r"(?i)\bVERTICAL\s*-\s*GRAIN\b", "Vertical Grain", text)
+    text = re.sub(r"(?i)\bHORIZONTAL\s*-\s*GRAIN\b", "Horizontal Grain", text)
     text = re.sub(r"\([^)]*(upper|overhead|base|island|bar back|cabinet|panel|run|shelf)[^)]*\)", "", text, flags=re.IGNORECASE)
     text = _strip_summary_location_tail(
         text,
@@ -1541,6 +1721,13 @@ def _normalize_door_colour_summary_value(value: str) -> str:
 
 def _normalize_handle_summary_value(value: str) -> str:
     text = parsing.normalize_space(value)
+    text = re.sub(r"(?i)\b([A-Z][A-Z0-9&]+)\s+\1\b", r"\1", text)
+    text = re.sub(r"(?i)\bimage of\b.*$", "", text)
+    text = re.sub(r"(?i)\bas per drawings\b.*$", "", text)
+    text = re.sub(r"(?i)\bPTO\s+(?:where\s+required|where\s+req|req(?:uired)?)\b.*$", "", text)
+    text = re.sub(r"(?i)\bsize shown varies\b.*$", "", text)
+    text = re.sub(r"(?i)\binvestigating\b.*$", "", text)
+    text = re.sub(r"(?i)\bpricing from\b.*$", "", text)
     text = re.sub(r"\([^)]*(location|up/down|left/right|door|drawer|centre|center)[^)]*\)", "", text, flags=re.IGNORECASE)
     return _strip_summary_location_tail(
         text,
@@ -1560,6 +1747,11 @@ def _normalize_benchtop_summary_value(value: str) -> str:
     text = re.sub(r"(?i)^wall run bench top\s*", "", text)
     text = re.sub(r"(?i)^island bench top\s*", "", text)
     text = re.sub(r"(?i)^island benchtop\s*", "", text)
+    text = re.sub(r"(?i)\b(?:um\s*sink|undermount\s+sink)\b.*$", "", text)
+    text = re.sub(r"(?i)\b(?:stone\s+)?splashback\b.*$", "", text)
+    text = re.sub(r"(?i)\bNOTE:\s*.*$", "", text)
+    text = re.sub(r"(?i)\bIncl\.\s*Spring\s+Free\s+Upgrade\s+Promotion\b.*$", "", text)
+    text = re.sub(r"(?i)\bFree\s+Upgrade\s+Promotion\b.*$", "", text)
     text = re.sub(
         r"(?i)\s*-\s*to\s+(?:the\s+)?(?:cooktop run|wall run|wall bench|wall side|island bench|island|powder room\s*\d*|powder\s+room|ensuite\s*\d*|ensuite|main bathroom|bathroom|laundry|vanities?|butler'?s pantry|pantry)\b.*$",
         "",

@@ -103,6 +103,20 @@
         <span class="status-chip status-ready">Room</span>
       </div>
       <div class="room-field-list">
+        {% if row.is_imperial_raw_rows %}
+        {% for item in row.material_rows %}
+        <div class="room-field-row room-field-stack">
+          <strong>{{ item.title }}</strong>
+          <span>{{ item.value }}</span>
+        </div>
+        {% else %}
+        <div class="room-field-row"><strong>Material Rows</strong><span>-</span></div>
+        {% endfor %}
+        <div class="room-field-row"><strong>Drawers</strong><span>{{ row.drawers_soft_close or "-" }}</span></div>
+        <div class="room-field-row"><strong>Hinges</strong><span>{{ row.hinges_soft_close or "-" }}</span></div>
+        <div class="room-field-row"><strong>Flooring</strong><span>{{ row.flooring or "-" }}</span></div>
+        <div class="room-field-row"><strong>Sink</strong><span>{{ row.sink_info or "-" }}</span></div>
+        {% else %}
         {% if row.show_split_benchtops %}
         <div class="room-field-row"><strong>Wall Run Bench Top</strong><span>{{ row.bench_tops_wall_run }}</span></div>
         <div class="room-field-row"><strong>Island Bench Top</strong><span>{{ row.bench_tops_island }}</span></div>
@@ -124,6 +138,9 @@
         {% endif %}
         {% if row.show_door_colours_bar_back %}
         <div class="room-field-row"><strong>Bar Back</strong><span>{{ row.door_colours_bar_back }}</span></div>
+        {% endif %}
+        {% if row.show_feature_colour %}
+        <div class="room-field-row"><strong>Feature Colour</strong><span>{{ row.feature_colour }}</span></div>
         {% endif %}
         <div class="room-field-row"><strong>Toe Kick</strong><span>{{ row.toe_kick or "-" }}</span></div>
         <div class="room-field-row"><strong>Bulkheads</strong><span>{{ row.bulkheads or "-" }}</span></div>
@@ -153,6 +170,7 @@
         <div class="room-field-row"><strong>Hinges</strong><span>{{ row.hinges_soft_close }}</span></div>
         <div class="room-field-row"><strong>Splashback</strong><span>{{ row.splashback or "-" }}</span></div>
         <div class="room-field-row"><strong>Flooring</strong><span>{{ row.flooring or "-" }}</span></div>
+        {% endif %}
       </div>
       <div class="room-meta-list">
         <div class="room-field-row"><strong>Source</strong><span>{{ row.source_file or "-" }}</span></div>

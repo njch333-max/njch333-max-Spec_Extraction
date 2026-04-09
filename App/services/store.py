@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 from typing import Any
 
-from App.services import cleaning_rules
+from App.services import cleaning_rules, parsing
 from App.services.runtime import APP_BUILD_ID, DB_PATH, WORKER_LEASE_TTL_SECONDS, utc_after_seconds_iso, utc_now_iso
 
 
@@ -736,6 +737,8 @@ def _upsert_snapshot_verification_locked(
 
 
 def _build_snapshot_verification_checklist(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    if parsing._is_imperial_builder(str(snapshot.get("builder_name", "") or "")):
+        return _build_imperial_snapshot_verification_checklist(snapshot)
     checklist: list[dict[str, Any]] = []
     rooms = snapshot.get("rooms", [])
     for room in rooms if isinstance(rooms, list) else []:
@@ -760,6 +763,7 @@ def _build_snapshot_verification_checklist(snapshot: dict[str, Any]) -> list[dic
             ("door_colours_tall", "door_colours_tall"),
             ("door_colours_island", "door_colours_island"),
             ("door_colours_bar_back", "door_colours_bar_back"),
+            ("feature_colour", "feature_colour"),
             ("toe_kick", "toe_kick"),
             ("bulkheads", "bulkheads"),
             ("handles", "handles"),
@@ -823,6 +827,156 @@ def _build_snapshot_verification_checklist(snapshot: dict[str, Any]) -> list[dic
     return checklist
 
 
+def _build_imperial_snapshot_verification_checklist(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    checklist: list[dict[str, Any]] = []
+    rooms = snapshot.get("rooms", [])
+    ordered_rooms = sorted(
+        [room for room in rooms if isinstance(room, dict)],
+        key=lambda room: (int(room.get("room_order", 0) or 0), _verification_room_label(room)),
+    )
+    summary_entries: dict[str, list[str]] = {
+        "door_colours": [],
+        "handles": [],
+        "bench_tops": [],
+    }
+    seen_summary_entries: dict[str, set[str]] = {key: set() for key in summary_entries}
+    for room in ordered_rooms:
+        room_label = _verification_room_label(room)
+        room_page_refs = _verification_text(room.get("page_refs", ""))
+        _append_verification_item(
+            checklist,
+            section_type="room",
+            entity_label=room_label,
+            field_name="room_title",
+            extracted_value=room_label,
+            source_page_refs=room_page_refs,
+        )
+        material_rows = room.get("material_rows", [])
+        if isinstance(material_rows, list):
+            ordered_rows = sorted(
+                [item for item in material_rows if isinstance(item, dict)],
+                key=lambda item: (
+                    int(item.get("page_no", 0) or 0),
+                    int(item.get("row_order", 0) or 0),
+                    _verification_text(item.get("area_or_item", "")),
+                ),
+            )
+            for item in ordered_rows:
+                area_or_item = _verification_text(item.get("area_or_item", ""))
+                if not area_or_item:
+                    continue
+                supplier = _verification_text(item.get("supplier", ""))
+                description = _verification_text(item.get("specs_or_description", ""))
+                notes = _verification_text(item.get("notes", ""))
+                extracted_value = " - ".join(part for part in (supplier, description, notes) if part)
+                if not extracted_value:
+                    continue
+                tags = [str(tag).strip() for tag in (item.get("tags", []) or []) if str(tag).strip()]
+                primary_tag = tags[0] if tags else "other_material"
+                if primary_tag not in summary_entries:
+                    continue
+                if not _imperial_verification_row_is_summary_worthy(
+                    area_or_item=area_or_item,
+                    extracted_value=extracted_value,
+                    tags=tags,
+                    needs_review=bool(item.get("needs_review", False)),
+                ):
+                    continue
+                field_name = f"{primary_tag}: {area_or_item}"
+                source_page_refs = _verification_text(item.get("page_no", "")) or room_page_refs
+                _append_verification_item(
+                    checklist,
+                    section_type="room",
+                    entity_label=room_label,
+                    field_name=field_name,
+                    extracted_value=extracted_value,
+                    source_page_refs=source_page_refs,
+                )
+                normalized_value = _verification_normalize_summary_value(primary_tag, extracted_value)
+                summary_text = normalized_value or extracted_value
+                display_text = f"{room_label}: {area_or_item} -> {summary_text}"
+                dedupe_basis = summary_text
+                dedupe_key = f"{room_label}|{primary_tag}|{dedupe_basis}".lower()
+                if dedupe_key not in seen_summary_entries[primary_tag]:
+                    seen_summary_entries[primary_tag].add(dedupe_key)
+                    summary_entries[primary_tag].append(display_text)
+        for field_name, source_key in (
+            ("drawers", "drawers_soft_close"),
+            ("hinges", "hinges_soft_close"),
+            ("flooring", "flooring"),
+            ("sink", "sink_info"),
+        ):
+            _append_verification_item(
+                checklist,
+                section_type="room",
+                entity_label=room_label,
+                field_name=field_name,
+                extracted_value=_verification_text(room.get(source_key, "")),
+                source_page_refs=room_page_refs,
+            )
+    for bucket_key, label in (
+        ("door_colours", "Door Colours"),
+        ("handles", "Handles"),
+        ("bench_tops", "Bench Tops"),
+    ):
+        _append_verification_item(
+            checklist,
+            section_type="summary",
+            entity_label="Material Summary",
+            field_name=label,
+            extracted_value=" | ".join(summary_entries[bucket_key]),
+            source_page_refs="",
+        )
+    return checklist
+
+
+def _imperial_verification_summary_bucket_key(tags: list[str]) -> str:
+    normalized = {str(tag).strip().lower() for tag in tags if str(tag).strip()}
+    if "door_colours" in normalized:
+        return "door_colours"
+    if "handles" in normalized:
+        return "handles"
+    if "bench_tops" in normalized:
+        return "bench_tops"
+    return ""
+
+
+def _imperial_verification_row_is_summary_worthy(
+    *,
+    area_or_item: str,
+    extracted_value: str,
+    tags: list[str],
+    needs_review: bool,
+) -> bool:
+    if needs_review:
+        return False
+    bucket_key = _imperial_verification_summary_bucket_key(tags)
+    if not bucket_key:
+        return False
+    title = _verification_text(area_or_item)
+    value = _verification_text(extracted_value)
+    normalized_value = _verification_normalize_summary_value(bucket_key, value)
+    if not title or not value:
+        return False
+    if not normalized_value or re.match(r"(?i)^(?:incl|include|open|split|allow|note)\b", normalized_value):
+        return False
+    if bucket_key == "bench_tops":
+        return "BENCHTOP" in title.upper()
+    if bucket_key == "handles":
+        if not re.search(r"(?i)\b(?:handles?|knob)\b", title):
+            return False
+        if re.search(r"(?i)\b(?:gpo|spice tray|drawer gpo|lighting|led strip|bin\b|casters?)\b", value):
+            return False
+        return True
+    if bucket_key == "door_colours":
+        if not re.search(r"(?i)\b(?:colour|frame|bar back|panel)\b", title):
+            return False
+        if re.search(r"(?i)\b(?:gpo|spice tray|drawer gpo|lighting|led strip|bin\b|casters?|handle|fingerpull|knob)\b", value):
+            return False
+        return True
+    return False
+
+
 def _append_verification_item(
     checklist: list[dict[str, Any]],
     section_type: str,
@@ -872,6 +1026,79 @@ def _verification_text(value: Any) -> str:
                 parts.append(item_text)
         return " | ".join(parts)
     return str(value).strip()
+
+
+def _verification_normalize_summary_value(bucket_key: str, value: str) -> str:
+    text = parsing.normalize_space(value)
+    if bucket_key == "door_colours":
+        text = re.sub(r"(?i)\bCOLOURED?\b", "", text)
+        text = re.sub(r"(?i)\bREFER TO DRAWINGS(?: FOR ALLOCATIONS)?\b.*$", "", text)
+        text = re.sub(r"(?i)\bBLUM\s+AVENTOS\b.*$", "", text)
+        text = re.sub(r"(?i)\bNOTE:\s*.*$", "", text)
+        text = re.sub(r"(?i)\b(?:COLOURED\s+)?BOTTOMS TO OVERHEADS\b.*$", "", text)
+        text = re.sub(r"(?i)\bVERTICAL\s*-\s*GRAIN\b", "Vertical Grain", text)
+        text = re.sub(r"(?i)\bHORIZONTAL\s*-\s*GRAIN\b", "Horizontal Grain", text)
+        text = re.sub(r"\([^)]*(upper|overhead|base|island|bar back|cabinet|panel|run|shelf)[^)]*\)", "", text, flags=re.IGNORECASE)
+        return _verification_strip_summary_tail(
+            text,
+            (
+                r"(?i)\b(?:plain glass\s+)?display cabinet\b.*$",
+                r"(?i)\bto tall open shelves\b.*$",
+                r"(?i)\b(?:to|for)\b[^|;]*\b(upper|overhead|base|island|bar back|cabinetry|run|shelf|shelves)\b.*$",
+            ),
+        )
+    if bucket_key == "handles":
+        text = re.sub(r"(?i)\b([A-Z][A-Z0-9&]+)\s+\1\b", r"\1", text)
+        text = re.sub(r"(?i)\bimage of\b.*$", "", text)
+        text = re.sub(r"(?i)\bas per drawings\b.*$", "", text)
+        text = re.sub(r"(?i)\bPTO\s+(?:where\s+required|where\s+req|req(?:uired)?)\b.*$", "", text)
+        text = re.sub(r"(?i)\bsize shown varies\b.*$", "", text)
+        text = re.sub(r"(?i)\binvestigating\b.*$", "", text)
+        text = re.sub(r"(?i)\bpricing from\b.*$", "", text)
+        text = re.sub(r"\([^)]*(location|up/down|left/right|door|drawer|centre|center)[^)]*\)", "", text, flags=re.IGNORECASE)
+        return _verification_strip_summary_tail(
+            text,
+            (
+                r"(?i)\bdoor location\b.*$",
+                r"(?i)\bdown\s*drawer location\b.*$",
+                r"(?i)\bdrawer location\b.*$",
+                r"(?i)\b(?:centre|center)\s+to\s+profile\b.*$",
+                r"(?i)\bto\s+(?:base|upper|overhead|base cabinets?|upper cabinets?|cabinet locations?)\b.*$",
+            ),
+        )
+    if bucket_key == "bench_tops":
+        text = re.sub(r"(?i)^back benchtops?\s*", "", text)
+        text = re.sub(r"(?i)^wall run bench top\s*", "", text)
+        text = re.sub(r"(?i)^island bench top\s*", "", text)
+        text = re.sub(r"(?i)^island benchtop\s*", "", text)
+        text = re.sub(r"(?i)\b(?:um\s*sink|undermount\s+sink)\b.*$", "", text)
+        text = re.sub(r"(?i)\b(?:stone\s+)?splashback\b.*$", "", text)
+        text = re.sub(r"(?i)\bNOTE:\s*.*$", "", text)
+        text = re.sub(r"(?i)\bIncl\.\s*Spring\s+Free\s+Upgrade\s+Promotion\b.*$", "", text)
+        text = re.sub(r"(?i)\bFree\s+Upgrade\s+Promotion\b.*$", "", text)
+        text = re.sub(
+            r"(?i)\s*-\s*to\s+(?:the\s+)?(?:cooktop run|wall run|wall bench|wall side|island bench|island|powder room\s*\d*|powder\s+room|ensuite\s*\d*|ensuite|main bathroom|bathroom|laundry|vanities?|butler'?s pantry|pantry)\b.*$",
+            "",
+            text,
+        )
+        text = re.sub(
+            r"(?i)\s+\bto\s+(?:the\s+)?(?:cooktop run|wall run|wall bench|wall side|island bench|island|powder room\s*\d*|powder\s+room|ensuite\s*\d*|ensuite|main bathroom|bathroom|laundry|vanities?|butler'?s pantry|pantry)\b.*$",
+            "",
+            text,
+        )
+    return text.strip(" -;,/")
+
+
+def _verification_strip_summary_tail(text: str, patterns: tuple[str, ...]) -> str:
+    normalized = parsing.normalize_space(text)
+    if not normalized:
+        return ""
+    end_index = len(normalized)
+    for pattern in patterns:
+        match = re.search(pattern, normalized)
+        if match:
+            end_index = min(end_index, match.start())
+    return normalized[:end_index].strip(" -;,/")
 
 
 def _load_checklist_json(value: Any) -> list[dict[str, Any]]:
