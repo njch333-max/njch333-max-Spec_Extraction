@@ -891,9 +891,10 @@ def _build_imperial_snapshot_verification_checklist(snapshot: dict[str, Any]) ->
                 supplier = _verification_text(item.get("supplier", ""))
                 description = _verification_text(item.get("specs_or_description", ""))
                 notes = _verification_text(item.get("notes", ""))
+                raw_summary_value = " - ".join(part for part in (supplier, description, notes) if part)
                 extracted_value = _verification_text(parsing._imperial_material_row_display_value_for_view(item))
                 if not extracted_value:
-                    extracted_value = " - ".join(part for part in (supplier, description, notes) if part)
+                    extracted_value = raw_summary_value
                 if not extracted_value:
                     continue
                 tags = [str(tag).strip() for tag in (item.get("tags", []) or []) if str(tag).strip()]
@@ -919,7 +920,7 @@ def _build_imperial_snapshot_verification_checklist(snapshot: dict[str, Any]) ->
                 )
                 for summary_text in _verification_summary_values_for_bucket(
                     primary_tag,
-                    extracted_value,
+                    raw_summary_value or extracted_value,
                     supplier=supplier,
                 ):
                     entry = _verification_find_imperial_summary_entry(
@@ -1370,25 +1371,11 @@ def _verification_imperial_summary_material_candidates(
 def _verification_summary_values_for_bucket(bucket_key: str, raw_value: str, *, supplier: str = "") -> list[str]:
     values: list[str] = []
     candidates = [raw_value]
+    handle_text = parsing.normalize_space(raw_value) if bucket_key == "handles" else ""
     if bucket_key == "handles":
-        handle_text = parsing.normalize_space(raw_value)
-        marker_pattern = re.compile(
-            r"(?i)\b(?:push\s+to\s+open|no\s+handles?(?:\s+on\s+[A-Za-z ]+)?|drawers?\s*-\s*bevel\s+edge\s+finger\s+pull|bevel\s+edge\s+finger\s+pull(?:\s+on\s+[A-Za-z ]+)?|tall\s+door\s+handles?|high\s+split\s+handle|desk\s*-\s*\d+\s+voda\s+profile\s+handle|\d+\s+voda\s+profile\s+handle|voda\s+profile\s+handle|benchseat\s+drawers?\s*-\s*pto|woodgate\s+round\s+cabinet\s+knob|cabinet\s+knob|knob)\b"
-        )
-        split_candidates = [part.strip() for part in re.split(r"\s*\|\s*", handle_text) if part.strip()]
-        if handle_text:
-            matches = list(marker_pattern.finditer(handle_text))
-            if matches:
-                derived_candidates: list[str] = []
-                for index, match in enumerate(matches):
-                    end = matches[index + 1].start() if index + 1 < len(matches) else len(handle_text)
-                    segment = handle_text[match.start() : end].strip(" -|;,")
-                    if segment:
-                        derived_candidates.append(segment)
-                if derived_candidates:
-                    split_candidates = derived_candidates
-        if split_candidates:
-            candidates = split_candidates
+        semantic_candidates = _verification_semantic_imperial_handle_summary_candidates(handle_text)
+        if semantic_candidates:
+            candidates = semantic_candidates
     elif bucket_key in {"door_colours", "bench_tops"}:
         material_candidates = _verification_imperial_summary_material_candidates(bucket_key, raw_value, supplier)
         if material_candidates:
@@ -1400,7 +1387,7 @@ def _verification_summary_values_for_bucket(bucket_key: str, raw_value: str, *, 
         )
         if not normalized or normalized in values:
             continue
-        if bucket_key == "handles" and re.match(r"(?i)^(?:pto|drawers?|benchseat)$", normalized):
+        if bucket_key == "handles" and re.match(r"(?i)^(?:pto|drawers?|benchseat|casters?)$", normalized):
             continue
         values.append(normalized)
     if bucket_key == "handles" and len(values) > 1:
@@ -1439,6 +1426,34 @@ def _verification_normalize_handle_summary_value(value: str) -> str:
 
 def _verification_normalize_imperial_handle_summary_value(value: str) -> str:
     text = parsing.normalize_space(value)
+    text = re.sub(r"^\[[^\]]+\]\s*-\s*", "", text)
+    text = re.sub(r"(?i)\s*-\s*\((Vertical|Horizontal)\)\s*$", r" - \1", text)
+    text = re.sub(
+        r"(?i)\s*-\s*\((?:Investigating[^)]*|pricing[^)]*|(?:Horizontal|Vertical)\s+Install|location[^)]*)\)\s*$",
+        "",
+        text,
+    )
+    text = re.sub(
+        r"(?i)\b(?:Furnware|Titus Tekform|Polytec|Laminex|Kethy|Allegra|Momo|Barchie|Lincoln Sentry|ABI Interiors)\b\s*-\s*",
+        "",
+        text,
+    )
+    text = re.sub(
+        r"(?i)\b(?:Furnware|Titus Tekform|Polytec|Laminex|Kethy|Allegra|Momo|Barchie|Lincoln Sentry|ABI Interiors)\b$",
+        "",
+        text,
+    ).strip(" -|;,")
+    text = re.sub(r"(?i)\b(?:Horizontal|Vertical)\s+Install\b.*$", "", text).strip(" -|;,")
+    if re.search(r"(?i)\bUPPER\s*-\s*FINGERPULL\b", text):
+        return "UPPER - FINGERPULL"
+    if re.search(r"(?i)\bBASE\s*-\s*BEVEL\s+EDGE\s+FINGERPULL\b", text):
+        return "BASE - BEVEL EDGE FINGERPULL"
+    tall_code_match = re.search(r"(?i)\b(?:TALL\s*-\s*)?(S225\.280\.MBK)\b", text)
+    if tall_code_match:
+        return f"TALL - {parsing.normalize_space(tall_code_match.group(1)).rstrip('.') }."
+    chute_match = re.search(r"(?i)\b(?:CHUTE\s+DOOR\s*-\s*)?(S225\.160\.MBK)\b", text)
+    if chute_match:
+        return f"CHUTE DOOR - {parsing.normalize_space(chute_match.group(1)).rstrip('.') }."
     knob_match = re.search(
         r"(?i)\b(?P<body>(?:[A-Z][A-Za-z0-9& ]+\s*-\s*)?(?:Woodgate\s+Round\s+Cabinet\s+Knob|[^|]*?\b(?:cabinet\s+)?knob\b[^|]*?)(?:SKU:Part No:\s*[A-Z0-9.]+)?)",
         text,
@@ -1446,16 +1461,27 @@ def _verification_normalize_imperial_handle_summary_value(value: str) -> str:
     if knob_match:
         knob_text = parsing.normalize_space(knob_match.group("body"))
         knob_text = re.sub(r"(?i)^Handles?\s*-\s*", "", knob_text).strip(" -|;,")
+        knob_text = re.sub(r"(?i)^Barchie\s+", "", knob_text).strip(" -|;,")
+        knob_text = re.sub(r"(?i)\s*\|?\s*SKU:Part No:\s*[A-Z0-9.]+\b", "", knob_text).strip(" -|;,")
         knob_text = re.sub(r"(?i)\s*\|\s*Casters\b.*$", "", knob_text).strip(" -|;,")
         return knob_text
     desk_handle_match = re.search(
-        r"(?i)\b(?:DESK\s*-\s*)?(?P<body>\d+\s+Voda\s+Profile\s+Handle\s+Brushed\s+Nickel\s+\d+\s*mm\s*-\s*SO-2163-[A-Z0-9-]+)\b",
+        r"(?i)\b(?:(?P<prefix>DESK)\s*-\s*)?(?P<body>\d+\s+Voda\s+Profile\s+Handle\s+(?:Brushed\s+Nickel|Matt\s+Black)\s+\d+\s*mm\s*-\s*SO-2163-[A-Z0-9-]+)\b",
         text,
     )
     if desk_handle_match:
-        desk_text = f"DESK - {parsing.normalize_space(desk_handle_match.group('body'))}"
+        desk_prefix = "DESK - " if desk_handle_match.group("prefix") else ""
+        desk_text = f"{desk_prefix}{parsing.normalize_space(desk_handle_match.group('body'))}"
         desk_text = re.sub(r"(?i)\b(?:Furnware|Titus Tekform)\b\s*$", "", desk_text).strip(" -|;,")
         return desk_text
+    ht576_match = re.search(r"(?i)\b(HT576\s*-\s*(?:128|192)\s*-\s*BKO)\b", text)
+    if ht576_match:
+        base = parsing.normalize_space(ht576_match.group(1))
+        if re.search(r"(?i)\bDarwen\s+Cabinet\s+Pull\s+Handle\b", text):
+            base = f"{base} Darwen Cabinet Pull Handle"
+        if re.search(r"(?i)\bBlack\s+Olive\s+Colour\b", text):
+            base = f"{base} - Black Olive Colour"
+        return parsing.normalize_space(base)
     complex_markers = bool(
         re.search(
             r"(?i)\b(?:tall door handles?|high split handle|voda profile handle|hinoki|tekform|so-[a-z0-9-]+|hin[0-9a-z.-]+|benchseat drawers\s*-\s*pto)\b",
@@ -1464,8 +1490,14 @@ def _verification_normalize_imperial_handle_summary_value(value: str) -> str:
     )
     if re.search(r"(?i)\bno\s+handles?\b", text) and not complex_markers and not re.search(r"(?i)\bbevel\s+edge\s+finger\s+pull\b", text):
         return "No handles"
+    if re.search(r"(?i)\btouch\s+catch\b", text):
+        touch_match = re.search(r"(?i)\bTouch catch(?:\s*-\s*Overheads above)?", text)
+        if touch_match:
+            return parsing.normalize_space(touch_match.group(0))
     if re.search(r"(?i)\bpush\s+to\s+open\b", text) and not complex_markers:
         return "Push to open"
+    if re.search(r"(?i)\bDrawers?\s*-\s*Bevel Edge finger pull\b", text):
+        return "Drawers - Bevel Edge finger pull"
     if re.search(r"(?i)\bbevel\s+edge\s+finger\s+pull\b", text) and not re.search(
         r"(?i)\b(?:desk|benchseat|drawers?\s*-|voda|so-[a-z0-9-]+)\b",
         text,
@@ -1474,6 +1506,70 @@ def _verification_normalize_imperial_handle_summary_value(value: str) -> str:
     normalized = _verification_normalize_handle_summary_value(text)
     normalized = re.sub(r"(?i)\b(?:Furnware|Titus Tekform)\b\s*$", "", normalized).strip(" -|;,")
     return normalized
+
+
+def _verification_semantic_imperial_handle_summary_candidates(value: str) -> list[str]:
+    text = parsing.normalize_space(value)
+    if not text:
+        return []
+    if re.search(r"(?i)\bHT576\s*-\s*(?:128|192)\s*-\s*BKO\b", text):
+        normalized = _verification_normalize_imperial_handle_summary_value(text)
+        return [normalized] if normalized else []
+    text = re.sub(
+        r"(?i)\b((?:DESK\s*-\s*)?\d*\s*Voda\s+Profile\s+Handle\s+(?:Brushed\s+Nickel|Matt\s+Black)\s+\d+\s*mm)\s*\|\s*(SO-2163-[A-Z0-9-]+)\b",
+        lambda match: f"{parsing.normalize_space(match.group(1))} - {parsing.normalize_space(match.group(2))}",
+        text,
+    )
+    text = re.sub(r"(?i)\bUPPER\s*-\s*FINGERPULL(?:\s*\([^)]*\))?", lambda match: f" | {match.group(0)} | ", text)
+    text = re.sub(r"(?i)\bBASE\s*-\s*BEVEL\s+EDGE\s+FINGERPULL\b", lambda match: f" | {match.group(0)} | ", text)
+    text = re.sub(r"(?i)\bS225\.280\.MBK\b", lambda match: f" | {match.group(0)} | ", text)
+    text = re.sub(r"(?i)\bS225\.160\.MBK\b", lambda match: f" | {match.group(0)} | ", text)
+    candidates: list[str] = []
+    patterns = (
+        r"(?i)\bUPPER\s*-\s*FINGERPULL(?:\s*\([^)]*\))?",
+        r"(?i)\bBASE\s*-\s*BEVEL\s+EDGE\s+FINGERPULL\b",
+        r"(?i)\bTALL\s*-\s*[A-Z]\d+\.\d+\.?[A-Z]*\b",
+        r"(?i)\bCHUTE\s+DOOR\s*-\s*[A-Z]\d+\.\d+\.?[A-Z]*\b",
+        r"(?i)\bS225\.280\.MBK\b",
+        r"(?i)\bS225\.160\.MBK\b",
+        r"(?i)\bTall Door Handles?\s*-\s*[^|]+",
+        r"(?i)\bHigh Split Handle\s*-\s*[^|]+",
+        r"(?i)\bDrawers?\s*-\s*Bevel Edge finger pull\b",
+        r"(?i)\bBevel edge finger pull(?:\s+on\s+lowers)?\b",
+        r"(?i)\b(?:Handles?\s*-\s*)?(?:Barchie\s+)?Woodgate\s+Round\s+Cabinet\s+Knob(?:\s*\|\s*SKU:Part No:\s*[A-Z0-9.]+)?\b",
+        r"(?i)\bDESK\s*-\s*\d+\s+Voda\s+Profile\s+Handle\s+(?:Brushed\s+Nickel|Matt\s+Black)\s+\d+\s*mm\s*-\s*SO-2163-[A-Z0-9-]+\b",
+        r"(?i)\bBENCHSEAT DRAWERS?\s*-\s*PTO\b",
+        r"(?i)\bPush to open\b",
+        r"(?i)\bNo handles?(?:\s+on\s+[A-Za-z ]+)?\b",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, text):
+            normalized = _verification_normalize_imperial_handle_summary_value(match.group(0))
+            if normalized and normalized not in candidates:
+                candidates.append(normalized)
+    if candidates:
+        return candidates
+    whole_normalized = _verification_normalize_imperial_handle_summary_value(text)
+    if whole_normalized and re.search(
+        r"(?i)\b(?:pm\d+[a-z0-9 /.-]*|hole centres|oa size|matt silver|touch catch|no handles?|push to open|bevel edge finger pull)\b",
+        text,
+    ):
+        return [parsing.normalize_space(re.sub(r"\s*\|\s*", " ", whole_normalized))]
+    fallback_values = [
+        normalized
+        for normalized in (
+            _verification_normalize_imperial_handle_summary_value(part)
+            for part in re.split(r"\s*\|\s*", text)
+        )
+        if normalized and not re.match(r"(?i)^casters?$", normalized)
+    ]
+    if any(re.match(r"(?i)^DESK\s*-\s*\d+\s+Voda\s+Profile\s+Handle\b", value) for value in fallback_values):
+        fallback_values = [
+            value
+            for value in fallback_values
+            if not re.fullmatch(r"(?i)SO-2163-[A-Z0-9-]+", value)
+        ]
+    return fallback_values
 
 
 def _verification_strip_summary_tail(text: str, patterns: tuple[str, ...]) -> str:

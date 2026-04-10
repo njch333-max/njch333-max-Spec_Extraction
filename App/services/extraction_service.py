@@ -1040,6 +1040,73 @@ class ImperialColumnModel:
 
 
 @dataclass
+class ImperialSeparatorModel:
+    visible_vertical_edges: list[float] = field(default_factory=list)
+    visible_horizontal_edges: list[float] = field(default_factory=list)
+    inferred_vertical_edges: list[float] = field(default_factory=list)
+    inferred_horizontal_edges: list[float] = field(default_factory=list)
+    visible_vertical_segments: list[dict[str, float]] = field(default_factory=list)
+    visible_horizontal_segments: list[dict[str, float]] = field(default_factory=list)
+    inferred_vertical_segments: list[dict[str, float]] = field(default_factory=list)
+    inferred_horizontal_segments: list[dict[str, float]] = field(default_factory=list)
+    image_bboxes: list[dict[str, float]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "visible_vertical_edges": [float(value) for value in self.visible_vertical_edges],
+            "visible_horizontal_edges": [float(value) for value in self.visible_horizontal_edges],
+            "inferred_vertical_edges": [float(value) for value in self.inferred_vertical_edges],
+            "inferred_horizontal_edges": [float(value) for value in self.inferred_horizontal_edges],
+            "visible_vertical_segments": [
+                {
+                    "edge": float(item.get("edge", 0.0) or 0.0),
+                    "start": float(item.get("start", 0.0) or 0.0),
+                    "end": float(item.get("end", 0.0) or 0.0),
+                }
+                for item in self.visible_vertical_segments
+                if isinstance(item, dict)
+            ],
+            "visible_horizontal_segments": [
+                {
+                    "edge": float(item.get("edge", 0.0) or 0.0),
+                    "start": float(item.get("start", 0.0) or 0.0),
+                    "end": float(item.get("end", 0.0) or 0.0),
+                }
+                for item in self.visible_horizontal_segments
+                if isinstance(item, dict)
+            ],
+            "inferred_vertical_segments": [
+                {
+                    "edge": float(item.get("edge", 0.0) or 0.0),
+                    "start": float(item.get("start", 0.0) or 0.0),
+                    "end": float(item.get("end", 0.0) or 0.0),
+                }
+                for item in self.inferred_vertical_segments
+                if isinstance(item, dict)
+            ],
+            "inferred_horizontal_segments": [
+                {
+                    "edge": float(item.get("edge", 0.0) or 0.0),
+                    "start": float(item.get("start", 0.0) or 0.0),
+                    "end": float(item.get("end", 0.0) or 0.0),
+                }
+                for item in self.inferred_horizontal_segments
+                if isinstance(item, dict)
+            ],
+            "image_bboxes": [
+                {
+                    "x0": float(item.get("x0", 0.0) or 0.0),
+                    "x1": float(item.get("x1", 0.0) or 0.0),
+                    "top": float(item.get("top", 0.0) or 0.0),
+                    "bottom": float(item.get("bottom", 0.0) or 0.0),
+                }
+                for item in self.image_bboxes
+                if isinstance(item, dict)
+            ],
+        }
+
+
+@dataclass
 class ImperialCell:
     text: str
     col_role: str
@@ -1288,6 +1355,11 @@ def _canonicalize_imperial_joinery_material_layout(
             canonical_row = _canonicalize_imperial_joinery_row(block_label, raw_row)
             if canonical_row:
                 canonical_rows.append(canonical_row)
+    separator_model = (
+        _load_pdfplumber_page_separator_model(str(document_path or ""), page_no)
+        if document_path and page_no > 0
+        else ImperialSeparatorModel()
+    )
     repaired_page = _repair_imperial_joinery_grid_page(
         canonical_rows=canonical_rows,
         raw_page_text=raw_page_text,
@@ -1296,6 +1368,7 @@ def _canonicalize_imperial_joinery_material_layout(
         page_no=page_no,
         table_rows=table_rows or [],
         page_words=_load_pdfplumber_page_words(str(document_path or ""), page_no) if document_path and page_no > 0 else (),
+        separator_model=separator_model,
     )
     if repaired_page and repaired_page.rows:
         return repaired_page.to_layout()
@@ -1334,9 +1407,15 @@ def _repair_imperial_joinery_grid_page(
     page_no: int = 0,
     table_rows: list[Any] | None = None,
     page_words: tuple[tuple[float, float, str], ...] = (),
+    separator_model: ImperialSeparatorModel | None = None,
 ) -> ImperialGridPage | None:
     normalized_room = parsing.normalize_space(room_scope)
-    word_grid_rows, unresolved_rows = _extract_imperial_joinery_word_grid_rows(page_words, room_scope=normalized_room, page_no=page_no)
+    word_grid_rows, unresolved_rows = _extract_imperial_joinery_word_grid_rows(
+        page_words,
+        room_scope=normalized_room,
+        page_no=page_no,
+        separator_model=separator_model or ImperialSeparatorModel(),
+    )
     text_rows = word_grid_rows or _extract_imperial_joinery_text_grid_rows(raw_page_text, room_scope=normalized_room)
     candidate_rows = [
         _imperial_grid_row_from_layout_row(row, room_scope=normalized_room, row_order=index)
@@ -1382,6 +1461,392 @@ def _load_pdfplumber_page_words(document_path: str, page_no: int) -> tuple[tuple
             continue
         normalized_words.append((float(word.get("top", 0.0) or 0.0), float(word.get("x0", 0.0) or 0.0), text))
     return tuple(normalized_words)
+
+
+def _imperial_separator_edge_values(items: list[dict[str, Any]], *, keys: tuple[str, ...]) -> list[float]:
+    values: list[float] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        for key in keys:
+            try:
+                value = float(item.get(key, 0.0) or 0.0)
+            except (TypeError, ValueError):
+                value = 0.0
+            if value > 0:
+                values.append(round(value, 1))
+    return sorted(set(values))
+
+
+def _imperial_separator_segments(
+    items: list[dict[str, Any]],
+    *,
+    orientation: str,
+) -> list[dict[str, float]]:
+    segments: list[dict[str, float]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            x0 = float(item.get("x0", 0.0) or 0.0)
+            x1 = float(item.get("x1", 0.0) or 0.0)
+            top = float(item.get("top", 0.0) or 0.0)
+            bottom = float(item.get("bottom", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if orientation == "horizontal":
+            if x1 <= x0:
+                continue
+            if top <= 0.0 and bottom <= 0.0:
+                continue
+            edges = [value for value in (top, bottom) if value > 0.0]
+            if not edges:
+                continue
+            for edge in sorted(set(round(value, 1) for value in edges)):
+                segments.append({
+                    "edge": edge,
+                    "start": round(x0, 1),
+                    "end": round(x1, 1),
+                })
+        else:
+            if bottom <= top:
+                continue
+            if x0 <= 0.0 and x1 <= 0.0:
+                continue
+            edges = [value for value in (x0, x1) if value > 0.0]
+            if not edges:
+                continue
+            for edge in sorted(set(round(value, 1) for value in edges)):
+                segments.append({
+                    "edge": edge,
+                    "start": round(top, 1),
+                    "end": round(bottom, 1),
+                })
+    normalized: list[dict[str, float]] = []
+    seen: set[tuple[float, float, float]] = set()
+    for segment in segments:
+        key = (
+            round(float(segment.get("edge", 0.0) or 0.0), 1),
+            round(float(segment.get("start", 0.0) or 0.0), 1),
+            round(float(segment.get("end", 0.0) or 0.0), 1),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(segment)
+    return sorted(normalized, key=lambda item: (item["edge"], item["start"], item["end"]))
+
+
+def _imperial_bridge_separator_segments_across_images(
+    *,
+    orientation: str,
+    visible_segments: list[dict[str, float]],
+    image_bboxes: list[dict[str, float]],
+) -> list[dict[str, float]]:
+    if not visible_segments or not image_bboxes:
+        return []
+    inferred: list[dict[str, float]] = []
+    if orientation == "horizontal":
+        for image_box in image_bboxes:
+            left_segments = [
+                segment
+                for segment in visible_segments
+                if image_box["top"] - 6.0 <= float(segment.get("edge", 0.0) or 0.0) <= image_box["bottom"] + 6.0
+                and float(segment.get("end", 0.0) or 0.0) <= image_box["x0"] + 8.0
+            ]
+            right_segments = [
+                segment
+                for segment in visible_segments
+                if image_box["top"] - 6.0 <= float(segment.get("edge", 0.0) or 0.0) <= image_box["bottom"] + 6.0
+                and float(segment.get("start", 0.0) or 0.0) >= image_box["x1"] - 8.0
+            ]
+            for left in left_segments:
+                for right in right_segments:
+                    if abs(float(left.get("edge", 0.0) or 0.0) - float(right.get("edge", 0.0) or 0.0)) > 4.0:
+                        continue
+                    inferred.append(
+                        {
+                            "edge": round((float(left.get("edge", 0.0) or 0.0) + float(right.get("edge", 0.0) or 0.0)) / 2.0, 1),
+                            "start": round(float(left.get("start", 0.0) or 0.0), 1),
+                            "end": round(float(right.get("end", 0.0) or 0.0), 1),
+                        }
+                    )
+    else:
+        for image_box in image_bboxes:
+            above_segments = [
+                segment
+                for segment in visible_segments
+                if image_box["x0"] - 6.0 <= float(segment.get("edge", 0.0) or 0.0) <= image_box["x1"] + 6.0
+                and float(segment.get("end", 0.0) or 0.0) <= image_box["top"] + 8.0
+            ]
+            below_segments = [
+                segment
+                for segment in visible_segments
+                if image_box["x0"] - 6.0 <= float(segment.get("edge", 0.0) or 0.0) <= image_box["x1"] + 6.0
+                and float(segment.get("start", 0.0) or 0.0) >= image_box["bottom"] - 8.0
+            ]
+            for above in above_segments:
+                for below in below_segments:
+                    if abs(float(above.get("edge", 0.0) or 0.0) - float(below.get("edge", 0.0) or 0.0)) > 4.0:
+                        continue
+                    inferred.append(
+                        {
+                            "edge": round((float(above.get("edge", 0.0) or 0.0) + float(below.get("edge", 0.0) or 0.0)) / 2.0, 1),
+                            "start": round(float(above.get("start", 0.0) or 0.0), 1),
+                            "end": round(float(below.get("end", 0.0) or 0.0), 1),
+                        }
+                    )
+    normalized: list[dict[str, float]] = []
+    seen: set[tuple[float, float, float]] = set()
+    for segment in inferred:
+        key = (
+            round(float(segment.get("edge", 0.0) or 0.0), 1),
+            round(float(segment.get("start", 0.0) or 0.0), 1),
+            round(float(segment.get("end", 0.0) or 0.0), 1),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(segment)
+    return sorted(normalized, key=lambda item: (item["edge"], item["start"], item["end"]))
+
+
+def _infer_imperial_separator_model_for_page(
+    *,
+    page: Any,
+    visible_horizontal_edges: list[float],
+    visible_vertical_edges: list[float],
+) -> ImperialSeparatorModel:
+    image_bboxes: list[dict[str, float]] = []
+    for raw_image in list(getattr(page, "images", []) or []):
+        if not isinstance(raw_image, dict):
+            continue
+        try:
+            x0 = float(raw_image.get("x0", 0.0) or 0.0)
+            x1 = float(raw_image.get("x1", 0.0) or 0.0)
+            top = float(raw_image.get("top", 0.0) or 0.0)
+            bottom = float(raw_image.get("bottom", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if x1 <= x0 or bottom <= top:
+            continue
+        image_bboxes.append({"x0": x0, "x1": x1, "top": top, "bottom": bottom})
+    visible_horizontal_segments = _imperial_separator_segments(
+        list(getattr(page, "lines", []) or []) + list(getattr(page, "rects", []) or []),
+        orientation="horizontal",
+    )
+    visible_vertical_segments = _imperial_separator_segments(
+        list(getattr(page, "lines", []) or []) + list(getattr(page, "rects", []) or []),
+        orientation="vertical",
+    )
+    inferred_horizontal_edges: list[float] = []
+    inferred_vertical_edges: list[float] = []
+    inferred_horizontal_segments = _imperial_bridge_separator_segments_across_images(
+        orientation="horizontal",
+        visible_segments=visible_horizontal_segments,
+        image_bboxes=image_bboxes,
+    )
+    inferred_vertical_segments = _imperial_bridge_separator_segments_across_images(
+        orientation="vertical",
+        visible_segments=visible_vertical_segments,
+        image_bboxes=image_bboxes,
+    )
+    if len(visible_vertical_edges) >= 2:
+        inferred_vertical_edges = sorted(set(round(value, 1) for value in visible_vertical_edges))
+    if image_bboxes and visible_horizontal_edges:
+        for image_box in image_bboxes:
+            above = [
+                edge
+                for edge in visible_horizontal_edges
+                if image_box["top"] - 18.0 <= edge <= image_box["top"] + 18.0
+            ]
+            below = [
+                edge
+                for edge in visible_horizontal_edges
+                if image_box["bottom"] - 18.0 <= edge <= image_box["bottom"] + 18.0
+            ]
+            if above:
+                inferred_horizontal_edges.extend(above)
+            if below:
+                inferred_horizontal_edges.extend(below)
+    inferred_horizontal_edges.extend(
+        round(float(segment.get("edge", 0.0) or 0.0), 1)
+        for segment in inferred_horizontal_segments
+        if float(segment.get("edge", 0.0) or 0.0) > 0.0
+    )
+    inferred_vertical_edges.extend(
+        round(float(segment.get("edge", 0.0) or 0.0), 1)
+        for segment in inferred_vertical_segments
+        if float(segment.get("edge", 0.0) or 0.0) > 0.0
+    )
+    return ImperialSeparatorModel(
+        visible_vertical_edges=visible_vertical_edges,
+        visible_horizontal_edges=visible_horizontal_edges,
+        inferred_vertical_edges=sorted(set(round(value, 1) for value in inferred_vertical_edges)),
+        inferred_horizontal_edges=sorted(set(round(value, 1) for value in inferred_horizontal_edges)),
+        visible_vertical_segments=visible_vertical_segments,
+        visible_horizontal_segments=visible_horizontal_segments,
+        inferred_vertical_segments=inferred_vertical_segments,
+        inferred_horizontal_segments=inferred_horizontal_segments,
+        image_bboxes=image_bboxes,
+    )
+
+
+@functools.lru_cache(maxsize=256)
+def _load_pdfplumber_page_separator_model(document_path: str, page_no: int) -> ImperialSeparatorModel:
+    path = str(document_path or "").strip()
+    if not path or page_no <= 0:
+        return ImperialSeparatorModel()
+    try:
+        import pdfplumber  # type: ignore
+    except Exception:
+        return ImperialSeparatorModel()
+    try:
+        with pdfplumber.open(path) as pdf:
+            if page_no - 1 < 0 or page_no - 1 >= len(pdf.pages):
+                return ImperialSeparatorModel()
+            page = pdf.pages[page_no - 1]
+            visible_horizontal_edges = _imperial_separator_edge_values(
+                list(getattr(page, "lines", []) or []),
+                keys=("top", "bottom"),
+            )
+            visible_vertical_edges = _imperial_separator_edge_values(
+                list(getattr(page, "lines", []) or []),
+                keys=("x0", "x1"),
+            )
+            rects = list(getattr(page, "rects", []) or [])
+            visible_horizontal_edges.extend(
+                value
+                for value in _imperial_separator_edge_values(rects, keys=("top", "bottom"))
+                if value not in visible_horizontal_edges
+            )
+            visible_vertical_edges.extend(
+                value
+                for value in _imperial_separator_edge_values(rects, keys=("x0", "x1"))
+                if value not in visible_vertical_edges
+            )
+            return _infer_imperial_separator_model_for_page(
+                page=page,
+                visible_horizontal_edges=sorted(set(visible_horizontal_edges)),
+                visible_vertical_edges=sorted(set(visible_vertical_edges)),
+            )
+    except Exception:
+        return ImperialSeparatorModel()
+
+
+def _enrich_imperial_separator_model_for_row_bands(
+    separator_model: ImperialSeparatorModel,
+    row_bands: list[dict[str, Any]],
+) -> ImperialSeparatorModel:
+    if not row_bands:
+        return separator_model
+    inferred_horizontal_edges = list(separator_model.inferred_horizontal_edges)
+    visible_horizontal_edges = list(separator_model.visible_horizontal_edges)
+    for previous, current in zip(row_bands, row_bands[1:]):
+        previous_top = float(previous.get("top", 0.0) or 0.0)
+        current_top = float(current.get("top", 0.0) or 0.0)
+        if current_top <= previous_top:
+            continue
+        midpoint = round((previous_top + current_top) / 2.0, 1)
+        if any(abs(edge - midpoint) <= 4.0 for edge in visible_horizontal_edges):
+            continue
+        gap = current_top - previous_top
+        current_text = parsing.normalize_space(str(current.get("text", "") or ""))
+        if gap >= 18.0:
+            inferred_horizontal_edges.append(midpoint)
+            continue
+        if current_text and _imperial_five_column_item_starts_row(current_text):
+            inferred_horizontal_edges.append(midpoint)
+    return ImperialSeparatorModel(
+        visible_vertical_edges=list(separator_model.visible_vertical_edges),
+        visible_horizontal_edges=list(separator_model.visible_horizontal_edges),
+        inferred_vertical_edges=list(separator_model.inferred_vertical_edges),
+        inferred_horizontal_edges=sorted(set(round(value, 1) for value in inferred_horizontal_edges)),
+        visible_vertical_segments=list(separator_model.visible_vertical_segments),
+        visible_horizontal_segments=list(separator_model.visible_horizontal_segments),
+        inferred_vertical_segments=list(separator_model.inferred_vertical_segments),
+        inferred_horizontal_segments=list(separator_model.inferred_horizontal_segments),
+        image_bboxes=list(separator_model.image_bboxes),
+    )
+
+
+def _imperial_separator_confidence_for_boundary(
+    separator_model: ImperialSeparatorModel,
+    *,
+    previous_bottom: float,
+    current_top: float,
+) -> str:
+    if previous_bottom <= 0 or current_top <= 0 or current_top <= previous_bottom:
+        return "none"
+    midpoint = (previous_bottom + current_top) / 2.0
+    boundary_min = previous_bottom + 1.5
+    boundary_max = current_top + 3.5
+    if any(
+        abs(edge - midpoint) <= 6.0 or boundary_min <= edge <= boundary_max
+        for edge in separator_model.visible_horizontal_edges
+    ):
+        return "visible"
+    if any(
+        abs(edge - midpoint) <= 6.0 or boundary_min <= edge <= boundary_max
+        for edge in separator_model.inferred_horizontal_edges
+    ):
+        return "inferred_high"
+    if current_top - previous_bottom >= 14.0:
+        return "inferred_low"
+    return "none"
+
+
+def _imperial_visual_fragment_from_row(
+    row: ImperialFiveColumnRow,
+    *,
+    separator_model: ImperialSeparatorModel,
+    previous_row: ImperialFiveColumnRow | None = None,
+) -> dict[str, Any]:
+    provenance = _coerce_provenance_dict(row.provenance)
+    area_box = _coerce_provenance_dict(provenance.get("area_or_item"))
+    description_box = _coerce_provenance_dict(provenance.get("specs_or_description"))
+    supplier_box = _coerce_provenance_dict(provenance.get("supplier"))
+    notes_box = _coerce_provenance_dict(provenance.get("notes"))
+    top_candidates = [
+        float(box.get("top", 0.0) or 0.0)
+        for box in (area_box, description_box, supplier_box, notes_box)
+        if isinstance(box, dict) and float(box.get("top", 0.0) or 0.0) > 0.0
+    ]
+    bottom_candidates = [
+        float(box.get("bottom", 0.0) or 0.0)
+        for box in (area_box, description_box, supplier_box, notes_box)
+        if isinstance(box, dict) and float(box.get("bottom", 0.0) or 0.0) > 0.0
+    ]
+    previous_bottom = 0.0
+    if previous_row is not None:
+        previous_provenance = _coerce_provenance_dict(previous_row.provenance)
+        prev_boxes = [
+            _coerce_provenance_dict(previous_provenance.get(key))
+            for key in ("area_or_item", "specs_or_description", "supplier", "notes")
+        ]
+        previous_bottom = max(
+            (
+                float(box.get("bottom", 0.0) or 0.0)
+                for box in prev_boxes
+                if isinstance(box, dict) and float(box.get("bottom", 0.0) or 0.0) > 0.0
+            ),
+            default=0.0,
+        )
+    current_top = min(top_candidates) if top_candidates else 0.0
+    return {
+        "area_or_item": parsing.normalize_space(row.area_or_item),
+        "specs_or_description": parsing.normalize_space(row.specs_or_description),
+        "supplier": parsing.normalize_space(row.supplier),
+        "notes": parsing.normalize_space(row.notes),
+        "row_band": int(provenance.get("row_band", 0) or 0),
+        "top": current_top,
+        "bottom": max(bottom_candidates) if bottom_candidates else current_top,
+        "separator_confidence_from_previous": _imperial_separator_confidence_for_boundary(
+            separator_model,
+            previous_bottom=previous_bottom,
+            current_top=current_top,
+        ),
+    }
 
 
 @functools.lru_cache(maxsize=256)
@@ -1838,6 +2303,7 @@ def _build_imperial_five_column_rows_from_cells(
     *,
     room_scope: str,
     page_no: int = 0,
+    separator_model: ImperialSeparatorModel | None = None,
 ) -> list[ImperialFiveColumnRow]:
     if not cells:
         return []
@@ -1905,6 +2371,7 @@ def _build_imperial_five_column_rows_from_cells(
             "canonical_label": label,
             "match_source": match_source,
             "raw_area_or_item": original_area_or_item,
+            "separator_model": (separator_model or ImperialSeparatorModel()).to_dict(),
         }
         if recovered_area_or_item:
             provenance["recovered_area_or_item"] = recovered_area_or_item
@@ -2011,8 +2478,31 @@ def _repair_imperial_five_column_rows(rows: list[ImperialFiveColumnRow]) -> list
             canonical_label=label,
         )
         merged_provenance = _coerce_provenance_dict(current.provenance)
+        separator_model = ImperialSeparatorModel(**{
+            key: value
+            for key, value in _coerce_provenance_dict(merged_provenance.get("separator_model")).items()
+            if key in {
+                "visible_vertical_edges",
+                "visible_horizontal_edges",
+                "inferred_vertical_edges",
+                "inferred_horizontal_edges",
+                "visible_vertical_segments",
+                "visible_horizontal_segments",
+                "inferred_vertical_segments",
+                "inferred_horizontal_segments",
+                "image_bboxes",
+            }
+        }) if _coerce_provenance_dict(merged_provenance.get("separator_model")) else ImperialSeparatorModel()
         merged_provenance["sequence_repair_span"] = len(chunk)
         merged_provenance["sequence_repair_area_or_item"] = combined_area
+        merged_provenance["visual_fragments"] = [
+            _imperial_visual_fragment_from_row(
+                candidate,
+                separator_model=separator_model,
+                previous_row=chunk[idx - 1] if idx > 0 else None,
+            )
+            for idx, candidate in enumerate(chunk)
+        ]
         if overflow:
             merged_provenance["area_or_item_overflow"] = overflow
         return ImperialFiveColumnRow(
@@ -2241,9 +2731,15 @@ def _build_imperial_logical_rows_from_cells(
     *,
     room_scope: str,
     page_no: int = 0,
+    separator_model: ImperialSeparatorModel | None = None,
 ) -> list[ImperialLogicalRow]:
     row_items = _repair_imperial_five_column_rows(
-        _build_imperial_five_column_rows_from_cells(cells, room_scope=room_scope, page_no=page_no)
+        _build_imperial_five_column_rows_from_cells(
+            cells,
+            room_scope=room_scope,
+            page_no=page_no,
+            separator_model=separator_model,
+        )
     )
     logical_rows: list[ImperialLogicalRow] = []
     pending_items: list[ImperialFiveColumnRow] = []
@@ -2543,6 +3039,7 @@ def _extract_imperial_joinery_word_grid_rows(
     *,
     room_scope: str,
     page_no: int = 0,
+    separator_model: ImperialSeparatorModel | None = None,
 ) -> tuple[list[ImperialGridRow], list[dict[str, Any]]]:
     if not page_words:
         return [], []
@@ -2550,10 +3047,24 @@ def _extract_imperial_joinery_word_grid_rows(
     _, table_header_index, content_rows, _ = _split_imperial_word_page_regions(row_bands)
     if not content_rows:
         return [], []
+    separator_model = _enrich_imperial_separator_model_for_row_bands(
+        separator_model or ImperialSeparatorModel(),
+        content_rows,
+    )
     column_model = _infer_imperial_column_model(row_bands, table_header_index=table_header_index)
     cells = _extract_imperial_cells_from_word_rows(content_rows, column_model=column_model)
-    five_column_rows = _build_imperial_five_column_rows_from_cells(cells, room_scope=room_scope, page_no=page_no)
-    logical_rows = _build_imperial_logical_rows_from_cells(cells, room_scope=room_scope, page_no=page_no)
+    five_column_rows = _build_imperial_five_column_rows_from_cells(
+        cells,
+        room_scope=room_scope,
+        page_no=page_no,
+        separator_model=separator_model,
+    )
+    logical_rows = _build_imperial_logical_rows_from_cells(
+        cells,
+        room_scope=room_scope,
+        page_no=page_no,
+        separator_model=separator_model,
+    )
     rows: list[ImperialGridRow] = []
     for logical_row in logical_rows:
         built = logical_row.to_grid_row()
@@ -2624,6 +3135,13 @@ def _should_defer_imperial_word_grid_fragment_to_next_row(
         return False
     current_label = parsing.normalize_space(str(current.get("row_label", "") or "")).upper()
     next_label_upper = parsing.normalize_space(next_label).upper()
+    if current_label.startswith("HANDLES") and next_label_upper.startswith("NO HANDLES"):
+        return bool(
+            re.search(
+                r"(?i)\b(?:recessed\s+f(?:i|in)d?ger\s+space|touch\s+catch|no\s+handles?|fridge|microwave|cooktop|beside|above|below)\b",
+                fragment_text,
+            )
+        )
     if next_label_upper.startswith("HANDLES") and current_label == "KICKBOARDS":
         return bool(
             re.search(r"(?i)\b(?:fingerpull|fing[ee]r\s*pull|bevel edge|recessed finger|touch catch|required\)?|vertical|horizontal|no handles?)\b", fragment_text)

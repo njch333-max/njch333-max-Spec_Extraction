@@ -3443,6 +3443,7 @@ def _collapse_repeated_token_sequence(text: str) -> str:
     normalized_text = normalize_space(text)
     if not normalized_text:
         return ""
+    normalized_text = re.sub(r"(?i)\b(\d+\s*MM)\s+\1\b", r"\1", normalized_text)
     dash_parts = [part.strip() for part in normalized_text.split(" - ")]
     if len(dash_parts) > 1:
         deduped_parts: list[str] = []
@@ -5908,6 +5909,396 @@ def _imperial_material_row_display_value(*, supplier: str, description: str, not
     return " - ".join(part for part in (supplier, description, notes) if normalize_space(part))
 
 
+def _imperial_material_row_display_line(*, supplier: str, description: str, notes: str) -> str:
+    supplier_text = normalize_brand_casing_text(normalize_space(supplier)).strip(" -|;,")
+    description_text = _collapse_repeated_token_sequence(
+        normalize_brand_casing_text(normalize_space(description))
+    ).strip(" -|;,")
+    notes_text = _collapse_repeated_token_sequence(
+        normalize_brand_casing_text(_imperial_normalize_handle_note_text(notes))
+    ).strip(" -|;,")
+    if supplier_text:
+        description_text = _imperial_strip_supplier_duplication(supplier_text, description_text)
+        notes_text = _imperial_strip_supplier_duplication(supplier_text, notes_text)
+    parts: list[str] = []
+    if supplier_text:
+        parts.append(f"[{supplier_text}]")
+    if description_text:
+        parts.append(description_text)
+    if notes_text:
+        parts.append(f"({notes_text})")
+    return " - ".join(part for part in parts if part)
+
+
+def _imperial_handle_description_prefers_empty_supplier(description: str) -> bool:
+    cleaned = normalize_space(description)
+    if not cleaned:
+        return True
+    branded_markers = (
+        r"(?i)\b(?:Momo|Hinoki|Voda|Woodgate|Barchie|Kethy|Allegra|Tekform|Titus|Furnware|Lincoln Sentry|ABI Interiors)\b",
+        r"(?i)\bSO-\d{4}-[A-Z0-9-]+\b",
+        r"(?i)\bS\d+\.\d+\.?[A-Z]*\b",
+        r"(?i)\bPM\d+[A-Z0-9 /.-]*\b",
+    )
+    if any(re.search(pattern, cleaned) for pattern in branded_markers):
+        return False
+    return bool(
+        re.search(
+            r"(?i)\b(?:push\s+to\s+open|pto\b|no\s+handles?|touch\s+catch|recessed\s+f(?:i|in)d?ger\s+space|bevel\s+edge\s+finger\s+pull)\b",
+            cleaned,
+        )
+    )
+
+
+def _imperial_handle_context_looks_relevant(text: str) -> bool:
+    cleaned = normalize_space(text)
+    if not cleaned:
+        return False
+    if _imperial_handle_block_marker_count_enhanced(cleaned) > 0:
+        return True
+    return bool(
+        re.search(
+            r"(?i)\b(?:handle|handles|knob|fingerpull|finger pull|touch\s+catch|no\s+handles?|push\s+to\s+open|pto\b|voda|darwen|hinoki|woodgate|trouser rack|casters?|ht576|pm2817|6368-[A-Z0-9-]+|s225\.\d+\.?[A-Z]*|so-2163-[A-Z0-9-]+)\b",
+            cleaned,
+        )
+    )
+
+
+def _imperial_handle_context_inputs(provenance: dict[str, Any]) -> tuple[str, str, str]:
+    if not isinstance(provenance, dict):
+        return "", "", ""
+    page_text_handle_block = normalize_space(str(provenance.get("page_text_handle_block", "") or ""))
+    if not _imperial_handle_context_looks_relevant(page_text_handle_block):
+        page_text_handle_block = ""
+    prefix_lines_raw = provenance.get("page_text_prefix_lines", [])
+    prefix_lines: list[str] = []
+    if isinstance(prefix_lines_raw, list):
+        prefix_lines = [
+            normalize_space(str(line or ""))
+            for line in prefix_lines_raw
+            if _imperial_handle_context_looks_relevant(str(line or ""))
+        ]
+    inline_before = normalize_space(str(provenance.get("page_text_inline_before_label", "") or ""))
+    if inline_before and not _imperial_handle_context_looks_relevant(inline_before):
+        inline_before = ""
+    return page_text_handle_block, " | ".join(prefix_lines), inline_before
+
+
+def _imperial_strip_handle_supplier_tokens(description: str, supplier_display: str) -> str:
+    cleaned = normalize_space(description)
+    if not cleaned:
+        return ""
+    supplier_tokens = [
+        normalize_space(part)
+        for part in re.split(r"\s*\|\s*", normalize_space(supplier_display))
+        if normalize_space(part)
+    ]
+    supplier_tokens.extend(IMPERIAL_HANDLE_SUPPLIER_HINTS)
+    for supplier_token in _unique(supplier_tokens):
+        if not supplier_token:
+            continue
+        cleaned = re.sub(rf"(?i)^\s*{re.escape(supplier_token)}\s*-\s*", "", cleaned)
+        cleaned = re.sub(rf"(?i)(?:\s*\|\s*)?{re.escape(supplier_token)}(?=\s*-\s*(?:Horizontal|Vertical)\b)", "", cleaned)
+        cleaned = re.sub(rf"(?i)\b{re.escape(supplier_token)}\b", " ", cleaned)
+    cleaned = normalize_space(re.sub(r"(?:\s*\|\s*){2,}", " | ", cleaned)).strip(" -|;,")
+    return cleaned
+
+
+_IMPERIAL_ENHANCED_HANDLE_MARKER_PATTERNS: tuple[str, ...] = (
+    r"(?i)\bTall Door Handles?\b",
+    r"(?i)\bHigh Split Handle\b",
+    r"(?i)\bUPPER\s*-\s*FINGERPULL(?:\s*\([^)]*\))?\b",
+    r"(?i)\bBASE\s*-\s*BEVEL\s+EDGE\s+FINGERPULL\b",
+    r"(?i)\bTALL\s*-\s*S225\.280\.MBK\.?\b",
+    r"(?i)\bCHUTE\s+DOOR\s*-\s*S225\.160\.MBK\.?\b",
+    r"(?i)\bHT576\s*-\s*(?:128|192)\s*-\s*BKO\b",
+    r"(?i)\bPM2817\s*/\s*(?:192|288)\s*/\s*MSIL\b",
+    r"(?i)\b6368-(?:160|224|K)-?brushed nickel\b",
+    r"(?i)\bDrawers?\s*-\s*Bevel Edge finger pull\b",
+    r"(?i)\bDESK\s*-\s*\d+\s+Voda\s+Profile\s+Handle\b",
+    r"(?i)\bBENCHSEAT DRAWERS\s*-\s*PTO\b",
+    r"(?i)\bBevel edge finger pull on lowers\b",
+    r"(?i)\bNo handles on uppers\b",
+    r"(?i)\bTalls?\s*-\s*Tall Door Handles?\b",
+    r"(?i)\bPush to open\b",
+    r"(?i)\bTROUSER RACK\b",
+    r"(?i)\bEVYN['бп]?S ROOM DRAWERS?\s*&\s*SHELF\b",
+    r"(?i)\b(?:Handles?\s*-\s*)?Woodgate Round Cabinet Knob\b",
+    r"(?i)\bCasters?\b",
+)
+
+
+def _imperial_handle_block_entry_starts_enhanced(text: str) -> bool:
+    cleaned = normalize_space(text)
+    if not cleaned:
+        return False
+    cleaned = re.sub(
+        r"(?i)^(?:Furnware|Titus Tekform|Lincoln Sentry|ABI Interiors|Polytec|Laminex|Kethy|Allegra|Barchie)\s*-\s*",
+        "",
+        cleaned,
+    )
+    if _imperial_handle_block_entry_starts(cleaned):
+        return True
+    start_patterns = (
+        r"(?i)^UPPER\s*-\s*FINGERPULL(?:\s*\([^)]*\))?\b",
+        r"(?i)^BASE\s*-\s*BEVEL\s+EDGE\s+FINGERPULL\b",
+        r"(?i)^TALL\s*-\s*S225\.280\.MBK\.?\b",
+        r"(?i)^CHUTE\s+DOOR\s*-\s*S225\.160\.MBK\.?\b",
+        r"(?i)^HT576\s*-\s*(?:128|192)\s*-\s*BKO\b",
+        r"(?i)^PM2817\s*/\s*(?:192|288)\s*/\s*MSIL\b",
+        r"(?i)^6368-(?:160|224|K)-?brushed nickel\b",
+    )
+    return any(re.search(pattern, cleaned) for pattern in start_patterns)
+
+
+def _imperial_handle_block_marker_count_enhanced(text: str) -> int:
+    cleaned = normalize_space(text)
+    if not cleaned:
+        return 0
+    return sum(1 for pattern in _IMPERIAL_ENHANCED_HANDLE_MARKER_PATTERNS if re.search(pattern, cleaned))
+
+
+def _imperial_handle_fragment_prefers_continuation_enhanced(
+    row_label: str,
+    previous_description: str,
+    description: str,
+    supplier: str,
+    notes: str,
+    separator_confidence: str,
+) -> bool:
+    if _imperial_handle_fragment_prefers_continuation(
+        row_label,
+        previous_description,
+        description,
+        supplier,
+        notes,
+        separator_confidence,
+    ):
+        return True
+    normalized_description = normalize_space(description)
+    normalized_previous = normalize_space(previous_description)
+    normalized_notes = _imperial_normalize_handle_note_text(notes)
+    install_note_only = bool(
+        re.fullmatch(
+            r"(?i)(?:Horizontal/Vertical|Vertical Install|Horizontal Install|Vertical on doors|Horizontal on drawers|Vertical on drawers|Horizontal on doors|vertical on tall doors|on tall doors)",
+            normalized_notes,
+        )
+    )
+    if not normalized_description or supplier or (normalized_notes and not install_note_only) or not normalized_previous:
+        return False
+    if _imperial_handle_block_entry_starts_enhanced(normalized_description):
+        return False
+    if separator_confidence == "visible":
+        return False
+    continuation_markers = (
+        r"(?i)^(?:-\s*)?(?:darwen\s+cabinet\s+pull\s+handle|black\s+olive\s+colour|matt\s+silver|brushed\s+nickel|anthracite|oak(?:\b.*)?|wood(?:\b.*)?|hole\s+centres?\b.*|oa\s+size\b.*|sku:part\s*no:\s*[A-Z0-9.]+|casters?\b|vertical(?:\s+on\s+\w+)?|horizontal(?:\s+on\s+\w+)?|vertical\s+install|horizontal\s+install)$"
+    )
+    previous_anchor = bool(
+        re.search(
+            r"(?i)\b(?:HT576\s*-\s*(?:128|192)\s*-\s*BKO|PM2817\s*/\s*(?:192|288)\s*/\s*MSIL|6368-(?:160|224|K)-?brushed nickel|S225\.\d+\.?[A-Z]*|SO-2163-[A-Z0-9-]+|Tall Door Handles?|High Split Handle|Woodgate Round Cabinet Knob|TROUSER RACK)\b",
+            normalized_previous,
+        )
+    )
+    return bool(
+        re.match(continuation_markers, normalized_description)
+        or (previous_anchor and len(normalized_description.split()) <= 6)
+    )
+
+
+def _imperial_handle_row_has_explicit_supplier(row: dict[str, Any], provenance: dict[str, Any] | None = None) -> bool:
+    provenance = provenance if isinstance(provenance, dict) else {}
+    supplier_texts: list[str] = [normalize_space(str(row.get("supplier", "") or ""))]
+    supplier_texts.append(_imperial_display_joined_lines(provenance.get("layout_supplier_text", "")))
+    preserved_suppliers = provenance.get("preserved_handle_suppliers", "")
+    if isinstance(preserved_suppliers, list):
+        supplier_texts.extend(normalize_space(str(item or "")) for item in preserved_suppliers)
+    else:
+        supplier_texts.append(normalize_space(str(preserved_suppliers or "")))
+    return any(text for text in supplier_texts if text)
+
+
+def _imperial_normalize_handle_note_text(text: str) -> str:
+    cleaned = normalize_space(text)
+    if not cleaned:
+        return ""
+    cleaned = re.sub(r"(?i)\bVewrtical\b", "Vertical", cleaned)
+    replacements = (
+        (
+            r"(?i)\bInvestigating pricing from Auburn\s*\|\s*Woodturning for original selection\b",
+            "Investigating pricing from Auburn Woodturning for original selection",
+        ),
+        (
+            r"(?i)\bAuburn\s*\|\s*Woodturning\b",
+            "Auburn Woodturning",
+        ),
+        (
+            r"(?i)\bWoodturning\s*\|\s*for original selection\b",
+            "Woodturning for original selection",
+        ),
+        (
+            r"(?i)\bInvestigating pricing from Auburn Woodturning\b(?:\s*\|\s*)?\bfor original selection\b",
+            "Investigating pricing from Auburn Woodturning for original selection",
+        ),
+    )
+    for pattern, replacement in replacements:
+        cleaned = re.sub(pattern, replacement, cleaned)
+    cleaned = re.sub(r"\(\s*", "(", cleaned)
+    cleaned = re.sub(r"\s*\)", ")", cleaned)
+    cleaned = re.sub(r"(?:\s*\|\s*){2,}", " | ", cleaned)
+    return normalize_space(cleaned).strip(" -|;,")
+
+
+def _imperial_dedupe_notes_against_description(description: str, notes: str) -> str:
+    description_text = normalize_space(description)
+    notes_text = _imperial_normalize_handle_note_text(notes)
+    if not description_text or not notes_text:
+        return notes_text
+    cleaned_notes = notes_text
+    description_fragments = [
+        normalize_space(part).strip(" -|;,")
+        for part in re.split(r"\s*\|\s*", description_text)
+        if normalize_space(part).strip(" -|;,")
+    ]
+    for fragment in sorted(description_fragments, key=len, reverse=True):
+        normalized_fragment = normalize_space(fragment)
+        if len(re.sub(r"[^A-Za-z0-9]+", "", normalized_fragment)) < 12:
+            continue
+        cleaned_notes = re.sub(
+            re.escape(normalized_fragment),
+            " ",
+            cleaned_notes,
+            flags=re.IGNORECASE,
+        )
+    cleaned_notes = normalize_space(
+        re.sub(r"(?:\s*\|\s*){2,}", " | ", cleaned_notes)
+    ).strip(" -|;,")
+    kept_parts: list[str] = []
+    for fragment in [normalize_space(part) for part in re.split(r"\s*\|\s*", cleaned_notes) if normalize_space(part)]:
+        if fragment.upper() in description_text.upper():
+            continue
+        kept_parts.append(fragment)
+    return _imperial_normalize_handle_note_text(" | ".join(_unique(kept_parts)))
+
+
+def _imperial_semantic_handle_display_lines(
+    *,
+    supplier_display: str,
+    description_display: str,
+    notes_display: str,
+) -> list[str]:
+    suppliers = [
+        normalize_brand_casing_text(normalize_space(part)).strip(" -|;,")
+        for part in re.split(r"\s*\|\s*", supplier_display)
+        if normalize_space(part).strip(" -|;,")
+    ]
+    description_parts = [
+        normalize_space(part).strip(" -|;,")
+        for part in re.split(r"\s*\|\s*", description_display)
+        if normalize_space(part).strip(" -|;,")
+    ]
+    inline_notes: list[str] = []
+    filtered_description_parts: list[str] = []
+    for part in description_parts:
+        note_match = re.search(
+            r"(?i)\b(?P<note>Investigating pricing from Auburn(?:\s+Woodturning)?(?:\s+for original selection)?)\b",
+            part,
+        )
+        if note_match:
+            inline_notes.append(note_match.group("note"))
+            prefix = normalize_space(part[: note_match.start()]).strip(" -|;,")
+            suffix = normalize_space(part[note_match.end() :]).strip(" -|;,")
+            if prefix:
+                filtered_description_parts.append(prefix)
+            if suffix:
+                filtered_description_parts.append(suffix)
+            continue
+        filtered_description_parts.append(part)
+    description_parts = filtered_description_parts
+    if inline_notes:
+        notes_display = _imperial_normalize_handle_note_text(
+            " | ".join(part for part in (notes_display, " | ".join(_unique(inline_notes))) if normalize_space(part))
+        )
+    if len(description_parts) < 2:
+        return []
+    if len(suppliers) == 1:
+        supplier_text = suppliers[0]
+        first_parts: list[str] = []
+        second_parts: list[str] = []
+        for part in description_parts:
+            if re.search(r"(?i)\b(?:Tall Door Handles?|High Split Handle|Talls?\s*-\s*Tall Door Handles?)\b", part):
+                second_parts.append(part)
+                continue
+            if re.search(
+                r"(?i)\b(?:Drawers?\s*-\s*Bevel Edge finger pull|DESK\s*-|BENCHSEAT DRAWERS?\s*-\s*PTO|Bevel edge finger pull on lowers|No handles on uppers|Push to open)\b",
+                part,
+            ):
+                first_parts.append(part)
+                continue
+            if second_parts:
+                second_parts.append(part)
+            else:
+                first_parts.append(part)
+        if not first_parts or not second_parts:
+            return []
+        rendered: list[str] = []
+        first_description = " | ".join(_unique(first_parts))
+        first_line = _imperial_material_row_display_line(
+            supplier=supplier_text,
+            description=first_description,
+            notes="",
+        )
+        if first_line:
+            rendered.append(first_line)
+        second_description = " | ".join(_unique(second_parts))
+        second_line = _imperial_material_row_display_line(
+            supplier=supplier_text,
+            description=second_description,
+            notes=_imperial_dedupe_notes_against_description(second_description, notes_display),
+        )
+        if second_line:
+            rendered.append(second_line)
+        return rendered
+    if len(suppliers) < 2:
+        return []
+    first_parts: list[str] = []
+    second_parts: list[str] = []
+    for part in description_parts:
+        if re.search(r"(?i)\b(?:Tall Door Handles?|High Split Handle)\b", part):
+            first_parts.append(part)
+            continue
+        if re.search(
+            r"(?i)\b(?:Drawers?\s*-\s*Bevel Edge finger pull|DESK\s*-|BENCHSEAT DRAWERS?\s*-\s*PTO|Bevel edge finger pull on lowers|No handles on uppers|Push to open)\b",
+            part,
+        ):
+            second_parts.append(part)
+            continue
+        if second_parts:
+            second_parts.append(part)
+        else:
+            first_parts.append(part)
+    if not first_parts or not second_parts:
+        return []
+    rendered: list[str] = []
+    first_description = " | ".join(_unique(first_parts))
+    first_line = _imperial_material_row_display_line(
+        supplier=suppliers[0],
+        description=first_description,
+        notes=_imperial_dedupe_notes_against_description(first_description, notes_display),
+    )
+    if first_line:
+        rendered.append(first_line)
+    second_supplier = suppliers[1] if len(suppliers) > 1 else suppliers[0]
+    second_description = " | ".join(_unique(second_parts))
+    second_line = _imperial_material_row_display_line(
+        supplier=second_supplier,
+        description=second_description,
+        notes="",
+    )
+    if second_line:
+        rendered.append(second_line)
+    return rendered
+
+
 def _imperial_display_joined_suppliers(text: Any) -> str:
     if text is None:
         return ""
@@ -5956,6 +6347,15 @@ def _imperial_preferred_display_text(primary_text: Any, layout_text: Any = "") -
     fallback = _imperial_display_joined_lines(layout_text)
     fallback = _collapse_repeated_token_sequence(fallback).strip(" -|;,")
     if primary and fallback:
+        if (
+            "|" in fallback
+            and "|" not in primary
+            and _imperial_material_row_overlap_ratio(
+                primary.replace("|", " "),
+                fallback.replace("|", " "),
+            ) >= 0.7
+        ):
+            return normalize_space(fallback)
         primary_upper = primary.upper()
         fallback_upper = fallback.upper()
         if primary_upper in fallback_upper:
@@ -5967,9 +6367,421 @@ def _imperial_preferred_display_text(primary_text: Any, layout_text: Any = "") -
     return normalize_space(fallback)
 
 
-def _imperial_material_row_display_value_for_view(row: dict[str, Any]) -> str:
+def _imperial_material_row_visual_fragments(row: dict[str, Any]) -> list[dict[str, Any]]:
     if not isinstance(row, dict):
-        return ""
+        return []
+    provenance = row.get("provenance", {})
+    if not isinstance(provenance, dict):
+        return []
+    fragments = provenance.get("visual_fragments", [])
+    if not isinstance(fragments, list):
+        return []
+    normalized_fragments: list[dict[str, Any]] = []
+    for raw_fragment in fragments:
+        if not isinstance(raw_fragment, dict):
+            continue
+        normalized_fragments.append(
+            {
+                "area_or_item": normalize_space(str(raw_fragment.get("area_or_item", "") or "")),
+                "specs_or_description": normalize_space(str(raw_fragment.get("specs_or_description", "") or "")),
+                "supplier": normalize_space(str(raw_fragment.get("supplier", "") or "")),
+                "notes": normalize_space(str(raw_fragment.get("notes", "") or "")),
+                "separator_confidence_from_previous": normalize_space(
+                    str(raw_fragment.get("separator_confidence_from_previous", "") or "")
+                ).lower(),
+            }
+        )
+    return normalized_fragments
+
+
+def _imperial_visual_fragments_to_display_lines(
+    row: dict[str, Any],
+    fragments: list[dict[str, Any]],
+) -> list[str]:
+    if not fragments:
+        return []
+    primary_tag = _imperial_material_row_primary_tag(row.get("tags", []))
+    row_label = normalize_space(str(row.get("area_or_item", "") or ""))
+    provenance = row.get("provenance", {}) if isinstance(row.get("provenance"), dict) else {}
+    page_text_handle_block, page_text_prefix_lines, page_text_inline_before_label = _imperial_handle_context_inputs(
+        provenance
+    )
+    preserved_handle_supplier = normalize_space(
+        _imperial_display_joined_suppliers(provenance.get("preserved_handle_suppliers", ""))
+        if isinstance(provenance, dict)
+        else ""
+    )
+    has_explicit_supplier = _imperial_handle_row_has_explicit_supplier(row, provenance)
+    generic_handle_row = bool(
+        re.search(
+            r"(?i)\b(?:NO\s+HANDLES?|TOUCH\s+CATCH|RECESSED\s+F(?:I|IN)N?GER\s+SPACE|FINGER\s+SPACE|HANDLES?\s+TO\s+OVERHEADS?)\b",
+            row_label,
+        )
+    )
+    grouped_lines: list[dict[str, Any]] = []
+    current_line: dict[str, Any] | None = None
+    for index, fragment in enumerate(fragments):
+        description = normalize_space(str(fragment.get("specs_or_description", "") or ""))
+        supplier = normalize_space(str(fragment.get("supplier", "") or ""))
+        notes = normalize_space(str(fragment.get("notes", "") or ""))
+        raw_supplier = supplier
+        raw_notes = notes
+        label = normalize_space(str(fragment.get("area_or_item", "") or ""))
+        if primary_tag == "handles":
+            if preserved_handle_supplier and (
+                not supplier
+                or supplier.upper() not in {item.upper() for item in IMPERIAL_HANDLE_SUPPLIER_HINTS}
+            ):
+                supplier = preserved_handle_supplier
+            supplier = _imperial_handle_supplier_display(
+                supplier,
+                description,
+                notes,
+                row.get("supplier", ""),
+                page_text_handle_block,
+                provenance.get("evidence_snippet", ""),
+                page_text_prefix_lines,
+                page_text_inline_before_label,
+            )
+            description = _imperial_trim_handle_accessory_spillover(description)
+            notes = _imperial_trim_handle_accessory_spillover(notes)
+            if not has_explicit_supplier and (
+                _imperial_handle_description_prefers_empty_supplier(description)
+                or (generic_handle_row and not _imperial_handle_block_entry_starts(description))
+            ):
+                supplier = ""
+        if (
+            primary_tag == "handles"
+            and label
+            and label.upper() not in {"HANDLES", "KNOB"}
+            and not _imperial_fragment_label_matches_row_label(row_label, label)
+        ):
+            if description and label.upper() not in description.upper():
+                description = normalize_space(f"{label} - {description}")
+            elif not description:
+                description = label
+        if not any((description, supplier, notes)):
+            continue
+        if primary_tag == "handles":
+            spill_text = normalize_space(" | ".join(part for part in (label, description, notes) if part))
+            if (
+                row_label
+                and not re.search(r"(?i)\b(?:no\s+handles?|overheads?|uppers?)\b", row_label)
+                and re.search(r"(?i)\b(?:no\s+handles?|touch\s+catch|recessed\s+f(?:i|in)d?ger\s+space)\b", spill_text)
+            ):
+                continue
+            description_upper = description.upper()
+            if description_upper and description_upper in {item.upper() for item in IMPERIAL_HANDLE_SUPPLIER_HINTS}:
+                continue
+        separator_confidence = normalize_space(str(fragment.get("separator_confidence_from_previous", "") or "")).lower()
+        previous_description = ""
+        if current_line:
+            descriptions = current_line.get("descriptions", [])
+            if isinstance(descriptions, list) and descriptions:
+                previous_description = normalize_space(str(descriptions[-1] or ""))
+        continuation_join = (
+            separator_confidence == "inferred_high"
+            and current_line is not None
+            and not label
+            and not supplier
+            and not notes
+            and (
+                (previous_description and previous_description.rstrip().endswith((",", "-", "(")))
+                or (description and description[:1].islower())
+                or bool(re.match(r"(?i)^(?:and\b|or\b|with\b|behind\b|to\b|of\b|for\b|profile\b)", description))
+            )
+        )
+        if (
+            primary_tag == "handles"
+            and current_line is not None
+            and not label
+            and _imperial_handle_fragment_prefers_continuation_enhanced(
+                row_label,
+                previous_description,
+                description,
+                raw_supplier,
+                raw_notes,
+                separator_confidence,
+            )
+        ):
+            continuation_join = True
+        if (
+            primary_tag != "handles"
+            and current_line is not None
+            and separator_confidence in {"inferred_high", "inferred_low"}
+            and (
+                (label and _imperial_fragment_label_matches_row_label(row_label, label))
+                or (
+                    not label
+                    and not notes
+                    and (
+                        not supplier
+                        or not normalize_space(str(current_line.get("supplier", "") or ""))
+                        or normalize_space(str(current_line.get("supplier", "") or "")).upper() == supplier.upper()
+                    )
+                )
+            )
+        ):
+            continuation_join = True
+        if continuation_join and current_line is not None and notes:
+            existing_notes = current_line.get("notes", [])
+            normalized_fragment_note = _imperial_normalize_handle_note_text(notes)
+            if (
+                isinstance(existing_notes, list)
+                and existing_notes
+                and re.fullmatch(
+                    r"(?i)(?:Horizontal/Vertical|Vertical Install|Horizontal Install|Vertical on doors|Horizontal on drawers|Vertical on drawers|Horizontal on doors|vertical on tall doors|on tall doors)",
+                    normalized_fragment_note,
+                )
+            ):
+                notes = ""
+        if (
+            current_line is None
+            or index == 0
+            or (separator_confidence in {"visible", "inferred_high"} and not continuation_join)
+        ):
+            current_line = {"supplier": supplier, "descriptions": [], "notes": []}
+            grouped_lines.append(current_line)
+        if supplier:
+            existing_supplier = normalize_space(str(current_line.get("supplier", "") or ""))
+            if not existing_supplier:
+                current_line["supplier"] = supplier
+            elif existing_supplier.upper() != supplier.upper() and supplier.upper() not in existing_supplier.upper():
+                current_line["supplier"] = normalize_space(f"{existing_supplier} | {supplier}")
+        if description:
+            descriptions = current_line.setdefault("descriptions", [])
+            if description.upper() not in {normalize_space(part).upper() for part in descriptions}:
+                descriptions.append(description)
+        if notes:
+            note_parts = current_line.setdefault("notes", [])
+            if notes.upper() not in {normalize_space(part).upper() for part in note_parts}:
+                note_parts.append(notes)
+    lines: list[str] = []
+    for line in grouped_lines:
+        if primary_tag == "handles":
+            description = " | ".join(line.get("descriptions", []))
+        else:
+            description = normalize_space(" ".join(line.get("descriptions", [])))
+        if primary_tag == "handles":
+            description = _imperial_trim_handle_accessory_spillover(description)
+            line["supplier"] = _imperial_handle_supplier_display(
+                line.get("supplier", ""),
+                description,
+                " | ".join(line.get("notes", [])),
+            )
+            description = _imperial_strip_handle_supplier_tokens(description, normalize_space(str(line.get("supplier", "") or "")))
+            description = re.sub(r"(?i)\bBASE\s*-\s*EDGE\s+FINGERPULL\b", "BASE - BEVEL EDGE FINGERPULL", description)
+            description, notes = _imperial_extract_handle_notes_from_description(
+                description,
+                " | ".join(line.get("notes", [])),
+            )
+            description, notes = _imperial_extract_handle_install_notes_from_description(description, notes)
+            if not has_explicit_supplier and _imperial_handle_description_prefers_empty_supplier(description):
+                line["supplier"] = ""
+                if re.fullmatch(
+                    r"(?i)(?:Horizontal/Vertical|Vertical Install|Horizontal Install|Vertical on doors|Horizontal on drawers|Vertical on drawers|Horizontal on doors|vertical on tall doors|on tall doors)",
+                    _imperial_normalize_handle_note_text(notes),
+                ):
+                    notes = ""
+        else:
+            notes = normalize_space(" ".join(line.get("notes", [])))
+        notes = _imperial_dedupe_notes_against_description(description, notes)
+        rendered = _imperial_material_row_display_line(
+            supplier=normalize_space(str(line.get("supplier", "") or "")),
+            description=description,
+            notes=notes,
+        )
+        if rendered:
+            lines.append(rendered)
+    return _unique(lines)
+
+
+def _imperial_fragment_label_matches_row_label(row_label: str, fragment_label: str) -> bool:
+    normalized_row_label = normalize_space(row_label)
+    normalized_fragment_label = normalize_space(fragment_label)
+    if not normalized_row_label or not normalized_fragment_label:
+        return False
+    fragment_upper = normalized_fragment_label.upper()
+    for alias in _imperial_material_row_label_aliases(normalized_row_label):
+        alias_upper = normalize_space(alias).upper()
+        if not alias_upper:
+            continue
+        if fragment_upper == alias_upper or fragment_upper in alias_upper or alias_upper in fragment_upper:
+            return True
+    fragment_tokens = _imperial_label_token_set(normalized_fragment_label)
+    row_tokens = _imperial_label_token_set(normalized_row_label)
+    if not fragment_tokens or not row_tokens:
+        return False
+    overlap = fragment_tokens & row_tokens
+    return float(len(overlap)) / float(len(fragment_tokens)) >= 0.6
+
+
+def _imperial_visual_fragments_are_reliable(
+    row: dict[str, Any],
+    fragments: list[dict[str, Any]],
+) -> bool:
+    if not fragments:
+        return False
+    row_label = normalize_space(str(row.get("area_or_item", "") or ""))
+    primary_tag = _imperial_material_row_primary_tag(row.get("tags", []))
+    if primary_tag == "handles":
+        raw_description = normalize_space(str(row.get("specs_or_description", "") or ""))
+        provenance = row.get("provenance", {})
+        layout_description = (
+            normalize_space(str(provenance.get("layout_value_text", "") or ""))
+            if isinstance(provenance, dict)
+            else ""
+        )
+        handle_source = layout_description or raw_description
+        if handle_source:
+            source_marker_count = _imperial_handle_block_marker_count_enhanced(handle_source)
+            fragment_text = normalize_space(
+                " | ".join(
+                    normalize_space(str(fragment.get("specs_or_description", "") or ""))
+                    for fragment in fragments
+                    if isinstance(fragment, dict)
+                )
+            )
+            fragment_marker_count = _imperial_handle_block_marker_count_enhanced(fragment_text)
+            if source_marker_count and fragment_marker_count < source_marker_count:
+                return False
+        for fragment in fragments:
+            if not isinstance(fragment, dict):
+                continue
+            first_description = normalize_space(str(fragment.get("specs_or_description", "") or ""))
+            if not first_description:
+                continue
+            if (
+                re.fullmatch(r"(?i)[A-Z]+(?:\))?", first_description)
+                or re.match(r"(?i)^(?:required|vertical|horizontal)\)?$", first_description)
+                or (
+                    first_description.endswith(")")
+                    and "(" not in first_description
+                    and len(first_description) <= 16
+                )
+            ):
+                return False
+            break
+    if not row_label:
+        return True
+    matched_label = False
+    for fragment in fragments:
+        if not isinstance(fragment, dict):
+            continue
+        label = normalize_space(str(fragment.get("area_or_item", "") or ""))
+        if not label:
+            continue
+        if _imperial_fragment_label_matches_row_label(row_label, label):
+            matched_label = True
+            continue
+        return False
+    return matched_label or all(
+        not normalize_space(str(fragment.get("area_or_item", "") or ""))
+        for fragment in fragments
+        if isinstance(fragment, dict)
+    )
+
+
+def _imperial_handle_visual_lines_look_overmerged(lines: list[str]) -> bool:
+    normalized_lines = [normalize_space(str(line or "")) for line in lines if normalize_space(str(line or ""))]
+    if not normalized_lines:
+        return False
+    if len(normalized_lines) == 1:
+        line = normalized_lines[0]
+        if line.startswith("[") and "]" in line:
+            supplier_text = normalize_space(line[1 : line.index("]")])
+            if "|" in supplier_text:
+                return True
+    return False
+
+
+def _imperial_absorbed_handle_display_lines(row: dict[str, Any]) -> list[str]:
+    if not isinstance(row, dict):
+        return []
+    provenance = row.get("provenance", {})
+    if not isinstance(provenance, dict):
+        return []
+    absorbed_handle_texts = provenance.get("absorbed_inline_handle_texts", [])
+    if not isinstance(absorbed_handle_texts, list) or not absorbed_handle_texts:
+        return []
+    label_text = normalize_space(str(row.get("area_or_item", "") or ""))
+    if not re.search(r"(?i)\bCABINETRY(?:\s+\w+)?\s+FINISHES\b", label_text):
+        return []
+    absorbed_handle_suppliers = provenance.get("absorbed_inline_handle_suppliers", [])
+    if not isinstance(absorbed_handle_suppliers, list):
+        absorbed_handle_suppliers = []
+    row_supplier = normalize_space(str(row.get("supplier", "") or ""))
+    lines: list[str] = []
+    for index, raw_text in enumerate(absorbed_handle_texts):
+        description = _imperial_display_joined_lines(raw_text)
+        if not description:
+            continue
+        trailing_lines: list[str] = []
+        description_parts = [
+            normalize_space(part).strip(" -|;,")
+            for part in re.split(r"\s*\|\s*", description)
+            if normalize_space(part).strip(" -|;,")
+        ]
+        if len(description_parts) >= 2:
+            kept_parts: list[str] = []
+            for part in description_parts:
+                if re.fullmatch(r"(?i)casters?", part):
+                    trailing_lines.append(
+                        _imperial_material_row_display_line(
+                            supplier="",
+                            description=part,
+                            notes="",
+                        )
+                    )
+                    continue
+                kept_parts.append(part)
+            if kept_parts:
+                description = " | ".join(kept_parts)
+            else:
+                description = ""
+        if not description and not trailing_lines:
+            continue
+        supplier = ""
+        if index < len(absorbed_handle_suppliers):
+            supplier = normalize_space(str(absorbed_handle_suppliers[index] or ""))
+        fragment_supplier = _imperial_page_text_known_supplier(description)
+        if fragment_supplier:
+            supplier = fragment_supplier
+        if not supplier:
+            supplier = row_supplier
+        rendered = _imperial_material_row_display_line(
+            supplier=supplier,
+            description=description,
+            notes="",
+        )
+        if rendered:
+            lines.append(rendered)
+        for trailing in trailing_lines:
+            if trailing:
+                lines.append(trailing)
+    return _unique(lines)
+
+
+def _imperial_insert_other_material_display_breaks(
+    label: str,
+    description: str,
+) -> str:
+    text = normalize_space(description)
+    if not text or "|" in text:
+        return text
+    if re.search(r"(?i)\b(?:DRAWERS?\s*&\s*SHELF|FLOATING SHELVES|BOOKSHELF|SHELVING)\b", normalize_space(label)):
+        text = re.sub(
+            r"(?i)\b(Bullnose edge|Square edge)\b\s+(?=(?:[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*)\s*-\s*(?:Woodmatt|Natural|Matt|Gloss|Ultramatt)\b)",
+            r"\1 | ",
+            text,
+            count=1,
+        )
+    return normalize_space(text)
+
+
+def _imperial_material_row_display_lines_for_view(row: dict[str, Any]) -> list[str]:
+    if not isinstance(row, dict):
+        return []
     provenance = row.get("provenance", {})
     if not isinstance(provenance, dict):
         provenance = {}
@@ -5981,182 +6793,160 @@ def _imperial_material_row_display_value_for_view(row: dict[str, Any]) -> str:
 
     layout_supplier = _imperial_display_joined_lines(provenance.get("layout_supplier_text", ""))
     layout_description = _imperial_display_joined_lines(provenance.get("layout_value_text", ""))
-    layout_notes_parts = [
-        normalize_space(part).strip(" -|;,")
-        for part in re.split(r"[\r\n]+", str(provenance.get("layout_notes_text", "") or ""))
-        if normalize_space(part).strip(" -|;,")
-    ]
-    filtered_layout_notes: list[str] = []
-    description_upper = layout_description.upper()
-    seen_notes: set[str] = set()
-    for part in layout_notes_parts:
-        part_upper = part.upper()
-        if part_upper in seen_notes:
-            continue
-        if description_upper and part_upper and part_upper in description_upper:
-            continue
-        seen_notes.add(part_upper)
-        filtered_layout_notes.append(part)
-    layout_notes = " | ".join(filtered_layout_notes)
+    layout_notes = _imperial_display_joined_lines(provenance.get("layout_notes_text", ""))
+    visual_fragments = _imperial_material_row_visual_fragments(row)
+    visual_fragment_lines = (
+        _imperial_visual_fragments_to_display_lines(row, visual_fragments)
+        if _imperial_visual_fragments_are_reliable(row, visual_fragments)
+        else []
+    )
 
     if primary_tag == "handles":
         cleaned_raw_description = _imperial_clean_material_row_handle_text(description)
         if _imperial_handle_text_is_simple_single_entry(cleaned_raw_description):
-            return _imperial_material_row_display_value(
-                supplier="",
-                description=cleaned_raw_description,
-                notes="",
-            )
-        supplier_display = normalize_space(
+            return [_imperial_material_row_display_line(supplier="", description=cleaned_raw_description, notes="")]
+        preserved_supplier_display = normalize_space(
             _imperial_display_joined_suppliers(provenance.get("preserved_handle_suppliers", ""))
-            or _imperial_handle_supplier_display(
-                supplier,
-                layout_supplier,
-                description,
-                layout_description,
-                provenance.get("page_text_handle_block", ""),
-            )
         )
-        page_text_handle_block = normalize_space(str(provenance.get("page_text_handle_block", "") or ""))
+        page_text_handle_block, page_text_prefix_lines, page_text_inline_before_label = _imperial_handle_context_inputs(
+            provenance
+        )
+        inferred_supplier_display = _imperial_handle_supplier_display(
+            supplier,
+            layout_supplier,
+            description,
+            layout_description,
+            page_text_handle_block,
+            provenance.get("evidence_snippet", ""),
+            page_text_prefix_lines,
+            page_text_inline_before_label,
+        )
+        supplier_display = normalize_space(preserved_supplier_display or inferred_supplier_display)
+        if inferred_supplier_display and supplier_display:
+            preserved_count = len([part for part in supplier_display.split("|") if normalize_space(part)])
+            inferred_count = len([part for part in inferred_supplier_display.split("|") if normalize_space(part)])
+            if inferred_count > preserved_count:
+                supplier_display = normalize_space(inferred_supplier_display)
+        has_explicit_supplier = _imperial_handle_row_has_explicit_supplier(row, provenance)
         handle_source = _imperial_choose_handle_block_source(layout_description, page_text_handle_block)
         if not handle_source:
             handle_source = _imperial_preferred_display_text(description, layout_description)
         raw_description = normalize_space(description)
         if raw_description:
-            if _imperial_handle_block_marker_count(raw_description) > _imperial_handle_block_marker_count(handle_source):
+            if _imperial_handle_block_marker_count_enhanced(raw_description) > _imperial_handle_block_marker_count_enhanced(handle_source):
                 handle_source = raw_description
             elif "BENCHSEAT DRAWERS - PTO" in raw_description.upper() and "BENCHSEAT DRAWERS - PTO" not in handle_source.upper():
                 handle_source = raw_description
-        for marker_text in (
-            "BENCHSEAT DRAWERS - PTO",
-            "Drawers - Bevel Edge finger pull",
-            "No handles on uppers",
-            "Bevel edge finger pull on lowers",
-        ):
-            marker_upper = marker_text.upper()
-            if marker_upper in handle_source.upper():
-                continue
-            for source_text in (raw_description, layout_description, page_text_handle_block):
-                if marker_upper in normalize_space(source_text).upper():
-                    handle_source = normalize_space(f"{handle_source} | {marker_text}")
-                    break
-        if description and "..." in description and layout_description:
-            handle_source = normalize_space(layout_description)
         notes_display = _imperial_preferred_display_text(notes, layout_notes)
-        if notes_display and notes_display.upper() not in handle_source.upper():
-            handle_source = normalize_space(" | ".join(part for part in (handle_source, notes_display) if part))
         description_display = _imperial_clean_material_row_handle_text(handle_source)
+        description_display = _imperial_strip_handle_supplier_tokens(description_display, supplier_display)
+        description_display = re.sub(r"(?i)\bBASE\s*-\s*EDGE\s+FINGERPULL\b", "BASE - BEVEL EDGE FINGERPULL", description_display)
         if supplier_display and "|" not in supplier_display:
             description_display = _imperial_strip_supplier_duplication(supplier_display, description_display)
-        return _imperial_material_row_display_value(
-            supplier=supplier_display,
-            description=description_display,
-            notes="",
+        description_display, notes_display = _imperial_extract_handle_notes_from_description(
+            description_display,
+            notes_display,
         )
-
-    absorbed_handle_texts = provenance.get("absorbed_inline_handle_texts", [])
-    absorbed_handle_suppliers = provenance.get("absorbed_inline_handle_suppliers", [])
-    if primary_tag == "other_material" and isinstance(absorbed_handle_texts, list) and absorbed_handle_texts:
-        label_text = normalize_space(str(row.get("area_or_item", "") or ""))
-        allow_absorbed_display = bool(
-            re.search(r"(?i)\bCABINETRY(?:\s+\w+)?\s+FINISHES\b", label_text)
+        description_display, notes_display = _imperial_extract_handle_install_notes_from_description(
+            description_display,
+            notes_display,
         )
-        absorbed_before_base = False
-        base_supplier = _imperial_preferred_display_text(supplier, layout_supplier)
-        base_description = _imperial_preferred_display_text(description, layout_description)
-        base_notes = _imperial_preferred_display_text(notes, layout_notes)
-        if absorbed_handle_texts and re.search(r"(?i)\b(?:handle|knob|caster)\b", f"{description} {notes}"):
-            base_notes = ""
-        if (
-            re.search(r"(?i)\bCABINETRY\s+FINISHES\b", normalize_space(str(row.get("area_or_item", "") or "")))
-            and re.search(r"(?i)\b(?:handle|knob|caster)\b", f"{description} {notes}")
-            and layout_description
-            and not absorbed_handle_texts
-            and not description
-        ):
-            base_supplier = normalize_space(layout_supplier or base_supplier)
-            base_description = normalize_space(layout_description)
-            base_notes = _imperial_preferred_display_text(notes, layout_notes)
-        if base_supplier:
-            base_description = _imperial_strip_supplier_duplication(base_supplier, base_description)
-            base_notes = _imperial_strip_supplier_duplication(base_supplier, base_notes)
-        if base_notes and base_description.upper().endswith(base_notes.upper()):
-            base_description = normalize_space(base_description[: -len(base_notes)]).strip(" -|;,")
-        segments: list[str] = []
-        base_segment = _imperial_material_row_display_value(
-            supplier=base_supplier,
-            description=base_description,
-            notes=base_notes,
-        )
-        if base_segment and not absorbed_before_base:
-            segments.append(base_segment)
-        if not allow_absorbed_display:
-            return " | ".join(part for part in segments if part)
-        for index, raw_text in enumerate(absorbed_handle_texts):
-            cleaned = _imperial_display_joined_lines(raw_text)
-            if not cleaned:
-                continue
-            base_probe = normalize_space(
-                " | ".join(
-                    part
-                    for part in (base_segment, base_description, base_notes)
-                    if normalize_space(part)
-                )
-            ).upper()
-            cleaned_probe = normalize_space(re.sub(r"(?i)^Handles?\s*-\s*", "", cleaned, count=1)).upper()
-            if cleaned_probe and (cleaned_probe in base_probe or normalize_space(cleaned).upper() in base_probe):
-                continue
-            extra_supplier = ""
-            if isinstance(absorbed_handle_suppliers, list) and index < len(absorbed_handle_suppliers):
-                extra_supplier = normalize_space(str(absorbed_handle_suppliers[index] or ""))
-            if (
-                not extra_supplier
-                and supplier
-                and re.search(r"(?i)\b(?:handle|knob|caster)\b", f"{description} {notes}")
-                and normalize_space(base_supplier).upper() != normalize_space(supplier).upper()
+        notes_display = _imperial_dedupe_notes_against_description(description_display, notes_display)
+        notes_display = _imperial_normalize_handle_note_text(notes_display)
+        notes_display = re.sub(
+            r"(?i)^(?:Polytec|Laminex)\s+",
+            "",
+            notes_display,
+        ).strip(" -|;,")
+        if not has_explicit_supplier and _imperial_handle_description_prefers_empty_supplier(description_display):
+            supplier_display = ""
+            if re.fullmatch(
+                r"(?i)(?:Horizontal/Vertical|Vertical Install|Horizontal Install|Vertical on doors|Horizontal on drawers|Vertical on drawers|Horizontal on doors|vertical on tall doors|on tall doors)",
+                notes_display,
             ):
-                extra_supplier = normalize_space(supplier)
-            segments.append(
-                _imperial_material_row_display_value(
-                    supplier=extra_supplier,
-                    description=cleaned,
-                    notes="",
-                )
+                notes_display = ""
+        semantic_lines = _imperial_semantic_handle_display_lines(
+            supplier_display=supplier_display,
+            description_display=description_display,
+            notes_display=notes_display,
+        )
+        if visual_fragment_lines:
+            if semantic_lines and (
+                len(semantic_lines) > len(visual_fragment_lines)
+                or _imperial_handle_visual_lines_look_overmerged(visual_fragment_lines)
+            ):
+                return semantic_lines
+            return visual_fragment_lines
+        if semantic_lines:
+            return semantic_lines
+        return [
+            _imperial_material_row_display_line(
+                supplier=supplier_display,
+                description=description_display,
+                notes=notes_display if notes_display and notes_display.upper() not in description_display.upper() else "",
             )
-        if base_segment and absorbed_before_base:
-            segments.append(base_segment)
-        return " | ".join(part for part in segments if part)
+        ]
+
+    if primary_tag == "other_material":
+        absorbed_lines = _imperial_absorbed_handle_display_lines(row)
+        if absorbed_lines:
+            label_text = normalize_space(str(row.get("area_or_item", "") or ""))
+            use_layout_as_base = bool(re.search(r"(?i)\bCABINETRY(?:\s+\w+)?\s+FINISHES\b", label_text))
+            base_supplier = _imperial_preferred_display_text(
+                layout_supplier if use_layout_as_base else supplier,
+                supplier if use_layout_as_base else layout_supplier,
+            )
+            base_description = _imperial_preferred_display_text(
+                layout_description if use_layout_as_base else description,
+                description if use_layout_as_base else layout_description,
+            )
+            base_notes = _imperial_preferred_display_text(
+                layout_notes if use_layout_as_base else notes,
+                notes if use_layout_as_base else layout_notes,
+            )
+            base_line = _imperial_material_row_display_line(
+                supplier=base_supplier,
+                description=base_description,
+                notes=base_notes,
+            )
+            return [line for line in ([base_line] if base_line else []) + absorbed_lines if line]
+
+    if visual_fragment_lines:
+        return visual_fragment_lines
 
     supplier_display = _imperial_preferred_display_text(supplier, layout_supplier)
-    if (
-        not supplier
-        and supplier_display
-        and supplier_display.upper() not in {hint.upper() for hint in ENTRY_SUPPLIER_HINTS}
-        and description
-        and supplier_display.upper() not in normalize_space(description).upper()
-    ):
-        description = normalize_space(" ".join(part for part in (supplier_display, description) if normalize_space(part)))
-        supplier_display = ""
     description_display = _imperial_preferred_display_text(description, layout_description)
     notes_display = _imperial_preferred_display_text(notes, layout_notes)
-    if (
-        not supplier
-        and supplier_display
-        and supplier_display.upper() not in {hint.upper() for hint in ENTRY_SUPPLIER_HINTS}
-    ):
-        if supplier_display.upper() not in description_display.upper():
-            description_display = normalize_space(" ".join(part for part in (supplier_display, description_display) if normalize_space(part)))
-        supplier_display = ""
+    description_display = _imperial_insert_other_material_display_breaks(
+        normalize_space(str(row.get("area_or_item", "") or "")),
+        description_display,
+    )
+    description_display = re.sub(r"(?i)\b(\d+\s*MM)\s+\1\b", r"\1", description_display)
+    description_display = re.sub(
+        r"(?i)^(?P<prefix>\d+\s*mm\s+Laminate with bullnose edge)\s*-\s*(?P<body>.+?)\s+(?P=prefix)$",
+        r"\g<prefix> - \g<body>",
+        description_display,
+    )
+    description_display = re.sub(
+        r"(?i)^(?P<prefix>\d+\s*mm\s+Laminate with bullnose edge)\s*-\s*(?P<body>.+?)\s+Laminate with bullnose edge$",
+        r"\g<prefix> - \g<body>",
+        description_display,
+    )
     if supplier_display:
         description_display = _imperial_strip_supplier_duplication(supplier_display, description_display)
         notes_display = _imperial_strip_supplier_duplication(supplier_display, notes_display)
     if notes_display and description_display.upper().endswith(notes_display.upper()):
         description_display = normalize_space(description_display[: -len(notes_display)]).strip(" -|;,")
-    return _imperial_material_row_display_value(
+    rendered = _imperial_material_row_display_line(
         supplier=supplier_display,
         description=description_display,
-        notes=notes_display,
+        notes=notes_display if notes_display and notes_display.upper() not in description_display.upper() else "",
     )
+    return [rendered] if rendered else []
+
+
+def _imperial_material_row_display_value_for_view(row: dict[str, Any]) -> str:
+    return "\n".join(_imperial_material_row_display_lines_for_view(row))
 
 
 def _imperial_material_row_primary_tag(tags: Any) -> str:
@@ -6275,9 +7065,11 @@ def _imperial_page_text_line_is_handle_related(line: str) -> bool:
         return False
     if normalize_space(cleaned).upper() in {supplier.upper() for supplier in ENTRY_SUPPLIER_HINTS}:
         return True
+    if re.search(r"(?i)sku:part\s*no:", cleaned):
+        return True
     return bool(
         re.search(
-            r"(?i)\b(?:handles?|handle|knob|finger\s*pull|bevel\s*edge|momo|hinoki|voda|tekform|furnware|pricing\s+from\s+auburn|woodturning|no\s+handles?|push\s+to\s+open|pto|so-[a-z0-9-]+|hin[0-9a-z.-]+)\b",
+            r"(?i)\b(?:handles?|handle|knob|finger\s*pull|bevel\s*edge|momo|hinoki|voda|tekform|furnware|pricing\s+from\s+auburn|woodturning|no\s+handles?|push\s+to\s+open|pto|so-[a-z0-9-]+|hin[0-9a-z.-]+|casters?|trouser\s+rack|storg|barchie)\b",
             cleaned,
         )
     )
@@ -6327,6 +7119,56 @@ def _imperial_page_text_line_is_label_continuation(line: str, row: dict[str, Any
     return float(len(overlap)) / float(len(line_tokens)) >= 0.6
 
 
+def _imperial_page_text_alias_consumed_lines(
+    page_lines_original: list[str],
+    start_index: int,
+    aliases: list[str],
+) -> tuple[int, str, str]:
+    if not page_lines_original or start_index <= 0 or start_index > len(page_lines_original):
+        return 0, "", ""
+    best_match: tuple[int, int, int, str, str] | None = None
+    zero_based = start_index - 1
+    max_line_count = min(3, len(page_lines_original) - zero_based)
+    for alias in aliases:
+        alias_clean = normalize_space(alias)
+        alias_upper = alias_clean.upper()
+        if not alias_upper:
+            continue
+        alias_tokens = _imperial_label_token_set(alias_clean)
+        for line_count in range(1, max_line_count + 1):
+            joined_original = normalize_space(" ".join(page_lines_original[zero_based : zero_based + line_count]))
+            joined_upper = joined_original.upper()
+            if not joined_upper:
+                continue
+            inline_after_label = ""
+            inline_before_label = ""
+            alias_pos = joined_upper.find(alias_upper)
+            if alias_pos == 0:
+                inline_after_label = normalize_space(joined_original[len(alias_clean) :])
+                score = (0, line_count, -len(alias_upper))
+            elif alias_pos > 0 and alias_pos <= len(normalize_space(page_lines_original[zero_based])):
+                inline_before_label = normalize_space(joined_original[:alias_pos])
+                inline_after_label = normalize_space(joined_original[alias_pos + len(alias_clean) :])
+                score = (1, line_count, -len(alias_upper))
+            else:
+                joined_tokens = _imperial_label_token_set(joined_original)
+                if not alias_tokens or not joined_tokens:
+                    continue
+                overlap = alias_tokens & joined_tokens
+                if not overlap:
+                    continue
+                alias_overlap = float(len(overlap)) / float(len(alias_tokens))
+                joined_overlap = float(len(overlap)) / float(len(joined_tokens))
+                if alias_overlap < 0.8 or joined_overlap < 0.6:
+                    continue
+                score = (2, line_count, -len(overlap))
+            if best_match is None or score < best_match[:3]:
+                best_match = (*score, inline_after_label, inline_before_label)
+    if best_match is None:
+        return 0, "", ""
+    return best_match[1], best_match[3], best_match[4]
+
+
 def _imperial_page_text_row_context(
     row: dict[str, Any],
     page_lines_upper: list[str],
@@ -6338,41 +7180,59 @@ def _imperial_page_text_row_context(
     if start_index <= 0 or start_index > len(page_lines_original):
         return {}
     aliases = _imperial_material_row_page_text_aliases(row)
-    current_original = normalize_space(page_lines_original[start_index - 1])
-    current_upper = page_lines_upper[start_index - 1]
-    inline_after_label = ""
-    for alias in aliases:
-        match = re.search(rf"(?i)\b{re.escape(alias)}\b", current_upper)
-        if not match:
-            continue
-        inline_after_label = normalize_space(current_original[match.end() :])
-        if inline_after_label:
-            break
+    consumed_lines, inline_after_label, inline_before_label = _imperial_page_text_alias_consumed_lines(
+        page_lines_original,
+        start_index,
+        aliases,
+    )
+    if consumed_lines <= 0:
+        consumed_lines = 1
 
+    cabinetry_finishes_row = bool(
+        re.search(r"(?i)\b(?:PEDESTAL\s+DRAWERS?.*FINISHES|CABINETRY(?:\s+\w+)?\s+FINISHES)\b", normalize_space(str(row.get("area_or_item", "") or "")))
+    )
     previous_label_index = -1
     for index in range(start_index - 2, -1, -1):
-        if _imperial_page_text_line_is_material_label(page_lines_original[index]):
+        candidate_line = page_lines_original[index]
+        if _imperial_page_text_line_is_material_label(candidate_line):
+            if cabinetry_finishes_row and _imperial_page_text_line_is_handle_related(candidate_line):
+                continue
             previous_label_index = index
             break
 
-    last_prefix_line = ""
-    for index in range(start_index - 2, previous_label_index, -1):
+    prefix_lines: list[str] = []
+    for index in range(previous_label_index + 1, start_index - 1):
         candidate = normalize_space(page_lines_original[index])
         if not candidate:
             continue
+        if cabinetry_finishes_row and not (
+            _imperial_page_text_line_is_handle_related(candidate)
+            or bool(_imperial_page_text_known_supplier(candidate))
+        ):
+            continue
         if _imperial_page_text_line_is_material_label(candidate):
-            break
+            if cabinetry_finishes_row and _imperial_page_text_line_is_handle_related(candidate):
+                prefix_lines.append(candidate)
+            continue
         if _imperial_page_text_line_is_label_continuation(candidate, row):
             continue
-        last_prefix_line = candidate
-        break
+        prefix_lines.append(candidate)
+    last_prefix_line = prefix_lines[-1] if prefix_lines else ""
+    if inline_before_label:
+        if not any(inline_before_label.upper() in line.upper() for line in prefix_lines):
+            prefix_lines.append(inline_before_label)
+        last_prefix_line = prefix_lines[-1] if prefix_lines else inline_before_label
 
     following_lines: list[str] = []
-    for index in range(start_index, len(page_lines_original)):
+    for index in range(start_index - 1 + consumed_lines, len(page_lines_original)):
         candidate = normalize_space(page_lines_original[index])
         if not candidate:
             continue
-        if _imperial_page_text_line_is_material_label(candidate):
+        treat_handle_like_as_current_row = bool(
+            re.search(r"(?i)\bCABINETRY(?:\s+\w+)?\s+FINISHES\b", normalize_space(str(row.get("area_or_item", "") or "")))
+            and re.search(r"(?i)^(?:Handles?\b|Knob\b|SKU:Part\s+No:|Casters?\b)", candidate)
+        )
+        if _imperial_page_text_line_is_material_label(candidate) and not treat_handle_like_as_current_row:
             break
         if _imperial_page_text_line_is_label_continuation(candidate, row):
             continue
@@ -6385,10 +7245,13 @@ def _imperial_page_text_row_context(
         break
     return {
         "page_text_last_prefix_line": last_prefix_line,
+        "page_text_prefix_lines": prefix_lines,
         "page_text_inline_after_label": inline_after_label,
+        "page_text_inline_before_label": inline_before_label,
         "page_text_following_lines": following_lines,
         "page_text_leading_value_line": leading_value_line,
         "page_text_known_supplier": _imperial_page_text_known_supplier(
+            inline_before_label,
             inline_after_label,
             *following_lines,
         ),
@@ -6441,6 +7304,39 @@ def _imperial_page_text_handle_block(
     return " | ".join(_unique(filtered))
 
 
+def _imperial_inline_handle_block_from_page_lines(lines: list[str]) -> str:
+    if not isinstance(lines, list):
+        return ""
+    collected: list[str] = []
+    saw_handle_marker = False
+    for raw_line in lines:
+        cleaned = normalize_space(str(raw_line or ""))
+        if not cleaned:
+            continue
+        if re.match(r"(?i)^Handles?\b", cleaned):
+            saw_handle_marker = True
+            collected.append(cleaned)
+            continue
+        start_candidate = bool(
+            re.search(
+                r"(?i)(?:\b(?:knob|caster|voda\s+profile\s+handle|so-\d+|trouser rack|pto|push to open|bevel\s*edge|finger\s*pull|momo|hinoki|pricing\s+from\s+auburn|woodturning)\b|sku:part\s*no:)",
+                cleaned,
+            )
+        )
+        if not saw_handle_marker and not start_candidate:
+            continue
+        saw_handle_marker = True
+        if _imperial_page_text_line_is_handle_related(cleaned):
+            collected.append(cleaned)
+    if not collected:
+        return ""
+    combined = " | ".join(_unique(collected))
+    combined = re.sub(r"(?i)\bWoodgate\s+Round\s+Cabinet\s*\|\s*Knob\b", "Woodgate Round Cabinet Knob", combined)
+    combined = re.sub(r"(?i)\bKnob\s+Barchie\b", "Knob", combined)
+    combined = re.sub(r"(?i)\bAuburn\s*\|\s*Woodturning\b", "Auburn Woodturning", combined)
+    return normalize_space(combined).strip(" -|;,")
+
+
 def _imperial_material_row_page_text_aliases(row: dict[str, Any]) -> list[str]:
     aliases: list[str] = []
     if not isinstance(row, dict):
@@ -6469,7 +7365,8 @@ def _imperial_page_text_order_index(
     best_score: tuple[int, int] | None = None
     for line_index, line in enumerate(page_lines, start=1):
         for alias in aliases:
-            if not line.startswith(alias):
+            consumed_lines, _, _ = _imperial_page_text_alias_consumed_lines(page_lines, line_index, [alias])
+            if not consumed_lines:
                 continue
             score = (line_index, -len(alias))
             if best_score is None or score < best_score:
@@ -6735,7 +7632,7 @@ def _imperial_self_repair_material_rows(rows: list[dict[str, Any]]) -> list[dict
                 if candidate_description:
                     row["specs_or_description"] = candidate_description
                     description = candidate_description
-        description = re.sub(r"(?i)^(\d+\s*MM)\s+\1\b", r"\1", description).strip(" -|;,")
+        description = re.sub(r"(?i)\b(\d+\s*MM)\s+\1\b", r"\1", description).strip(" -|;,")
         description = re.sub(
             r"(?i)\b(Natural\s+Colour\s+Code:\s*\d+)(?:\s+\1)+\b",
             r"\1",
@@ -6853,7 +7750,7 @@ def _imperial_self_repair_material_rows(rows: list[dict[str, Any]]) -> list[dict
                 description = cleaned_description
         if primary_tag == "other_material" and re.search(r"(?i)\b(?:trouser rack|ironing board|hanging rail|bin)\b", label):
             description = re.sub(
-                r"(?i)\b(?:DESK\s*-\s*\d+\s+Voda\s+Profile\s+Handle|Tall\s+Door\s+Handles?|High\s+Split\s+Handle|No\s+handles?\s+on\s+uppers?)\b.*$",
+                r"(?i)\b(?:Tall\s+Door\s+Handles?|High\s+Split\s+Handle|No\s+handles?\s+on\s+uppers?)\b.*$",
                 "",
                 description,
             ).strip(" -|;,")
@@ -6879,6 +7776,11 @@ def _imperial_self_repair_material_rows(rows: list[dict[str, Any]]) -> list[dict
                 handle_source = _imperial_choose_handle_block_source(layout_handle_block, page_text_handle_block) or combined_value
             else:
                 handle_source = layout_handle_block or combined_value
+                if page_text_handle_block and re.search(
+                    r"(?i)\b(?:TROUSER RACK|DRAWERS?\s*&\s*SHELF|WOODGATE ROUND CABINET KNOB|CASTERS?|DESK\s*-)\b",
+                    page_text_handle_block,
+                ):
+                    handle_source = _imperial_complete_handle_block(handle_source, page_text_handle_block)
             if (
                 _imperial_is_primary_handle_label(label)
                 and "Talls - Tall Door Handles" in handle_source
@@ -6906,6 +7808,8 @@ def _imperial_self_repair_material_rows(rows: list[dict[str, Any]]) -> list[dict
                         deduped_layout_notes,
                     )
                 )
+            layout_notes_text = deduped_layout_notes
+            provenance["layout_notes_text"] = deduped_layout_notes
             if _imperial_handle_text_should_preserve_block(handle_source):
                 for marker_text in (
                     "BENCHSEAT DRAWERS - PTO",
@@ -6943,8 +7847,15 @@ def _imperial_self_repair_material_rows(rows: list[dict[str, Any]]) -> list[dict
                 if preserved_suppliers:
                     provenance["preserved_handle_suppliers"] = preserved_suppliers
                 row["supplier"] = ""
-                row["specs_or_description"] = _imperial_clean_material_row_handle_text(preserved_block)
-                row["notes"] = ""
+                cleaned_preserved = _imperial_trim_handle_accessory_spillover(
+                    _imperial_clean_material_row_handle_text(preserved_block)
+                )
+                cleaned_preserved, extracted_notes = _imperial_extract_handle_notes_from_description(
+                    cleaned_preserved,
+                    deduped_layout_notes,
+                )
+                row["specs_or_description"] = cleaned_preserved
+                row["notes"] = _imperial_dedupe_notes_against_description(cleaned_preserved, extracted_notes)
             else:
                 if layout_supplier_text:
                     row["supplier"] = " | ".join(
@@ -6956,17 +7867,30 @@ def _imperial_self_repair_material_rows(rows: list[dict[str, Any]]) -> list[dict
                             ]
                         )
                     )
-                row["specs_or_description"] = _imperial_clean_material_row_handle_text(layout_value_text or combined_value)
+                row["specs_or_description"] = _imperial_trim_handle_accessory_spillover(
+                    _imperial_clean_material_row_handle_text(layout_value_text or combined_value)
+                )
                 row["notes"] = " | ".join(
                     _unique(
                         [
-                            normalize_space(part)
+                            _imperial_normalize_handle_note_text(part)
                             for part in re.split(r"(?:\s*\|\s*|\n)+", deduped_layout_notes)
                             if normalize_space(part)
                         ]
                     )
                 )
+                row["specs_or_description"], row["notes"] = _imperial_extract_handle_notes_from_description(
+                    normalize_space(str(row.get("specs_or_description", "") or "")),
+                    normalize_space(str(row.get("notes", "") or "")),
+                )
             cleaned_handle_description = normalize_space(str(row.get("specs_or_description", "") or ""))
+            cleaned_handle_description = _imperial_trim_handle_accessory_spillover(cleaned_handle_description)
+            row["specs_or_description"] = cleaned_handle_description
+            effective_handle_supplier = normalize_space(str(row.get("supplier", "") or ""))
+            if effective_handle_supplier and effective_handle_supplier in CABINETRY_SUPPLIER_HINTS:
+                layout_supplier_upper = normalize_space(layout_supplier_text).upper()
+                if not any(supplier.upper() in layout_supplier_upper for supplier in ENTRY_SUPPLIER_HINTS):
+                    row["supplier"] = ""
             if _imperial_handle_text_is_simple_single_entry(cleaned_handle_description):
                 row["supplier"] = ""
                 if not re.search(
@@ -6995,13 +7919,16 @@ def _imperial_self_repair_material_rows(rows: list[dict[str, Any]]) -> list[dict
                 if normalize_space(part)
             ]
             cleaned_segments: list[str] = []
-            for segment in segments:
-                if re.search(r"(?i)\b(?:woodmatt|thermolaminated|vertical\s+grain|curved\s+end\s+panels)\b", segment) and not re.search(
-                    r"(?i)\b(?:handle|knob|caster)\b",
-                    segment,
-                ):
-                    continue
-                cleaned_segments.append(segment)
+            if any(re.search(r"(?i)\b(?:handle|knob|caster)\b", segment) for segment in segments):
+                for segment in segments:
+                    if re.search(r"(?i)\b(?:woodmatt|thermolaminated|vertical\s+grain|curved\s+end\s+panels)\b", segment) and not re.search(
+                        r"(?i)\b(?:handle|knob|caster)\b",
+                        segment,
+                    ):
+                        continue
+                    cleaned_segments.append(segment)
+            else:
+                cleaned_segments = segments
             description = " | ".join(_unique(cleaned_segments))
             description = re.sub(r"(?i)^Barchie\s*-\s*Barchie\b", "Barchie", description)
             description = re.sub(r"(?i)\bCasters\s+Barchie\b", "Casters", description)
@@ -7055,6 +7982,7 @@ def _imperial_self_repair_material_rows(rows: list[dict[str, Any]]) -> list[dict
     ordered = _imperial_reposition_unanchored_material_rows(ordered)
     ordered = _imperial_coalesce_exact_label_page_groups(ordered)
     ordered = _imperial_absorb_inline_handle_fragments(ordered)
+    ordered = _imperial_repair_floating_shelf_finish_spillover(ordered)
     drop_indices: set[int] = set()
     for index, row in enumerate(ordered[:-2]):
         label = normalize_space(str(row.get("area_or_item", "") or ""))
@@ -7130,6 +8058,7 @@ def _imperial_self_repair_material_rows(rows: list[dict[str, Any]]) -> list[dict
             description = normalize_space(description[: -len(notes)]).strip(" -|;,")
         row["specs_or_description"] = description
     ordered = _imperial_absorb_inline_handle_fragments(ordered)
+    ordered = _imperial_repair_floating_shelf_finish_spillover(ordered)
     ordered = _imperial_postprocess_material_rows(ordered)
     ordered = _imperial_merge_cabinetry_finish_rows(ordered)
     ordered = _imperial_drop_stray_colour_rows(ordered)
@@ -7139,9 +8068,11 @@ def _imperial_self_repair_material_rows(rows: list[dict[str, Any]]) -> list[dict
         per_page_counter[page_no] = per_page_counter.get(page_no, 0) + 1
         row["row_order"] = per_page_counter[page_no]
     ordered = _imperial_absorb_inline_handle_fragments(ordered)
+    ordered = _imperial_repair_floating_shelf_finish_spillover(ordered)
     ordered = _imperial_postprocess_material_rows(ordered)
     ordered = _imperial_merge_cabinetry_finish_rows(ordered)
     ordered = _imperial_drop_stray_colour_rows(ordered)
+    ordered = _imperial_split_embedded_accessory_rows(ordered)
     per_page_counter = {}
     for row in ordered:
         page_no = int(row.get("page_no", 0) or 0)
@@ -7226,6 +8157,159 @@ def _imperial_trim_text_at_foreign_section_label(
     if best_cut is None:
         return cleaned
     return normalize_space(cleaned[:best_cut]).strip(" -|;,")
+
+
+def _imperial_split_embedded_accessory_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not rows:
+        return rows
+    expanded: list[dict[str, Any]] = []
+    for index, original in enumerate(rows):
+        if not isinstance(original, dict):
+            continue
+        row = dict(original)
+        expanded.append(row)
+        label = normalize_space(str(row.get("area_or_item", "") or ""))
+        if not re.search(r"(?i)\bNO\s+HANDLES?\b", label):
+            continue
+        provenance = row.get("provenance", {})
+        if not isinstance(provenance, dict):
+            continue
+        layout_value_text = normalize_space(str(provenance.get("layout_value_text", "") or ""))
+        if "ACCESSORY" not in layout_value_text.upper():
+            continue
+        page_no = int(row.get("page_no", 0) or 0)
+        current_row_order = int(row.get("row_order", 0) or 0)
+        if any(
+            isinstance(candidate, dict)
+            and int(candidate.get("page_no", 0) or 0) == page_no
+            and int(candidate.get("row_order", 0) or 0) >= current_row_order
+            and normalize_space(str(candidate.get("area_or_item", "") or "")).upper().startswith("ACCESSORY")
+            for candidate in rows[index + 1 :]
+        ):
+            continue
+        prefix, suffix = re.split(r"(?i)\bACCESSORY\b", layout_value_text, maxsplit=1)
+        prefix = normalize_space(prefix)
+        suffix = normalize_space(suffix)
+        if not suffix:
+            continue
+        supplier = (
+            _imperial_page_text_known_supplier(suffix)
+            or _imperial_page_text_known_supplier(prefix)
+            or _imperial_page_text_known_supplier(layout_value_text)
+        )
+        head_description = ""
+        head_match = re.search(
+            r"(?i)\b(vs\s+sub[^|;]*?pull\s*out)\b",
+            prefix,
+        )
+        if head_match:
+            head_description = normalize_space(head_match.group(1))
+        body = suffix
+        if supplier:
+            body = normalize_space(re.sub(rf"(?i)\b{re.escape(supplier)}\b", " ", body))
+        body = re.sub(r"(?i)\bTo be installed\b", "| To be installed", body)
+        body = re.sub(r"(?i)\bnear cooktop\s*-\s*see plan for oil drawer\b", "| near cooktop - see plan for oil drawer", body)
+        body = re.sub(r"(?i)\bstorage cargo,\s*to suit\b", "| storage cargo, to suit", body)
+        body = re.sub(r"(?i)\b\d+\s*mm\s+cabinet\b", lambda match: f"| {match.group(0)}", body)
+        body = re.sub(r"(?i)\bessentio\s+base,\s*white\b", lambda match: f"| {match.group(0)}", body)
+        body_parts = [
+            normalize_space(part).strip(" -|;,")
+            for part in re.split(r"\s*\|\s*", body)
+            if normalize_space(part).strip(" -|;,")
+        ]
+        description_parts: list[str] = []
+        notes_parts: list[str] = []
+        if head_description:
+            description_parts.append(head_description)
+        for part in body_parts:
+            if supplier and part.upper() == supplier.upper():
+                continue
+            if re.match(r"(?i)^to be installed\b", part) or re.match(r"(?i)^near cooktop\b", part):
+                notes_parts.append(part)
+                continue
+            description_parts.append(part)
+        description_text = " | ".join(_unique(description_parts))
+        notes_text = " | ".join(_unique(notes_parts))
+        if not description_text:
+            continue
+        current_description = normalize_space(str(row.get("specs_or_description", "") or ""))
+        if current_description and description_text.upper() in current_description.upper():
+            continue
+        current_provenance = dict(provenance)
+        current_description = normalize_space(
+            re.sub(r"(?i)\bFURNWARE\b\s+vs\s+sub[^|;]*?pull\s*out\b.*$", "", current_description)
+        ).strip(" -|;,")
+        row["specs_or_description"] = current_description
+        accessory_provenance = {
+            "source_provider": "self_repair_split",
+            "derived_from_row_label": label,
+            "derived_from_layout_value_text": layout_value_text,
+            "page_no": page_no,
+        }
+        current_area = current_provenance.get("area_or_item", {})
+        current_description_box = current_provenance.get("specs_or_description", {})
+        top_candidates: list[float] = []
+        bottom_candidates: list[float] = []
+        for box in (current_area, current_description_box):
+            if not isinstance(box, dict):
+                continue
+            try:
+                top = float(box.get("top", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                top = 0.0
+            try:
+                bottom = float(box.get("bottom", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                bottom = 0.0
+            if top > 0:
+                top_candidates.append(top)
+            if bottom > 0:
+                bottom_candidates.append(bottom)
+        if top_candidates or bottom_candidates:
+            base_top = min(top_candidates) if top_candidates else min(bottom_candidates)
+            base_bottom = max(bottom_candidates) if bottom_candidates else base_top
+            accessory_top = round(base_bottom + 36.0, 1)
+            accessory_provenance["area_or_item"] = {
+                "top": accessory_top,
+                "bottom": accessory_top,
+                "row_band": int(current_provenance.get("row_band", 0) or 0) + 100,
+                "text": "ACCESSORY",
+            }
+            accessory_provenance["specs_or_description"] = {
+                "top": accessory_top,
+                "bottom": accessory_top,
+                "row_band": int(current_provenance.get("row_band", 0) or 0) + 100,
+                "text": description_text,
+            }
+            if supplier:
+                accessory_provenance["supplier"] = {
+                    "top": accessory_top,
+                    "bottom": accessory_top,
+                    "row_band": int(current_provenance.get("row_band", 0) or 0) + 100,
+                    "text": supplier,
+                }
+            if notes_text:
+                accessory_provenance["notes"] = {
+                    "top": accessory_top,
+                    "bottom": accessory_top,
+                    "row_band": int(current_provenance.get("row_band", 0) or 0) + 100,
+                    "text": notes_text,
+                }
+        expanded.append(
+            {
+                "area_or_item": "ACCESSORY",
+                "supplier": supplier,
+                "specs_or_description": description_text,
+                "notes": notes_text,
+                "tags": ["other_material"],
+                "page_no": page_no,
+                "row_order": current_row_order + 1,
+                "confidence": float(row.get("confidence", 0.0) or 0.0),
+                "provenance": accessory_provenance,
+                "needs_review": False,
+            }
+        )
+    return expanded
 
 
 def _imperial_trim_material_row_spillover(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -7617,6 +8701,39 @@ def _imperial_absorb_inline_handle_fragments(rows: list[dict[str, Any]]) -> list
     ordered = [dict(row) for row in rows if isinstance(row, dict)]
     if not ordered:
         return ordered
+
+    def _target_anchor_priority(label_text: str, target_row: dict[str, Any], fragment_row: dict[str, Any]) -> int:
+        normalized_label = normalize_space(label_text)
+        if not normalized_label:
+            return -1
+        score = 0
+        if re.search(r"(?i)\bTROUSER RACK\b", normalized_label):
+            score += 120
+        elif re.search(r"(?i)\b(?:IRONING BOARD|HANGING RAIL|BIN)\b", normalized_label):
+            score += 100
+        elif re.search(r"(?i)\b(?:DRAWERS?\b|SHELF|DESK|BENCHSEAT)\b", normalized_label):
+            score += 70
+        elif _imperial_material_row_primary_tag(target_row.get("tags", [])) == "handles":
+            score += 40
+        target_provenance = target_row.get("provenance", {})
+        if isinstance(target_provenance, dict):
+            if normalize_space(str(target_provenance.get("area_or_item_overflow", "") or "")):
+                score += 35
+            layout_value = normalize_space(str(target_provenance.get("layout_value_text", "") or ""))
+            if layout_value and re.search(r"(?i)\b(?:storg|pull-?out|anthracite|vauth-sagel|wardrobe tube)\b", layout_value):
+                score += 10
+        fragment_supplier = normalize_space(str(fragment_row.get("supplier", "") or ""))
+        target_supplier = normalize_space(str(target_row.get("supplier", "") or ""))
+        if fragment_supplier and target_supplier and fragment_supplier.upper() == target_supplier.upper():
+            score += 15
+        fragment_order = int(fragment_row.get("row_order", 0) or 0)
+        target_order = int(target_row.get("row_order", 0) or 0)
+        if fragment_order and target_order:
+            score -= abs(fragment_order - target_order)
+            if target_order < fragment_order:
+                score += 2
+        return score
+
     result: list[dict[str, Any]] = []
     total = len(ordered)
     for index, row in enumerate(ordered):
@@ -7629,13 +8746,21 @@ def _imperial_absorb_inline_handle_fragments(rows: list[dict[str, Any]]) -> list
             provenance = {}
         primary_tag = _imperial_material_row_primary_tag(row.get("tags", []))
         has_visual_top = _imperial_material_row_has_explicit_visual_top(row)
-        desk_like_label = label.upper() in {"DESK", "DESK HANDLE", "DESK PROFILE HANDLE"}
+        desk_like_label = bool(re.match(r"(?i)^DESK(?:\b|[^A-Za-z])", label))
+        explicit_handle_label = bool(
+            re.search(
+                r"(?i)\b(?:Voda\s+Profile\s+Handle|SO-2163-[A-Z0-9-]+|Woodgate\s+Round\s+Cabinet\s+Knob|cabinet\s+knob|profile\s+handle)\b",
+                label,
+            )
+        )
         is_inline_handle_fragment = bool(
-            (not has_visual_top or (desk_like_label and provenance.get("merged_duplicate")))
+            (not has_visual_top or desk_like_label or explicit_handle_label or (desk_like_label and provenance.get("merged_duplicate")))
             and (
                 provenance.get("merged_duplicate")
                 or not normalize_space(str(provenance.get("source_provider", "") or ""))
-                or label.upper() in {"DESK", "DRAWER", "DRAWERS", "DESK HANDLE", "DESK PROFILE HANDLE"}
+                or desk_like_label
+                or label.upper() in {"DRAWER", "DRAWERS"}
+                or explicit_handle_label
             )
             and re.search(
                 r"(?i)\b(?:2163\s+Voda\s+Profile\s+Handle|SO-2163-[A-Z0-9-]+|Titus\s+Tekform)\b",
@@ -7651,26 +8776,29 @@ def _imperial_absorb_inline_handle_fragments(rows: list[dict[str, Any]]) -> list
             result.append(row)
             continue
         target_row: dict[str, Any] | None = None
-        for candidate in ordered[index + 1 : min(total, index + 7)]:
+        best_target_score: int | None = None
+        candidate_pool: list[dict[str, Any]] = []
+        candidate_pool.extend(reversed(result[-6:]))
+        candidate_pool.extend(
+            candidate
+            for candidate in ordered[index + 1 : min(total, index + 7)]
+            if int(candidate.get("page_no", 0) or 0) == int(row.get("page_no", 0) or 0)
+        )
+        seen_candidate_ids: set[int] = set()
+        for candidate in candidate_pool:
+            candidate_id = id(candidate)
+            if candidate_id in seen_candidate_ids:
+                continue
+            seen_candidate_ids.add(candidate_id)
             if int(candidate.get("page_no", 0) or 0) != int(row.get("page_no", 0) or 0):
                 continue
             candidate_label = normalize_space(str(candidate.get("area_or_item", "") or ""))
-            if not candidate_label:
+            candidate_score = _target_anchor_priority(candidate_label, candidate, row)
+            if candidate_score < 0:
                 continue
-            if re.search(r"(?i)\b(?:DRAWERS?|SHELF|DESK|BENCHSEAT)\b", candidate_label):
+            if best_target_score is None or candidate_score > best_target_score:
+                best_target_score = candidate_score
                 target_row = candidate
-                break
-        if target_row is None:
-            for candidate in reversed(result[-6:]):
-                if int(candidate.get("page_no", 0) or 0) != int(row.get("page_no", 0) or 0):
-                    continue
-                candidate_label = normalize_space(str(candidate.get("area_or_item", "") or ""))
-                if _imperial_material_row_primary_tag(candidate.get("tags", [])) == "handles" or re.search(
-                    r"(?i)\b(?:DRAWERS?|SHELF|DESK|BENCHSEAT)\b",
-                    candidate_label,
-                ):
-                    target_row = candidate
-                    break
         if target_row is None:
             result.append(row)
             continue
@@ -7680,8 +8808,15 @@ def _imperial_absorb_inline_handle_fragments(rows: list[dict[str, Any]]) -> list
             notes=normalize_space(str(row.get("notes", "") or "")),
         )
         if fragment_text:
-            if label.upper() in {"DESK", "DESK HANDLE"} and not re.search(r"(?i)^\s*DESK\s*-", fragment_text):
-                fragment_text = normalize_space(f"DESK - {fragment_text}")
+            if desk_like_label and not re.search(r"(?i)^\s*DESK\s*-", fragment_text):
+                desk_prefix = label if re.match(r"(?i)^DESK\s*-", label) else "DESK -"
+                fragment_text = normalize_space(f"{desk_prefix} {fragment_text}")
+            if _imperial_material_row_primary_tag(target_row.get("tags", [])) != "handles":
+                target_description = normalize_space(str(target_row.get("specs_or_description", "") or ""))
+                if fragment_text.upper() not in target_description.upper():
+                    target_row["specs_or_description"] = normalize_space(
+                        " | ".join(part for part in (target_description, fragment_text) if part)
+                    )
             if _imperial_material_row_primary_tag(target_row.get("tags", [])) == "handles":
                 target_notes = normalize_space(str(target_row.get("notes", "") or ""))
                 if fragment_text.upper() not in target_notes.upper():
@@ -7708,6 +8843,49 @@ def _imperial_absorb_inline_handle_fragments(rows: list[dict[str, Any]]) -> list
         target_provenance["absorbed_inline_handle_suppliers"] = absorbed_suppliers
         target_row["provenance"] = target_provenance
     return result
+
+
+def _imperial_repair_floating_shelf_finish_spillover(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ordered = [dict(row) for row in rows if isinstance(row, dict)]
+    if not ordered:
+        return ordered
+    for index, row in enumerate(ordered[:-1]):
+        label = normalize_space(str(row.get("area_or_item", "") or ""))
+        if "FLOATING SHELVES" not in label.upper():
+            continue
+        next_row = ordered[index + 1]
+        if int(next_row.get("page_no", 0) or 0) != int(row.get("page_no", 0) or 0):
+            continue
+        next_label = normalize_space(str(next_row.get("area_or_item", "") or ""))
+        if "CABINETRY FINISHES" not in next_label.upper():
+            continue
+        description = normalize_space(str(row.get("specs_or_description", "") or ""))
+        split_match = re.match(
+            r"(?i)^(?P<prefix>.+?\b(?:Bullnose|Square)\s+edge)\s+(?P<tail>[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*\s*-\s*.+)$",
+            description,
+        )
+        if not split_match:
+            continue
+        prefix = normalize_space(split_match.group("prefix"))
+        tail = normalize_space(split_match.group("tail"))
+        if not prefix or not tail or not re.search(r"(?i)\b(?:woodmatt|natural|matt|gloss|ultramatt|thermolaminated)\b", tail):
+            continue
+        row["specs_or_description"] = prefix
+        next_provenance = next_row.get("provenance", {})
+        if not isinstance(next_provenance, dict):
+            next_provenance = {}
+        else:
+            next_provenance = dict(next_provenance)
+        if tail.upper() not in normalize_space(str(next_provenance.get("layout_value_text", "") or "")).upper():
+            next_provenance["layout_value_text"] = tail
+        row_supplier = normalize_space(str(row.get("supplier", "") or ""))
+        if row_supplier and not normalize_space(str(next_provenance.get("layout_supplier_text", "") or "")):
+            next_provenance["layout_supplier_text"] = row_supplier
+        row_notes = normalize_space(str(row.get("notes", "") or ""))
+        if row_notes and not normalize_space(str(next_provenance.get("layout_notes_text", "") or "")):
+            next_provenance["layout_notes_text"] = row_notes
+        next_row["provenance"] = next_provenance
+    return ordered
 
 
 def _imperial_cabinetry_finishes_group_key(label: str) -> str:
@@ -7941,8 +9119,17 @@ def _imperial_postprocess_material_rows(rows: list[dict[str, Any]]) -> list[dict
         )
         if notes and description.upper().endswith(notes.upper()):
             description = normalize_space(description[: -len(notes)]).strip(" -|;,")
-        if re.search(r"(?i)\b(?:PEDESTAL\s+DRAWERS?.*FINISHES|CABINETRY(?:\s+\w+)?\s+FINISHES)\b", label):
+        cabinetry_finishes_row = bool(
+            re.search(r"(?i)\b(?:PEDESTAL\s+DRAWERS?.*FINISHES|CABINETRY(?:\s+\w+)?\s+FINISHES)\b", label)
+        )
+        if cabinetry_finishes_row:
             combined_text = normalize_space(" | ".join(part for part in (description, notes) if part))
+            page_text_following_lines = provenance.get("page_text_following_lines", [])
+            if not isinstance(page_text_following_lines, list):
+                page_text_following_lines = []
+            page_text_prefix_lines = provenance.get("page_text_prefix_lines", [])
+            if not isinstance(page_text_prefix_lines, list):
+                page_text_prefix_lines = []
             handle_fragments = provenance.get("absorbed_inline_handle_texts", [])
             if not isinstance(handle_fragments, list):
                 handle_fragments = []
@@ -7952,6 +9139,14 @@ def _imperial_postprocess_material_rows(rows: list[dict[str, Any]]) -> list[dict
                 knob_match = re.search(r"(?i)(?:[A-Z][A-Za-z0-9& ]+\s*-\s*)?[^|]*?\b(?:cabinet\s+)?knob\b[^|]*?(?:SKU:Part No:\s*[A-Z0-9.]+)?", combined_text)
                 if knob_match:
                     handle_block = normalize_space(knob_match.group(0))
+            page_handle_block = _imperial_inline_handle_block_from_page_lines(page_text_prefix_lines + page_text_following_lines)
+            if handle_block or page_handle_block or handle_fragments:
+                base_supplier = normalize_space(str(provenance.get("layout_supplier_text", "") or supplier))
+                base_description = normalize_space(str(provenance.get("layout_value_text", "") or description))
+                base_notes = normalize_space(str(provenance.get("layout_notes_text", "") or notes))
+                supplier = base_supplier
+                description = base_description
+                notes = base_notes
             if handle_block:
                 handle_block = re.sub(r"(?i)\bVertical\s+Grain\b", "", handle_block)
                 handle_block = normalize_space(handle_block)
@@ -7961,11 +9156,12 @@ def _imperial_postprocess_material_rows(rows: list[dict[str, Any]]) -> list[dict
                 if supplier_match:
                     candidate_supplier = normalize_space(supplier_match.group("supplier"))
                     if candidate_supplier and len(candidate_supplier.split()) <= 2 and (
-                        not supplier or supplier.upper() in {"POLYTEC", "LAMINEX", "FURNWARE", "TITUS TEKFORM"}
+                        not cabinetry_finishes_row
+                        and (not supplier or supplier.upper() in {"POLYTEC", "LAMINEX", "FURNWARE", "TITUS TEKFORM"})
                     ):
                         supplier = candidate_supplier
                         handle_block = normalize_space(f"Handles - {supplier_match.group('body')}")
-                elif not supplier:
+                elif not supplier and not cabinetry_finishes_row:
                     leading_supplier = re.match(r"(?i)^(?P<supplier>[A-Z][A-Za-z0-9& ]+?)\s*-\s*(?P<body>.+)$", handle_block)
                     if leading_supplier and len(normalize_space(leading_supplier.group("supplier")).split()) <= 2:
                         supplier = normalize_space(leading_supplier.group("supplier"))
@@ -7984,26 +9180,37 @@ def _imperial_postprocess_material_rows(rows: list[dict[str, Any]]) -> list[dict
                 )
                 if handle_block and handle_block not in handle_fragments:
                     handle_fragments.append(handle_block)
-                description = handle_block or description
-                notes = ""
+            if page_handle_block:
+                if page_handle_block not in handle_fragments:
+                    handle_fragments.append(page_handle_block)
+                if "SKU:PART NO:" in page_handle_block.upper():
+                    handle_fragments = [
+                        fragment
+                        for fragment in handle_fragments
+                        if "WOODGATE ROUND CABINET KNOB" not in fragment.upper()
+                        or "SKU:PART NO:" in fragment.upper()
+                    ]
             segments = [
                 normalize_space(part)
                 for part in re.split(r"\s*\|\s*", description)
                 if normalize_space(part)
             ]
             cleaned_segments: list[str] = []
-            for segment in segments:
-                if re.search(r"(?i)\b(?:woodmatt|thermolaminated|vertical\s+grain|curved\s+end\s+panels)\b", segment) and not re.search(
-                    r"(?i)\b(?:handle|knob|caster)\b",
-                    segment,
-                ):
-                    continue
-                cleaned_segments.append(segment)
+            if any(re.search(r"(?i)\b(?:handle|knob|caster)\b", segment) for segment in segments):
+                for segment in segments:
+                    if re.search(r"(?i)\b(?:woodmatt|thermolaminated|vertical\s+grain|curved\s+end\s+panels)\b", segment) and not re.search(
+                        r"(?i)\b(?:handle|knob|caster)\b",
+                        segment,
+                    ):
+                        continue
+                    cleaned_segments.append(segment)
+            else:
+                cleaned_segments = segments
             description = " | ".join(_unique(cleaned_segments))
             description = re.sub(r"(?i)^Barchie\s*-\s*Barchie\b", "Barchie", description)
             description = re.sub(r"(?i)\bCasters\s+Barchie\b", "Casters", description)
             description = re.sub(r"(?i)\bCasters\b(?:\s*\|\s*\bCasters\b)+", "Casters", description)
-            if not supplier and re.match(r"(?i)^Barchie\b", description):
+            if not supplier and not cabinetry_finishes_row and re.match(r"(?i)^Barchie\b", description):
                 supplier = "Barchie"
                 description = normalize_space(re.sub(r"(?i)^Barchie\s*-\s*", "", description, count=1))
             if handle_fragments:
@@ -8881,7 +10088,7 @@ def _imperial_handle_text_should_preserve_block(text: str) -> bool:
     if "|" in cleaned:
         return True
     if re.search(
-        r"(?i)\b(?:investigating|pricing from|for original selection|woodturning|desk\s*-|benchseat|talls?\b|uppers?\b|lowers?\b|drawers?\s*-|voda|SO-[A-Z0-9-]+)\b",
+        r"(?i)\b(?:investigating|pricing from|for original selection|woodturning|desk\s*-|benchseat|talls?\b|uppers?\b|lowers?\b|drawers?\s*-|voda|SO-[A-Z0-9-]+|trouser rack|drawers?\s*&\s*shelf|woodgate round cabinet knob|casters?)\b",
         cleaned,
     ):
         return True
@@ -8911,10 +10118,46 @@ def _imperial_handle_block_entry_starts(text: str) -> bool:
     )
     return bool(
         re.search(
-            r"(?i)^(?:Tall Door Handles?\b|High Split Handle\b|(?<!High\s)Split Handle\b|Drawers?\s*-\s*Bevel Edge finger pull\b|DESK\s*-\s*\d+\s+Voda\s+Profile\s+Handle\b|BENCHSEAT DRAWERS\s*-\s*PTO\b|Bevel edge finger pull on lowers\b|No handles on uppers\b|Talls?\s*-\s*Tall Door Handles?\b|Push to open\b|Investigating pricing from Auburn\b)",
+            r"(?i)^(?:Tall Door Handles?\b|High Split Handle\b|(?<!High\s)Split Handle\b|Drawers?\s*-\s*Bevel Edge finger pull\b|DESK\s*-\s*\d+\s+Voda\s+Profile\s+Handle\b|BENCHSEAT DRAWERS\s*-\s*PTO\b|Bevel edge finger pull on lowers\b|No handles on uppers\b|Talls?\s*-\s*Tall Door Handles?\b|Push to open\b|Investigating pricing from Auburn\b|TROUSER RACK\b|EVYN['’]?S ROOM DRAWERS?\s*&\s*SHELF\b|(?:Handles?\s*-\s*)?Woodgate Round Cabinet Knob\b|Casters?\b)",
             cleaned,
         )
     )
+
+
+def _imperial_handle_fragment_prefers_continuation(
+    row_label: str,
+    previous_description: str,
+    description: str,
+    supplier: str,
+    notes: str,
+    separator_confidence: str,
+) -> bool:
+    normalized_description = normalize_space(description)
+    if not normalized_description or supplier or notes:
+        return False
+    if _imperial_handle_block_entry_starts(normalized_description):
+        return False
+    normalized_row_label = normalize_space(row_label)
+    combined_text = normalize_space(
+        " | ".join(part for part in (previous_description, normalized_description) if normalize_space(part))
+    )
+    generic_handle_row = bool(
+        re.search(
+            r"(?i)\b(?:NO\s+HANDLES?|TOUCH\s+CATCH|RECESSED\s+F(?:I|IN)N?GER\s+SPACE|FINGER\s+SPACE|HANDLES?\s+TO\s+OVERHEADS?)\b",
+            normalized_row_label,
+        )
+        or _imperial_handle_description_prefers_empty_supplier(combined_text)
+    )
+    if not generic_handle_row:
+        return False
+    if separator_confidence == "visible":
+        return bool(
+            re.match(
+                r"(?i)^[-–—]?\s*(?:fridge|microwave|cooktop|beside|behind|above|below|and\b|or\b|with\b|to\b|for\b|vs\b)",
+                normalized_description,
+            )
+        )
+    return True
 
 
 def _imperial_handle_block_marker_count(text: str) -> int:
@@ -8931,6 +10174,10 @@ def _imperial_handle_block_marker_count(text: str) -> int:
         r"(?i)\bNo handles on uppers\b",
         r"(?i)\bTalls?\s*-\s*Tall Door Handles?\b",
         r"(?i)\bPush to open\b",
+        r"(?i)\bTROUSER RACK\b",
+        r"(?i)\bEVYN['’]?S ROOM DRAWERS?\s*&\s*SHELF\b",
+        r"(?i)\bWoodgate Round Cabinet Knob\b",
+        r"(?i)\bCasters?\b",
     )
     return sum(1 for pattern in patterns if re.search(pattern, cleaned))
 
@@ -8951,6 +10198,10 @@ def _imperial_handle_block_segments(text: str) -> list[str]:
         r"\bTalls?\s*-\s*Tall Door Handles?\b",
         r"\bPush to open\b",
         r"\bInvestigating pricing from Auburn\b",
+        r"\bTROUSER RACK\b",
+        r"\bEVYN['’]?S ROOM DRAWERS?\s*&\s*SHELF\b",
+        r"\b(?:Handles?\s*-\s*)?Woodgate Round Cabinet Knob\b",
+        r"\bCasters?\b",
     ):
         cleaned = re.sub(rf"(?<!\|)\s+(?={pattern})", " | ", cleaned, flags=re.IGNORECASE)
     return [
@@ -8995,6 +10246,12 @@ def _imperial_handle_supplier_display(*texts: Any) -> str:
                 continue
             seen.add(supplier)
             suppliers.append(supplier)
+    if any(supplier.upper() in {item.upper() for item in IMPERIAL_HANDLE_SUPPLIER_HINTS} for supplier in suppliers):
+        suppliers = [
+            supplier
+            for supplier in suppliers
+            if supplier.upper() in {item.upper() for item in IMPERIAL_HANDLE_SUPPLIER_HINTS}
+        ]
     return " | ".join(suppliers)
 
 
@@ -9005,8 +10262,10 @@ def _imperial_choose_handle_block_source(layout_text: str, page_text: str) -> st
         return layout_clean
     if not layout_clean:
         return page_clean
-    layout_marker_count = _imperial_handle_block_marker_count(layout_clean)
-    page_marker_count = _imperial_handle_block_marker_count(page_clean)
+    if "BENCHSEAT DRAWERS - PTO" in layout_clean.upper() and "BENCHSEAT DRAWERS - PTO" not in page_clean.upper():
+        return layout_clean
+    layout_marker_count = _imperial_handle_block_marker_count_enhanced(layout_clean)
+    page_marker_count = _imperial_handle_block_marker_count_enhanced(page_clean)
     if page_marker_count > layout_marker_count:
         return page_clean
     if re.search(r"(?i)^[A-Z][A-Za-z0-9& ]+\s+Investigating pricing", page_clean):
@@ -9029,6 +10288,61 @@ def _imperial_choose_handle_block_source(layout_text: str, page_text: str) -> st
         return page_clean
 
     return layout_clean
+
+
+def _imperial_extract_handle_notes_from_description(
+    description: str,
+    notes: str,
+) -> tuple[str, str]:
+    description_text = normalize_space(description)
+    notes_text = _imperial_normalize_handle_note_text(notes)
+    if not description_text:
+        return description_text, notes_text
+    match = re.search(
+        r"(?i)\b(Investigating pricing from Auburn(?:\s*\|\s*)?Woodturning for original selection)\b",
+        description_text,
+    )
+    if not match:
+        return description_text, notes_text
+    extracted_note = _imperial_normalize_handle_note_text(match.group(1))
+    description_text = normalize_space(
+        f"{description_text[:match.start()]} {description_text[match.end():]}"
+    ).strip(" -|;,")
+    if extracted_note and extracted_note.upper() not in notes_text.upper():
+        notes_text = normalize_space(" | ".join(part for part in (notes_text, extracted_note) if part))
+    return description_text, _imperial_normalize_handle_note_text(notes_text)
+
+
+def _imperial_extract_handle_install_notes_from_description(
+    description: str,
+    notes: str,
+) -> tuple[str, str]:
+    description_text = normalize_space(description)
+    notes_text = _imperial_normalize_handle_note_text(notes)
+    if not description_text:
+        return description_text, notes_text
+    install_patterns = (
+        r"(?i)\b(Horizontal/Vertical)\b",
+        r"(?i)\b(Vertical Install|Horizontal Install)\b",
+        r"(?i)\b(Vertical on doors|Horizontal on drawers|Vertical on drawers|Horizontal on doors|vertical on tall doors|on tall doors)\b",
+    )
+    extracted: list[str] = []
+    for pattern in install_patterns:
+        while True:
+            match = re.search(pattern, description_text)
+            if not match:
+                break
+            extracted_note = _imperial_normalize_handle_note_text(match.group(1))
+            if extracted_note:
+                extracted.append(extracted_note)
+            description_text = normalize_space(
+                f"{description_text[:match.start()]} {description_text[match.end():]}"
+            ).strip(" -|;,")
+    if extracted:
+        notes_text = _imperial_normalize_handle_note_text(
+            " | ".join(part for part in (notes_text, " | ".join(_unique(extracted))) if part)
+        )
+    return description_text, notes_text
 
 
 def _imperial_rebuild_preserved_handle_block(text: str) -> str:
@@ -9117,7 +10431,8 @@ def _imperial_rebuild_preserved_handle_block(text: str) -> str:
         cleaned_entry = normalize_space(cleaned_entry).strip(" -;,")
         if cleaned_entry:
             cleaned_entries.append(cleaned_entry)
-    rebuilt = normalize_space(" | ".join(_unique(cleaned_entries))).strip(" -;,")
+    rebuilt = _imperial_normalize_handle_note_text(" | ".join(_unique(cleaned_entries)))
+    rebuilt = normalize_space(rebuilt).strip(" -;,")
     desk_pattern = re.compile(
         r"(?i)\bDESK\s*-\s*2163\s+Voda\s+Profile\s+Handle\s+Brushed\s+Nickel\s+300mm\s*-\s*SO-2163-300-BN\b"
     )
@@ -9129,6 +10444,42 @@ def _imperial_rebuild_preserved_handle_block(text: str) -> str:
         end = matches[-1].end()
         rebuilt = normalize_space(f"{rebuilt[:start]} {rebuilt[end:]}").strip(" -|;,")
     return rebuilt
+
+
+def _imperial_trim_handle_accessory_spillover(text: str) -> str:
+    cleaned = normalize_space(text)
+    if not cleaned:
+        return ""
+    cleaned = re.sub(r"(?i)(?:\s*\|\s*|\s+)ACCESSOR(?:Y|IES)\b.*$", "", cleaned).strip(" -|;,")
+    cleaned = re.sub(r"(?i)\b(?:BIN|ACCESSOR(?:Y|IES))\b.*$", "", cleaned).strip(" -|;,") if re.match(r"(?i)^no\s+handles?\b", cleaned) else cleaned
+    if re.search(r"(?i)\b(?:no\s+handles?|touch\s+catch|recessed\s+f(?:i|in)d?ger\s+space)\b", cleaned):
+        cleaned = re.sub(
+            r"(?i)(?:\s*\|\s*|\s+)(?:furnware|kethy|polytec|titus tekform|tekform)(?=\s*(?:vs\s*sub|storage\s+cargo|essentio\s+base|to\s+be\s+installed\s+ub|near\s+cooktop|see\s+plan|$))",
+            "",
+            cleaned,
+        ).strip(" -|;,")
+        cleaned = re.sub(
+            r"(?i)(?:\s*\|\s*|\s+)(?:vs\s*sub|storage\s+cargo|essentio\s+base|to\s+be\s+installed\s+ub|near\s+cooktop\b).*?$",
+            "",
+            cleaned,
+        ).strip(" -|;,")
+    return normalize_space(cleaned).strip(" -|;,")
+
+
+def _imperial_insert_handle_semantic_breaks(text: str) -> str:
+    cleaned = normalize_space(text)
+    if not cleaned:
+        return ""
+    for pattern in (
+        r"\bUPPER\s*-\s*FINGERPULL(?:\s*\([^)]*\))?\b",
+        r"\bBASE\s*-\s*(?:BEVEL\s+)?EDGE\s+FINGERPULL\b",
+        r"\bTALL\s*-\s*S225\.280\.MBK\.?\b",
+        r"\bCHUTE\s+DOOR\s*-\s*S225\.160\.MBK\.?\b",
+        r"\bDESK\s*-\s*\d+\s+Voda\s+Profile\s+Handle\b",
+        r"\bBENCHSEAT DRAWERS?\s*-\s*PTO\b",
+    ):
+        cleaned = re.sub(rf"(?<!\|)\s+(?={pattern})", " | ", cleaned, flags=re.IGNORECASE)
+    return normalize_space(cleaned).strip(" -|;,")
 
 
 def _imperial_clean_material_row_handle_text(text: str) -> str:
@@ -9147,6 +10498,7 @@ def _imperial_clean_material_row_handle_text(text: str) -> str:
 
     if _imperial_handle_text_should_preserve_block(text):
         cleaned = _imperial_rebuild_preserved_handle_block(text)
+        cleaned = _imperial_insert_handle_semantic_breaks(cleaned)
         cleaned = re.sub(r"(?i)\b(Momo)\s*-\s*\1\s*-\s*", r"\1 - ", cleaned).strip(" -;,")
         cleaned = re.sub(
             r"(?i)\bHorizontal\s+on\s+Drawers\s+and\s+Vertical\s+on\s*-\s*Horizontal\s+on\s+Drawers\s+and\s+Vertical\s+on\s+Doors\b",
@@ -9201,6 +10553,9 @@ def _imperial_clean_material_row_handle_text(text: str) -> str:
         "Push to open",
         combined,
     ).strip(" -;,")
+    combined = _imperial_insert_handle_semantic_breaks(combined)
+    combined = _imperial_normalize_handle_note_text(combined)
+    combined = _imperial_trim_handle_accessory_spillover(combined)
     return normalize_space(combined).strip(" -;,")
 
 
@@ -9387,6 +10742,16 @@ def _imperial_finalize_material_rows(rows: list[dict[str, Any]]) -> list[dict[st
             row["tags"] = ["other_material"]
             primary_tag = "other_material"
         label_upper = normalize_space(str(row.get("area_or_item", "") or "")).upper()
+        if any(
+            marker in label_upper
+            for marker in (
+                "HINGES & DRAWER RUNNERS",
+                "Hinges & Drawer Runners".upper(),
+                "FLOOR TYPE & KICK REFACING REQUIRED",
+                "FLOOR TYPE",
+            )
+        ):
+            continue
         if (
             primary_tag == "door_colours"
             and label_upper.startswith("CABINETRY COLOUR ")
@@ -12233,6 +13598,8 @@ SOFT_CLOSE_NEGATIVE_HINTS = (
     "not soft close",
     "not soft closed",
     "not soft-close",
+    " std ",
+    " standard ",
     "standard runner",
     "standard runners",
     "standard hinge",
@@ -12247,6 +13614,7 @@ SOFT_CLOSE_POSITIVE_HINTS = (
     "soft closed",
     "soft-close",
     "softclose",
+    "softc close",
     "blumotion",
 )
 
@@ -12261,13 +13629,32 @@ def normalize_soft_close_value(value: Any, keyword: str = "") -> str:
     if not text:
         return ""
     lowered = text.lower()
+    lowered_probe = f" {lowered} "
+    scalar_soft_close_tokens = {
+        "std",
+        "standard",
+        "soft close",
+        "soft closed",
+        "soft-close",
+        "softclose",
+        "softc close",
+        "not soft close",
+        "not soft closed",
+        "not soft-close",
+        "yes",
+        "y",
+        "true",
+        "no",
+        "n",
+        "false",
+    }
     if keyword:
         field_hints = SOFT_CLOSE_FIELD_HINTS.get(keyword, (keyword,))
         if keyword == "hinge" and "drawer" in lowered:
             return ""
-        if not any(token in lowered for token in field_hints):
+        if not any(token in lowered for token in field_hints) and lowered not in scalar_soft_close_tokens:
             return ""
-    if any(token in lowered for token in SOFT_CLOSE_NEGATIVE_HINTS):
+    if any(token in lowered_probe for token in SOFT_CLOSE_NEGATIVE_HINTS):
         return "Not Soft Close"
     if any(token in lowered for token in SOFT_CLOSE_POSITIVE_HINTS):
         return "Soft Close"
@@ -12462,6 +13849,10 @@ def _clean_yellowwood_overlay_source_text(text: str) -> str:
             continue
         if re.match(r"(?i)^LOT\s+\d+\b", line):
             continue
+        line = re.sub(r"(?i)\bFlooring Xtra\b", "", line)
+        line = normalize_space(line)
+        if not line:
+            continue
         cleaned_lines.append(line)
     return "\n".join(cleaned_lines)
 
@@ -12527,10 +13918,19 @@ def _collect_yellowwood_flooring_overlays(
 ) -> None:
     non_wet_areas: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
+            r"ENTRY,\s*HALLWAYS,\s*LIVING,\s*DINING,\s*PASSAGE,\s*PASSAGE\s+LINEN,\s*KITCHEN\s*&\s*PANTRY",
+            (source_room_key("KITCHEN"), source_room_key("PANTRY"), source_room_key("BUTLERS PANTRY")),
+        ),
+        (
+            r"ENTRY,\s*HALLWAYS,\s*LIVING,\s*DINING,\s*PASSAGE,\s*PASSAGE\s+LINEN,\s*KITCHEN,\s*PANTRY",
+            (source_room_key("KITCHEN"), source_room_key("PANTRY"), source_room_key("BUTLERS PANTRY")),
+        ),
+        (
             r"ENTRY,\s*PASSAGE,\s*HALLWAYS,\s*DINING,\s*LIVING,\s*KITCHEN,\s*PANTRY",
             (source_room_key("KITCHEN"), source_room_key("PANTRY"), source_room_key("BUTLERS PANTRY")),
         ),
         (r"LIVING,\s*KITCHEN,\s*PANTRY", (source_room_key("KITCHEN"), source_room_key("PANTRY"), source_room_key("BUTLERS PANTRY"))),
+        (r"KITCHEN\s*&\s*PANTRY", (source_room_key("KITCHEN"), source_room_key("PANTRY"), source_room_key("BUTLERS PANTRY"))),
         (r"KITCHEN,\s*PANTRY", (source_room_key("KITCHEN"), source_room_key("PANTRY"), source_room_key("BUTLERS PANTRY"))),
         (r"KITCHEN\s*&\s*DINING", (source_room_key("KITCHEN"),)),
         (r"GROUND\s+FLOOR\s+ALL\s+MAIN\s+FLOORING", (source_room_key("KITCHEN"), source_room_key("BUTLERS PANTRY"))),
@@ -12542,6 +13942,7 @@ def _collect_yellowwood_flooring_overlays(
         (r"BED\s*5\s*\+\s*ROBE", (source_room_key("BED 5 ROBE FIT OUT"),)),
     )
     non_wet_stops = (
+        r"TILING\s+SCHEDULE",
         r"MEDIA ROOM",
         r"MEDIA",
         r"MASTER\s+BED\s*1\s*\+\s*WALK\s+IN\s+ROBE",
@@ -12570,6 +13971,7 @@ def _collect_yellowwood_flooring_overlays(
     wet_area_targets: tuple[tuple[str, str], ...] = (
         (r"BED\s*1\s+MASTER\s+ENSUITE", source_room_key("BED 1 MASTER ENSUITE VANITY")),
         (r"BED\s*1\s+ENSUITE", source_room_key("BED 1 ENSUITE VANITY")),
+        (r"BED\s*2\s+ENSUITE", source_room_key("BED 2 ENSUITE VANITY")),
         (r"GROUND\s+FLOOR\s+BATHROOM", source_room_key("BATHROOM VANITY")),
         (r"BATHROOM", source_room_key("BATHROOM VANITY")),
         (r"GROUND\s+FLOOR\s+POWDER\s+ROOM", source_room_key("GROUND FLOOR POWDER ROOM")),
@@ -20250,6 +21652,9 @@ IMPERIAL_HANDLE_SUPPLIER_HINTS = {
     "Titus Tekform",
     "Lincoln Sentry",
     "ABI Interiors",
+    "Kethy",
+    "Allegra",
+    "Barchie",
 }
 CABINETRY_SUPPLIER_HINTS = {"Polytec", "Laminex"}
 ENTRY_SUPPLIER_HINTS = {
@@ -20261,6 +21666,7 @@ ENTRY_SUPPLIER_HINTS = {
     "Safe Desk",
     "OE Elsafe",
     "Furnware",
+    "Barchie",
     "ABI Interiors",
     "Franke",
 }
