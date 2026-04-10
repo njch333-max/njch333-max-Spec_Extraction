@@ -101,6 +101,10 @@
    - each builder finalizer owns final room-title preservation, overlay merge priority, fixture blacklist enforcement, and grouped-row/property-row cleanup
    - this stage is where Clarendon room whitelisting, Yellowwood vanity/robe title preservation, Imperial fixture cleanup, and future Simonds/Evoca grouped-row cleanup are applied
 8. Enrich room rows with fixture fields (`sink_info`, `basin_info`, `tap_info`), split door-colour fields (`door_colours_overheads`, `door_colours_base`, `door_colours_tall`, `door_colours_island`, `door_colours_bar_back`), and derived bench-top fields (`bench_tops_wall_run`, `bench_tops_island`, `bench_tops_other`).
+8a. Imperial is now a deliberate exception for joinery/material pages:
+  - after the five-column cell-aware recovery stage, persist `material_rows` as the primary truth layer instead of treating the split door-colour / benchtop fields as the main output
+  - each row carries `area_or_item`, `supplier`, `specs_or_description`, `notes`, `tags`, `page_no`, `row_order`, `confidence`, `needs_review`, and row/cell provenance
+  - room order follows spec appearance order, and row order follows source table order; no later display or finalize stage may re-sort Imperial material rows by tag or inferred semantics
 9. Remove plumbing fixtures from appliance rows so they only appear on room rows.
 10. Apply the fixed `Global Conservative` profile for every builder:
   - room identity is source-driven
@@ -139,6 +143,10 @@
   - avoid turning `... TO TOP OF BENCHTOP` layout text plus a later `OFFICE JOINERY SELECTION SHEET` title into a fake benchtop field
   - keep sinkware/tapware and appliance pages on deterministic text/overlay parsing by default; Vision on Imperial is for table-boundary recovery, not free-form final field generation
   - `CLIENT NAME`, `SIGNATURE`, `SIGNED DATE`, `NOTES SUPPLIER`, and `DOCUMENT REF` are always treated as footer-noise markers on Imperial pages and must never enter room/appliance fields
+13a. After Imperial five-column recovery and section parsing, run a constrained self-repair pass before persistence:
+  - validator marks row-order drift, missing `AREA / ITEM` labels, column spillover, room-ownership conflicts, handle over-splitting, and summary tag conflicts
+  - self-repair may only fix those row-local issues using recorded provenance; it may not freely rewrite whole-room JSON
+  - low-confidence repairs become `needs_review` / unresolved evidence instead of formal output
 
 ### 3.5 Source Control And Review
 - The repository is prepared for a GitHub-hosted workflow centered on pull-request review.
@@ -149,6 +157,7 @@
 - `.github/PULL_REQUEST_TEMPLATE.md` and `.github/CODEOWNERS` define the default review shape once the remote repository is connected.
 - Expected review focus for parser work is regression safety rather than code style: room-local ownership, builder-specific finalizers, PDF QA gating, and UI/export/schema consistency.
 - Operational rule: use `fix this bug` as the default path for PDF-grounded live defects with a clear target field/room/result. Use `review this PR` when the code change affects shared parser flow, grouped-row cleanup, builder finalizers, or PDF QA state transitions.
+ - `tests/fixtures/imperial_37867_gold.json` is the highest-priority Imperial regression fixture. Any change that affects Imperial raw rows, row order, handle preservation, summary grouping, or retained bottom fields must pass that fixture before broader Imperial reruns.
   - parse table-style rows so `BENCHTOPS`, `SPLASHBACK`, `UPPER CABINETRY COLOUR + TALL CABINETS`, `BASE CABINETRY COLOUR`, `KICKBOARDS`, and `HANDLES` stay on their own row boundaries
   - treat auxiliary all-caps row starts such as `ISLAND CABINETRY COLOUR`, `GPO'S`, `BIN`, `HAMPER`, `HANGING RAIL`, `MIRRORED SHAVING CABINET`, and `EXTRA TOP IN ...` as stop markers for the previous row, even when those rows do not yet map to a top-level room field
   - only split glued inline markers at real row starts or lowercase-to-uppercase row transitions, so words such as `CABINETRY` are never broken into fake `BIN` rows
@@ -188,6 +197,7 @@
   - `notes`
   - `checklist_json`
 3. `checklist_json` stores field-level items such as room title, benchtops, cabinetry colour splits, toe kick, bulkheads, floating shelf, shelf, handles, accessories/others, sink/basin/tap, drawers/hinges/flooring, and appliance rows.
+3a. Imperial joinery/material QA is now an explicit exception: the primary checklist focus is `material_rows` correctness, tag correctness, summary correctness, and the retained bottom fields (`Drawers`, `Hinges`, `Flooring`, `Sink`). `Tap` is intentionally excluded from Imperial primary QA.
 4. The PDF QA page edits those checklist items directly and can save, mark pass, or mark fail.
 5. `passed` is only valid when every checklist item is `pass` or `na` and no item is `fail`.
 6. Raw snapshots remain visible while QA is pending or failed, but formal exports are blocked until the latest raw-spec verification is `passed`.
@@ -197,11 +207,21 @@
 2. Load the latest matching `snapshot_verifications` row for PDF QA state.
 3. Flatten room, appliance, and other fields into read-only page rows.
 4. Render the `Rooms` section as a vertical stack of wide horizontal room cards on desktop, with one display row per field and a separate metadata column.
-5. Show room fixtures (`Sink`, `Basin`, `Tap`) directly on the room card and split door colours into `Overheads`, `Base`, `Tall`, `Island`, and `Bar Back`, while trimming location-only suffixes and filtering obvious OCR noise.
-6. Only the kitchen card expands bench tops into `Wall Run` and `Island`; all other rooms collapse to a single `Benchtop` display row.
-7. Non-kitchen cards only render door-colour groups that are both allowed for that room and actually present; `Island` and `Bar Back` are kitchen-only UI rows.
+5. Non-Imperial room cards show room fixtures (`Sink`, `Basin`, `Tap`) directly on the room card and split door colours into `Overheads`, `Base`, `Tall`, `Island`, and `Bar Back`, while trimming location-only suffixes and filtering obvious OCR noise.
+6. Non-Imperial kitchen cards expand bench tops into `Wall Run` and `Island`; all other non-Imperial rooms collapse to a single `Benchtop` display row.
+7. Non-Imperial cards only render door-colour groups that are both allowed for that room and actually present; `Island` and `Bar Back` are kitchen-only UI rows.
+7a. Imperial room cards render `material_rows` in source order instead:
+  - left column = `AREA / ITEM`
+  - right column = lightly cleaned `SUPPLIER - SPECS / DESCRIPTION - NOTES`
+  - preserve original handle-block wording order; do not aggressively split `HANDLES` text into artificial description/note fragments
+  - only retain `Drawers`, `Hinges`, `Flooring`, and `Sink` beneath the raw rows
+  - omit `Tap` from Imperial room cards
 8. Filter plumbing fixtures out of the `Appliances` table and export.
 9. Render a `Material Summary` section that smart-deduplicates room-level door colours, handle models, and bench tops, using the split wall-run/island bench-top values when available, preserving distinct thickness/edge variants, and including floating-shelf materials in the bench-top summary bucket.
+9a. Imperial summary entries are built directly from tagged `material_rows` and rendered as:
+  - first line: normalized material text
+  - second line: `Room: A | B | C`
+  - room lists are de-duplicated and kept in source spec order
 10. Render appliance official links as a clickable wrapped `Product` column.
 11. Render non-room joinery sections such as `FEATURE TALL DOORS` in a dedicated `Special Sections` block instead of folding them into nearby rooms.
 12. Show `Generated at`, `Extraction duration`, and the current PDF QA status in Brisbane time / human-readable duration format on the raw Spec List page.
@@ -251,6 +271,7 @@
 - Array-like fields are stored as lists in JSON and flattened with ` | ` in the review UI
 - `room_key` is a source-driven normalized identity, `original_room_label` preserves the detected source label
 - Room rows also carry fixture fields for sinks, basins, and taps plus split door-colour and bench-top display fields, including the global `door_colours_tall` split for tall-cabinet material.
+- Imperial room rows additionally carry `material_rows` as the primary joinery/material truth layer; the older split fields remain compatibility outputs only and are no longer the authoritative source for Imperial room-card rendering or Imperial material summary generation.
 - Room rows now also support `floating_shelf`, conditional `shelf`, `led`, ordered `accessories`, and curated `other_items` accessory labels such as `RAIL` and `JEWELLERY INSERT`. `Shelf` is source-driven and same-room-local: it must come from explicit shelf wording in that room's own source text, not from generic fit-out notes or nearby room content.
 - The finalizer also gates `Shelf` by room family. It should only survive for simple fit-out/storage spaces such as `WIP`, `WIR`, `WIL`, `Linen Cupboard/Fit Out`, and robe-fit-out rooms. A plain `PANTRY` may keep `Shelf` only when its local evidence clearly shows walk-in/open-shelving fit-out wording such as `WIP`, `Open Shelving`, or `Shelving Only`. Main rooms such as `Kitchen`, `Butlers Pantry`, `Laundry`, and vanity/bathroom spaces must not keep `Shelf`, even if their text contains construction phrases like `CARCASS & SHELF EDGES` or `OPEN FACED SHELVES`.
 - Builder finalization now applies a global material-evidence gate after overlays merge: rooms survive only when they hold true joinery/material fields, not merely handles, plumbing fixtures, flooring, LED, or accessory text.

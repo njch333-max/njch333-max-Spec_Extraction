@@ -86,7 +86,14 @@
   - Imperial handle parsing now includes a delayed same-section recovery pass so footer-adjacent handle model lines can still populate `handles` without letting nearby cabinet-colour rows pollute the value
   - orientation-only notes such as `Vertical on Tall doors only` and `Horizontal on all` are now rejected as door-colour material values, so they do not populate `Tall` or `Island`
   - Imperial sink and tap room fields now prefer the builder-specific non-joinery overlay parser over noisier AI fixture guesses when both are present
-  - all room cards and exports now support a global `Tall` material field for tall cabinets / tall doors / tall panels when the source provides that split
+  - Imperial joinery/material now uses `cell-aware raw rows + constrained self-repair` as the primary output path: `AREA / ITEM` is the row title, the visible `SUPPLIER / SPECS / DESCRIPTION / NOTES` wording is preserved with minimal cleanup, and each row carries `row_order`, `confidence`, `needs_review`, and row/cell provenance
+  - Imperial room cards now render `material_rows` in source room order and source row order instead of the older split field stack; the retained footer fields for Imperial are now only `Drawers`, `Hinges`, `Flooring`, and `Sink`
+  - Imperial `Tap` is intentionally omitted from room cards, primary summary output, and primary Imperial PDF QA so sinkware/tap overlay noise does not dominate the joinery/material workflow
+  - Imperial handle cleanup is now deliberately conservative: handle blocks keep original `Specs / Description` wording order and only remove footer noise, duplicated fragments, or duplicated supplier prefixes instead of splitting into aggressive `description/notes` fragments
+  - Imperial `Material Summary` now aggregates directly from tagged `material_rows`; `Door Colours`, `Handles`, and `Bench Tops` are grouped by normalized material text and each item renders a de-duplicated `Room: ...` list in source spec order
+  - `tests/fixtures/imperial_37867_gold.json` is now the highest-priority Imperial gold fixture, covering room order, row order, handle-block preservation, summary output, and retained bottom fields against the source PDF
+  - Imperial `job 60 / 37867` now passes source-PDF QA on run `1838`, which is the current live acceptance sample for the raw-row + self-repair presentation model
+- all room cards and exports now support a global `Tall` material field for tall cabinets / tall doors / tall panels when the source provides that split
 - room cards and exports now also support optional `Floating Shelf`, conditional `Shelf`, explicit `LED Yes/No`, dedicated `LED Note`, ordered `Accessories`, and curated accessory `Others` rows
   - `Shelf` is now restricted to WIL/WIR/WIP/linen/robe-fit-out style rooms; a plain `PANTRY` keeps `Shelf` only when its local evidence clearly shows walk-in/open-shelving fit-out wording such as `WIP`, `Open Shelving`, or `Shelving Only`
   - `CARCASS & SHELF EDGES`, `SQUARE EDGE RAILS`, and main-room `OPEN FACED SHELVES` wording no longer count as room-level shelf evidence
@@ -199,15 +206,16 @@
 - Keep the active 5-builder / 11-job PDF-QA matrix green after future parser changes:
   - `Clarendon`: `job 1`, `job 46`
   - `Yellowwood`: `job 12`, `job 24`
-  - `Imperial`: `job 28`, `job 41`, `job 49`, `job 50`
+  - `Imperial`: `job 28`, `job 41`, `job 49`, `job 50`, `job 60`
   - `Simonds`: `job 14`, `job 19`
   - `Evoca`: `job 39`
 - Continue validating the new builder-finalizer split on Yellowwood-heavy grouped schedule jobs such as `job 24`, especially pantry/WIP suppression, robe-fit-out title preservation, powder-room separation, kitchen plumbing reinjection, and vanity-room plumbing cleanup
 - Continue tightening noisy field cleanup inside the fixed global conservative profile without reintroducing per-builder configuration
 - Continue tightening grouped-room door-colour logic so `Vanities` only shows `Overheads` when the authoritative room section explicitly labels overhead cabinetry
 - Continue tightening supplement-file room mapping so only clearly related fixture pages enrich grouped rooms while unrelated finish/glazing notes stay ignored
-- Continue refining Imperial field cleanup for non-kitchen sections so `BAR`, `LAUNDRY`, and `BATH + ENSUITE` stay at the same high-confidence row-boundary quality as `KITCHEN`
-- Continue validating Imperial title/body preservation on more templates where the extracted title appears after the body text in PDF reading order
+- Continue strengthening Imperial `AREA / ITEM` label-cell recovery so more rows come from true label cells instead of regex fallback
+- Continue enriching Imperial row/cell provenance so every rendered raw row and summary entry can be traced back to specific source cells
+- Continue lifting Imperial sinkware/appliance pages toward the same structured-row discipline without reintroducing `Tap` into Imperial primary UI/QA
 - Extend deterministic model-page probing beyond the currently supported appliance brand patterns
 - Expand model-number coverage for more appliance naming patterns beyond the current explicit rules
 - Build the future comparison UI and diff logic

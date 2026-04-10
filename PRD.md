@@ -90,7 +90,9 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
   - `Clarendon AFC sinkware/appliances/flooring`: table/grid-first without default Vision
   - `Clarendon drawing pages`: heuristic-only
 - OpenAI-powered `AI merge` remains a manual rescue tool for targeted parser-debug or QA-failed jobs; it is not part of the normal production pipeline.
-- Imperial joinery/material Vision is a boundary-recognition layer, not a free-form final extractor. It is used to recover header rows, column boundaries, merged-cell carry-forward, and footer/signature isolation before deterministic field mapping runs.
+- Imperial joinery/material Vision is a boundary-recognition layer, not a free-form final extractor. It is used to recover header rows, column boundaries, merged-cell carry-forward, and footer/signature isolation before cell-aware raw-row reconstruction runs.
+- Imperial joinery/material output now uses a `material_rows` truth layer. Each retained row must preserve the source table's `AREA / ITEM` label plus the lightly cleaned `SUPPLIER / SPECS / DESCRIPTION / NOTES` text, along with `row_order`, `confidence`, `needs_review`, and row/cell provenance.
+- Imperial parser behavior now includes a constrained self-repair pass after initial cell-aware row assembly. That pass may only repair row order, missing label cells, column spillover, room ownership, and summary tags; it must not freely rewrite whole-room JSON.
 - For all non-drawing table/grid-first page families, values must be read from the recovered table/grid rows first and only lightly normalized afterward. Field ordering and UI presentation must happen after extraction, not before it.
 - Layout analysis must emit `page_type`, `section_label`, `room_label`, `room_blocks`, and `rows`, and later extraction stages may only read values from those matched blocks instead of scanning freely across the page.
 - After shared structure extraction, every builder must pass through a builder-specific finalizer stage. The shared layer owns page classification, room/row block detection, and common noise cleanup; builder finalizers own final room-title preservation, overlay merge priority, fixture blacklist enforcement, and grouped-row/property-row cleanup.
@@ -165,6 +167,8 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Imperial sinkware semantic parsing must ignore unrelated pre-heading basin/tub noise, keep mounting suffixes such as `UNDERMOUNT` attached to the correct sink row, and apply generic taphole notes to the correct sink cluster without cross-room leakage.
 - Orientation-only notes such as `Vertical on Tall doors only` or `Horizontal on all` must not be treated as room-material values.
 - Imperial fixture overlay pages should be preferred over AI guesses for sink, basin, and tap text whenever the builder-specific overlay parser can read a cleaner local value.
+- Imperial room-card order must follow source spec order, and each room's `material_rows` must also render strictly in source row order. No later finalize/UI stage may re-sort Imperial rows by tag, label, or inferred semantic priority.
+- Imperial `HANDLES` rows must preserve the original `SPECS / DESCRIPTION` wording order. Cleaning may remove footer noise, exact duplicate fragments, or duplicated supplier prefixes, but it must not over-split a handle block into artificial description/notes fragments or drop later sub-items.
 - Yellowwood cabinetry/joinery pages must now be treated as table/grid-first schedules as well, so rows such as `BENCHTOP`, `BASE CABINETRY COLOUR`, `UPPER CABINETRY COLOUR`, `ISLAND CABINETRY COLOUR`, `HANDLES`, `BIN`, `LIGHTING`, and `KICKBOARDS` are split before field mapping.
 - Under the conservative merge profile, accessory lists and door-colour subgroup values should prefer clean heuristic output over noisier AI-only guesses when the AI result appears to come from another row or section.
 - Joinery schedule parsing must ignore non-cabinet finish pages and exclude colours that only appear in paint, Colorbond, garage-door, entry-door, window-frame, or other non-joinery contexts.
@@ -242,9 +246,11 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - In 1080p half-screen windows, the Raw Spec List page must remain readable without a horizontal scroll bar; dense tables should switch to stacked cards and room fields should wrap vertically instead of forcing sideways dragging.
 - In 1080p half-screen windows, the responsive layout must also remove fixed content minima and suppress page-level horizontal overflow so wrapped room cards do not still trigger a horizontal scrollbar.
 - The `Rooms` section should use one wide horizontal block per room on desktop, stacked vertically one below the next, so each field can be read without cramped narrow cards.
-- Each room card must show room fixture rows for `Sink`, `Basin`, and `Tap`.
-- Each room card must show `Door Colours` as separate `Overheads`, `Base`, `Island`, and `Bar Back` rows.
-- Each room card must also show a `Tall` row so tall-cabinet material can be captured when the source provides it.
+- Non-Imperial room cards must show room fixture rows for `Sink`, `Basin`, and `Tap`.
+- Non-Imperial room cards should continue to show `Door Colours` as separate `Overheads`, `Base`, `Island`, and `Bar Back` rows when those splits exist.
+- Non-Imperial room cards should continue to show a `Tall` row when the source provides tall-cabinet material.
+- Imperial room cards now render a `material_rows` block instead of the older split field stack. Each line uses `AREA / ITEM` as the title and displays `SUPPLIER - SPECS / DESCRIPTION - NOTES` with only light whitespace/noise cleanup.
+- Imperial room cards only retain `Drawers`, `Hinges`, `Flooring`, and `Sink` beneath the raw material rows. `Tap` is intentionally omitted from Imperial room cards, Imperial material summary, and Imperial primary PDF QA.
 - Each room card must support optional `Floating Shelf`, `Shelf`, `LED`, `LED Note`, `Accessories 1..n`, and curated `Others` accessory rows, and only render `Shelf` or the LED block when those values are non-empty / `LED = Yes`.
 - Non-kitchen room cards must never render `Island` or `Bar Back`, and non-kitchen `Overheads` should only render when the authoritative room section explicitly provides that split.
 - Each room card should prefer separate `Wall Run Bench Top` and `Island Bench Top` rows when the source text supports that split.
@@ -254,6 +260,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - `Material Summary -> Bench Tops` must preserve full material, thickness, and edge/apron/waterfall details while stripping only location suffixes such as `to cooktop run`, `to island bench`, or `to powder room 2`.
 - `Material Summary -> Bench Tops` must also include floating-shelf materials when the room card captures a `Floating Shelf` material.
 - `Material Summary -> Door Colours` and `Material Summary -> Handles` must preserve real `profile`, `style`, `model no.`, and handle-family descriptions; normalization may trim pure installation-location tails, but it must not collapse a value to a bare supplier name.
+- For Imperial only, `Material Summary` must aggregate directly from tagged `material_rows`, not from legacy split fields. Each summary entry must render the normalized material text on the first line and `Room: ...` on the second line, where the room list is de-duplicated and ordered by source spec appearance order using ` | ` as the separator.
 - Grouped vanity titles such as `VANITIES` must sort into the same room-priority band as `Bathroom / Ensuite / Powder`, ahead of robe, rumpus, and generic rooms.
 - Appliance rows on the page must expose a clickable official `Product` link and allow long URLs to wrap across multiple lines.
 - The page must also render a `Special Sections` area for non-room joinery sections such as `FEATURE TALL DOORS`.
@@ -381,6 +388,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Clarendon jobs use an additional deterministic post-polish step so repeated parses keep source-driven room ownership from the `Drawings and Colours` master while stripping handle-location noise, fixture line breaks, and noisy field spillover.
 - Clarendon jobs support both the original `37016` schedule family and the denser single-line `handleless / mirror splashback / laminate` family, with the same compact-summary output style.
 - Imperial jobs use title-driven section parsing so kitchen, pantry, laundry, bar, bath/ensuite, and other selection-sheet sections stay isolated, footer/signature blocks are ignored, and `FEATURE TALL DOORS` is shown separately from room cards.
+- Imperial jobs now use cell-aware raw material rows as the primary joinery/material output, constrained self-repair to catch row-order and column-spill bugs before persistence, and a dedicated `37867` source-PDF gold fixture as the highest-priority regression gate for room order, row order, handle preservation, and summary accuracy.
 - The completion workflow for confirmed changes includes deployment to `spec.lxtransport.online`, successful service restarts, and live verification on the affected page or job.
 - SQLite persists Builders, Jobs, files, run history, raw results, and reviewed results.
 - Worker can process queued spec and drawing runs separately from the web process.
