@@ -1175,6 +1175,7 @@ _IMPERIAL_TABLE_REPAIR_ROW_SPECS: tuple[tuple[str, str, str], ...] = (
     (r"(?i)^ISLAND\s+BENCHTOP\b", "ISLAND BENCHTOP", "material"),
     (r"(?i)^COOKTOP\s+RUN\s+BENCHTOP\b", "COOKTOP RUN BENCHTOP", "material"),
     (r"(?i)^WALL\s+RUN\s+BENCHTOP\b", "WALL RUN BENCHTOP", "material"),
+    (r"(?i)^DESK\s+BENCHTOP\s+AND\s+DESK\s+BASE\s+CABINETRY\s+COLOUR\b", "DESK BENCHTOP AND DESK BASE CABINETRY COLOUR", "material"),
     (r"(?i)^FEATURE\s+COLOUR\s+BAR\s+BACK\s*\+\s*BAR\s+BACK\s+DOOR\b", "FEATURE COLOUR BAR BACK + BAR BACK DOOR", "material"),
     (r"(?i)^UPPER\s+CABINETRY\s+COLOUR\s*\+\s*FRIDGE\s+PANELS?\s+AND\s+FRIDGE\s+OVERHEAD\b", "UPPER CABINETRY COLOUR + FRIDGE PANELS AND FRIDGE OVERHEAD", "material"),
     (r"(?i)^UPPER\s+CABINETRY\s+COLOUR\s*\+\s*TALL\s+CABINETS?\b", "UPPER CABINETRY COLOUR + TALL CABINETS", "material"),
@@ -1182,6 +1183,15 @@ _IMPERIAL_TABLE_REPAIR_ROW_SPECS: tuple[tuple[str, str, str], ...] = (
     (r"(?i)^BASE\s*,\s*UPPER\s*&\s*TALL\s+CABINETRY\s+COLOUR(?:ED)?(?:\s+BOTTOMS\s+TO\s+OVERHEADS)?\b", "BASE + OVERHEAD + OPEN OVERHEADS + TALLS", "material"),
     (r"(?i)^BASE\s*&\s*TALL\s+CABINETRY\s+COLOUR\b", "BASE CABINETRY COLOUR + TALL CABINETS", "material"),
     (r"(?i)^BASE\s+CABINETRY\s+COLOUR\s*\+\s*TALL\s+PANTRY\b", "BASE CABINETRY COLOUR + TALL PANTRY", "material"),
+    (r"(?i)^EXTERNAL\s+BASE\s+CABINETRY\s+COLOUR(?:\s+AND\s+SLIDING\s+DOORS?)?\b", "EXTERNAL BASE CABINETRY COLOUR AND SLIDING DOORS", "material"),
+    (r"(?i)^INTERNAL\s+CABINETRY\s+COLOUR(?:\s*\(.*\))?\b", "INTERNAL CABINETRY COLOUR", "material"),
+    (r"(?i)^BENCH\s+CABINETRY\s+COLOUR\b", "BENCH CABINETRY COLOUR", "material"),
+    (r"(?i)^TALL\s+CABINETRY\s+COLOUR\b", "TALL CABINETRY COLOUR", "material"),
+    (r"(?i)^FRAME\s+DETAIL(?:\s*\(.*\))?\b", "FRAME DETAIL", "material"),
+    (r"(?i)^VERTICAL\s+UPPER\s+PARTITIONS\s+CABINETRY\s+COLOUR(?:\s*\(.*\))?\b", "VERTICAL UPPER PARTITIONS CABINETRY COLOUR (REFER TO DRAWINGS)", "material"),
+    (r"(?i)^BOOKSHELF\b", "BOOKSHELF", "material"),
+    (r"(?i)^BENCHSEAT\s+AND\s+ROBE\s+INTERNALS\s+CABINETRY\s+COLOUR\b", "BENCHSEAT AND ROBE INTERNALS CABINETRY COLOUR", "material"),
+    (r"(?i)^EVYN'?S\s+ROOM\s+DRAWERS?\s*&\s*SHELF\b", "EVYN'S ROOM DRAWERS & SHELF", "material"),
     (r"(?i)^UPPER\s*/\s*FEATURE\s+CABINETRY\s+COLOUR\b", "FEATURE COLOUR OVERHEADS", "material"),
     (r"(?i)^FEATURE\s+CABINETRY\s+COLOUR\b", "FEATURE CABINETRY COLOUR", "material"),
     (r"(?i)^FEATURE\s+TALL\s+CABINETRY\s+COLOUR\b", "FEATURE TALL CABINETRY COLOUR", "material"),
@@ -1218,6 +1228,9 @@ _IMPERIAL_TABLE_REPAIR_ROW_SPECS: tuple[tuple[str, str, str], ...] = (
     (r"(?i)^BENCHTOP\b", "BENCHTOP", "material"),
     (r"(?i)^BIN\b", "BIN", "accessory"),
     (r"(?i)^DESK\s+GROMMETS?\b", "DESK GROMMETS", "accessory"),
+    (r"(?i)^IRONING\s+BOARD\b", "IRONING BOARD", "accessory"),
+    (r"(?i)^TROUSER\s+RACK\b", "TROUSER RACK", "accessory"),
+    (r"(?i)^HANGING\s+RAIL\b", "HANGING RAIL", "accessory"),
 )
 
 
@@ -1589,6 +1602,9 @@ def _match_imperial_row_from_cell_text(
     label, remainder, row_kind = _match_imperial_table_repair_row(label_text)
     if label:
         return label, remainder, row_kind, "label"
+    exact_area = parsing.normalize_space(label_text)
+    if exact_area and _imperial_five_column_item_starts_row(exact_area):
+        return exact_area, "", _imperial_row_kind_from_area_or_item(exact_area), "area"
     combined = parsing.normalize_space(
         " ".join(
             part
@@ -1654,6 +1670,169 @@ def _imperial_five_column_row_confidence(
     return max(0.0, min(1.0, score))
 
 
+def _imperial_force_raw_area_row_start(
+    area_text: str,
+    description_text: str,
+    supplier_text: str,
+    note_text: str,
+) -> bool:
+    cleaned_area = parsing.normalize_space(area_text).upper()
+    combined_text = parsing.normalize_space(
+        " ".join(
+            part
+            for part in (description_text, supplier_text, note_text)
+            if parsing.normalize_space(part)
+        )
+    )
+    if cleaned_area == "DESK" and re.search(
+        r"(?i)\b(?:handle|profile handle|voda|knob|finger pull|bevel edge|momo|tekform|touch catch|no handles?)\b",
+        combined_text,
+    ):
+        return True
+    return False
+
+
+def _imperial_area_or_item_overflow_looks_value(text: str) -> bool:
+    cleaned = parsing.normalize_space(text).strip(" -;,")
+    if not cleaned:
+        return False
+    if _imperial_five_column_item_is_label_continuation(cleaned):
+        return False
+    if cleaned.startswith("(") and cleaned.endswith(")"):
+        return False
+    if re.match(r"(?i)^\d+\s*MM\b", cleaned):
+        return True
+    if cleaned and cleaned[0].islower():
+        return True
+    return bool(
+        re.search(
+            r"(?i)\b(?:thermolaminated|laminate|woodmatt|matt|natural|colour code|oak|walnut|clay|cinder|alabaster|gumnut|coastal|outback|florentine|boston|porcelain|blush|whiteboard|anthracite|brushed|nickel|storg|green)\b",
+            cleaned,
+        )
+    )
+
+
+def _imperial_split_area_or_item_overflow(area_or_item: str, canonical_label: str = "") -> tuple[str, str]:
+    cleaned = parsing.normalize_space(area_or_item)
+    canonical = parsing.normalize_space(canonical_label)
+    if not cleaned:
+        return "", ""
+    if canonical:
+        canonical_upper = canonical.upper()
+        cleaned_upper = cleaned.upper()
+        canonical_parenthetical_match = re.match(r"^(?P<prefix>.+?)\s*\((?P<inside>[^)]+)\)$", canonical)
+        cleaned_parenthetical_match = re.match(r"^(?P<prefix>.+?)\s*\((?P<inside>[^)]+)\)$", cleaned)
+        if canonical_parenthetical_match and cleaned_parenthetical_match:
+            canonical_prefix = parsing.normalize_space(canonical_parenthetical_match.group("prefix"))
+            cleaned_prefix = parsing.normalize_space(cleaned_parenthetical_match.group("prefix"))
+            canonical_inside = parsing.normalize_space(canonical_parenthetical_match.group("inside"))
+            cleaned_inside = parsing.normalize_space(cleaned_parenthetical_match.group("inside"))
+            if canonical_prefix and cleaned_prefix and cleaned_prefix.upper().startswith(canonical_prefix.upper()):
+                canonical_tokens = canonical_inside.split()
+                cleaned_tokens = cleaned_inside.split()
+                extras: list[str] = []
+                cursor = 0
+                for token in cleaned_tokens:
+                    if cursor < len(canonical_tokens) and token.upper() == canonical_tokens[cursor].upper():
+                        cursor += 1
+                        continue
+                    extras.append(token)
+                if canonical_tokens and cursor == len(canonical_tokens):
+                    cleaned = canonical
+                    overflow = parsing.normalize_space(" ".join(extras))
+                    if overflow:
+                        return cleaned, overflow
+        if cleaned_upper.startswith(canonical_upper):
+            suffix = parsing.normalize_space(cleaned[len(canonical) :]).strip(" -;,")
+            if suffix and _imperial_area_or_item_overflow_looks_value(suffix):
+                return canonical, suffix
+        if canonical_upper == "VERTICAL UPPER PARTITIONS CABINETRY COLOUR (REFER TO DRAWINGS)":
+            match = re.match(
+                r"(?i)^VERTICAL\s+UPPER\s+PARTITIONS\s+CABINETRY\s+COLOUR\s*\(REFER\s+TO\s+(.+?)\s+DRAWINGS\)$",
+                cleaned,
+            )
+            if match:
+                embedded = parsing.normalize_space(match.group(1))
+                if embedded and _imperial_area_or_item_overflow_looks_value(embedded):
+                    return canonical, embedded
+        if canonical_upper == "BENCHTOP":
+            bench_with_suffix_match = re.match(
+                r"(?i)^BENCHTOP\s*\((?P<inside>[^)]+)\)\s*(?P<suffix>\d+\s*mm)\b$",
+                cleaned,
+            )
+            if bench_with_suffix_match:
+                inside = parsing.normalize_space(bench_with_suffix_match.group("inside"))
+                suffix = parsing.normalize_space(bench_with_suffix_match.group("suffix"))
+                repaired_inside = parsing.normalize_space(
+                    re.sub(rf"(?i)\b{re.escape(suffix)}(?=\s+WM\s*/\s*Dryer\b)", "", inside)
+                )
+                if repaired_inside and repaired_inside.upper() != inside.upper():
+                    return f"BENCHTOP ({repaired_inside})", suffix
+            bench_parenthetical_match = re.match(
+                r"(?i)^BENCHTOP\s*\((?P<inside>[^)]+)\)$",
+                cleaned,
+            )
+            if bench_parenthetical_match:
+                inside = parsing.normalize_space(bench_parenthetical_match.group("inside"))
+                repaired_inside = re.sub(
+                    r"(?i)\b(\d+\s*mm\b.*?)(?=\bWM\s*/\s*Dryer\b)",
+                    "",
+                    inside,
+                )
+                repaired_inside = parsing.normalize_space(repaired_inside)
+                if repaired_inside and repaired_inside.upper() != inside.upper():
+                    return f"BENCHTOP ({repaired_inside})", ""
+    if re.match(r"(?i)^CABINETRY\s+COLOUR\b", cleaned):
+        suffix = parsing.normalize_space(re.sub(r"(?i)^CABINETRY\s+COLOUR\b", "", cleaned)).strip(" -;,")
+        if suffix and _imperial_area_or_item_overflow_looks_value(suffix):
+            return "CABINETRY COLOUR", suffix
+    thermolaminated_match = re.match(
+        r"(?i)^(?P<label>.+?\bCABINETRY\s+COLOUR)\s+(?P<suffix>THERMOLAMINATED)\b$",
+        cleaned,
+    )
+    if thermolaminated_match:
+        repaired_label = parsing.normalize_space(thermolaminated_match.group("label"))
+        suffix = parsing.normalize_space(thermolaminated_match.group("suffix"))
+        if repaired_label and suffix:
+            return repaired_label, suffix
+    lighting_match = re.match(r"(?i)^(LIGHTING)\s+(\d+\s*X?)\b$", cleaned)
+    if lighting_match:
+        return parsing.normalize_space(lighting_match.group(1)), parsing.normalize_space(lighting_match.group(2))
+    return cleaned, ""
+
+
+def _imperial_merge_area_overflow_into_description(
+    overflow: str,
+    description: str,
+    *,
+    canonical_label: str = "",
+) -> str:
+    cleaned_overflow = parsing.normalize_space(overflow)
+    cleaned_description = parsing.normalize_space(description)
+    if not cleaned_overflow:
+        return cleaned_description
+    if (
+        canonical_label.upper().startswith("BENCHTOP")
+        and re.fullmatch(r"(?i)[A-Za-z]+", cleaned_overflow)
+        and re.search(r"(?i)\b(?:natural|matt|woodmatt|gloss|ultramatt)\b", cleaned_description)
+    ):
+        repaired_description = re.sub(
+            r"(?i)(-\s*)([A-Za-z][A-Za-z]+)(\s*-\s*(?:natural|matt|woodmatt|gloss|ultramatt)\b)",
+            lambda match: (
+                match.group(0)
+                if cleaned_overflow.upper() in match.group(2).upper()
+                else f"{match.group(1)}{cleaned_overflow} {match.group(2)}{match.group(3)}"
+            ),
+            cleaned_description,
+            count=1,
+        )
+        if repaired_description != cleaned_description:
+            return parsing.normalize_space(repaired_description)
+    return parsing.normalize_space(
+        " ".join(part for part in (cleaned_overflow, cleaned_description) if parsing.normalize_space(part))
+    )
+
+
 def _build_imperial_five_column_rows_from_cells(
     cells: list[ImperialCell],
     *,
@@ -1668,7 +1847,8 @@ def _build_imperial_five_column_rows_from_cells(
     rows: list[ImperialFiveColumnRow] = []
     for row_band in sorted(grouped):
         row_cells = sorted(grouped[row_band], key=lambda item: (item.x0, item.text))
-        area_or_item = _imperial_row_role_text(row_cells, "label")
+        original_area_or_item = _imperial_row_role_text(row_cells, "label")
+        area_or_item = original_area_or_item
         specs_or_description = _imperial_row_role_text(row_cells, "description")
         image = _imperial_row_role_text(row_cells, "image")
         supplier = _imperial_row_role_text(row_cells, "supplier")
@@ -1684,6 +1864,28 @@ def _build_imperial_five_column_rows_from_cells(
             supplier,
             notes,
         )
+        area_or_item, area_or_item_overflow = _imperial_split_area_or_item_overflow(area_or_item, label)
+        if area_or_item_overflow:
+            specs_or_description = _imperial_merge_area_overflow_into_description(
+                area_or_item_overflow,
+                specs_or_description,
+                canonical_label=label,
+            )
+        recovered_area_or_item = ""
+        if not area_or_item and label:
+            recovered_area_or_item = label
+            area_or_item = label
+            if remainder and not specs_or_description:
+                specs_or_description = remainder
+            elif remainder and specs_or_description:
+                specs_or_description = parsing.normalize_space(
+                    re.sub(rf"(?i)^\s*{re.escape(label)}\b", "", specs_or_description)
+                ) or specs_or_description
+            # Once a missing label has been recovered into the label column, the
+            # remaining text should flow through the explicit description/supplier
+            # columns only. Keeping the raw combined-text remainder here causes the
+            # same words to be appended a second time during logical-row assembly.
+            remainder = ""
         confidence = _imperial_five_column_row_confidence(
             area_or_item=area_or_item,
             specs_or_description=specs_or_description,
@@ -1700,7 +1902,14 @@ def _build_imperial_five_column_rows_from_cells(
             "image": _imperial_row_role_provenance(row_cells, "image"),
             "supplier": _imperial_row_role_provenance(row_cells, "supplier"),
             "notes": _imperial_row_role_provenance(row_cells, "notes"),
+            "canonical_label": label,
+            "match_source": match_source,
+            "raw_area_or_item": original_area_or_item,
         }
+        if recovered_area_or_item:
+            provenance["recovered_area_or_item"] = recovered_area_or_item
+        if area_or_item_overflow:
+            provenance["area_or_item_overflow"] = area_or_item_overflow
         rows.append(
             ImperialFiveColumnRow(
                 room_scope=room_scope,
@@ -1722,6 +1931,205 @@ def _build_imperial_five_column_rows_from_cells(
     return rows
 
 
+def _repair_imperial_five_column_rows(rows: list[ImperialFiveColumnRow]) -> list[ImperialFiveColumnRow]:
+    if not rows:
+        return []
+
+    def _sequence_row_start_label(item: ImperialFiveColumnRow) -> str:
+        candidate = parsing.normalize_space(item.canonical_label or item.area_or_item)
+        if candidate and _imperial_five_column_item_starts_row(candidate):
+            return candidate
+        raw_area = parsing.normalize_space(item.area_or_item)
+        if raw_area and _imperial_five_column_item_starts_row(raw_area):
+            return raw_area
+        return ""
+
+    def _is_soft_continuation_row(item: ImperialFiveColumnRow) -> bool:
+        raw_area = parsing.normalize_space(item.area_or_item)
+        if not raw_area:
+            return True
+        if (
+            raw_area
+            and _imperial_five_column_item_starts_row(raw_area)
+            and not _imperial_five_column_item_is_label_continuation(raw_area)
+            and not _imperial_area_or_item_overflow_looks_value(raw_area)
+        ):
+            return False
+        if _imperial_five_column_item_is_label_continuation(raw_area):
+            return True
+        if not item.canonical_label:
+            if raw_area.endswith(")") or _imperial_area_or_item_overflow_looks_value(raw_area):
+                return True
+            if len(raw_area.split()) <= 3:
+                return True
+        return False
+
+    def _merge_chunk(chunk: list[ImperialFiveColumnRow], *, current: ImperialFiveColumnRow) -> ImperialFiveColumnRow | None:
+        combined_area = parsing.normalize_space(
+            " ".join(candidate.area_or_item for candidate in chunk if parsing.normalize_space(candidate.area_or_item))
+        )
+        combined_description = parsing.normalize_space(
+            " ".join(candidate.specs_or_description for candidate in chunk if parsing.normalize_space(candidate.specs_or_description))
+        )
+        combined_supplier = parsing.normalize_space(
+            " ".join(candidate.supplier for candidate in chunk if parsing.normalize_space(candidate.supplier))
+        )
+        combined_notes = parsing.normalize_space(
+            " ".join(candidate.notes for candidate in chunk if parsing.normalize_space(candidate.notes))
+        )
+        label, remainder, row_kind, match_source = _match_imperial_row_from_cell_text(
+            combined_area,
+            combined_description,
+            combined_supplier,
+            combined_notes,
+        )
+        sequence_area = parsing.normalize_space(current.area_or_item or combined_area)
+        sequence_overflow = ""
+        if not label and current.canonical_label:
+            label = current.canonical_label
+            row_kind = current.row_kind
+            match_source = current.match_source or "sequence"
+        elif not label and sequence_area:
+            repaired_area, repaired_overflow = _imperial_split_area_or_item_overflow(sequence_area)
+            if repaired_area and _imperial_five_column_item_starts_row(repaired_area):
+                label = repaired_area
+                row_kind = _imperial_row_kind_from_area_or_item(repaired_area) or current.row_kind or "other"
+                match_source = current.match_source or "sequence"
+                sequence_area = repaired_area
+                sequence_overflow = repaired_overflow
+        if not label:
+            return None
+        remainder = ""
+        cleaned_area, overflow = _imperial_split_area_or_item_overflow(combined_area, label)
+        if not overflow and sequence_overflow:
+            overflow = sequence_overflow
+        if not cleaned_area and sequence_area:
+            cleaned_area = sequence_area
+        repaired_description = _imperial_merge_area_overflow_into_description(
+            overflow,
+            combined_description,
+            canonical_label=label,
+        )
+        merged_provenance = _coerce_provenance_dict(current.provenance)
+        merged_provenance["sequence_repair_span"] = len(chunk)
+        merged_provenance["sequence_repair_area_or_item"] = combined_area
+        if overflow:
+            merged_provenance["area_or_item_overflow"] = overflow
+        return ImperialFiveColumnRow(
+            room_scope=current.room_scope,
+            row_order=int(current.row_order or 0),
+            area_or_item=cleaned_area or label,
+            specs_or_description=repaired_description,
+            image=parsing.normalize_space(" ".join(candidate.image for candidate in chunk if parsing.normalize_space(candidate.image))),
+            supplier=combined_supplier,
+            notes=combined_notes,
+            canonical_label=label,
+            remainder=remainder,
+            row_kind=row_kind,
+            match_source=match_source or "sequence",
+            confidence=max(_normalize_confidence_value(candidate.confidence) for candidate in chunk),
+            provenance=merged_provenance,
+            needs_review=False,
+        )
+
+    def _continuation_compatible_with_current(current: ImperialFiveColumnRow, candidate: ImperialFiveColumnRow) -> bool:
+        candidate_text = parsing.normalize_space(
+            " ".join(
+                part
+                for part in (
+                    candidate.area_or_item,
+                    candidate.specs_or_description,
+                    candidate.supplier,
+                    candidate.notes,
+                )
+                if parsing.normalize_space(part)
+            )
+        )
+        if not candidate_text:
+            return True
+        current_label = parsing.normalize_space(current.area_or_item or current.canonical_label)
+        current_kind = str(current.row_kind or "").lower()
+        current_row_start = _sequence_row_start_label(current)
+        candidate_row_start = _sequence_row_start_label(candidate)
+        if current_row_start and candidate_row_start:
+            current_upper = current_row_start.upper()
+            candidate_upper = candidate_row_start.upper()
+            same_start_family = (
+                current_upper == candidate_upper
+                or candidate_upper.startswith(f"{current_upper} ")
+                or current_upper.startswith(f"{candidate_upper} ")
+            )
+            if not same_start_family:
+                return False
+        if current_kind != "handle" and re.search(
+            r"(?i)\b(?:handles?|knob|voda profile handle|momo|tekform|bevel edge|finger pull)\b",
+            candidate_text,
+        ):
+            return False
+        if current_kind == "handle" and re.search(
+            r"(?i)\b(?:lighting|led|strip lighting|cabinetry and kicks|recessed kick)\b",
+            candidate_text,
+        ):
+            return False
+        if "BENCHTOP" in current_label.upper() and re.search(r"(?i)\b(?:cabinetry colour|kickboards?|frame detail)\b", candidate_text):
+            return False
+        if "CABINETRY COLOUR" in current_label.upper() and re.search(r"(?i)\b(?:benchtop|bin|lighting)\b", candidate_text):
+            return False
+        if current_kind == "handle" and re.search(r"(?i)\b(?:cabinetry colour|benchtop|frame detail)\b", candidate_text):
+            return False
+        return True
+
+    repaired: list[ImperialFiveColumnRow] = []
+    index = 0
+    total = len(rows)
+    while index < total:
+        current = rows[index]
+        merged_row: ImperialFiveColumnRow | None = None
+        consumed = 1
+        max_span = min(5, total - index)
+        if current.canonical_label:
+            current_area = parsing.normalize_space(current.area_or_item)
+            if (
+                current_area.count("(") > current_area.count(")")
+                or current.row_kind == "handle"
+                or current_area.upper() in {"BENCHTOP", "FRAME DETAIL", "BIN"}
+            ):
+                for span in range(max_span, 1, -1):
+                    chunk = rows[index : index + span]
+                    if any(candidate.canonical_label for candidate in chunk[1:] if not _is_soft_continuation_row(candidate)):
+                        continue
+                    if not all(_is_soft_continuation_row(candidate) for candidate in chunk[1:]):
+                        continue
+                    if not all(_continuation_compatible_with_current(current, candidate) for candidate in chunk[1:]):
+                        continue
+                    merged_candidate = _merge_chunk(chunk, current=current)
+                    if merged_candidate is None:
+                        continue
+                    merged_row = merged_candidate
+                    consumed = span
+                    break
+        elif parsing.normalize_space(current.area_or_item):
+            for span in range(max_span, 1, -1):
+                chunk = rows[index : index + span]
+                if any(candidate.canonical_label for candidate in chunk[1:]):
+                    continue
+                if not all(_continuation_compatible_with_current(current, candidate) for candidate in chunk[1:]):
+                    continue
+                merged_candidate = _merge_chunk(chunk, current=current)
+                if merged_candidate is None:
+                    continue
+                merged_row = merged_candidate
+                consumed = span
+                break
+        if merged_row is not None:
+            repaired.append(merged_row)
+            index += consumed
+            continue
+        repaired.append(current)
+        index += 1
+    return repaired
+
+
 def _append_imperial_fragment_to_logical_row(
     row: ImperialLogicalRow,
     fragment: str,
@@ -1732,17 +2140,43 @@ def _append_imperial_fragment_to_logical_row(
     cleaned = parsing.normalize_space(fragment)
     if not cleaned:
         return
+    preserve_handle_block = bool(
+        str(row.row_kind or "").lower() == "handle"
+        or re.search(r"(?i)\b(?:handles?|knob)\b", parsing.normalize_space(row.row_label))
+    )
     if prefer_supplier:
-        row.supplier_parts.append(cleaned)
+        if preserve_handle_block:
+            existing_text = parsing.normalize_space(" ".join(row.description_parts[-2:]))
+            if existing_text and (
+                cleaned.upper() in existing_text.upper()
+                or existing_text.upper() in cleaned.upper()
+            ):
+                return
+            row.description_parts.append(cleaned)
+        else:
+            row.supplier_parts.append(cleaned)
         return
     supplier, remainder = _extract_imperial_grid_supplier_fragment(cleaned)
     if supplier and not prefer_note:
-        row.supplier_parts.append(supplier)
+        if preserve_handle_block:
+            supplier_fragment = supplier if not remainder else f"{supplier} - {parsing.normalize_space(remainder)}"
+            row.description_parts.append(parsing.normalize_space(supplier_fragment))
+        else:
+            row.supplier_parts.append(supplier)
         cleaned = parsing.normalize_space(remainder)
         if not cleaned:
             return
     if prefer_note or _imperial_grid_fragment_is_note(cleaned, row_label=row.row_label):
-        row.note_parts.append(cleaned)
+        if preserve_handle_block:
+            existing_text = parsing.normalize_space(" ".join(row.description_parts[-2:]))
+            if existing_text and (
+                cleaned.upper() in existing_text.upper()
+                or existing_text.upper() in cleaned.upper()
+            ):
+                return
+            row.description_parts.append(cleaned)
+        else:
+            row.note_parts.append(cleaned)
         return
     row.description_parts.append(cleaned)
 
@@ -1754,14 +2188,33 @@ def _append_imperial_supplier_fragment_to_logical_row(
     cleaned = parsing.normalize_space(fragment)
     if not cleaned:
         return
+    preserve_handle_block = bool(
+        str(row.row_kind or "").lower() == "handle"
+        or re.search(r"(?i)\b(?:handles?|knob)\b", parsing.normalize_space(row.row_label))
+    )
     supplier, remainder = _extract_imperial_grid_supplier_fragment(cleaned)
     if supplier:
-        if remainder:
-            _append_imperial_fragment_to_logical_row(row, remainder)
-        row.supplier_parts.append(supplier)
+        if preserve_handle_block:
+            existing_text = parsing.normalize_space(" ".join(row.description_parts[-2:]))
+            normalized_remainder = parsing.normalize_space(remainder)
+            if normalized_remainder and existing_text and (
+                normalized_remainder.upper() in existing_text.upper()
+                or existing_text.upper().endswith(normalized_remainder.upper())
+            ):
+                row.description_parts.append(supplier)
+            else:
+                merged_fragment = supplier if not normalized_remainder else f"{supplier} - {normalized_remainder}"
+                row.description_parts.append(parsing.normalize_space(merged_fragment))
+        else:
+            if remainder:
+                _append_imperial_fragment_to_logical_row(row, remainder)
+            row.supplier_parts.append(supplier)
         return
     if _looks_like_supplier_only_line(cleaned):
-        row.supplier_parts.append(cleaned)
+        if preserve_handle_block:
+            row.description_parts.append(cleaned)
+        else:
+            row.supplier_parts.append(cleaned)
         return
     _append_imperial_fragment_to_logical_row(row, cleaned)
 
@@ -1789,10 +2242,30 @@ def _build_imperial_logical_rows_from_cells(
     room_scope: str,
     page_no: int = 0,
 ) -> list[ImperialLogicalRow]:
-    row_items = _build_imperial_five_column_rows_from_cells(cells, room_scope=room_scope, page_no=page_no)
+    row_items = _repair_imperial_five_column_rows(
+        _build_imperial_five_column_rows_from_cells(cells, room_scope=room_scope, page_no=page_no)
+    )
     logical_rows: list[ImperialLogicalRow] = []
     pending_items: list[ImperialFiveColumnRow] = []
     current: ImperialLogicalRow | None = None
+
+    def _next_row_start_label(start_index: int) -> str:
+        for candidate in row_items[start_index + 1 :]:
+            candidate_label = parsing.normalize_space(candidate.canonical_label)
+            if candidate_label:
+                return candidate_label
+            candidate_area = parsing.normalize_space(candidate.area_or_item)
+            if candidate_area and (
+                _imperial_five_column_item_starts_row(candidate_area)
+                or _imperial_force_raw_area_row_start(
+                    candidate_area,
+                    candidate.specs_or_description,
+                    candidate.supplier,
+                    candidate.notes,
+                )
+            ):
+                return candidate_area
+        return ""
 
     def pending_to_current(target: ImperialLogicalRow) -> None:
         nonlocal pending_items
@@ -1805,16 +2278,24 @@ def _build_imperial_logical_rows_from_cells(
                 continue
             carry_items.append(pending)
         for pending in carry_items[-3:]:
-            _append_imperial_fragment_to_logical_row(target, pending.specs_or_description)
+            pending_prefix = parsing.normalize_space(pending.area_or_item)
+            pending_fragment = parsing.normalize_space(
+                " ".join(
+                    part
+                    for part in (
+                        "" if pending.canonical_label else pending_prefix,
+                        pending.specs_or_description,
+                    )
+                    if parsing.normalize_space(part)
+                )
+            )
+            _append_imperial_fragment_to_logical_row(target, pending_fragment)
             _append_imperial_supplier_fragment_to_logical_row(target, pending.supplier)
             _append_imperial_fragment_to_logical_row(target, pending.notes, prefer_note=True)
         pending_items = deferred_items
 
     for index, item in enumerate(row_items):
-        next_label = next(
-            (candidate.canonical_label for candidate in row_items[index + 1 :] if candidate.canonical_label),
-            "",
-        )
+        next_label = _next_row_start_label(index)
         raw_area_or_item = parsing.normalize_space(item.area_or_item)
         label = item.canonical_label
         description_text = item.specs_or_description
@@ -1822,14 +2303,30 @@ def _build_imperial_logical_rows_from_cells(
         note_text = item.notes
         if raw_area_or_item and _imperial_five_column_item_is_label_continuation(raw_area_or_item):
             if current is not None:
-                current.raw_area_or_item = _imperial_merge_area_or_item_parts(current.raw_area_or_item or current.row_label, raw_area_or_item)
+                continuation_label, continuation_overflow = _imperial_split_area_or_item_overflow(raw_area_or_item)
+                merged_area_or_item = _imperial_merge_area_or_item_parts(
+                    current.raw_area_or_item or current.row_label,
+                    continuation_label or raw_area_or_item,
+                )
+                current.raw_area_or_item = merged_area_or_item
+                current_label = parsing.normalize_space(current.row_label)
+                if current_label and (
+                    current_label.upper() in merged_area_or_item.upper()
+                    or current_label.upper().startswith(("CABINETRY COLOUR", "VERTICAL UPPER PARTITIONS"))
+                ):
+                    current.row_label = merged_area_or_item
+                if continuation_overflow:
+                    _append_imperial_fragment_to_logical_row(current, continuation_overflow)
                 _append_imperial_fragment_to_logical_row(current, description_text)
                 _append_imperial_supplier_fragment_to_logical_row(current, supplier_text)
                 _append_imperial_fragment_to_logical_row(current, note_text, prefer_note=True)
                 continue
             pending_items.append(item)
             continue
-        if raw_area_or_item and _imperial_five_column_item_starts_row(raw_area_or_item):
+        if raw_area_or_item and (
+            _imperial_five_column_item_starts_row(raw_area_or_item)
+            or _imperial_force_raw_area_row_start(raw_area_or_item, description_text, supplier_text, note_text)
+        ):
             if current is not None:
                 logical_rows.append(current)
             current_label = label or raw_area_or_item
@@ -1904,7 +2401,17 @@ def _build_imperial_logical_rows_from_cells(
             continue
         if item.image:
             current.image_parts.append(item.image)
-        _append_imperial_fragment_to_logical_row(current, description_text)
+        continuation_fragment = parsing.normalize_space(
+            " ".join(
+                part
+                for part in (
+                    "" if label else raw_area_or_item,
+                    description_text,
+                )
+                if parsing.normalize_space(part)
+            )
+        )
+        _append_imperial_fragment_to_logical_row(current, continuation_fragment)
         _append_imperial_supplier_fragment_to_logical_row(current, supplier_text)
         _append_imperial_fragment_to_logical_row(current, note_text, prefer_note=True)
     if current is not None:
@@ -1920,6 +2427,35 @@ def _imperial_five_column_item_is_label_continuation(area_or_item: str) -> bool:
         return True
     if cleaned.startswith("(") and cleaned.endswith(")"):
         return True
+    upper = cleaned.upper()
+    if upper in {
+        "SHELVING",
+        "SHELVING & TALL CABINETRY",
+        "AND SLIDING DOORS",
+        "BACK AND SIDES",
+        "DOOR FRAMES AND",
+        "FRAMES AND KICKBOARDS",
+        "DRAWERS AND OPEN SHELVING)",
+        "GPO'S ISLAND",
+        "DRAWER",
+        "DOORS",
+        "DRAWERS",
+        "INTERNAL STEEL SUPPORTS)",
+        "BACK DOOR",
+        "DRAWINGS)",
+        "LIGHTING ALLOW",
+        "LIGHTING 3X",
+        "LED LIGHTING LED",
+        "RAIL PROVISION",
+        "HANGING RAIL OVAL",
+    }:
+        return True
+    if re.fullmatch(r"(?i)CABINET X \d+ DOORS?", cleaned):
+        return True
+    if re.fullmatch(r"(?i)(?:DOORS|DRAWERS)-\d+MM", cleaned):
+        return True
+    if re.match(r"(?i)^CABINETRY\s+COLOUR\b", cleaned):
+        return True
     return False
 
 
@@ -1928,7 +2464,7 @@ def _imperial_five_column_item_starts_row(area_or_item: str) -> bool:
     if not cleaned or _imperial_five_column_item_is_label_continuation(cleaned):
         return False
     upper = cleaned.upper()
-    if upper in {"AREA / ITEM", "COLOUR", "HIGH", "TALL", "LAUNDRY"}:
+    if upper in {"AREA / ITEM", "COLOUR", "HIGH", "TALL", "LAUNDRY", "DESK"}:
         return False
     if any(
         marker in upper
@@ -1947,7 +2483,7 @@ def _imperial_five_column_item_starts_row(area_or_item: str) -> bool:
         return False
     return bool(
         re.search(
-            r"(?i)\b(?:benchtop|colour|cabinetry|handles?|knob|kickboards?|splashback|bin|lighting|rail|accessories|floating shelves?|open shelves?|frame|drawers?|doors?|gpo|internals?|shelving)\b",
+            r"(?i)\b(?:benchtop|colour|cabinetry|handles?|knob|kickboards?|splashback|upstand|bin|lighting|rail|accessories|floating shelves?|open shelves?|frame|drawers?|doors?|gpo|internals?|shelving|bookshelf|partitions|ironing\s+board|trouser\s+rack|hanging\s+rail|robe\s+internals?)\b",
             cleaned,
         )
     )
@@ -1969,12 +2505,37 @@ def _imperial_row_kind_from_area_or_item(area_or_item: str) -> str:
 
 def _imperial_merge_area_or_item_parts(current_label: str, continuation: str) -> str:
     base = parsing.normalize_space(current_label)
-    suffix = parsing.normalize_space(continuation).lstrip("+").strip()
+    raw_suffix = parsing.normalize_space(continuation)
+    explicit_plus = raw_suffix.startswith("+")
+    suffix = raw_suffix.lstrip("+").strip()
     if not base:
         return suffix
     if not suffix:
         return base
-    return parsing.normalize_space(f"{base} + {suffix}")
+    base_upper = base.upper()
+    suffix_upper = suffix.upper()
+    if suffix_upper in base_upper:
+        return base
+    if base_upper in suffix_upper:
+        return suffix
+    if not explicit_plus and suffix_upper.startswith("AND ") and "COLOUR" in base_upper:
+        colour_index = base_upper.rfind("COLOUR")
+        if colour_index >= 0:
+            base = parsing.normalize_space(base[: colour_index + len("COLOUR")])
+    base_words = base.split()
+    suffix_words = suffix.split()
+    base_keys = [re.sub(r"[^A-Za-z0-9']+", "", word).upper() for word in base_words]
+    suffix_keys = [re.sub(r"[^A-Za-z0-9']+", "", word).upper() for word in suffix_words]
+    limit = min(len(base_words), len(suffix_words))
+    for span in range(limit, 0, -1):
+        if base_keys[-span:] == suffix_keys[:span]:
+            remainder = " ".join(suffix_words[span:])
+            return parsing.normalize_space(f"{base} {remainder}" if remainder else base)
+        if suffix_keys[-span:] == base_keys[:span]:
+            remainder = " ".join(base_words[span:])
+            return parsing.normalize_space(f"{suffix} {remainder}" if remainder else suffix)
+    connector = " + " if explicit_plus else " "
+    return parsing.normalize_space(f"{base}{connector}{suffix}")
 
 
 def _extract_imperial_joinery_word_grid_rows(
@@ -2023,7 +2584,12 @@ def _extract_imperial_joinery_word_grid_rows(
 
 def _imperial_low_confidence_grid_row_should_keep(row: ImperialGridRow, *, raw_area_or_item: str) -> bool:
     raw_label = parsing.normalize_space(raw_area_or_item or row.row_label)
-    if not raw_label or not _imperial_five_column_item_starts_row(raw_label):
+    if not raw_label:
+        return False
+    if not (
+        _imperial_five_column_item_starts_row(raw_label)
+        or _imperial_force_raw_area_row_start(raw_label, row.description, row.supplier, row.notes)
+    ):
         return False
     combined = parsing.normalize_space(" ".join(part for part in (row.supplier, row.description, row.notes) if parsing.normalize_space(part)))
     if not combined:
@@ -2062,9 +2628,60 @@ def _should_defer_imperial_word_grid_fragment_to_next_row(
         return bool(
             re.search(r"(?i)\b(?:fingerpull|fing[ee]r\s*pull|bevel edge|recessed finger|touch catch|required\)?|vertical|horizontal|no handles?)\b", fragment_text)
         )
+    if current_label == "IRONING BOARD" and next_label_upper == "HANGING RAIL":
+        return bool(re.search(r"(?i)\b(?:oval|wardrobe tube|aluminium|matt black)\b", fragment_text))
+    if current_label == "HANGING RAIL" and next_label_upper == "TROUSER RACK":
+        return bool(re.search(r"(?i)\b(?:storg|trouser rack|anthracite|pull-out)\b", fragment_text))
     if next_label_upper == "BIN" and current_label.startswith("HANDLES"):
         return bool(
             re.search(r"(?i)\b(?:bin|vauth-sagel|envi space|furnware|litre|part no)\b", fragment_text)
+        )
+    if current_label == "INTERNAL CABINETRY COLOUR" and next_label_upper.endswith("CABINETRY COLOUR"):
+        return bool(
+            not supplier_text
+            and not note_text
+            and current.get("description_parts")
+            and re.search(
+                r"(?i)\b(?:gumnut|natural|colour code|oak|walnut|whiteboard|matt|woodmatt|outback|clay|alabaster|boston|coastal|florentine|blush|porcelain)\b",
+                fragment_text,
+            )
+        )
+    if current_label.startswith("HANDLES") and next_label_upper.startswith("LIGHTING"):
+        return bool(
+            re.search(r"(?i)\b(?:lighting|led|strip lighting|cabinetry and kicks|recessed kick|underside of cabinetry)\b", fragment_text)
+        )
+    if next_label_upper in {"IRONING BOARD", "TROUSER RACK", "HANGING RAIL", "BOOKSHELF", "BIN"} and (
+        "CABINETRY COLOUR" in current_label or current_label.startswith("HANDLES")
+    ):
+        return bool(
+            re.search(
+                r"(?i)\b(?:vauth-sagel|iron(?:ing)?|tube|trouser|rack|part number|pull out|mounted inside cabinet|woodmatt|matt black|anthracite)\b",
+                fragment_text,
+            )
+        )
+    if next_label_upper.startswith("HANDLES") and (
+        "CABINETRY COLOUR" in current_label
+        or current_label.startswith("BENCHTOP")
+    ):
+        return bool(
+            re.search(
+                r"(?i)\b(?:handles?|tall door handles?|high split handle|voda profile handle|momo|tekform|knob|bevel edge|finger pull|no handles?)\b",
+                fragment_text,
+            )
+        )
+    if "CABINETRY COLOUR" in current_label and "BENCHTOP" in next_label_upper:
+        return bool(
+            re.search(
+                r"(?i)\b(?:upstand|splashback|laminated apron|bullnose edge|colour code|alabaster|outback|clay|natural)\b",
+                fragment_text,
+            )
+        )
+    if "BENCHTOP" in next_label_upper and re.search(r"(?i)\b(?:UPSTAND|SPLASHBACK)\b", current_label):
+        return bool(
+            re.search(
+                r"(?i)\b(?:laminated apron|bullnose edge|bullnose|profile)\b",
+                fragment_text,
+            )
         )
     if supplier_text or note_text:
         if current_label.startswith("BENCHTOP") and next_label_upper.startswith("SPLASHBACK"):

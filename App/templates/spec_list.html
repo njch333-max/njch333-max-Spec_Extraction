@@ -55,36 +55,51 @@
   <div class="summary-grid">
     <article class="summary-card">
       <h4>{{ material_summary.door_colours.label }}</h4>
-      <p class="muted">{{ material_summary.door_colours.count }} distinct item{{ "" if material_summary.door_colours.count == 1 else "s" }}</p>
-      <ul class="summary-list">
+        <p class="muted">{{ material_summary.door_colours.count }} distinct item{{ "" if material_summary.door_colours.count == 1 else "s" }}</p>
+        <ul class="summary-list">
         {% for item in material_summary.door_colours.entries %}
-        <li>{{ item.display_text }}</li>
+        <li class="room-field-stack">
+          <span>{{ item.display_text }}</span>
+          {% if item.rooms_display is defined %}
+          <span class="muted">Room: {{ item.rooms_display or "-" }}</span>
+          {% endif %}
+        </li>
         {% else %}
         <li class="muted">No door colours found.</li>
         {% endfor %}
-      </ul>
+        </ul>
     </article>
     <article class="summary-card">
       <h4>{{ material_summary.handles.label }}</h4>
-      <p class="muted">{{ material_summary.handles.count }} distinct item{{ "" if material_summary.handles.count == 1 else "s" }}</p>
-      <ul class="summary-list">
+        <p class="muted">{{ material_summary.handles.count }} distinct item{{ "" if material_summary.handles.count == 1 else "s" }}</p>
+        <ul class="summary-list">
         {% for item in material_summary.handles.entries %}
-        <li>{{ item.display_text }}</li>
+        <li class="room-field-stack">
+          <span>{{ item.display_text }}</span>
+          {% if item.rooms_display is defined %}
+          <span class="muted">Room: {{ item.rooms_display or "-" }}</span>
+          {% endif %}
+        </li>
         {% else %}
         <li class="muted">No handles found.</li>
         {% endfor %}
-      </ul>
+        </ul>
     </article>
     <article class="summary-card">
       <h4>{{ material_summary.bench_tops.label }}</h4>
-      <p class="muted">{{ material_summary.bench_tops.count }} distinct item{{ "" if material_summary.bench_tops.count == 1 else "s" }}</p>
-      <ul class="summary-list">
+        <p class="muted">{{ material_summary.bench_tops.count }} distinct item{{ "" if material_summary.bench_tops.count == 1 else "s" }}</p>
+        <ul class="summary-list">
         {% for item in material_summary.bench_tops.entries %}
-        <li>{{ item.display_text }}</li>
+        <li class="room-field-stack">
+          <span>{{ item.display_text }}</span>
+          {% if item.rooms_display is defined %}
+          <span class="muted">Room: {{ item.rooms_display or "-" }}</span>
+          {% endif %}
+        </li>
         {% else %}
         <li class="muted">No bench tops found.</li>
         {% endfor %}
-      </ul>
+        </ul>
     </article>
   </div>
 </section>
@@ -107,7 +122,7 @@
         {% for item in row.material_rows %}
         <div class="room-field-row room-field-stack">
           <strong>{{ item.title }}</strong>
-          <span>{{ item.value }}</span>
+          <span>{{ item.display_value or item.value }}</span>
         </div>
         {% else %}
         <div class="room-field-row"><strong>Material Rows</strong><span>-</span></div>

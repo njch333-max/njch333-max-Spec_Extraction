@@ -1,0 +1,525 @@
+{
+  "room_order": [
+    "UPR-BED 1 (Master)",
+    "UPPER-BED 2 (Evyn)",
+    "UPPER-BED 3(Astrid)",
+    "UPPER LINEN",
+    "TV UPPER",
+    "UPPER BATHROOM",
+    "LOWER STAIRS BOOKSHELF",
+    "LOWER TV BENCH",
+    "LWR STUDY DESK (ASTRID)",
+    "LWR STUDY DESK (EVYN)",
+    "LOWER LINEN",
+    "LOWER LAUNDRY"
+  ],
+  "title_samples": [
+    {
+      "raw_text": "Address: 17 Park Street, Kelvin Grove\nClient: Swallowtail Projects\nDate: 3/09/2025\nUPR-BED 1 (Master) JOINERY SELECTION SHEET",
+      "expected": "UPR-BED 1 (Master)"
+    },
+    {
+      "raw_text": "Address: 17 Park Street, Kelvin Grove\nClient: Swallowtail Projects\nDate: 3/09/2025\nUPPER-BED 2 (Evyn) JOINERY SELECTION SHEET",
+      "expected": "UPPER-BED 2 (Evyn)"
+    },
+    {
+      "raw_text": "Address: 17 Park Street, Kelvin Grove\nClient: Swallowtail Projects\nDate: 3/09/2025\nUPPER-BED 3(Astrid)JOINERY SELECTION SHEET",
+      "expected": "UPPER-BED 3(Astrid)"
+    },
+    {
+      "raw_text": "Address: 17 Park Street, Kelvin Grove\nClient: Swallowtail Projects\nDate: 3/09/2025\nLWR STUDY DESK (ASTRID) JOINERY SELECTION SHEET",
+      "expected": "LWR STUDY DESK (ASTRID)"
+    },
+    {
+      "raw_text": "Address: 17 Park Street, Kelvin Grove\nClient: Swallowtail Projects\nDate: 3/09/2025\nLWR STUDY DESK (EVYN) JOINERY SELECTION SHEET",
+      "expected": "LWR STUDY DESK (EVYN)"
+    }
+  ],
+  "summary_snapshot": {
+    "builder_name": "Imperial",
+    "rooms": [
+      {
+        "room_key": "upr_bed_1_master",
+        "original_room_label": "UPR-BED 1 (Master)",
+        "room_order": 1,
+        "material_rows": [
+          {
+            "area_or_item": "BASE CABINETRY COLOUR",
+            "supplier": "Polytec",
+            "specs_or_description": "Boston Oak - Woodmatt",
+            "notes": "Framed sliding doors - Vertical Grain",
+            "tags": [
+              "door_colours"
+            ],
+            "page_no": 1,
+            "row_order": 1
+          },
+          {
+            "area_or_item": "HANDLES",
+            "supplier": "",
+            "specs_or_description": "No handles",
+            "notes": "",
+            "tags": [
+              "handles"
+            ],
+            "page_no": 1,
+            "row_order": 2
+          }
+        ],
+        "drawers_soft_close": "Soft Close",
+        "hinges_soft_close": "Soft Close",
+        "flooring": "",
+        "sink_info": ""
+      },
+      {
+        "room_key": "upper_bed_2_evyn",
+        "original_room_label": "UPPER-BED 2 (Evyn)",
+        "room_order": 2,
+        "material_rows": [
+          {
+            "area_or_item": "BENCHTOP",
+            "supplier": "Polytec",
+            "specs_or_description": "33MM Laminated Benchtop with bullnose profile (Internal shelf in Robe)",
+            "notes": "",
+            "tags": [
+              "bench_tops"
+            ],
+            "page_no": 2,
+            "row_order": 1
+          },
+          {
+            "area_or_item": "EXTERNAL BASE CABINETRY COLOUR AND SLIDING DOORS",
+            "supplier": "Polytec",
+            "specs_or_description": "Thermolaminated Florentine Walnut - Woodmatt - Style 4 - Berrilee",
+            "notes": "Vertical Grain",
+            "tags": [
+              "door_colours"
+            ],
+            "page_no": 2,
+            "row_order": 2
+          }
+        ],
+        "drawers_soft_close": "Soft Close",
+        "hinges_soft_close": "Soft Close",
+        "flooring": "",
+        "sink_info": ""
+      },
+      {
+        "room_key": "upper_bed_3_astrid",
+        "original_room_label": "UPPER-BED 3(Astrid)",
+        "room_order": 3,
+        "material_rows": [
+          {
+            "area_or_item": "DESK BENCHTOP AND DESK BASE CABINETRY COLOUR",
+            "supplier": "Polytec",
+            "specs_or_description": "100mm Laminated Apron Benchtop - Boston Oak - Woodmatt",
+            "notes": "Vertical Grain",
+            "tags": [
+              "bench_tops"
+            ],
+            "page_no": 3,
+            "row_order": 1
+          },
+          {
+            "area_or_item": "HANDLES",
+            "supplier": "Titus Tekform",
+            "specs_or_description": "DESK - 2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN",
+            "notes": "",
+            "tags": [
+              "handles"
+            ],
+            "page_no": 3,
+            "row_order": 2
+          }
+        ],
+        "drawers_soft_close": "",
+        "hinges_soft_close": "",
+        "flooring": "",
+        "sink_info": ""
+      },
+      {
+        "room_key": "upper_linen",
+        "original_room_label": "UPPER LINEN",
+        "room_order": 4,
+        "material_rows": [
+          {
+            "area_or_item": "BASE CABINETRY COLOUR - SPLIT CABINET X 4 DOORS",
+            "supplier": "Polytec",
+            "specs_or_description": "Thermolaminated - Calcutta - Style 2 - Soft Profile - CLASSIC White - Matt",
+            "notes": "",
+            "tags": [
+              "door_colours"
+            ],
+            "page_no": 4,
+            "row_order": 1
+          },
+          {
+            "area_or_item": "HANDLES",
+            "supplier": "",
+            "specs_or_description": "Push to open - Calcutta (image)",
+            "notes": "",
+            "tags": [
+              "handles"
+            ],
+            "page_no": 4,
+            "row_order": 2
+          }
+        ],
+        "drawers_soft_close": "",
+        "hinges_soft_close": "",
+        "flooring": "NA",
+        "sink_info": ""
+      },
+      {
+        "room_key": "tv_upper",
+        "original_room_label": "TV UPPER",
+        "room_order": 5,
+        "material_rows": [
+          {
+            "area_or_item": "BASE & UPPER CABINETRY COLOUR",
+            "supplier": "Polytec",
+            "specs_or_description": "Thermolaminated - Coastal oak - Woodmatt - with Curved end panels",
+            "notes": "Vertical Grain",
+            "tags": [
+              "door_colours"
+            ],
+            "page_no": 5,
+            "row_order": 1
+          },
+          {
+            "area_or_item": "HANDLES",
+            "supplier": "",
+            "specs_or_description": "Push to open",
+            "notes": "",
+            "tags": [
+              "handles"
+            ],
+            "page_no": 5,
+            "row_order": 2
+          }
+        ],
+        "drawers_soft_close": "Soft Close",
+        "hinges_soft_close": "Soft Close",
+        "flooring": "",
+        "sink_info": ""
+      },
+      {
+        "room_key": "upper_bathroom",
+        "original_room_label": "UPPER BATHROOM",
+        "room_order": 6,
+        "material_rows": [
+          {
+            "area_or_item": "BASE CABINETRY COLOUR",
+            "supplier": "Polytec",
+            "specs_or_description": "Thermolaminated - Coastal oak - Woodmatt - with Curved end panels",
+            "notes": "Vertical Grain",
+            "tags": [
+              "door_colours"
+            ],
+            "page_no": 6,
+            "row_order": 1
+          },
+          {
+            "area_or_item": "HANDLES",
+            "supplier": "",
+            "specs_or_description": "Bevel Edge finger pull",
+            "notes": "",
+            "tags": [
+              "handles"
+            ],
+            "page_no": 6,
+            "row_order": 2
+          }
+        ],
+        "drawers_soft_close": "Soft Close",
+        "hinges_soft_close": "Soft Close",
+        "flooring": "",
+        "sink_info": ""
+      },
+      {
+        "room_key": "lower_stairs_bookshelf",
+        "original_room_label": "LOWER STAIRS BOOKSHELF",
+        "room_order": 7,
+        "material_rows": [
+          {
+            "area_or_item": "BASE CABINETRY COLOUR",
+            "supplier": "Polytec",
+            "specs_or_description": "Boston Oak - Woodmatt",
+            "notes": "Vertical Grain",
+            "tags": [
+              "door_colours"
+            ],
+            "page_no": 7,
+            "row_order": 1
+          },
+          {
+            "area_or_item": "HANDLES",
+            "supplier": "",
+            "specs_or_description": "Push to open",
+            "notes": "",
+            "tags": [
+              "handles"
+            ],
+            "page_no": 7,
+            "row_order": 2
+          }
+        ],
+        "drawers_soft_close": "Soft Close",
+        "hinges_soft_close": "Soft Close",
+        "flooring": "",
+        "sink_info": ""
+      },
+      {
+        "room_key": "lower_tv_bench",
+        "original_room_label": "LOWER TV BENCH",
+        "room_order": 8,
+        "material_rows": [
+          {
+            "area_or_item": "BASE CABINETRY COLOUR",
+            "supplier": "Polytec",
+            "specs_or_description": "Boston Oak - Woodmatt",
+            "notes": "Vertical Grain",
+            "tags": [
+              "door_colours"
+            ],
+            "page_no": 8,
+            "row_order": 1
+          },
+          {
+            "area_or_item": "BENCHTOP",
+            "supplier": "Polytec",
+            "specs_or_description": "40mm Laminate benchtop with bullnose edge - Boston Oak - Woodmatt",
+            "notes": "",
+            "tags": [
+              "bench_tops"
+            ],
+            "page_no": 8,
+            "row_order": 2
+          },
+          {
+            "area_or_item": "HANDLES",
+            "supplier": "",
+            "specs_or_description": "Bevel Edge finger pull",
+            "notes": "",
+            "tags": [
+              "handles"
+            ],
+            "page_no": 8,
+            "row_order": 3
+          }
+        ],
+        "drawers_soft_close": "Soft Close",
+        "hinges_soft_close": "Soft Close",
+        "flooring": "",
+        "sink_info": ""
+      },
+      {
+        "room_key": "lwr_study_desk_astrid",
+        "original_room_label": "LWR STUDY DESK (ASTRID)",
+        "room_order": 9,
+        "material_rows": [
+          {
+            "area_or_item": "BASE CABINETRY COLOUR",
+            "supplier": "Laminex",
+            "specs_or_description": "Alabaster Natural Colour Code: 203",
+            "notes": "",
+            "tags": [
+              "door_colours"
+            ],
+            "page_no": 9,
+            "row_order": 1
+          },
+          {
+            "area_or_item": "DESK BENCHTOP",
+            "supplier": "Polytec",
+            "specs_or_description": "80mm Laminated Apron - Alabaster Natural Colour Code: 203 - with bullnose edge profile",
+            "notes": "",
+            "tags": [
+              "bench_tops"
+            ],
+            "page_no": 9,
+            "row_order": 2
+          }
+        ],
+        "drawers_soft_close": "Soft Close",
+        "hinges_soft_close": "Soft Close",
+        "flooring": "",
+        "sink_info": ""
+      },
+      {
+        "room_key": "lwr_study_desk_evyn",
+        "original_room_label": "LWR STUDY DESK (EVYN)",
+        "room_order": 10,
+        "material_rows": [
+          {
+            "area_or_item": "BASE CABINETRY COLOUR",
+            "supplier": "Polytec",
+            "specs_or_description": "Natural Oak - matt",
+            "notes": "Vertical Grain",
+            "tags": [
+              "door_colours"
+            ],
+            "page_no": 10,
+            "row_order": 1
+          },
+          {
+            "area_or_item": "BENCHTOP",
+            "supplier": "Laminex",
+            "specs_or_description": "33MM Laminated benchtop (not fixed to the wall, height adjustable desk frame) - Green Slate - Natural - Colour Code: 8793",
+            "notes": "",
+            "tags": [
+              "bench_tops"
+            ],
+            "page_no": 10,
+            "row_order": 2
+          },
+          {
+            "area_or_item": "HANDLES",
+            "supplier": "Titus Tekform",
+            "specs_or_description": "2163 Voda Profile Handle Matt Black 40mm SO-2163-40-MB",
+            "notes": "Size shown varies from selection ie. 40mm",
+            "tags": [
+              "handles"
+            ],
+            "page_no": 10,
+            "row_order": 3
+          }
+        ],
+        "drawers_soft_close": "Soft Close",
+        "hinges_soft_close": "Soft Close",
+        "flooring": "",
+        "sink_info": ""
+      },
+      {
+        "room_key": "lower_linen",
+        "original_room_label": "LOWER LINEN",
+        "room_order": 11,
+        "material_rows": [
+          {
+            "area_or_item": "UPPER CABINETRY COLOUR",
+            "supplier": "Laminex",
+            "specs_or_description": "Gumnut Natural Colour Code: 2606",
+            "notes": "",
+            "tags": [
+              "door_colours"
+            ],
+            "page_no": 11,
+            "row_order": 1
+          },
+          {
+            "area_or_item": "HANDLES",
+            "supplier": "Furnware",
+            "specs_or_description": "Tall Door Handles - Momo Hinoki Wood Big D 832mm Handle Oak-HIN0682.832.OAK | High Split Handle - Momo hinoki wood big d 416mm handle oak-HIN0682.416.OAK",
+            "notes": "Investigating pricing from Auburn Woodturning for original selection",
+            "tags": [
+              "handles"
+            ],
+            "page_no": 11,
+            "row_order": 2
+          }
+        ],
+        "drawers_soft_close": "Soft Close",
+        "hinges_soft_close": "Soft Close",
+        "flooring": "",
+        "sink_info": ""
+      },
+      {
+        "room_key": "lower_laundry",
+        "original_room_label": "LOWER LAUNDRY",
+        "room_order": 12,
+        "material_rows": [
+          {
+            "area_or_item": "BENCHTOP (Sink)",
+            "supplier": "Laminex",
+            "specs_or_description": "33mm Laminate with bullnose edge - Outback Clay Natural Colour Code: 2601",
+            "notes": "",
+            "tags": [
+              "bench_tops"
+            ],
+            "page_no": 12,
+            "row_order": 1
+          },
+          {
+            "area_or_item": "FRAME DETAIL (As per drawings)",
+            "supplier": "Polytec",
+            "specs_or_description": "Boston Oak - Woodmatt",
+            "notes": "Vertical Grain",
+            "tags": [
+              "door_colours"
+            ],
+            "page_no": 12,
+            "row_order": 2
+          },
+          {
+            "area_or_item": "HANDLES",
+            "supplier": "Furnware",
+            "specs_or_description": "Bevel edge finger pull on lowers | Talls - Tall Door Handles - Momo Hinoki Wood Big D 832mm Handle Oak-HIN0682.832.OAK",
+            "notes": "No handles on uppers | Investigating pricing from Auburn Woodturning for original selection",
+            "tags": [
+              "handles"
+            ],
+            "page_no": 12,
+            "row_order": 3
+          }
+        ],
+        "drawers_soft_close": "Soft Close",
+        "hinges_soft_close": "Soft Close",
+        "flooring": "",
+        "sink_info": "Sink Mounting - TBC By Others"
+      }
+    ]
+  },
+  "summary_expectations": {
+    "door_colours": [
+      {
+        "text": "Polytec - Coastal oak - Woodmatt",
+        "rooms": [
+          "TV UPPER",
+          "UPPER BATHROOM"
+        ]
+      },
+      {
+        "text": "Polytec - Boston Oak - Woodmatt - Vertical Grain",
+        "rooms": [
+          "UPR-BED 1 (Master)",
+          "LOWER STAIRS BOOKSHELF",
+          "LOWER TV BENCH",
+          "LOWER LAUNDRY"
+        ]
+      }
+    ],
+    "handles": [
+      {
+        "text": "Push to open",
+        "rooms": [
+          "UPPER LINEN",
+          "TV UPPER",
+          "LOWER STAIRS BOOKSHELF"
+        ]
+      },
+      {
+        "text": "Bevel Edge finger pull",
+        "rooms": [
+          "UPPER BATHROOM",
+          "LOWER TV BENCH",
+          "LOWER LAUNDRY"
+        ]
+      }
+    ],
+    "bench_tops": [
+      {
+        "text": "Polytec - Boston Oak - Woodmatt - Vertical Grain",
+        "rooms": [
+          "UPPER-BED 3(Astrid)",
+          "LOWER TV BENCH"
+        ]
+      },
+      {
+        "text": "Laminex - Green Slate Natural Colour Code: 8793",
+        "rooms": [
+          "LWR STUDY DESK (EVYN)"
+        ]
+      }
+    ]
+  }
+}

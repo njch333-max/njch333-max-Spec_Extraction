@@ -834,12 +834,11 @@ def _build_imperial_snapshot_verification_checklist(snapshot: dict[str, Any]) ->
         [room for room in rooms if isinstance(room, dict)],
         key=lambda room: (int(room.get("room_order", 0) or 0), _verification_room_label(room)),
     )
-    summary_entries: dict[str, list[str]] = {
-        "door_colours": [],
-        "handles": [],
-        "bench_tops": [],
+    summary_entries: dict[str, dict[str, dict[str, Any]]] = {
+        "door_colours": {},
+        "handles": {},
+        "bench_tops": {},
     }
-    seen_summary_entries: dict[str, set[str]] = {key: set() for key in summary_entries}
     for room in ordered_rooms:
         room_label = _verification_room_label(room)
         room_page_refs = _verification_text(room.get("page_refs", ""))
@@ -853,22 +852,48 @@ def _build_imperial_snapshot_verification_checklist(snapshot: dict[str, Any]) ->
         )
         material_rows = room.get("material_rows", [])
         if isinstance(material_rows, list):
+            def _sort_key(item: dict[str, Any]) -> tuple[int, int, str]:
+                provenance = item.get("provenance", {})
+                source_row_index = 0
+                if isinstance(provenance, dict):
+                    source_row_index = int(provenance.get("source_row_index", 0) or 0)
+                return (
+                    int(item.get("page_no", 0) or 0),
+                    source_row_index or int(item.get("row_order", 0) or 0),
+                    _verification_text(item.get("area_or_item", "")),
+                )
             ordered_rows = sorted(
                 [item for item in material_rows if isinstance(item, dict)],
-                key=lambda item: (
-                    int(item.get("page_no", 0) or 0),
-                    int(item.get("row_order", 0) or 0),
-                    _verification_text(item.get("area_or_item", "")),
-                ),
+                key=_sort_key,
             )
             for item in ordered_rows:
                 area_or_item = _verification_text(item.get("area_or_item", ""))
                 if not area_or_item:
                     continue
+                provenance = item.get("provenance", {}) if isinstance(item.get("provenance", {}), dict) else {}
+                absorbed_handle_texts = provenance.get("absorbed_inline_handle_texts", [])
+                if isinstance(absorbed_handle_texts, list):
+                    for raw_handle_text in absorbed_handle_texts:
+                        for summary_text in _verification_summary_values_for_bucket(
+                            "handles",
+                            _verification_text(raw_handle_text),
+                        ):
+                            entry = _verification_find_imperial_summary_entry(
+                                "handles",
+                                list(summary_entries["handles"].values()),
+                                summary_text,
+                            )
+                            if entry is None:
+                                entry = {"text": summary_text, "rooms": []}
+                                summary_entries["handles"][summary_text.lower()] = entry
+                            if room_label and room_label not in entry["rooms"]:
+                                entry["rooms"].append(room_label)
                 supplier = _verification_text(item.get("supplier", ""))
                 description = _verification_text(item.get("specs_or_description", ""))
                 notes = _verification_text(item.get("notes", ""))
-                extracted_value = " - ".join(part for part in (supplier, description, notes) if part)
+                extracted_value = _verification_text(parsing._imperial_material_row_display_value_for_view(item))
+                if not extracted_value:
+                    extracted_value = " - ".join(part for part in (supplier, description, notes) if part)
                 if not extracted_value:
                     continue
                 tags = [str(tag).strip() for tag in (item.get("tags", []) or []) if str(tag).strip()]
@@ -892,14 +917,40 @@ def _build_imperial_snapshot_verification_checklist(snapshot: dict[str, Any]) ->
                     extracted_value=extracted_value,
                     source_page_refs=source_page_refs,
                 )
-                normalized_value = _verification_normalize_summary_value(primary_tag, extracted_value)
-                summary_text = normalized_value or extracted_value
-                display_text = f"{room_label}: {area_or_item} -> {summary_text}"
-                dedupe_basis = summary_text
-                dedupe_key = f"{room_label}|{primary_tag}|{dedupe_basis}".lower()
-                if dedupe_key not in seen_summary_entries[primary_tag]:
-                    seen_summary_entries[primary_tag].add(dedupe_key)
-                    summary_entries[primary_tag].append(display_text)
+                for summary_text in _verification_summary_values_for_bucket(
+                    primary_tag,
+                    extracted_value,
+                    supplier=supplier,
+                ):
+                    entry = _verification_find_imperial_summary_entry(
+                        primary_tag,
+                        list(summary_entries[primary_tag].values()),
+                        summary_text,
+                    )
+                    if entry is None:
+                        entry = {"text": summary_text, "rooms": []}
+                        summary_entries[primary_tag][summary_text.lower()] = entry
+                    elif _verification_imperial_summary_value_quality(
+                        primary_tag,
+                        summary_text,
+                    ) > _verification_imperial_summary_value_quality(
+                        primary_tag,
+                        entry.get("text", ""),
+                    ):
+                        old_key = next(
+                            (
+                                key
+                                for key, value in summary_entries[primary_tag].items()
+                                if value is entry
+                            ),
+                            "",
+                        )
+                        if old_key:
+                            summary_entries[primary_tag].pop(old_key, None)
+                        entry["text"] = summary_text
+                        summary_entries[primary_tag][summary_text.lower()] = entry
+                    if room_label and room_label not in entry["rooms"]:
+                        entry["rooms"].append(room_label)
         for field_name, source_key in (
             ("drawers", "drawers_soft_close"),
             ("hinges", "hinges_soft_close"),
@@ -924,7 +975,10 @@ def _build_imperial_snapshot_verification_checklist(snapshot: dict[str, Any]) ->
             section_type="summary",
             entity_label="Material Summary",
             field_name=label,
-            extracted_value=" | ".join(summary_entries[bucket_key]),
+            extracted_value=" | ".join(
+                f"{entry['text']} (Room: {' | '.join(entry['rooms']) or '-'})"
+                for entry in summary_entries[bucket_key].values()
+            ),
             source_page_refs="",
         )
     return checklist
@@ -961,20 +1015,173 @@ def _imperial_verification_row_is_summary_worthy(
     if not normalized_value or re.match(r"(?i)^(?:incl|include|open|split|allow|note)\b", normalized_value):
         return False
     if bucket_key == "bench_tops":
+        if re.search(r"(?i)\bunder\s+dryer\b", title):
+            return False
         return "BENCHTOP" in title.upper()
     if bucket_key == "handles":
-        if not re.search(r"(?i)\b(?:handles?|knob)\b", title):
-            return False
         if re.search(r"(?i)\b(?:gpo|spice tray|drawer gpo|lighting|led strip|bin\b|casters?)\b", value):
             return False
-        return True
+        if re.search(r"(?i)\b(?:handles?|knob)\b", title):
+            return True
+        return bool(
+            re.search(r"(?i)\b(?:desk|drawers?|drawer|pedestal|benchseat)\b", title)
+            and re.search(
+                r"(?i)\b(?:handle|knob|profile handle|voda|bevel edge|push to open|finger pull|no handles?|momo|tekform|hinoki|so-[a-z0-9-]+)\b",
+                value,
+            )
+        )
     if bucket_key == "door_colours":
         if not re.search(r"(?i)\b(?:colour|frame|bar back|panel)\b", title):
+            return False
+        if re.search(r"(?i)\b(?:internals?|kickboards?|open shelving|drawers?\b)\b", title):
             return False
         if re.search(r"(?i)\b(?:gpo|spice tray|drawer gpo|lighting|led strip|bin\b|casters?|handle|fingerpull|knob)\b", value):
             return False
         return True
     return False
+
+
+def _verification_imperial_summary_token_set(text: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[A-Za-z0-9]+", _verification_text(text).upper())
+        if len(token) > 1
+        and token not in {
+            "THE",
+            "AND",
+            "FOR",
+            "WITH",
+            "ONLY",
+            "NOTE",
+            "TO",
+            "OF",
+            "AS",
+            "PER",
+            "BY",
+            "AT",
+            "ON",
+            "IN",
+            "MM",
+            "NO",
+            "ROOM",
+        }
+    }
+
+
+def _verification_imperial_summary_anchor_token_set(bucket_key: str, text: str) -> set[str]:
+    generic_tokens = {
+        "POLYTEC",
+        "LAMINEX",
+        "CAESARSTONE",
+        "CDK",
+        "STONE",
+        "WOODMATT",
+        "MATT",
+        "MATTE",
+        "NATURAL",
+        "THERMOLAMINATED",
+        "LAMINATED",
+        "VERTICAL",
+        "HORIZONTAL",
+        "GRAIN",
+        "COLOUR",
+        "COLOR",
+        "IMAGE",
+    }
+    if bucket_key == "handles":
+        generic_tokens |= {
+            "HANDLE",
+            "HANDLES",
+            "DOOR",
+            "DOORS",
+            "DRAWER",
+            "DRAWERS",
+            "KNOB",
+            "PULL",
+        }
+    return {
+        token
+        for token in _verification_imperial_summary_token_set(text)
+        if token not in generic_tokens
+    }
+
+
+def _verification_imperial_summary_overlap_ratio(left: str, right: str) -> float:
+    left_tokens = _verification_imperial_summary_token_set(left)
+    right_tokens = _verification_imperial_summary_token_set(right)
+    if not left_tokens or not right_tokens:
+        return 0.0
+    shared = left_tokens & right_tokens
+    if not shared:
+        return 0.0
+    return float(len(shared)) / float(min(len(left_tokens), len(right_tokens)))
+
+
+def _verification_imperial_summary_value_quality(bucket_key: str, text: str) -> float:
+    cleaned = _verification_text(text)
+    quality = float(len(_verification_imperial_summary_token_set(cleaned)))
+    quality += 2.0 if " - " in cleaned else 0.0
+    if bucket_key == "handles":
+        if re.search(r"(?i)\b(?:investigating|pricing from|for original selection)\b", cleaned):
+            quality -= 4.0
+        if cleaned.count("|") >= 1:
+            quality -= float(cleaned.count("|")) * 3.0
+        if re.search(r"(?i)\bimage\b", cleaned):
+            quality -= 3.0
+        if re.search(r"(?i)\bno\s+handles?\s+on\s+uppers?\b", cleaned):
+            quality -= 6.0
+        if re.search(r"(?i)\btalls?\b", cleaned):
+            quality -= 4.0
+        if re.search(r"(?i)\blowers?\b", cleaned):
+            quality -= 3.0
+    if bucket_key == "door_colours":
+        if re.search(r"(?i)\b(?:handle|knob|push to open|finger pull|lighting|led)\b", cleaned):
+            quality -= 5.0
+        if re.search(r"(?i)\bframed?\s+sliding\s+doors?\b", cleaned):
+            quality -= 4.0
+    if bucket_key == "bench_tops":
+        if re.search(r"(?i)\b(?:floating shelf|internal steel support)\b", cleaned):
+            quality -= 4.0
+    return quality
+
+
+def _verification_imperial_summary_values_equivalent(bucket_key: str, left: str, right: str) -> bool:
+    left_text = _verification_text(left)
+    right_text = _verification_text(right)
+    if not left_text or not right_text:
+        return False
+    if left_text.lower() == right_text.lower():
+        return True
+    left_tokens = _verification_imperial_summary_anchor_token_set(bucket_key, left_text)
+    right_tokens = _verification_imperial_summary_anchor_token_set(bucket_key, right_text)
+    if min(len(left_tokens), len(right_tokens)) < 2:
+        return False
+    overlap = float(len(left_tokens & right_tokens)) / float(min(len(left_tokens), len(right_tokens)))
+    if bucket_key == "handles":
+        return overlap >= 0.9
+    if bucket_key in {"door_colours", "bench_tops"}:
+        return overlap >= 0.72
+    return False
+
+
+def _verification_find_imperial_summary_entry(
+    bucket_key: str,
+    entries: list[dict[str, Any]],
+    candidate_text: str,
+) -> dict[str, Any] | None:
+    candidate = _verification_text(candidate_text)
+    if not candidate:
+        return None
+    candidate_key = candidate.lower()
+    for entry in entries:
+        existing_text = _verification_text(entry.get("text", ""))
+        if not existing_text:
+            continue
+        if existing_text.lower() == candidate_key:
+            return entry
+        if _verification_imperial_summary_values_equivalent(bucket_key, existing_text, candidate):
+            return entry
+    return None
 
 
 def _append_verification_item(
@@ -1034,6 +1241,7 @@ def _verification_normalize_summary_value(bucket_key: str, value: str) -> str:
         text = re.sub(r"(?i)\bCOLOURED?\b", "", text)
         text = re.sub(r"(?i)\bREFER TO DRAWINGS(?: FOR ALLOCATIONS)?\b.*$", "", text)
         text = re.sub(r"(?i)\bBLUM\s+AVENTOS\b.*$", "", text)
+        text = re.sub(r"(?i)\bframed?\s+sliding\s+doors?\b\s*-?\s*", "", text)
         text = re.sub(r"(?i)\bNOTE:\s*.*$", "", text)
         text = re.sub(r"(?i)\b(?:COLOURED\s+)?BOTTOMS TO OVERHEADS\b.*$", "", text)
         text = re.sub(r"(?i)\bVERTICAL\s*-\s*GRAIN\b", "Vertical Grain", text)
@@ -1048,24 +1256,7 @@ def _verification_normalize_summary_value(bucket_key: str, value: str) -> str:
             ),
         )
     if bucket_key == "handles":
-        text = re.sub(r"(?i)\b([A-Z][A-Z0-9&]+)\s+\1\b", r"\1", text)
-        text = re.sub(r"(?i)\bimage of\b.*$", "", text)
-        text = re.sub(r"(?i)\bas per drawings\b.*$", "", text)
-        text = re.sub(r"(?i)\bPTO\s+(?:where\s+required|where\s+req|req(?:uired)?)\b.*$", "", text)
-        text = re.sub(r"(?i)\bsize shown varies\b.*$", "", text)
-        text = re.sub(r"(?i)\binvestigating\b.*$", "", text)
-        text = re.sub(r"(?i)\bpricing from\b.*$", "", text)
-        text = re.sub(r"\([^)]*(location|up/down|left/right|door|drawer|centre|center)[^)]*\)", "", text, flags=re.IGNORECASE)
-        return _verification_strip_summary_tail(
-            text,
-            (
-                r"(?i)\bdoor location\b.*$",
-                r"(?i)\bdown\s*drawer location\b.*$",
-                r"(?i)\bdrawer location\b.*$",
-                r"(?i)\b(?:centre|center)\s+to\s+profile\b.*$",
-                r"(?i)\bto\s+(?:base|upper|overhead|base cabinets?|upper cabinets?|cabinet locations?)\b.*$",
-            ),
-        )
+        return _verification_normalize_imperial_handle_summary_value(text)
     if bucket_key == "bench_tops":
         text = re.sub(r"(?i)^back benchtops?\s*", "", text)
         text = re.sub(r"(?i)^wall run bench top\s*", "", text)
@@ -1087,6 +1278,202 @@ def _verification_normalize_summary_value(bucket_key: str, value: str) -> str:
             text,
         )
     return text.strip(" -;,/")
+
+
+def _verification_imperial_summary_material_supplier(
+    bucket_key: str,
+    source_text: str,
+    explicit_supplier: str,
+    *,
+    material_kind: str = "",
+) -> str:
+    explicit = parsing.normalize_brand_casing_text(parsing.normalize_space(explicit_supplier))
+    upper = parsing.normalize_space(source_text).upper()
+    if material_kind == "colour_code" and "LAMINEX" in upper:
+        return "Laminex"
+    if material_kind == "woodmatt" and "POLYTEC" in upper:
+        return "Polytec"
+    if "LAMINEX" in upper and "POLYTEC" not in upper:
+        return "Laminex"
+    if "POLYTEC" in upper and "LAMINEX" not in upper:
+        return "Polytec"
+    if explicit:
+        return explicit
+    if bucket_key == "door_colours" and "THERMOLAMINATED" in upper:
+        return "Polytec"
+    return ""
+
+
+def _verification_imperial_summary_material_candidates(
+    bucket_key: str,
+    raw_value: str,
+    supplier: str,
+) -> list[str]:
+    text = parsing.normalize_space(raw_value)
+    if not text or bucket_key not in {"door_colours", "bench_tops"}:
+        return []
+    candidates: list[str] = []
+    colour_code_patterns = (
+        r"(?i)\b([A-Za-z][A-Za-z ]+?)\s*-\s*Natural\s*-\s*Colour Code:\s*(\d{2,4})\b",
+        r"(?i)\b([A-Za-z][A-Za-z ]+?)\s+Natural Colour Code:\s*(\d{2,4})\b",
+        r"(?i)\b([A-Za-z][A-Za-z ]+?)\s*-\s*Colour Code:\s*(\d{2,4})\b",
+    )
+    for pattern in colour_code_patterns:
+        for match in re.finditer(pattern, text):
+            material = parsing.normalize_space(match.group(1))
+            code = parsing.normalize_space(match.group(2))
+            if not material or not code:
+                continue
+            if material.upper() in {"COLOUR", "CODE", "NATURAL"}:
+                continue
+            supplier_hint = _verification_imperial_summary_material_supplier(
+                bucket_key,
+                text,
+                supplier,
+                material_kind="colour_code",
+            )
+            composed = f"{supplier_hint + ' - ' if supplier_hint else ''}{material} Natural Colour Code: {code}"
+            normalized = _verification_normalize_summary_value(bucket_key, composed)
+            if normalized and normalized not in candidates:
+                candidates.append(normalized)
+    woodmatt_pattern = re.compile(
+        r"(?i)\b([A-Za-z][A-Za-z ]+?)\s*-\s*(Woodmatt|Matt)(?:\s*-\s*(Vertical Grain|Horizontal Grain))?\b"
+    )
+    for match in woodmatt_pattern.finditer(text):
+        material = parsing.normalize_space(match.group(1))
+        finish = parsing.normalize_space(match.group(2))
+        grain = parsing.normalize_space(match.group(3) or "")
+        if not material or material.upper() in {"STYLE", "PROFILE", "NATURAL"}:
+            continue
+        material = re.sub(
+            r"(?i)\b(?:\d+\s*mm\s+)?(?:laminate(?:d)?(?:\s+apron)?\s+benchtop|laminate(?:d)?\s+with\s+bullnose\s+edge(?:\s+profile)?)\b\s*-\s*",
+            "",
+            material,
+        ).strip(" -;,/")
+        material = parsing.normalize_space(material)
+        if not material:
+            continue
+        supplier_hint = _verification_imperial_summary_material_supplier(
+            bucket_key,
+            text,
+            supplier,
+            material_kind="woodmatt",
+        )
+        composed_parts = [part for part in (supplier_hint, material, finish, grain) if part]
+        composed = " - ".join(composed_parts)
+        normalized = _verification_normalize_summary_value(bucket_key, composed)
+        if normalized and normalized not in candidates:
+            candidates.append(normalized)
+    return candidates
+
+
+def _verification_summary_values_for_bucket(bucket_key: str, raw_value: str, *, supplier: str = "") -> list[str]:
+    values: list[str] = []
+    candidates = [raw_value]
+    if bucket_key == "handles":
+        handle_text = parsing.normalize_space(raw_value)
+        marker_pattern = re.compile(
+            r"(?i)\b(?:push\s+to\s+open|no\s+handles?(?:\s+on\s+[A-Za-z ]+)?|drawers?\s*-\s*bevel\s+edge\s+finger\s+pull|bevel\s+edge\s+finger\s+pull(?:\s+on\s+[A-Za-z ]+)?|tall\s+door\s+handles?|high\s+split\s+handle|desk\s*-\s*\d+\s+voda\s+profile\s+handle|\d+\s+voda\s+profile\s+handle|voda\s+profile\s+handle|benchseat\s+drawers?\s*-\s*pto|woodgate\s+round\s+cabinet\s+knob|cabinet\s+knob|knob)\b"
+        )
+        split_candidates = [part.strip() for part in re.split(r"\s*\|\s*", handle_text) if part.strip()]
+        if handle_text:
+            matches = list(marker_pattern.finditer(handle_text))
+            if matches:
+                derived_candidates: list[str] = []
+                for index, match in enumerate(matches):
+                    end = matches[index + 1].start() if index + 1 < len(matches) else len(handle_text)
+                    segment = handle_text[match.start() : end].strip(" -|;,")
+                    if segment:
+                        derived_candidates.append(segment)
+                if derived_candidates:
+                    split_candidates = derived_candidates
+        if split_candidates:
+            candidates = split_candidates
+    elif bucket_key in {"door_colours", "bench_tops"}:
+        material_candidates = _verification_imperial_summary_material_candidates(bucket_key, raw_value, supplier)
+        if material_candidates:
+            candidates = material_candidates
+    for candidate in candidates:
+        normalized_candidate = _verification_normalize_summary_value(bucket_key, candidate)
+        normalized = _verification_text(
+            normalized_candidate if normalized_candidate else ("" if bucket_key == "handles" else candidate)
+        )
+        if not normalized or normalized in values:
+            continue
+        if bucket_key == "handles" and re.match(r"(?i)^(?:pto|drawers?|benchseat)$", normalized):
+            continue
+        values.append(normalized)
+    if bucket_key == "handles" and len(values) > 1:
+        if re.search(
+            r"(?i)\b(?:desk\b|voda\s+profile\s+handle|high\s+split\s+handle|benchseat\s+drawers?\s*-\s*pto|so-[a-z0-9-]+)\b",
+            handle_text,
+        ):
+            values = [value for value in values if value != "Bevel Edge finger pull"] or values
+        values = [value for value in values if value not in {"No handles", "Push to open"}] or values
+    return values
+
+
+def _verification_normalize_handle_summary_value(value: str) -> str:
+    text = parsing.normalize_space(value)
+    text = re.sub(r"(?i)\b([A-Z][A-Z0-9&]+)\s+\1\b", r"\1", text)
+    text = re.sub(r"(?i)\bimage of\b.*$", "", text)
+    text = re.sub(r"(?i)\s*-\s*[^-|()]+\s*\(image\)\s*$", "", text)
+    text = re.sub(r"(?i)\s*\(image\)\s*$", "", text)
+    text = re.sub(r"(?i)\bas per drawings\b.*$", "", text)
+    text = re.sub(r"(?i)\bPTO\s+(?:where\s+required|where\s+req|req(?:uired)?)\b.*$", "", text)
+    text = re.sub(r"(?i)\bsize shown varies\b.*$", "", text)
+    text = re.sub(r"(?i)\binvestigating\b.*$", "", text)
+    text = re.sub(r"(?i)\bpricing from\b.*$", "", text)
+    text = re.sub(r"\([^)]*(location|up/down|left/right|door|drawer|centre|center)[^)]*\)", "", text, flags=re.IGNORECASE)
+    return _verification_strip_summary_tail(
+        text,
+        (
+            r"(?i)\bdoor location\b.*$",
+            r"(?i)\bdown\s*drawer location\b.*$",
+            r"(?i)\bdrawer location\b.*$",
+            r"(?i)\b(?:centre|center)\s+to\s+profile\b.*$",
+            r"(?i)\bto\s+(?:base|upper|overhead|base cabinets?|upper cabinets?|cabinet locations?)\b.*$",
+        ),
+    )
+
+
+def _verification_normalize_imperial_handle_summary_value(value: str) -> str:
+    text = parsing.normalize_space(value)
+    knob_match = re.search(
+        r"(?i)\b(?P<body>(?:[A-Z][A-Za-z0-9& ]+\s*-\s*)?(?:Woodgate\s+Round\s+Cabinet\s+Knob|[^|]*?\b(?:cabinet\s+)?knob\b[^|]*?)(?:SKU:Part No:\s*[A-Z0-9.]+)?)",
+        text,
+    )
+    if knob_match:
+        knob_text = parsing.normalize_space(knob_match.group("body"))
+        knob_text = re.sub(r"(?i)^Handles?\s*-\s*", "", knob_text).strip(" -|;,")
+        knob_text = re.sub(r"(?i)\s*\|\s*Casters\b.*$", "", knob_text).strip(" -|;,")
+        return knob_text
+    desk_handle_match = re.search(
+        r"(?i)\b(?:DESK\s*-\s*)?(?P<body>\d+\s+Voda\s+Profile\s+Handle\s+Brushed\s+Nickel\s+\d+\s*mm\s*-\s*SO-2163-[A-Z0-9-]+)\b",
+        text,
+    )
+    if desk_handle_match:
+        desk_text = f"DESK - {parsing.normalize_space(desk_handle_match.group('body'))}"
+        desk_text = re.sub(r"(?i)\b(?:Furnware|Titus Tekform)\b\s*$", "", desk_text).strip(" -|;,")
+        return desk_text
+    complex_markers = bool(
+        re.search(
+            r"(?i)\b(?:tall door handles?|high split handle|voda profile handle|hinoki|tekform|so-[a-z0-9-]+|hin[0-9a-z.-]+|benchseat drawers\s*-\s*pto)\b",
+            text,
+        )
+    )
+    if re.search(r"(?i)\bno\s+handles?\b", text) and not complex_markers and not re.search(r"(?i)\bbevel\s+edge\s+finger\s+pull\b", text):
+        return "No handles"
+    if re.search(r"(?i)\bpush\s+to\s+open\b", text) and not complex_markers:
+        return "Push to open"
+    if re.search(r"(?i)\bbevel\s+edge\s+finger\s+pull\b", text) and not re.search(
+        r"(?i)\b(?:desk|benchseat|drawers?\s*-|voda|so-[a-z0-9-]+)\b",
+        text,
+    ):
+        return "Bevel Edge finger pull"
+    normalized = _verification_normalize_handle_summary_value(text)
+    normalized = re.sub(r"(?i)\b(?:Furnware|Titus Tekform)\b\s*$", "", normalized).strip(" -|;,")
+    return normalized
 
 
 def _verification_strip_summary_tail(text: str, patterns: tuple[str, ...]) -> str:

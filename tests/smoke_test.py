@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest import mock
 
 TEST_DATA_DIR = Path(tempfile.mkdtemp(prefix="spec-extraction-test-data-"))
+FIXTURES_DIR = Path(__file__).with_name("fixtures")
 os.environ["SPEC_EXTRACTION_DATA_DIR"] = str(TEST_DATA_DIR)
 os.environ["SPEC_EXTRACTION_ENABLE_OPENAI"] = "0"
 os.environ["SPEC_EXTRACTION_ENABLE_OPENAI_VISION"] = "0"
@@ -21,7 +22,7 @@ os.environ["SPEC_EXTRACTION_ENABLE_OPENAI_VISION"] = "0"
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 
-from App.main import _build_material_summary, _flatten_rooms, _format_brisbane_time, _format_run_duration, _run_duration_display, app
+from App.main import _build_material_summary, _flatten_imperial_material_rows, _flatten_rooms, _format_brisbane_time, _format_run_duration, _run_duration_display, app
 from App.services import cleaning_rules, extraction_service, parsing as parsing_module, store
 from App.services import appliance_official
 from App.services.appliance_official import _build_direct_product_candidates, _extract_size_from_text, _primary_model_token
@@ -34,6 +35,10 @@ class SmokeTest(unittest.TestCase):
     @classmethod
     def tearDownClass(cls) -> None:
         shutil.rmtree(TEST_DATA_DIR, ignore_errors=True)
+
+    @staticmethod
+    def _load_json_fixture(name: str) -> dict[str, object]:
+        return json.loads((FIXTURES_DIR / name).read_text(encoding="utf-8"))
 
     def setUp(self) -> None:
         self._reset_db()
@@ -3525,6 +3530,718 @@ H55784Z03AU
         self.assertEqual(rows[0]["material_rows"][0]["title"], "COOKTOP RUN BENCHTOP")
         self.assertEqual(rows[0]["material_rows"][0]["value"], "Caesarstone - Raw Concrete - Aris")
 
+    def test_flatten_imperial_material_rows_prefers_row_order_over_stale_source_row_index(self) -> None:
+        rows = _flatten_imperial_material_rows(
+            {
+                "material_rows": [
+                    {
+                        "area_or_item": "BOOKSHELF",
+                        "supplier": "Polytec",
+                        "specs_or_description": "Boston Oak - Woodmatt",
+                        "notes": "",
+                        "tags": ["other_material"],
+                        "page_no": 1,
+                        "row_order": 3,
+                        "provenance": {"source_row_index": 1},
+                    },
+                    {
+                        "area_or_item": "BASE CABINETRY COLOUR",
+                        "supplier": "Polytec",
+                        "specs_or_description": "Boston Oak - Woodmatt",
+                        "notes": "Vertical Grain",
+                        "tags": ["door_colours"],
+                        "page_no": 1,
+                        "row_order": 1,
+                        "provenance": {"source_row_index": 9},
+                    },
+                    {
+                        "area_or_item": "HANDLES",
+                        "supplier": "",
+                        "specs_or_description": "No handles",
+                        "notes": "",
+                        "tags": ["handles"],
+                        "page_no": 1,
+                        "row_order": 2,
+                        "provenance": {"source_row_index": 8},
+                    },
+                ]
+            }
+        )
+        self.assertEqual([row["title"] for row in rows], ["BASE CABINETRY COLOUR", "HANDLES", "BOOKSHELF"])
+
+    def test_flatten_imperial_material_rows_strips_duplicate_supplier_prefix_from_display(self) -> None:
+        rows = _flatten_imperial_material_rows(
+            {
+                "material_rows": [
+                    {
+                        "area_or_item": "PEDESTAL DRAWERS X 2 CABINETRY FINISHES",
+                        "supplier": "Barchie",
+                        "specs_or_description": "Barchie Woodgate Round Cabinet Knob SKU:Part No: 422.33.030 Casters",
+                        "notes": "",
+                        "tags": ["handles"],
+                        "page_no": 9,
+                        "row_order": 5,
+                        "provenance": {},
+                    }
+                ]
+            }
+        )
+        self.assertEqual(rows[0]["value"], "Barchie - Woodgate Round Cabinet Knob SKU:Part No: 422.33.030 Casters")
+
+    def test_imperial_material_row_display_value_for_view_prefers_layout_text_for_raw_row_fidelity(self) -> None:
+        display = parsing_module._imperial_material_row_display_value_for_view(
+            {
+                "area_or_item": "BASE CABINETRY COLOUR",
+                "supplier": "Polytec",
+                "specs_or_description": "Boston Oak - Woodmatt - Framed sliding",
+                "notes": "Vertical Grain",
+                "tags": ["door_colours"],
+                "provenance": {
+                    "layout_supplier_text": "Polytec",
+                    "layout_value_text": "Boston Oak - Woodmatt - Framed sliding doors",
+                    "layout_notes_text": "Vertical Grain",
+                },
+            }
+        )
+        self.assertEqual(display, "Polytec - Boston Oak - Woodmatt - Framed sliding doors - Vertical Grain")
+
+    def test_imperial_material_row_display_value_for_view_keeps_handle_block_and_suppliers(self) -> None:
+        display = parsing_module._imperial_material_row_display_value_for_view(
+            {
+                "area_or_item": "HANDLES",
+                "supplier": "",
+                "specs_or_description": "Tall Door Handles ... DESK - 2163 ...",
+                "notes": "",
+                "tags": ["handles"],
+                "provenance": {
+                    "preserved_handle_suppliers": "Furnware\nTitus Tekform",
+                    "layout_value_text": "Tall Door Handles - Momo Hinoki Wood Big D 832mm Handle Oak-HIN0682.832.OAK\nHigh Split Handle - Momo hinoki wood big d 416mm handle oak-HIN0682.416.OAK\nDrawers - Bevel Edge finger pull\nDESK - 2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN",
+                    "layout_notes_text": "Investigating pricing from Auburn Woodturning for original selection\nDESK - 2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN",
+                },
+            }
+        )
+        self.assertIn("Furnware | Titus Tekform - Tall Door Handles - Momo Hinoki Wood Big D 832mm Handle Oak-HIN0682.832.OAK", display)
+        self.assertIn("| High Split Handle - Momo hinoki wood big d 416mm handle oak-HIN0682.416.OAK", display)
+        self.assertIn("| Drawers - Bevel Edge finger pull", display)
+        self.assertIn("DESK - 2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN", display)
+        self.assertIn("| Investigating pricing from Auburn Woodturning for original selection", display)
+
+    def test_imperial_material_row_display_value_for_view_preserves_other_material_base_and_absorbed_handle(self) -> None:
+        display = parsing_module._imperial_material_row_display_value_for_view(
+            {
+                "area_or_item": "PEDESTAL DRAWERS X 2 CABINETRY FINISHES",
+                "supplier": "Barchie",
+                "specs_or_description": "Woodgate Round Cabinet Knob | Casters",
+                "notes": "",
+                "tags": ["other_material"],
+                "provenance": {
+                    "layout_supplier_text": "Polytec",
+                    "layout_value_text": "Boston Oak - Woodmatt (Flat fronts, not curved) - Thermolaminated curved end panels",
+                    "layout_notes_text": "Vertical Grain",
+                    "absorbed_inline_handle_texts": [
+                        "Woodgate Round Cabinet Knob | Casters"
+                    ],
+                },
+            }
+        )
+        self.assertEqual(
+            display,
+            "Barchie - Woodgate Round Cabinet Knob | Casters",
+        )
+
+    def test_imperial_material_row_display_value_for_view_keeps_absorbed_inline_handle_out_of_non_finish_row_display(self) -> None:
+        display = parsing_module._imperial_material_row_display_value_for_view(
+            {
+                "area_or_item": "EVYN'S ROOM DRAWERS & SHELF",
+                "supplier": "Polytec",
+                "specs_or_description": "33MM MDF Floating shelf with internal steel support and Bullnose edge Florentine Walnut - Woodmatt (Flat fronts, not curved), Std Whiteboard internal",
+                "notes": "Vertical Grain",
+                "tags": ["other_material"],
+                "provenance": {
+                    "absorbed_inline_handle_texts": [
+                        "DESK - 2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN"
+                    ]
+                },
+            }
+        )
+        self.assertEqual(
+            display,
+            "Polytec - 33MM MDF Floating shelf with internal steel support and Bullnose edge Florentine Walnut - Woodmatt (Flat fronts, not curved), Std Whiteboard internal - Vertical Grain",
+        )
+
+    def test_imperial_material_row_display_value_for_view_prefers_cleaned_handle_block_over_noisy_layout_duplicate(self) -> None:
+        display = parsing_module._imperial_material_row_display_value_for_view(
+            {
+                "area_or_item": "HANDLES",
+                "supplier": "",
+                "specs_or_description": (
+                    "Furnware - Tall Door Handles - Momo Hinoki Wood Big D 832mm Handle Oak-HIN0682.832.OAK | "
+                    "High Split Handle - Momo hinoki wood big d 416mm handle oak-HIN0682.416.OAK | "
+                    "Drawers - Bevel Edge finger pull | DESK - 2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN | "
+                    "BENCHSEAT DRAWERS - PTO - Investigating pricing from Auburn Woodturning for original selection | Titus Tekform"
+                ),
+                "notes": "",
+                "tags": ["handles"],
+                "provenance": {
+                    "layout_value_text": (
+                        "Furnware - Tall Door Handles - Momo Hinoki Wood Big D 832mm Handle Oak-HIN0682.832.OAK | "
+                        "High Split Handle - Momo hinoki wood big d 416mm handle oak-HIN0682.416.OAK | "
+                        "Drawers - Bevel Edge finger pull | DESK - 2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN | "
+                        "BENCHSEAT DRAWERS - PTO - Investigating pricing from Auburn Woodturning for original selection | "
+                        "Titus Tekform - DESK - 2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN"
+                    )
+                },
+            }
+        )
+        self.assertNotIn("Titus Tekform - DESK - 2163", display)
+
+    def test_imperial_material_row_display_value_for_view_keeps_simple_push_to_open_clean(self) -> None:
+        display = parsing_module._imperial_material_row_display_value_for_view(
+            {
+                "area_or_item": "HANDLES",
+                "supplier": "Laminex",
+                "specs_or_description": "Push to open",
+                "notes": "",
+                "tags": ["handles"],
+                "provenance": {
+                    "layout_value_text": "Push to open - image of Calcutta style panel",
+                    "page_text_handle_block": "Push to open",
+                },
+            }
+        )
+        self.assertEqual(display, "Push to open")
+
+    def test_imperial_choose_handle_block_source_prefers_cleaner_layout_over_dirty_page_text(self) -> None:
+        layout = (
+            "Furnware - Tall Door Handles - Momo Hinoki Wood Big D 832mm Handle Oak-HIN0682.832.OAK | "
+            "High Split Handle - Momo hinoki wood big d 416mm handle oak-HIN0682.416.OAK | "
+            "Drawers - Bevel Edge finger pull | DESK - 2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN | "
+            "BENCHSEAT DRAWERS - PTO - Investigating pricing from Auburn Woodturning for original selection | Titus Tekform"
+        )
+        page = (
+            "Furnware Investigating pricing from Auburn | Woodturning for original selection | "
+            "Tall Door Handles - Momo Hinoki Wood Big D | 832mm Handle Oak-HIN0682.832.OAK | "
+            "High Split Handle -Momo hinoki wood big d | 416mm handle oak-HIN0682.416.OAK | "
+            "DESK - 2163 Voda Profile Handle Brushed | Nickel 300mm - SO-2163-300-BN | Drawers - Bevel Edge finger pull"
+        )
+        self.assertEqual(parsing_module._imperial_choose_handle_block_source(layout, page), layout)
+
+    def test_extract_imperial_section_title_matches_37867_fixture_samples(self) -> None:
+        fixture = self._load_json_fixture("imperial_37867_gold.json")
+        for sample in fixture["title_samples"]:
+            self.assertEqual(
+                parsing_module._extract_imperial_section_title(sample["raw_text"]),
+                sample["expected"],
+            )
+
+    def test_flatten_rooms_matches_37867_gold_room_order(self) -> None:
+        fixture = self._load_json_fixture("imperial_37867_gold.json")
+        rows = _flatten_rooms(fixture["summary_snapshot"])
+        self.assertEqual(
+            [row["original_room_label"] for row in rows],
+            fixture["room_order"],
+        )
+        self.assertTrue(all(row["is_imperial_raw_rows"] for row in rows))
+
+    def test_build_material_summary_groups_imperial_materials_with_rooms(self) -> None:
+        fixture = self._load_json_fixture("imperial_37867_gold.json")
+        summary = _build_material_summary(fixture["summary_snapshot"])
+        expectations = fixture["summary_expectations"]
+        for bucket_key, expected_entries in expectations.items():
+            bucket = summary[bucket_key]
+            texts = {entry["text"]: entry for entry in bucket["entries"]}
+            for expected in expected_entries:
+                self.assertIn(expected["text"], texts)
+                self.assertEqual(texts[expected["text"]]["rooms"], expected["rooms"])
+                self.assertEqual(
+                    texts[expected["text"]]["rooms_display"],
+                    " | ".join(expected["rooms"]),
+                )
+
+    def test_imperial_verification_summary_includes_grouped_rooms(self) -> None:
+        fixture = self._load_json_fixture("imperial_37867_gold.json")
+        checklist = store._build_snapshot_verification_checklist(fixture["summary_snapshot"])
+        summary_items = {
+            item["field_name"]: item["extracted_value"]
+            for item in checklist
+            if item.get("section_type") == "summary"
+        }
+        self.assertIn(
+            "Polytec - Coastal oak - Woodmatt (Room: TV UPPER | UPPER BATHROOM)",
+            summary_items["Door Colours"],
+        )
+        self.assertIn(
+            "Push to open (Room: UPPER LINEN | TV UPPER | LOWER STAIRS BOOKSHELF)",
+            summary_items["Handles"],
+        )
+        self.assertIn(
+            "Polytec - Boston Oak - Woodmatt - Vertical Grain (Room: UPPER-BED 3(Astrid) | LOWER TV BENCH)",
+            summary_items["Bench Tops"],
+        )
+
+    def test_imperial_verification_summary_includes_absorbed_inline_handles(self) -> None:
+        snapshot = {
+            "builder_name": "Imperial",
+            "rooms": [
+                {
+                    "room_order": 1,
+                    "room_key": "evyn",
+                    "original_room_label": "UPPER-BED 2 (Evyn)",
+                    "page_refs": "2",
+                    "material_rows": [
+                        {
+                            "area_or_item": "EVYN'S ROOM DRAWERS & SHELF",
+                            "supplier": "Polytec",
+                            "specs_or_description": "33MM MDF Floating shelf with internal steel support",
+                            "notes": "Vertical Grain",
+                            "tags": ["other_material"],
+                            "page_no": 2,
+                            "row_order": 7,
+                            "provenance": {
+                                "absorbed_inline_handle_texts": [
+                                    "DESK - 2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN"
+                                ]
+                            },
+                        }
+                    ],
+                    "drawers_soft_close": "",
+                    "hinges_soft_close": "",
+                    "flooring": "",
+                    "sink_info": "",
+                },
+                {
+                    "room_order": 2,
+                    "room_key": "astrid",
+                    "original_room_label": "LWR STUDY DESK (ASTRID)",
+                    "page_refs": "9",
+                    "material_rows": [
+                        {
+                            "area_or_item": "PEDESTAL DRAWERS X 2 CABINETRY FINISHES",
+                            "supplier": "Barchie",
+                            "specs_or_description": "Woodgate Round Cabinet Knob",
+                            "notes": "Casters",
+                            "tags": ["other_material"],
+                            "page_no": 9,
+                            "row_order": 5,
+                            "provenance": {
+                                "absorbed_inline_handle_texts": [
+                                    "Handles - Woodgate Round Cabinet Knob SKU:Part No: 422.33.030 | Casters"
+                                ]
+                            },
+                        }
+                    ],
+                    "drawers_soft_close": "",
+                    "hinges_soft_close": "",
+                    "flooring": "",
+                    "sink_info": "",
+                },
+            ],
+        }
+        checklist = store._build_snapshot_verification_checklist(snapshot)
+        handles_summary = next(
+            item["extracted_value"]
+            for item in checklist
+            if item.get("section_type") == "summary" and item.get("field_name") == "Handles"
+        )
+        self.assertIn(
+            "DESK - 2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN (Room: UPPER-BED 2 (Evyn))",
+            handles_summary,
+        )
+        self.assertIn(
+            "Woodgate Round Cabinet Knob (Room: LWR STUDY DESK (ASTRID))",
+            handles_summary,
+        )
+
+    def test_imperial_verification_summary_drops_no_handles_when_complex_handle_block_present(self) -> None:
+        snapshot = {
+            "builder_name": "Imperial",
+            "rooms": [
+                {
+                    "room_order": 1,
+                    "room_key": "laundry",
+                    "original_room_label": "LOWER LAUNDRY",
+                    "page_refs": "12",
+                    "material_rows": [
+                        {
+                            "area_or_item": "HANDLES",
+                            "supplier": "",
+                            "specs_or_description": (
+                                "Bevel edge finger pull on lowers "
+                                "No handles on uppers "
+                                "Talls - Tall Door Handles - Momo Hinoki Wood Big D 832mm Handle Oak-HIN0682.832.OAK "
+                                "Investigating pricing from Auburn Woodturning for original selection"
+                            ),
+                            "notes": "",
+                            "tags": ["handles"],
+                            "page_no": 12,
+                            "row_order": 7,
+                            "provenance": {},
+                        }
+                    ],
+                    "drawers_soft_close": "",
+                    "hinges_soft_close": "",
+                    "flooring": "",
+                    "sink_info": "",
+                }
+            ],
+        }
+        checklist = store._build_snapshot_verification_checklist(snapshot)
+        handles_summary = next(
+            item["extracted_value"]
+            for item in checklist
+            if item.get("section_type") == "summary" and item.get("field_name") == "Handles"
+        )
+        self.assertNotIn("No handles (Room: LOWER LAUNDRY)", handles_summary)
+        self.assertIn(
+            "Tall Door Handles - Momo Hinoki Wood Big D 832mm Handle Oak-HIN0682.832.OAK (Room: LOWER LAUNDRY)",
+            handles_summary,
+        )
+
+    def test_imperial_finalize_material_rows_moves_vertical_grain_into_notes(self) -> None:
+        rows = [
+            {
+                "area_or_item": "BASE & UPPER CABINETRY COLOUR Thermolaminated",
+                "supplier": "Polytec",
+                "specs_or_description": "Thermolaminated - Coastal oak - Woodmatt - with Curved end panels - Vertical Grain",
+                "notes": "",
+                "tags": ["door_colours"],
+                "page_no": 5,
+                "row_order": 1,
+                "confidence": 0.72,
+                "provenance": {},
+            }
+        ]
+        finalized = parsing_module._imperial_finalize_material_rows(rows)
+        self.assertEqual(finalized[0]["area_or_item"], "BASE & UPPER CABINETRY COLOUR")
+        self.assertEqual(finalized[0]["supplier"], "Polytec")
+        self.assertEqual(
+            finalized[0]["specs_or_description"],
+            "Thermolaminated - Coastal oak - Woodmatt - with Curved end panels",
+        )
+        self.assertEqual(finalized[0]["notes"], "Vertical Grain")
+
+    def test_imperial_finalize_material_rows_cleans_no_handles_supplier_leak(self) -> None:
+        rows = [
+            {
+                "area_or_item": "HANDLES",
+                "supplier": "Polytec",
+                "specs_or_description": "No handles - No handles Vertical Grain |",
+                "notes": "",
+                "tags": ["handles"],
+                "page_no": 1,
+                "row_order": 2,
+                "confidence": 0.72,
+                "provenance": {},
+            }
+        ]
+        finalized = parsing_module._imperial_finalize_material_rows(rows)
+        self.assertEqual(finalized[0]["supplier"], "")
+        self.assertEqual(finalized[0]["specs_or_description"], "No handles")
+        self.assertEqual(finalized[0]["notes"], "")
+
+    def test_imperial_finalize_material_rows_trims_simple_no_handles_spillover(self) -> None:
+        rows = [
+            {
+                "area_or_item": "HANDLES",
+                "supplier": "",
+                "specs_or_description": "No handles BOOKSHELF Boston Oak - Woodmatt Vertical Grain",
+                "notes": "",
+                "tags": ["handles"],
+                "page_no": 1,
+                "row_order": 2,
+                "confidence": 0.72,
+                "provenance": {},
+            },
+            {
+                "area_or_item": "BOOKSHELF",
+                "supplier": "Polytec",
+                "specs_or_description": "Boston Oak - Woodmatt",
+                "notes": "Vertical Grain",
+                "tags": ["other_material"],
+                "page_no": 1,
+                "row_order": 3,
+                "confidence": 0.7,
+                "provenance": {},
+            },
+        ]
+        finalized = parsing_module._imperial_finalize_material_rows(rows)
+        handle = next(item for item in finalized if item["area_or_item"] == "HANDLES")
+        self.assertEqual(handle["supplier"], "")
+        self.assertEqual(handle["specs_or_description"], "No handles")
+        self.assertEqual(handle["notes"], "")
+
+    def test_imperial_finalize_material_rows_preserves_complex_handle_block(self) -> None:
+        rows = [
+            {
+                "area_or_item": "HANDLES",
+                "supplier": "Furnware",
+                "specs_or_description": "Bevel edge finger pull on lowers | Talls - Tall Door Handles - Momo Hinoki Wood Big D 832mm Handle Oak-HIN0682.832.OAK | No handles on uppers | Investigating pricing from Auburn Woodturning for original selection",
+                "notes": "",
+                "tags": ["handles"],
+                "page_no": 12,
+                "row_order": 9,
+                "confidence": 0.72,
+                "provenance": {},
+            }
+        ]
+        finalized = parsing_module._imperial_finalize_material_rows(rows)
+        self.assertEqual(finalized[0]["supplier"], "")
+        self.assertEqual(
+            finalized[0]["specs_or_description"],
+            "Furnware - Bevel edge finger pull on lowers | Talls - Tall Door Handles - Momo Hinoki Wood Big D 832mm Handle Oak-HIN0682.832.OAK | No handles on uppers | Investigating pricing from Auburn Woodturning for original selection",
+        )
+        self.assertEqual(finalized[0]["notes"], "")
+
+    def test_imperial_finalize_material_rows_dedupes_repeated_grain_notes(self) -> None:
+        rows = [
+            {
+                "area_or_item": "BASE CABINETRY COLOUR",
+                "supplier": "Polytec",
+                "specs_or_description": "Boston Oak - Woodmatt - Vertical Grain - Vertical Grain",
+                "notes": "Vertical Grain",
+                "tags": ["door_colours"],
+                "page_no": 8,
+                "row_order": 1,
+                "confidence": 0.72,
+                "provenance": {},
+            }
+        ]
+        finalized = parsing_module._imperial_finalize_material_rows(rows)
+        self.assertEqual(finalized[0]["specs_or_description"], "Boston Oak - Woodmatt")
+        self.assertEqual(finalized[0]["notes"], "Vertical Grain")
+
+    def test_imperial_clean_material_row_handle_text_removes_led_tail_and_dedupes(self) -> None:
+        cleaned = parsing_module._imperial_clean_material_row_handle_text(
+            "Titus Tekform - 3064 Square Handle Brushed Nickel - Horizontal on Drawers and Vertical on Doors - Horizontal on Drawers and Vertical on Doors - LED's As per drawings"
+        )
+        self.assertEqual(
+            cleaned,
+            "Titus Tekform - 3064 Square Handle Brushed Nickel - Horizontal on Drawers and Vertical on Doors",
+        )
+
+    def test_imperial_cleanup_sink_info_display_removes_taphole_location(self) -> None:
+        cleaned = parsing_module._imperial_cleanup_sink_info_display(
+            "Sink Mounting - TBC By Others - Taphole location: TBC"
+        )
+        self.assertEqual(cleaned, "Sink Mounting - TBC By Others")
+
+    def test_imperial_summary_merges_equivalent_material_text_across_rooms(self) -> None:
+        snapshot = {
+            "builder_name": "Imperial",
+            "rooms": [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "room_order": 1,
+                    "material_rows": [
+                        {
+                            "area_or_item": "EXTERNAL BASE CABINETRY COLOUR AND SLIDING DOORS",
+                            "supplier": "Polytec",
+                            "specs_or_description": "Thermolaminated Florentine Walnut - Woodmatt - Style 4 - Berrilee",
+                            "notes": "Vertical Grain",
+                            "tags": ["door_colours"],
+                            "page_no": 1,
+                            "row_order": 1,
+                        }
+                    ],
+                },
+                {
+                    "room_key": "pantry",
+                    "original_room_label": "PANTRY",
+                    "room_order": 2,
+                    "material_rows": [
+                        {
+                            "area_or_item": "EXTERNAL BASE CABINETRY COLOUR",
+                            "supplier": "Polytec",
+                            "specs_or_description": "Florentine Walnut Woodmatt - Style 4 - Berrilee",
+                            "notes": "Vertical Grain",
+                            "tags": ["door_colours"],
+                            "page_no": 2,
+                            "row_order": 1,
+                        }
+                    ],
+                },
+            ],
+        }
+        summary = _build_material_summary(snapshot)
+        entries = summary["door_colours"]["entries"]
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["rooms"], ["KITCHEN", "PANTRY"])
+        self.assertEqual(
+            entries[0]["text"],
+            "Polytec - Florentine Walnut Woodmatt - Style 4 - Berrilee - Vertical Grain",
+        )
+        checklist = store._build_snapshot_verification_checklist(snapshot)
+        summary_items = {
+            item["field_name"]: item["extracted_value"]
+            for item in checklist
+            if item.get("section_type") == "summary"
+        }
+        self.assertIn(
+            "Polytec - Florentine Walnut Woodmatt - Style 4 - Berrilee - Vertical Grain (Room: KITCHEN | PANTRY)",
+            summary_items["Door Colours"],
+        )
+
+    def test_imperial_cell_logical_rows_merge_unlabeled_description_prefixes(self) -> None:
+        cells = [
+            extraction_service.ImperialCell(text="33MM", col_role="label", row_band=8, x0=268.0, top=290.0, source="word_grid"),
+            extraction_service.ImperialCell(text="Laminated benchtop (not fixed to", col_role="description", row_band=8, x0=301.0, top=290.0, source="word_grid"),
+            extraction_service.ImperialCell(text="BENCHTOP", col_role="label", row_band=9, x0=127.0, top=304.0, source="word_grid"),
+            extraction_service.ImperialCell(text="wall, height adjustable desk frame) -", col_role="description", row_band=9, x0=286.0, top=304.0, source="word_grid"),
+            extraction_service.ImperialCell(text="Laminex", col_role="supplier", row_band=9, x0=806.0, top=304.0, source="word_grid"),
+            extraction_service.ImperialCell(text="Green", col_role="label", row_band=10, x0=267.0, top=319.0, source="word_grid"),
+            extraction_service.ImperialCell(text="Slate - Natural - Colour Code: 8793", col_role="description", row_band=10, x0=297.0, top=319.0, source="word_grid"),
+        ]
+        rows = extraction_service._build_imperial_logical_rows_from_cells(
+            cells,
+            room_scope="LWR STUDY DESK (EVYN)",
+            page_no=10,
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].row_label, "BENCHTOP")
+        self.assertIn("33MM", " ".join(rows[0].description_parts))
+        self.assertIn("Green Slate - Natural - Colour Code: 8793", " ".join(rows[0].description_parts))
+        self.assertEqual(" ".join(rows[0].supplier_parts), "Laminex")
+
+    def test_imperial_summary_excludes_kickboard_and_internal_colour_rows_from_door_colour_rooms(self) -> None:
+        summary = _build_material_summary(
+            {
+                "builder_name": "Imperial",
+                "rooms": [
+                    {
+                        "room_key": "upper_bed_3_astrid",
+                        "original_room_label": "UPPER-BED 3(Astrid)",
+                        "room_order": 1,
+                        "material_rows": [
+                            {
+                                "area_or_item": "BENCH CABINETRY COLOUR (ROBE DOOR FRAMES AND KICKBOARDS)",
+                                "supplier": "Polytec",
+                                "specs_or_description": "Boston Oak - Woodmatt",
+                                "notes": "Vertical Grain",
+                                "tags": ["door_colours"],
+                                "page_no": 3,
+                                "row_order": 1,
+                            },
+                            {
+                                "area_or_item": "BENCHSEAT AND ROBE INTERNALS CABINETRY COLOUR",
+                                "supplier": "Laminex",
+                                "specs_or_description": "Alabaster Natural Colour Code: 203",
+                                "notes": "",
+                                "tags": ["door_colours"],
+                                "page_no": 3,
+                                "row_order": 2,
+                            },
+                        ],
+                    },
+                    {
+                        "room_key": "lower_laundry",
+                        "original_room_label": "LOWER LAUNDRY",
+                        "room_order": 2,
+                        "material_rows": [
+                            {
+                                "area_or_item": "FRAME DETAIL (As per drawings)",
+                                "supplier": "Polytec",
+                                "specs_or_description": "Boston Oak - Woodmatt",
+                                "notes": "Vertical Grain",
+                                "tags": ["door_colours"],
+                                "page_no": 12,
+                                "row_order": 1,
+                            },
+                        ],
+                    },
+                ],
+            }
+        )
+        texts = {entry["text"]: entry for entry in summary["door_colours"]["entries"]}
+        self.assertEqual(texts["Polytec - Boston Oak - Woodmatt - Vertical Grain"]["rooms"], ["LOWER LAUNDRY"])
+        self.assertNotIn("Laminex - Alabaster Natural Colour Code: 203", texts)
+
+    def test_imperial_summary_keeps_mixed_handle_rows_out_of_generic_bevel_edge_bucket(self) -> None:
+        summary = _build_material_summary(
+            {
+                "builder_name": "Imperial",
+                "rooms": [
+                    {
+                        "room_key": "upper_bed_3_astrid",
+                        "original_room_label": "UPPER-BED 3(Astrid)",
+                        "room_order": 1,
+                        "material_rows": [
+                            {
+                                "area_or_item": "HANDLES",
+                                "supplier": "Titus Tekform",
+                                "specs_or_description": "416mm handle oak-HIN0682.416.OAK | Drawers - Bevel Edge finger pull - 2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN | DESK - 2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN",
+                                "notes": "",
+                                "tags": ["handles"],
+                                "page_no": 3,
+                                "row_order": 1,
+                            },
+                        ],
+                    },
+                    {
+                        "room_key": "lower_laundry",
+                        "original_room_label": "LOWER LAUNDRY",
+                        "room_order": 2,
+                        "material_rows": [
+                            {
+                                "area_or_item": "HANDLES",
+                                "supplier": "Furnware",
+                                "specs_or_description": "Bevel edge finger pull on lowers - Tall Door Handles - Momo Hinoki Wood Big D 832mm Handle Oak-HIN0682.832.OAK",
+                                "notes": "",
+                                "tags": ["handles"],
+                                "page_no": 12,
+                                "row_order": 1,
+                            },
+                        ],
+                    },
+                ],
+            }
+        )
+        texts = {entry["text"]: entry for entry in summary["handles"]["entries"]}
+        self.assertEqual(texts["Bevel Edge finger pull"]["rooms"], ["LOWER LAUNDRY"])
+
+    def test_imperial_summary_excludes_under_dryer_benchtop_from_shared_material_rooms(self) -> None:
+        summary = _build_material_summary(
+            {
+                "builder_name": "Imperial",
+                "rooms": [
+                    {
+                        "room_key": "upper_bed_3_astrid",
+                        "original_room_label": "UPPER-BED 3(Astrid)",
+                        "room_order": 1,
+                        "material_rows": [
+                            {
+                                "area_or_item": "DESK BENCHTOP AND DESK BASE CABINETRY COLOUR",
+                                "supplier": "Polytec",
+                                "specs_or_description": "100mm Laminated Apron Benchtop - Boston Oak - Woodmatt",
+                                "notes": "Vertical Grain",
+                                "tags": ["bench_tops"],
+                                "page_no": 3,
+                                "row_order": 1,
+                            },
+                        ],
+                    },
+                    {
+                        "room_key": "lower_laundry",
+                        "original_room_label": "LOWER LAUNDRY",
+                        "room_order": 2,
+                        "material_rows": [
+                            {
+                                "area_or_item": "BENCHTOP (Under dryer for stacked WM/Dryer)",
+                                "supplier": "Polytec",
+                                "specs_or_description": "33mm Laminate with bullnose edge - Boston Oak - Woodmatt",
+                                "notes": "Vertical Grain",
+                                "tags": ["bench_tops"],
+                                "page_no": 12,
+                                "row_order": 1,
+                            },
+                        ],
+                    },
+                ],
+            }
+        )
+        texts = {entry["text"]: entry for entry in summary["bench_tops"]["entries"]}
+        self.assertEqual(texts["Polytec - Boston Oak - Woodmatt - Vertical Grain"]["rooms"], ["UPPER-BED 3(Astrid)"])
+
     def test_build_spec_snapshot_keeps_global_conservative_room_shape_when_openai_splits_rooms(self) -> None:
         base_snapshot = {
             "job_no": "37529",
@@ -6594,13 +7311,112 @@ H55784Z03AU
         self.assertEqual(summary["door_colours"]["count"], 1)
         self.assertEqual(summary["handles"]["count"], 1)
         self.assertEqual(summary["bench_tops"]["count"], 1)
-        self.assertIn(
-            "KITCHEN: FEATURE COLOUR OVERHEADS -> Polytec - Perugian Walnut Woodmatt",
-            [entry["display_text"] for entry in summary["door_colours"]["entries"]],
+        self.assertEqual(summary["door_colours"]["entries"][0]["display_text"], "Polytec - Perugian Walnut Woodmatt")
+        self.assertEqual(summary["door_colours"]["entries"][0]["rooms_display"], "KITCHEN")
+        self.assertEqual(summary["handles"]["entries"][0]["display_text"], "Kethy - Darwen Cabinet Pull Handle - Vertical")
+        self.assertEqual(summary["handles"]["entries"][0]["rooms_display"], "KITCHEN")
+
+    def test_material_summary_includes_absorbed_inline_imperial_handle_fragments(self) -> None:
+        summary = _build_material_summary(
+            {
+                "builder_name": "Imperial",
+                "rooms": [
+                    {
+                        "room_key": "upper_bed_2_evyn",
+                        "original_room_label": "UPPER-BED 2 (Evyn)",
+                        "room_order": 2,
+                        "material_rows": [
+                            {
+                                "area_or_item": "EVYN'S ROOM DRAWERS & SHELF",
+                                "supplier": "Polytec",
+                                "specs_or_description": "33MM MDF Floating shelf with internal steel support",
+                                "notes": "Vertical Grain | 2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN",
+                                "tags": ["other_material"],
+                                "page_no": 2,
+                                "row_order": 7,
+                                "provenance": {
+                                    "absorbed_inline_handle_texts": [
+                                        "DESK - 2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN"
+                                    ]
+                                },
+                            }
+                        ],
+                    }
+                ],
+            }
         )
+        self.assertEqual(summary["handles"]["count"], 1)
+        self.assertEqual(
+            summary["handles"]["entries"][0]["display_text"],
+            "DESK - 2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN",
+        )
+        self.assertEqual(summary["handles"]["entries"][0]["rooms_display"], "UPPER-BED 2 (Evyn)")
+
+    def test_material_summary_includes_standalone_imperial_desk_handle_rows(self) -> None:
+        summary = _build_material_summary(
+            {
+                "builder_name": "Imperial",
+                "rooms": [
+                    {
+                        "room_key": "upper_bed_2_evyn",
+                        "original_room_label": "UPPER-BED 2 (Evyn)",
+                        "room_order": 2,
+                        "material_rows": [
+                            {
+                                "area_or_item": "DESK",
+                                "supplier": "Titus Tekform",
+                                "specs_or_description": "2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN",
+                                "notes": "",
+                                "tags": ["handles"],
+                                "page_no": 2,
+                                "row_order": 7,
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+        self.assertEqual(summary["handles"]["count"], 1)
+        self.assertEqual(
+            summary["handles"]["entries"][0]["display_text"],
+            "DESK - 2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN",
+        )
+        self.assertEqual(summary["handles"]["entries"][0]["rooms_display"], "UPPER-BED 2 (Evyn)")
+
+    def test_imperial_absorb_inline_handle_fragments_absorbs_visual_duplicate_desk_handle_row(self) -> None:
+        rows = parsing_module._imperial_absorb_inline_handle_fragments(
+            [
+                {
+                    "area_or_item": "DESK HANDLE",
+                    "supplier": "",
+                    "specs_or_description": "2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN",
+                    "notes": "",
+                    "tags": ["handles"],
+                    "page_no": 2,
+                    "row_order": 7,
+                    "provenance": {
+                        "merged_duplicate": True,
+                        "source_provider": "",
+                        "area_or_item": {"top": 607.7},
+                    },
+                },
+                {
+                    "area_or_item": "EVYN'S ROOM DRAWERS & SHELF",
+                    "supplier": "Polytec",
+                    "specs_or_description": "33MM MDF Floating shelf with internal steel support",
+                    "notes": "Vertical Grain",
+                    "tags": ["other_material"],
+                    "page_no": 2,
+                    "row_order": 8,
+                    "provenance": {"area_or_item": {"top": 643.0}},
+                },
+            ]
+        )
+        self.assertEqual([row["area_or_item"] for row in rows], ["EVYN'S ROOM DRAWERS & SHELF"])
+        provenance = rows[0]["provenance"]
         self.assertIn(
-            "KITCHEN: HANDLES - BASE DOORS -> Kethy - Darwen Cabinet Pull Handle - Vertical",
-            [entry["display_text"] for entry in summary["handles"]["entries"]],
+            "DESK - 2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN",
+            provenance["absorbed_inline_handle_texts"],
         )
 
     def test_material_summary_dedupes_imperial_bucket_entries_by_room_and_value(self) -> None:
@@ -6663,6 +7479,39 @@ H55784Z03AU
             }
         )
         self.assertEqual(summary["door_colours"]["count"], 0)
+
+    def test_material_summary_includes_absorbed_imperial_knob_handle_fragments(self) -> None:
+        summary = _build_material_summary(
+            {
+                "builder_name": "Imperial",
+                "rooms": [
+                    {
+                        "room_key": "lwr_study_desk_astrid",
+                        "original_room_label": "LWR STUDY DESK (ASTRID)",
+                        "room_order": 1,
+                        "material_rows": [
+                            {
+                                "area_or_item": "PEDESTAL DRAWERS X 2 CABINETRY FINISHES",
+                                "supplier": "Barchie",
+                                "specs_or_description": "Handles - Woodgate Round Cabinet Knob SKU:Part No: 422.33.030 | Casters",
+                                "notes": "",
+                                "tags": ["other_material"],
+                                "page_no": 9,
+                                "row_order": 5,
+                                "provenance": {
+                                    "absorbed_inline_handle_texts": [
+                                        "Handles - Barchie Woodgate Round Cabinet Knob SKU:Part No: 422.33.030 | Casters"
+                                    ]
+                                },
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+        self.assertEqual(summary["handles"]["count"], 1)
+        self.assertEqual(summary["handles"]["entries"][0]["rooms_display"], "LWR STUDY DESK (ASTRID)")
+        self.assertIn("Woodgate Round Cabinet Knob", summary["handles"]["entries"][0]["text"])
 
     def test_parse_documents_recovers_glued_schedule_headings_from_room_master(self) -> None:
         snapshot = parse_documents(
@@ -12796,6 +13645,1087 @@ H55784Z03AU
         self.assertNotIn("BASE + OVERHEAD + OPEN OVERHEADS + TALLS", labels)
         self.assertNotIn("FEATURE COLOUR OVERHEADS", labels)
 
+    def test_imperial_material_rows_preserve_section_row_order_over_layout_row_order(self) -> None:
+        rows = parsing_module._imperial_material_rows_from_section(
+            {
+                "page_nos": [1],
+                "layout_rows": [
+                    {
+                        "row_label": "BENCHTOP",
+                        "value_region_text": "33MM Laminated Benchtop",
+                        "supplier_region_text": "Polytec",
+                        "notes_region_text": "",
+                        "page_no": 1,
+                        "row_order": 8,
+                        "confidence": 0.9,
+                        "provenance": {"source": "cell"},
+                    },
+                    {
+                        "row_label": "BASE CABINETRY COLOUR",
+                        "value_region_text": "Boston Oak - Woodmatt",
+                        "supplier_region_text": "Polytec",
+                        "notes_region_text": "Vertical Grain",
+                        "page_no": 1,
+                        "row_order": 1,
+                        "confidence": 0.9,
+                        "provenance": {"source": "cell"},
+                    },
+                    {
+                        "row_label": "HANDLES",
+                        "value_region_text": "Push to open",
+                        "supplier_region_text": "",
+                        "notes_region_text": "",
+                        "page_no": 1,
+                        "row_order": 4,
+                        "confidence": 0.9,
+                        "provenance": {"source": "cell"},
+                    },
+                ],
+            }
+        )
+        self.assertEqual(
+            [item["area_or_item"] for item in rows],
+            ["BENCHTOP", "BASE CABINETRY COLOUR", "HANDLES"],
+        )
+        self.assertEqual([item["row_order"] for item in rows], [1, 2, 3])
+
+    def test_imperial_material_rows_prefer_source_row_index_for_order(self) -> None:
+        rows = parsing_module._imperial_material_rows_from_section(
+            {
+                "page_nos": [1],
+                "layout_rows": [
+                    {
+                        "row_label": "HANDLES",
+                        "value_region_text": "Push to open",
+                        "supplier_region_text": "",
+                        "notes_region_text": "",
+                        "page_no": 1,
+                        "row_order": 4,
+                        "confidence": 0.9,
+                        "provenance": {"source": "cell", "source_row_index": 3},
+                    },
+                    {
+                        "row_label": "BASE CABINETRY COLOUR",
+                        "value_region_text": "Boston Oak - Woodmatt",
+                        "supplier_region_text": "Polytec",
+                        "notes_region_text": "Vertical Grain",
+                        "page_no": 1,
+                        "row_order": 20,
+                        "confidence": 0.9,
+                        "provenance": {"source": "cell", "source_row_index": 1},
+                    },
+                    {
+                        "row_label": "BENCHTOP",
+                        "value_region_text": "33MM Laminated Benchtop",
+                        "supplier_region_text": "Polytec",
+                        "notes_region_text": "",
+                        "page_no": 1,
+                        "row_order": 1,
+                        "confidence": 0.9,
+                        "provenance": {"source": "cell", "source_row_index": 2},
+                    },
+                ],
+            }
+        )
+        self.assertEqual(
+            [item["area_or_item"] for item in rows],
+            ["BASE CABINETRY COLOUR", "BENCHTOP", "HANDLES"],
+        )
+        self.assertEqual([item["row_order"] for item in rows], [1, 2, 3])
+
+    def test_imperial_material_rows_use_page_text_order_and_canonical_label_when_available(self) -> None:
+        rows = parsing_module._imperial_material_rows_from_section(
+            {
+                "page_nos": [1],
+                "raw_page_texts": [
+                    {
+                        "page_no": 1,
+                        "text": (
+                            "BASE CABINETRY COLOUR Polytec Vertical Grain\n"
+                            "HANDLES No handles\n"
+                            "BOOKSHELF Polytec Vertical Grain\n"
+                        ),
+                    }
+                ],
+                "layout_rows": [
+                    {
+                        "row_label": "BOOKSHELF",
+                        "value_region_text": "Boston Oak - Woodmatt",
+                        "supplier_region_text": "Polytec",
+                        "notes_region_text": "Vertical Grain",
+                        "page_no": 1,
+                        "row_order": 4,
+                        "confidence": 0.9,
+                        "provenance": {"source": "cell", "source_row_index": 1},
+                    },
+                    {
+                        "row_label": "HANDLES",
+                        "value_region_text": "No handles",
+                        "supplier_region_text": "",
+                        "notes_region_text": "",
+                        "page_no": 1,
+                        "row_order": 11,
+                        "confidence": 0.9,
+                        "provenance": {"source": "cell", "source_row_index": 2},
+                    },
+                    {
+                        "row_label": "BASE CABINETRY COLOUR",
+                        "value_region_text": "Boston Oak - Woodmatt - Framed sliding",
+                        "supplier_region_text": "Polytec",
+                        "notes_region_text": "Vertical Grain",
+                        "page_no": 1,
+                        "row_order": 8,
+                        "confidence": 0.95,
+                        "provenance": {
+                            "source": "cell",
+                            "source_row_index": 3,
+                            "canonical_label": "BASE CABINETRY COLOUR",
+                            "raw_area_or_item": "BASE CABINETRY COLOUR Boston",
+                        },
+                    },
+                ],
+            }
+        )
+        self.assertEqual(
+            [item["area_or_item"] for item in rows],
+            ["BOOKSHELF", "HANDLES", "BASE CABINETRY COLOUR"],
+        )
+        self.assertEqual([item["row_order"] for item in rows], [1, 2, 3])
+        self.assertEqual(rows[0]["provenance"]["page_text_order_index"], 3)
+        self.assertEqual(rows[2]["provenance"]["page_text_order_index"], 1)
+
+    def test_imperial_sequence_repair_keeps_lighting_out_of_handles_row(self) -> None:
+        rows = [
+            extraction_service.ImperialFiveColumnRow(
+                room_scope="ROOM",
+                row_order=12,
+                area_or_item="HANDLES",
+                specs_or_description="Push to open",
+                image="",
+                supplier="",
+                notes="",
+                canonical_label="HANDLES",
+                row_kind="handle",
+                provenance={"raw_area_or_item": "HANDLES"},
+            ),
+            extraction_service.ImperialFiveColumnRow(
+                room_scope="ROOM",
+                row_order=13,
+                area_or_item="LIGHTING 3X",
+                specs_or_description="Strip lighting runs (top, Underside of",
+                image="",
+                supplier="",
+                notes="",
+                canonical_label="",
+                row_kind="other",
+                needs_review=True,
+                provenance={"raw_area_or_item": "LIGHTING 3X"},
+            ),
+            extraction_service.ImperialFiveColumnRow(
+                room_scope="ROOM",
+                row_order=14,
+                area_or_item="",
+                specs_or_description="cabinetry and kicks)",
+                image="",
+                supplier="",
+                notes="",
+                canonical_label="",
+                row_kind="other",
+                needs_review=True,
+                provenance={"raw_area_or_item": ""},
+            ),
+        ]
+        repaired = extraction_service._repair_imperial_five_column_rows(rows)
+        self.assertEqual([row.area_or_item for row in repaired], ["HANDLES", "LIGHTING"])
+        self.assertEqual(repaired[0].specs_or_description, "Push to open")
+        self.assertIn("3X", repaired[1].specs_or_description)
+
+    def test_imperial_word_grid_defers_colour_fragment_to_next_colour_row(self) -> None:
+        self.assertTrue(
+            extraction_service._should_defer_imperial_word_grid_fragment_to_next_row(
+                current={"row_label": "INTERNAL CABINETRY COLOUR", "description_parts": ["Boston Oak - Woodmatt"]},
+                description_text="Outback Clay",
+                supplier_text="",
+                note_text="",
+                next_label="TOP FACE CABINETRY COLOUR",
+            )
+        )
+
+    def test_imperial_word_grid_keeps_splashback_colour_code_with_splashback(self) -> None:
+        self.assertFalse(
+            extraction_service._should_defer_imperial_word_grid_fragment_to_next_row(
+                current={"row_label": "210MM HIGH 9MM THICK UPSTAND (SPLASHBACK)", "description_parts": ["Alabaster Natural"]},
+                description_text="Colour Code: 203",
+                supplier_text="",
+                note_text="",
+                next_label="DESK BENCHTOP",
+            )
+        )
+
+    def test_imperial_upstand_area_text_starts_row(self) -> None:
+        self.assertTrue(extraction_service._imperial_five_column_item_starts_row("210MM HIGH 9MM THICK UPSTAND"))
+
+    def test_imperial_low_confidence_grid_row_keeps_desk_handle_rows(self) -> None:
+        row = extraction_service.ImperialGridRow(
+            room_scope="ROOM",
+            row_label="DESK",
+            description="2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN",
+            supplier="",
+            notes="",
+            row_kind="other",
+            page_no=2,
+            row_order=22,
+            confidence=0.35,
+            needs_review=True,
+            provenance={},
+        )
+        self.assertTrue(
+            extraction_service._imperial_low_confidence_grid_row_should_keep(
+                row,
+                raw_area_or_item="DESK",
+            )
+        )
+
+    def test_imperial_self_repair_moves_laminated_apron_spill_to_next_benchtop(self) -> None:
+        repaired = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "BASE CABINETRY COLOUR",
+                    "supplier": "Laminex",
+                    "specs_or_description": "Alabaster Natural Colour Code: 203 80mm Laminated Apron - Alabaster",
+                    "notes": "",
+                    "tags": ["door_colours"],
+                    "page_no": 9,
+                    "row_order": 1,
+                    "confidence": 0.9,
+                    "provenance": {"source_row_index": 1},
+                    "needs_review": False,
+                },
+                {
+                    "area_or_item": "DESK BENCHTOP",
+                    "supplier": "Polytec",
+                    "specs_or_description": "Natural Colour Code: 203 - with bullnose edge profile",
+                    "notes": "",
+                    "tags": ["bench_tops"],
+                    "page_no": 9,
+                    "row_order": 2,
+                    "confidence": 0.9,
+                    "provenance": {"source_row_index": 2},
+                    "needs_review": False,
+                },
+            ]
+        )
+        self.assertEqual(repaired[0]["specs_or_description"], "Alabaster Natural Colour Code: 203")
+        self.assertEqual(
+            repaired[1]["specs_or_description"],
+            "80mm Laminated Apron - Alabaster Natural Colour Code: 203 - with bullnose edge profile",
+        )
+
+    def test_imperial_split_area_or_item_overflow_moves_material_tail_into_description(self) -> None:
+        self.assertEqual(
+            extraction_service._imperial_split_area_or_item_overflow(
+                "DESK BENCHTOP AND DESK BASE CABINETRY COLOUR Boston",
+                "DESK BENCHTOP AND DESK BASE CABINETRY COLOUR",
+            ),
+            ("DESK BENCHTOP AND DESK BASE CABINETRY COLOUR", "Boston"),
+        )
+        self.assertEqual(
+            extraction_service._imperial_split_area_or_item_overflow(
+                "BENCHTOP 33MM",
+                "BENCHTOP",
+            ),
+            ("BENCHTOP", "33MM"),
+        )
+
+    def test_imperial_match_row_from_cell_text_falls_back_to_exact_area_item_label(self) -> None:
+        self.assertEqual(
+            extraction_service._match_imperial_row_from_cell_text("DESK BENCHTOP", "Natural", "Polytec", ""),
+            ("DESK BENCHTOP", "", "material", "area"),
+        )
+        self.assertEqual(
+            extraction_service._match_imperial_row_from_cell_text("210MM HIGH 9MM THICK UPSTAND", "Alabaster", "Polytec", ""),
+            ("210MM HIGH 9MM THICK UPSTAND", "", "material", "area"),
+        )
+
+    def test_imperial_repair_rows_do_not_merge_upstand_into_later_desk_benchtop_row(self) -> None:
+        rows = extraction_service._repair_imperial_five_column_rows(
+            [
+                extraction_service.ImperialFiveColumnRow(
+                    room_scope="ROOM",
+                    row_order=11,
+                    area_or_item="210MM HIGH 9MM THICK UPSTAND",
+                    specs_or_description="Alabaster",
+                    image="",
+                    supplier="Polytec",
+                    notes="",
+                    canonical_label="210MM HIGH 9MM THICK UPSTAND",
+                    remainder="",
+                    row_kind="material",
+                    match_source="area",
+                    confidence=0.71,
+                    provenance={},
+                    needs_review=False,
+                ),
+                extraction_service.ImperialFiveColumnRow(
+                    room_scope="ROOM",
+                    row_order=12,
+                    area_or_item="(SPLASHBACK)",
+                    specs_or_description="Natural",
+                    image="",
+                    supplier="",
+                    notes="",
+                    canonical_label="",
+                    remainder="",
+                    row_kind="other",
+                    match_source="",
+                    confidence=0.61,
+                    provenance={},
+                    needs_review=True,
+                ),
+                extraction_service.ImperialFiveColumnRow(
+                    room_scope="ROOM",
+                    row_order=13,
+                    area_or_item="",
+                    specs_or_description="Colour Code: 203",
+                    image="",
+                    supplier="",
+                    notes="",
+                    canonical_label="",
+                    remainder="",
+                    row_kind="other",
+                    match_source="",
+                    confidence=0.58,
+                    provenance={},
+                    needs_review=True,
+                ),
+                extraction_service.ImperialFiveColumnRow(
+                    room_scope="ROOM",
+                    row_order=14,
+                    area_or_item="80mm",
+                    specs_or_description="Laminated Apron - Alabaster",
+                    image="",
+                    supplier="",
+                    notes="",
+                    canonical_label="",
+                    remainder="",
+                    row_kind="other",
+                    match_source="",
+                    confidence=0.58,
+                    provenance={},
+                    needs_review=True,
+                ),
+                extraction_service.ImperialFiveColumnRow(
+                    room_scope="ROOM",
+                    row_order=15,
+                    area_or_item="DESK BENCHTOP",
+                    specs_or_description="Natural",
+                    image="",
+                    supplier="Polytec",
+                    notes="",
+                    canonical_label="DESK BENCHTOP",
+                    remainder="",
+                    row_kind="material",
+                    match_source="area",
+                    confidence=0.73,
+                    provenance={},
+                    needs_review=False,
+                ),
+            ]
+        )
+        labels = [row.area_or_item for row in rows]
+        self.assertIn("210MM HIGH 9MM THICK UPSTAND", labels)
+        self.assertIn("DESK BENCHTOP", labels)
+        self.assertTrue(any("Colour Code: 203" in row.specs_or_description for row in rows if row.area_or_item != "DESK BENCHTOP"))
+        desk_row = next(row for row in rows if row.area_or_item == "DESK BENCHTOP")
+        self.assertEqual(desk_row.supplier, "Polytec")
+
+    def test_imperial_self_repair_promotes_benchtop_parenthetical_into_label(self) -> None:
+        rows = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "BENCHTOP",
+                    "supplier": "Polytec",
+                    "specs_or_description": "(Under dryer for stacked WM/Dryer) 33mm Laminate with bullnose edge - Boston Oak - Woodmatt",
+                    "notes": "Vertical Grain",
+                    "tags": ["bench_tops"],
+                    "page_no": 12,
+                    "row_order": 1,
+                    "confidence": 0.8,
+                    "provenance": {},
+                }
+            ]
+        )
+        self.assertEqual(rows[0]["area_or_item"], "BENCHTOP (Under dryer for stacked WM/Dryer)")
+        self.assertEqual(
+            rows[0]["specs_or_description"],
+            "33mm Laminate with bullnose edge - Boston Oak - Woodmatt",
+        )
+
+    def test_imperial_self_repair_cleans_handles_token_from_finish_label(self) -> None:
+        rows = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "PEDESTAL DRAWERS X 2 CABINETRY Handles FINISHES",
+                    "supplier": "",
+                    "specs_or_description": "Handles - Barchie Woodgate Round Cabinet Knob SKU:Part No: 422.33.030 Casters Barchie",
+                    "notes": "",
+                    "tags": ["handles"],
+                    "page_no": 9,
+                    "row_order": 5,
+                    "confidence": 0.8,
+                    "provenance": {
+                        "raw_area_or_item": "PEDESTAL DRAWERS X 2 CABINETRY Handles FINISHES",
+                    },
+                }
+            ]
+        )
+        self.assertEqual(rows[0]["area_or_item"], "PEDESTAL DRAWERS X 2 CABINETRY FINISHES")
+
+    def test_imperial_self_repair_prefers_layout_handle_block_over_page_text_handle_block(self) -> None:
+        rows = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "HANDLES",
+                    "supplier": "",
+                    "specs_or_description": "No handles on uppers",
+                    "notes": "",
+                    "tags": ["handles"],
+                    "page_no": 12,
+                    "row_order": 7,
+                    "confidence": 0.8,
+                    "provenance": {
+                        "layout_value_text": "Bevel edge finger pull on lowers No handles on uppers - Tall Door Handles - Momo Hinoki Wood D 832mm Handle Oak-HIN0682.832.OAK Furnware - Investigating Woodturning pricing from Auburn for original selection",
+                        "page_text_handle_block": "Bevel edge finger pull on lowers | No handles on uppers Investigating pricing from Auburn | Furnware | Talls - Tall Door Handles - Momo Hinoki Wood Woodturning for original selection | Big D 832mm Handle Oak-HIN0682.832.OAK",
+                    },
+                }
+            ]
+        )
+        repaired_text = rows[0]["specs_or_description"]
+        self.assertIn("Bevel edge finger pull on lowers", repaired_text)
+        self.assertIn("No handles on uppers", repaired_text)
+        self.assertIn("Tall Door Handles - Momo Hinoki Wood Big D 832mm Handle Oak-HIN0682.832.OAK", repaired_text)
+        self.assertNotIn("Talls - Tall Door Handles", repaired_text)
+        self.assertNotIn("| Furnware |", repaired_text)
+        self.assertEqual(rows[0]["supplier"], "")
+        self.assertEqual(rows[0]["notes"], "")
+        self.assertIn("Investigating pricing from Auburn", repaired_text)
+
+    def test_imperial_self_repair_prefers_page_text_handle_order_when_layout_reverses_desk_and_benchseat(self) -> None:
+        rows = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "HANDLES",
+                    "supplier": "",
+                    "specs_or_description": "Tall Door Handles - Momo Hinoki Wood Big D 832mm Handle Oak-HIN0682.832.OAK Furnware - Investigating pricing from Auburn High Split Handle -Momo hinoki wood big d Woodturning for original selection 416mm handle oak-HIN0682.416.OAK Drawers - Bevel Edge finger pull - 2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN BENCHSEAT DRAWERS - PTO Titus Tekform - DESK - 2163 Voda Nickel 300mm Profile Handle Brushed - SO-2163-300-BN",
+                    "notes": "",
+                    "tags": ["handles"],
+                    "page_no": 3,
+                    "row_order": 2,
+                    "confidence": 0.84,
+                    "provenance": {
+                        "layout_value_text": "Tall Door Handles - Momo Hinoki Wood Big D 832mm Handle Oak-HIN0682.832.OAK Furnware - Investigating pricing from Auburn High Split Handle -Momo hinoki wood big d Woodturning for original selection 416mm handle oak-HIN0682.416.OAK Drawers - Bevel Edge finger pull - 2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN BENCHSEAT DRAWERS - PTO Titus Tekform - DESK - 2163 Voda Nickel 300mm Profile Handle Brushed - SO-2163-300-BN",
+                        "page_text_handle_block": "Tall Door Handles - Momo Hinoki Wood Big D | 832mm Handle Oak-HIN0682.832.OAK Investigating pricing from Auburn | Furnware | High Split Handle -Momo hinoki wood big d Woodturning for original selection | 416mm handle oak-HIN0682.416.OAK | Drawers - Bevel Edge finger pull | DESK - 2163 Voda Profile Handle Brushed DESK - 2163 Voda Profile Handle Brushed | Titus Tekform | Nickel 300mm - SO-2163-300-BN | BENCHSEAT DRAWERS - PTO",
+                    },
+                }
+            ]
+        )
+        repaired_text = rows[0]["specs_or_description"]
+        self.assertIn("DESK - 2163 Voda Profile Handle", repaired_text)
+        self.assertIn("BENCHSEAT DRAWERS - PTO", repaired_text)
+        self.assertLess(repaired_text.index("DESK - 2163 Voda Profile Handle"), repaired_text.index("BENCHSEAT DRAWERS - PTO"))
+        self.assertNotIn("High | Split Handle", repaired_text)
+
+    def test_imperial_absorb_inline_handle_fragment_tracks_summary_provenance_without_polluting_row_notes(self) -> None:
+        rows = parsing_module._imperial_postprocess_material_rows(
+            parsing_module._imperial_absorb_inline_handle_fragments(
+                [
+                    {
+                        "area_or_item": "TROUSER RACK",
+                        "supplier": "Furnware",
+                        "specs_or_description": "storg riki pull-out trouser rack 900mm, anthracite - STWR.TRK900.ANT",
+                        "notes": "",
+                        "tags": ["other_material"],
+                        "page_no": 2,
+                        "row_order": 6,
+                        "provenance": {"area_or_item": {"top": 572.0}},
+                    },
+                    {
+                        "area_or_item": "DESK",
+                        "supplier": "Furnware",
+                        "specs_or_description": "2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN",
+                        "notes": "",
+                        "tags": ["handles"],
+                        "page_no": 2,
+                        "row_order": 7,
+                        "provenance": {
+                            "source_provider": "cell_grid_repair",
+                            "layout_row_label": "DESK",
+                            "layout_value_text": "2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN",
+                            "layout_supplier_text": "Furnware",
+                            "layout_row_order": 7,
+                        },
+                    },
+                    {
+                        "area_or_item": "EVYN'S ROOM DRAWERS & SHELF",
+                        "supplier": "Polytec",
+                        "specs_or_description": "33MM MDF Floating shelf with internal steel support and Bullnose edge Florentine Walnut - Woodmatt (Flat fronts, not curved), Std Whiteboard internal",
+                        "notes": "Vertical Grain",
+                        "tags": ["other_material"],
+                        "page_no": 2,
+                        "row_order": 8,
+                        "provenance": {"area_or_item": {"top": 643.0}},
+                    },
+                ]
+            )
+        )
+        self.assertEqual([row["area_or_item"] for row in rows], ["TROUSER RACK", "EVYN'S ROOM DRAWERS & SHELF"])
+        evyn_row = next(row for row in rows if row["area_or_item"] == "EVYN'S ROOM DRAWERS & SHELF")
+        self.assertEqual(evyn_row["notes"], "Vertical Grain")
+        provenance = evyn_row["provenance"]
+        self.assertIn("DESK - 2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN", provenance["absorbed_inline_handle_texts"])
+
+    def test_imperial_postprocess_material_rows_cleans_pedestal_finish_spillover(self) -> None:
+        rows = parsing_module._imperial_postprocess_material_rows(
+            [
+                {
+                    "area_or_item": "PEDESTAL DRAWERS X 2 CABINETRY FINISHES",
+                    "supplier": "Polytec",
+                    "specs_or_description": "Boston Oak - Woodmatt (Flat fronts, not curved) - Thermolaminated curved end panels | Handles - Barchie Woodgate Round Cabinet Knob SKU:Part No: 422.33.030 | Casters",
+                    "notes": "Vertical Grain",
+                    "tags": ["handles", "other_material"],
+                    "page_no": 9,
+                    "row_order": 5,
+                    "provenance": {},
+                }
+            ]
+        )
+        self.assertEqual(rows[0]["supplier"], "Barchie")
+        self.assertEqual(
+            rows[0]["specs_or_description"],
+            "Handles - Woodgate Round Cabinet Knob SKU:Part No: 422.33.030 | Casters",
+        )
+        self.assertEqual(rows[0]["notes"], "")
+        self.assertIn(
+            "Handles - Woodgate Round Cabinet Knob SKU:Part No: 422.33.030 | Casters",
+            rows[0]["provenance"]["absorbed_inline_handle_texts"],
+        )
+
+    def test_imperial_merge_cabinetry_finish_rows_keeps_base_material_and_absorbed_knob(self) -> None:
+        rows = parsing_module._imperial_merge_cabinetry_finish_rows(
+            [
+                {
+                    "area_or_item": "PEDESTAL DRAWERS X 2 CABINETRY FINISHES - Casters",
+                    "supplier": "Barchie",
+                    "specs_or_description": "Woodgate Round Cabinet Knob | Casters",
+                    "notes": "",
+                    "tags": ["other_material"],
+                    "page_no": 9,
+                    "row_order": 5,
+                    "confidence": 0.95,
+                    "provenance": {
+                        "absorbed_inline_handle_texts": ["Woodgate Round Cabinet Knob | Casters"],
+                        "absorbed_inline_handle_suppliers": ["Barchie"],
+                    },
+                },
+                {
+                    "area_or_item": "PEDESTAL DRAWERS X 2 CABINETRY FINISHES - Finish 1",
+                    "supplier": "Polytec",
+                    "specs_or_description": "",
+                    "notes": "Vertical Grain",
+                    "tags": ["other_material"],
+                    "page_no": 9,
+                    "row_order": 6,
+                    "confidence": 1.0,
+                    "provenance": {
+                        "layout_value_text": "Boston Oak - Woodmatt (Flat fronts, not curved) - Thermolaminated curved end panels",
+                        "layout_supplier_text": "Polytec",
+                        "layout_notes_text": "Vertical Grain",
+                    },
+                },
+            ]
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["area_or_item"], "PEDESTAL DRAWERS X 2 CABINETRY FINISHES")
+        self.assertEqual(rows[0]["supplier"], "Polytec")
+        self.assertEqual(rows[0]["notes"], "Vertical Grain")
+        provenance = rows[0]["provenance"]
+        self.assertIn("Woodgate Round Cabinet Knob | Casters", provenance["absorbed_inline_handle_texts"])
+        self.assertEqual(provenance["absorbed_inline_handle_suppliers"], ["Barchie"])
+
+    def test_imperial_drop_stray_colour_rows_removes_duplicate_cell_bleed(self) -> None:
+        rows = parsing_module._imperial_drop_stray_colour_rows(
+            [
+                {
+                    "area_or_item": "BENCH CABINETRY COLOUR (ROBE DOOR FRAMES AND)",
+                    "supplier": "Polytec",
+                    "specs_or_description": "Boston Oak - Woodmatt",
+                    "notes": "Vertical Grain",
+                    "tags": ["door_colours"],
+                    "page_no": 3,
+                    "row_order": 3,
+                },
+                {
+                    "area_or_item": "Colour",
+                    "supplier": "Polytec",
+                    "specs_or_description": "Boston Oak - Woodmatt",
+                    "notes": "Vertical Grain",
+                    "tags": ["other_material"],
+                    "page_no": 3,
+                    "row_order": 7,
+                },
+            ]
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["area_or_item"], "BENCH CABINETRY COLOUR (ROBE DOOR FRAMES AND)")
+
+    def test_imperial_postprocess_material_rows_repairs_handle_text_breaks_and_label_parenthesis(self) -> None:
+        rows = parsing_module._imperial_postprocess_material_rows(
+            [
+                {
+                    "area_or_item": "TALL CABINETRY COLOUR (ROBE DOOR FRAMES AND KICKBOARDS",
+                    "supplier": "Furnware",
+                    "specs_or_description": "Tall Door Handles - Momo Hinoki Wood Big D 832mm Handle Oak-HIN0682.832.OAK | High | Split Handle -Momo hinoki wood big d 416mm handle oak-HIN0682.416.OAK",
+                    "notes": "Investigating pricing from Auburn | Woodturning for original selection",
+                    "tags": ["handles"],
+                    "page_no": 3,
+                    "row_order": 2,
+                    "provenance": {},
+                }
+            ]
+        )
+        self.assertEqual(rows[0]["area_or_item"], "TALL CABINETRY COLOUR (ROBE DOOR FRAMES AND KICKBOARDS)")
+        self.assertIn("High Split Handle - Momo", rows[0]["specs_or_description"])
+        self.assertEqual(rows[0]["notes"], "Investigating pricing from Auburn Woodturning for original selection")
+
+    def test_imperial_self_repair_merges_same_label_rows_and_keeps_earlier_order(self) -> None:
+        rows = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "TALL CABINETRY COLOUR (ROBE DOORS DRAWERS AND OPEN SHELVING)",
+                    "supplier": "Laminex",
+                    "specs_or_description": "Blush Natural Colour Code: 149",
+                    "notes": "",
+                    "tags": ["door_colours"],
+                    "page_no": 3,
+                    "row_order": 8,
+                    "confidence": 0.92,
+                    "provenance": {
+                        "source_provider": "cell_grid_repair",
+                        "merged_order_override": 8,
+                    },
+                    "needs_review": False,
+                },
+                {
+                    "area_or_item": "TALL CABINETRY COLOUR (ROBE DOORS DRAWERS AND OPEN SHELVING)",
+                    "supplier": "Laminex",
+                    "specs_or_description": "Porcelain Blush Natural Colour Code: 149",
+                    "notes": "",
+                    "tags": ["door_colours"],
+                    "page_no": 3,
+                    "row_order": 4,
+                    "confidence": 0.64,
+                    "provenance": {},
+                    "needs_review": False,
+                },
+            ]
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["row_order"], 1)
+        self.assertIn("Porcelain Blush", rows[0]["specs_or_description"])
+
+    def test_imperial_self_repair_moves_unanchored_benchtop_before_floating_shelves(self) -> None:
+        rows = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "BASE CABINETRY COLOUR",
+                    "supplier": "Laminex",
+                    "specs_or_description": "Alabaster Natural Colour Code: 203",
+                    "notes": "",
+                    "tags": ["door_colours"],
+                    "page_no": 9,
+                    "row_order": 1,
+                    "confidence": 0.9,
+                    "provenance": {"area_or_item": {"top": 300.0}},
+                    "needs_review": False,
+                },
+                {
+                    "area_or_item": "(SPLASHBACK) 80mm",
+                    "supplier": "Polytec",
+                    "specs_or_description": "Natural Colour Code: 203 Laminated Apron - Alabaster",
+                    "notes": "",
+                    "tags": ["other_material"],
+                    "page_no": 9,
+                    "row_order": 2,
+                    "confidence": 0.9,
+                    "provenance": {"area_or_item": {"top": 360.0}},
+                    "needs_review": False,
+                },
+                {
+                    "area_or_item": "FLOATING SHELVES",
+                    "supplier": "Polytec",
+                    "specs_or_description": "Boston Oak - Woodmatt",
+                    "notes": "",
+                    "tags": ["other_material"],
+                    "page_no": 9,
+                    "row_order": 3,
+                    "confidence": 0.9,
+                    "provenance": {"area_or_item": {"top": 470.0}},
+                    "needs_review": False,
+                },
+                {
+                    "area_or_item": "DESK BENCHTOP",
+                    "supplier": "Polytec",
+                    "specs_or_description": "80mm Laminated Apron - Alabaster Natural Colour Code: 203 - with bullnose edge profile",
+                    "notes": "",
+                    "tags": ["bench_tops"],
+                    "page_no": 9,
+                    "row_order": 4,
+                    "confidence": 0.8,
+                    "provenance": {},
+                    "needs_review": False,
+                },
+            ]
+        )
+        self.assertEqual(
+            [row["area_or_item"] for row in rows],
+            ["BASE CABINETRY COLOUR", "(SPLASHBACK) 80mm", "DESK BENCHTOP", "FLOATING SHELVES"],
+        )
+
+    def test_imperial_self_repair_moves_unanchored_handle_after_benchtop(self) -> None:
+        rows = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "DESK BENCHTOP AND DESK BASE CABINETRY COLOUR",
+                    "supplier": "Polytec",
+                    "specs_or_description": "100mm Laminated Apron Benchtop - Boston Oak - Woodmatt",
+                    "notes": "Vertical Grain",
+                    "tags": ["bench_tops"],
+                    "page_no": 3,
+                    "row_order": 1,
+                    "confidence": 0.9,
+                    "provenance": {"area_or_item": {"top": 309.0}},
+                    "needs_review": False,
+                },
+                {
+                    "area_or_item": "BENCH CABINETRY COLOUR (ROBE DOOR FRAMES AND",
+                    "supplier": "Polytec",
+                    "specs_or_description": "Boston Oak - Woodmatt",
+                    "notes": "Vertical Grain",
+                    "tags": ["door_colours"],
+                    "page_no": 3,
+                    "row_order": 3,
+                    "confidence": 0.72,
+                    "provenance": {},
+                    "needs_review": False,
+                },
+                {
+                    "area_or_item": "HANDLES",
+                    "supplier": "",
+                    "specs_or_description": "Tall Door Handles - Momo Hinoki Wood Big D 832mm Handle Oak-HIN0682.832.OAK High Split Handle - Momo Hinoki Wood Big D 416mm Handle Oak-HIN0682.416.OAK",
+                    "notes": "",
+                    "tags": ["handles"],
+                    "page_no": 3,
+                    "row_order": 2,
+                    "confidence": 0.84,
+                    "provenance": {},
+                    "needs_review": False,
+                },
+            ]
+        )
+        self.assertEqual(
+            [row["area_or_item"] for row in rows],
+            ["DESK BENCHTOP AND DESK BASE CABINETRY COLOUR", "HANDLES", "BENCH CABINETRY COLOUR (ROBE DOOR FRAMES AND)"],
+        )
+
+    def test_imperial_self_repair_uses_following_value_line_for_colour_code_prefix(self) -> None:
+        rows = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "BASE CABINETRY COLOUR",
+                    "supplier": "Laminex",
+                    "specs_or_description": "Natural Colour Code: 2601",
+                    "notes": "",
+                    "tags": ["door_colours"],
+                    "page_no": 12,
+                    "row_order": 3,
+                    "confidence": 0.95,
+                    "provenance": {
+                        "layout_value_text": "Natural Colour Code: 2601",
+                        "layout_supplier_text": "Laminex",
+                        "page_text_last_prefix_line": "Laminex",
+                        "page_text_leading_value_line": "Outback Clay",
+                        "page_text_following_lines": [
+                            "Outback Clay",
+                            "Natural",
+                            "Colour Code: 2601",
+                            "Laminex",
+                        ],
+                        "page_text_known_supplier": "Laminex",
+                    },
+                    "needs_review": False,
+                }
+            ]
+        )
+        self.assertEqual(rows[0]["specs_or_description"], "Outback Clay Natural Colour Code: 2601")
+
+    def test_imperial_self_repair_drops_wrong_last_prefix_when_layout_value_is_clean_suffix(self) -> None:
+        rows = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "INTERNAL CABINETRY COLOUR",
+                    "supplier": "Polytec",
+                    "specs_or_description": "Boston Oak - Woodmatt Natural Oak - Matt",
+                    "notes": "Vertical Grain",
+                    "tags": ["other_material"],
+                    "page_no": 1,
+                    "row_order": 2,
+                    "confidence": 0.95,
+                    "provenance": {
+                        "layout_value_text": "Natural Oak - Matt",
+                        "layout_supplier_text": "Polytec",
+                        "page_text_last_prefix_line": "Boston Oak - Woodmatt",
+                    },
+                    "needs_review": False,
+                }
+            ]
+        )
+        self.assertEqual(rows[0]["specs_or_description"], "Natural Oak - Matt")
+
+    def test_imperial_self_repair_prefers_layout_block_for_non_primary_handle_row(self) -> None:
+        rows = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "DESK",
+                    "supplier": "",
+                    "specs_or_description": "anthracite - STWR.TRK900.ANT Furnware DESK - 2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN",
+                    "notes": "",
+                    "tags": ["handles"],
+                    "page_no": 2,
+                    "row_order": 7,
+                    "confidence": 0.35,
+                    "provenance": {
+                        "layout_value_text": "2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN",
+                        "layout_supplier_text": "",
+                        "layout_notes_text": "",
+                        "page_text_handle_block": "anthracite - STWR.TRK900.ANT Furnware | DESK - 2163 Voda Profile Handle Brushed | Nickel 300mm - SO-2163-300-BN",
+                    },
+                    "needs_review": False,
+                }
+            ]
+        )
+        self.assertEqual(
+            rows[0]["specs_or_description"],
+            "2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN",
+        )
+
+    def test_imperial_self_repair_reapplies_clean_layout_value_to_upstand_after_late_contamination(self) -> None:
+        rows = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "210MM HIGH 9MM THICK UPSTAND (SPLASHBACK) (SPLASHBACK)",
+                    "supplier": "Polytec",
+                    "specs_or_description": "Alabaster Natural Colour Code: 203 DESK BENCHTOP Natural Colour Code: 203",
+                    "notes": "",
+                    "tags": ["other_material"],
+                    "page_no": 9,
+                    "row_order": 2,
+                    "confidence": 1.0,
+                    "provenance": {
+                        "layout_value_text": "Alabaster Natural Colour Code: 203",
+                    },
+                    "needs_review": False,
+                }
+            ]
+        )
+        self.assertEqual(rows[0]["area_or_item"], "210MM HIGH 9MM THICK UPSTAND (SPLASHBACK)")
+        self.assertEqual(rows[0]["specs_or_description"], "Alabaster Natural Colour Code: 203")
+
+    def test_imperial_self_repair_does_not_assign_following_supplier_to_lighting_row(self) -> None:
+        rows = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "LIGHTING LED",
+                    "supplier": "",
+                    "specs_or_description": "LED Strip lighting located upper side of recessed kick",
+                    "notes": "",
+                    "tags": ["other_material"],
+                    "page_no": 7,
+                    "row_order": 4,
+                    "confidence": 0.9,
+                    "provenance": {
+                        "layout_value_text": "LED Strip lighting located upper side of recessed kick",
+                        "page_text_known_supplier": "Laminex",
+                    },
+                    "needs_review": False,
+                }
+            ]
+        )
+        self.assertEqual(rows[0]["supplier"], "")
+
+    def test_imperial_self_repair_strips_duplicated_note_from_open_upper_description(self) -> None:
+        rows = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "OPEN UPPER CABINETRY COLOUR",
+                    "supplier": "Polytec",
+                    "specs_or_description": "Coastal Oak - Woodmatt Note: Drawings front bullnose",
+                    "notes": "state Vertical panels have profiles (record storage) - Note: Drawings state Vertical panels have front bullnose profiles (record storage)",
+                    "tags": ["door_colours"],
+                    "page_no": 5,
+                    "row_order": 2,
+                    "confidence": 0.98,
+                    "provenance": {
+                        "layout_value_text": "Coastal Oak - Woodmatt Note: Drawings front bullnose",
+                        "layout_notes_text": "state Vertical panels have front bullnose profiles (record storage)",
+                    },
+                    "needs_review": False,
+                }
+            ]
+        )
+        self.assertEqual(rows[0]["specs_or_description"], "Coastal Oak - Woodmatt")
+        self.assertEqual(
+            rows[0]["notes"],
+            "Note: Drawings state Vertical panels have front bullnose profiles (record storage)",
+        )
+
+    def test_imperial_self_repair_normalizes_lighting_led_label_and_keeps_led_in_value(self) -> None:
+        rows = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "LIGHTING LED",
+                    "supplier": "",
+                    "specs_or_description": "Strip lighting located upper side of recessed kick",
+                    "notes": "",
+                    "tags": ["other_material"],
+                    "page_no": 7,
+                    "row_order": 4,
+                    "confidence": 0.9,
+                    "provenance": {
+                        "layout_value_text": "LED Strip lighting located upper side of recessed kick",
+                    },
+                    "needs_review": False,
+                }
+            ]
+        )
+        self.assertEqual(rows[0]["area_or_item"], "LIGHTING")
+        self.assertEqual(rows[0]["specs_or_description"], "LED Strip lighting located upper side of recessed kick")
+
+    def test_imperial_self_repair_clears_supplier_for_simple_push_to_open_handle(self) -> None:
+        rows = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "HANDLES",
+                    "supplier": "Laminex",
+                    "specs_or_description": "Push to open",
+                    "notes": "",
+                    "tags": ["handles"],
+                    "page_no": 7,
+                    "row_order": 5,
+                    "confidence": 0.95,
+                    "provenance": {
+                        "layout_value_text": "Push to open",
+                        "layout_supplier_text": "",
+                        "page_text_handle_block": "Push to open",
+                    },
+                    "needs_review": False,
+                }
+            ]
+        )
+        self.assertEqual(rows[0]["supplier"], "")
+        self.assertEqual(rows[0]["specs_or_description"], "Push to open")
+
+    def test_imperial_handle_cleaner_strips_push_to_open_image_style_noise(self) -> None:
+        self.assertEqual(
+            parsing_module._imperial_clean_material_row_handle_text("Push to open - image of Calcutta style panel"),
+            "Push to open",
+        )
+        self.assertEqual(
+            parsing_module._imperial_clean_material_row_handle_text("Push to open Calcutta"),
+            "Push to open",
+        )
+
+    def test_imperial_self_repair_preserves_numeric_handle_prefix_and_size_note(self) -> None:
+        rows = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "HANDLES",
+                    "supplier": "",
+                    "specs_or_description": "Voda Profile Handle Matt Black 40mm SO-2163-40-MB Size shown varies Titus Tekform",
+                    "notes": "",
+                    "tags": ["handles"],
+                    "page_no": 10,
+                    "row_order": 4,
+                    "confidence": 1.0,
+                    "provenance": {
+                        "raw_area_or_item": "HANDLES 2163",
+                        "page_text_following_lines": [
+                            "SO-2163-40-MB",
+                            "Size shown varies from selection ie. 40mm",
+                            "Titus Tekform",
+                        ],
+                    },
+                    "needs_review": False,
+                }
+            ]
+        )
+        self.assertEqual(
+            rows[0]["specs_or_description"],
+            "2163 Voda Profile Handle Matt Black 40mm SO-2163-40-MB Size shown varies Titus Tekform Size shown varies from selection ie. 40mm",
+        )
+
+    def test_imperial_self_repair_repairs_benchtop_parenthetical_from_raw_label_provenance(self) -> None:
+        rows = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "BENCHTOP",
+                    "supplier": "Polytec",
+                    "specs_or_description": "Laminate with bullnose edge - Boston Oak - Woodmatt",
+                    "notes": "Vertical Grain",
+                    "tags": ["bench_tops"],
+                    "page_no": 12,
+                    "row_order": 1,
+                    "confidence": 0.9,
+                    "provenance": {
+                        "raw_area_or_item": "BENCHTOP (Under dryer for stacked 33mm WM/Dryer) 33mm",
+                    },
+                }
+            ]
+        )
+        self.assertEqual(rows[0]["area_or_item"], "BENCHTOP (Under dryer for stacked WM/Dryer)")
+        self.assertEqual(
+            rows[0]["specs_or_description"],
+            "33mm Laminate with bullnose edge - Boston Oak - Woodmatt",
+        )
+
+    def test_imperial_consolidate_handle_rows_skips_duplicate_fragment_already_in_primary_row(self) -> None:
+        rows = parsing_module._imperial_consolidate_handle_rows(
+            [
+                {
+                    "area_or_item": "HANDLES",
+                    "supplier": "",
+                    "specs_or_description": "DESK - 2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN",
+                    "notes": "",
+                    "tags": ["handles"],
+                    "page_no": 1,
+                    "row_order": 1,
+                },
+                {
+                    "area_or_item": "DESK HANDLE",
+                    "supplier": "Titus Tekform",
+                    "specs_or_description": "DESK - 2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN",
+                    "notes": "",
+                    "tags": ["handles"],
+                    "page_no": 1,
+                    "row_order": 2,
+                },
+            ]
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(
+            rows[0]["specs_or_description"].upper().count("DESK - 2163 VODA PROFILE HANDLE BRUSHED NICKEL 300MM - SO-2163-300-BN"),
+            1,
+        )
+
     def test_imperial_material_rows_merge_fragmented_follow_on_labels(self) -> None:
         rows = parsing_module._imperial_material_rows_from_section(
             {
@@ -12925,6 +14855,288 @@ H55784Z03AU
         self.assertIn("AND DRIVERS BY CLIENT", lighting["notes"])
         self.assertIn("ISLAND CABINETRY COLOUR (incl. BACK OF ISLAND CURVE AND COLUMN)", labels)
         self.assertNotIn("ISLAND CABINETRY COLOUR", labels)
+
+    def test_imperial_material_rows_do_not_merge_weaker_duplicate_benchtop_values(self) -> None:
+        rows = parsing_module._imperial_material_rows_from_section(
+            {
+                "page_nos": [12],
+                "layout_rows": [
+                    {
+                        "row_label": "BENCHTOP (Sink)",
+                        "value_region_text": "33mm Laminate with bullnose edge - Outback Clay Natural Colour Code: 2601",
+                        "supplier_region_text": "Laminex",
+                        "notes_region_text": "",
+                        "page_no": 12,
+                        "row_order": 1,
+                        "confidence": 0.92,
+                        "provenance": {"source": "cell"},
+                    },
+                    {
+                        "row_label": "BENCHTOP",
+                        "value_region_text": "(Sink) Outback Clay Natural Colour Code: 2601",
+                        "supplier_region_text": "Laminex",
+                        "notes_region_text": "",
+                        "page_no": 12,
+                        "row_order": 2,
+                        "confidence": 0.61,
+                        "provenance": {"source": "cell"},
+                    },
+                ],
+            }
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["area_or_item"], "BENCHTOP (Sink)")
+        self.assertEqual(
+            rows[0]["specs_or_description"],
+            "33mm Laminate with bullnose edge - Outback Clay Natural Colour Code: 2601",
+        )
+
+    def test_imperial_material_rows_do_not_merge_door_frame_fragments_into_robe_doors_row(self) -> None:
+        rows = parsing_module._imperial_material_rows_from_section(
+            {
+                "page_nos": [3],
+                "layout_rows": [
+                    {
+                        "row_label": "CABINETRY COLOUR (ROBE DOOR FRAMES AND KICKBOARDS)",
+                        "value_region_text": "Boston Oak - Woodmatt",
+                        "supplier_region_text": "Polytec",
+                        "notes_region_text": "Vertical Grain",
+                        "page_no": 3,
+                        "row_order": 1,
+                        "confidence": 0.9,
+                        "provenance": {"source": "cell"},
+                    },
+                    {
+                        "row_label": "CABINETRY COLOUR (ROBE DOORS DRAWERS AND OPEN SHELVING)",
+                        "value_region_text": "Porcelain Blush Natural Colour Code: 149",
+                        "supplier_region_text": "Laminex",
+                        "notes_region_text": "",
+                        "page_no": 3,
+                        "row_order": 2,
+                        "confidence": 0.9,
+                        "provenance": {"source": "cell"},
+                    },
+                    {
+                        "row_label": "DOOR FRAMES AND",
+                        "value_region_text": "Boston Oak - Woodmatt",
+                        "supplier_region_text": "Polytec",
+                        "notes_region_text": "Vertical Grain",
+                        "page_no": 3,
+                        "row_order": 3,
+                        "confidence": 0.65,
+                        "provenance": {"source": "cell"},
+                    },
+                    {
+                        "row_label": "FRAMES AND KICKBOARDS",
+                        "value_region_text": "Boston Oak - Woodmatt",
+                        "supplier_region_text": "Polytec",
+                        "notes_region_text": "Vertical Grain",
+                        "page_no": 3,
+                        "row_order": 4,
+                        "confidence": 0.62,
+                        "provenance": {"source": "cell"},
+                    },
+                ],
+            }
+        )
+        labels = [item["area_or_item"] for item in rows]
+        self.assertIn("CABINETRY COLOUR (ROBE DOOR FRAMES AND KICKBOARDS)", labels)
+        self.assertIn("CABINETRY COLOUR (ROBE DOORS DRAWERS AND OPEN SHELVING)", labels)
+        self.assertFalse(any("+ DOOR FRAMES AND" in label for label in labels))
+        self.assertFalse(any(label == "DOOR FRAMES AND" for label in labels))
+        self.assertFalse(any(label == "FRAMES AND KICKBOARDS" for label in labels))
+
+    def test_imperial_material_rows_do_not_merge_bench_and_tall_colour_rows_sharing_frame_tokens(self) -> None:
+        rows = parsing_module._imperial_material_rows_from_section(
+            {
+                "page_nos": [3],
+                "layout_rows": [
+                    {
+                        "row_label": "BENCH CABINETRY COLOUR",
+                        "value_region_text": "Boston Oak - Woodmatt",
+                        "supplier_region_text": "Polytec",
+                        "notes_region_text": "Vertical Grain",
+                        "page_no": 3,
+                        "row_order": 3,
+                        "confidence": 0.9,
+                        "repair_source": "cell_grid_repair",
+                        "provenance": {
+                            "raw_area_or_item": "BENCH CABINETRY COLOUR (ROBE DOOR FRAMES AND",
+                            "canonical_label": "BENCH CABINETRY COLOUR",
+                        },
+                    },
+                    {
+                        "row_label": "TALL CABINETRY COLOUR",
+                        "value_region_text": "Boston Oak - Woodmatt",
+                        "supplier_region_text": "Polytec",
+                        "notes_region_text": "Vertical Grain",
+                        "page_no": 3,
+                        "row_order": 4,
+                        "confidence": 0.9,
+                        "repair_source": "cell_grid_repair",
+                        "provenance": {
+                            "raw_area_or_item": "TALL CABINETRY COLOUR (ROBE DOOR FRAMES AND KICKBOARDS",
+                            "canonical_label": "TALL CABINETRY COLOUR",
+                        },
+                    },
+                ],
+            }
+        )
+        labels = [item["area_or_item"] for item in rows]
+        self.assertTrue(any(label.startswith("BENCH CABINETRY COLOUR") for label in labels))
+        self.assertTrue(any(label.startswith("TALL CABINETRY COLOUR") for label in labels))
+        self.assertEqual(len(rows), 2)
+
+    def test_imperial_material_row_labels_treat_bench_and_tall_colour_rows_as_distinct(self) -> None:
+        self.assertFalse(
+            parsing_module._imperial_material_row_labels_related(
+                "BENCH CABINETRY COLOUR (ROBE DOOR FRAMES AND",
+                "TALL CABINETRY COLOUR (ROBE DOOR FRAMES AND KICKBOARDS)",
+            )
+        )
+
+    def test_imperial_material_rows_drop_handle_contaminated_cabinetry_fragments(self) -> None:
+        rows = parsing_module._imperial_material_rows_from_section(
+            {
+                "page_nos": [3],
+                "layout_rows": [
+                    {
+                        "row_label": "CABINETRY COLOUR Boston",
+                        "value_region_text": "Oak - Woodmatt (Flat fronts, not curved) Door Handles - Momo Hinoki Wood Big D 832mm Handle Oak-HIN0682.832.OAK",
+                        "supplier_region_text": "Polytec",
+                        "notes_region_text": "Vertical Grain pricing from Auburn for original selection",
+                        "page_no": 3,
+                        "row_order": 1,
+                        "confidence": 0.6,
+                        "provenance": {"source": "cell"},
+                    },
+                    {
+                        "row_label": "HANDLES",
+                        "value_region_text": "Tall Door Handles - Momo Hinoki Wood Big D 832mm Handle Oak-HIN0682.832.OAK",
+                        "supplier_region_text": "Furnware",
+                        "notes_region_text": "Investigating pricing from Auburn",
+                        "page_no": 3,
+                        "row_order": 2,
+                        "confidence": 0.88,
+                        "provenance": {"source": "cell"},
+                    },
+                ],
+            }
+        )
+        labels = [item["area_or_item"] for item in rows]
+        self.assertEqual(labels, ["HANDLES"])
+
+    def test_imperial_material_rows_consolidate_non_primary_handle_rows_into_handles(self) -> None:
+        rows = parsing_module._imperial_material_rows_from_section(
+            {
+                "page_nos": [3],
+                "layout_rows": [
+                    {
+                        "row_label": "High Split Handle",
+                        "value_region_text": "High Split Handle - Momo Hinoki Wood Big D 416mm Handle Oak-HIN0682.416.OAK",
+                        "supplier_region_text": "Furnware",
+                        "notes_region_text": "",
+                        "page_no": 3,
+                        "row_order": 2,
+                        "confidence": 0.8,
+                        "provenance": {"source": "cell"},
+                    },
+                    {
+                        "row_label": "Drawers",
+                        "value_region_text": "Drawers - Bevel Edge finger pull",
+                        "supplier_region_text": "Titus Tekform",
+                        "notes_region_text": "",
+                        "page_no": 3,
+                        "row_order": 3,
+                        "confidence": 0.8,
+                        "provenance": {"source": "cell"},
+                    },
+                    {
+                        "row_label": "HANDLES",
+                        "value_region_text": "DESK - 2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN",
+                        "supplier_region_text": "",
+                        "notes_region_text": "Investigating pricing from Auburn Woodturning for original selection",
+                        "page_no": 3,
+                        "row_order": 9,
+                        "confidence": 0.9,
+                        "provenance": {"source": "cell"},
+                    },
+                ],
+            }
+        )
+        self.assertEqual([item["area_or_item"] for item in rows], ["HANDLES"])
+        self.assertIn("High Split Handle", rows[0]["specs_or_description"])
+        self.assertIn("Drawers - Bevel Edge finger pull", rows[0]["specs_or_description"])
+        self.assertIn("DESK - 2163 Voda Profile Handle", rows[0]["specs_or_description"])
+
+    def test_imperial_material_rows_merge_duplicate_label_prefix_into_stronger_row(self) -> None:
+        rows = parsing_module._imperial_material_rows_from_section(
+            {
+                "page_nos": [3],
+                "layout_rows": [
+                    {
+                        "row_label": "BENCHTOP AND DESK BASE CABINETRY COLOUR",
+                        "value_region_text": "100mm Laminated Apron Benchtop - Boston Oak - Woodmatt",
+                        "supplier_region_text": "Polytec",
+                        "notes_region_text": "Vertical Grain",
+                        "page_no": 3,
+                        "row_order": 1,
+                        "confidence": 0.88,
+                        "provenance": {"source": "cell"},
+                    },
+                    {
+                        "row_label": "DESK BENCHTOP AND DESK BASE",
+                        "value_region_text": "100mm Laminated Apron Benchtop - Boston Oak - Woodmatt",
+                        "supplier_region_text": "",
+                        "notes_region_text": "",
+                        "page_no": 3,
+                        "row_order": 2,
+                        "confidence": 0.61,
+                        "provenance": {"source": "cell"},
+                    },
+                ],
+            }
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["area_or_item"], "DESK BENCHTOP AND DESK BASE CABINETRY COLOUR")
+
+    def test_imperial_material_rows_contextualize_generic_colour_into_internals_label(self) -> None:
+        rows = parsing_module._imperial_material_rows_from_section(
+            {
+                "page_nos": [3],
+                "layout_rows": [
+                    {
+                        "row_label": "BENCHSEAT AND ROBE INTERNALS",
+                        "value_region_text": "Alabaster",
+                        "supplier_region_text": "",
+                        "notes_region_text": "",
+                        "page_no": 3,
+                        "row_order": 1,
+                        "confidence": 0.72,
+                        "provenance": {"source": "cell"},
+                    },
+                    {
+                        "row_label": "CABINETRY COLOUR",
+                        "value_region_text": "Alabaster Natural Colour Code: 203",
+                        "supplier_region_text": "Laminex",
+                        "notes_region_text": "",
+                        "page_no": 3,
+                        "row_order": 2,
+                        "confidence": 0.64,
+                        "provenance": {"source": "cell"},
+                    },
+                ],
+            }
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["area_or_item"], "BENCHSEAT AND ROBE INTERNALS CABINETRY COLOUR")
+        self.assertEqual(rows[0]["supplier"], "Laminex")
+
+    def test_imperial_normalize_prefixed_layout_label_restores_truncated_colour_prefix(self) -> None:
+        self.assertEqual(
+            parsing_module._imperial_normalize_prefixed_layout_label("COLOUR (ROBE DOOR FRAMES AND KICKBOARDS)"),
+            "CABINETRY COLOUR (ROBE DOOR FRAMES AND KICKBOARDS)",
+        )
 
     def test_imperial_material_row_tags_cover_plural_combo_and_typo_labels(self) -> None:
         self.assertEqual(parsing_module._imperial_material_row_tags("BENCHTOPS COLOUR"), ["bench_tops"])
