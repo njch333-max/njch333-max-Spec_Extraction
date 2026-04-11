@@ -105,6 +105,11 @@
   - after the five-column cell-aware recovery stage, persist `material_rows` as the primary truth layer instead of treating the split door-colour / benchtop fields as the main output
   - each row carries `area_or_item`, `supplier`, `specs_or_description`, `notes`, `tags`, `page_no`, `row_order`, `confidence`, `needs_review`, and row/cell provenance
   - room order follows spec appearance order, and row order follows source table order; no later display or finalize stage may re-sort Imperial material rows by tag or inferred semantics
+8b. Imperial joinery/material rows now pass through an explicit second-pass control loop before persistence:
+  - detect row-local `FieldIssue` objects such as label contamination, cross-row spillover, handle over-splitting, short-value/orphan fragments, and true canonical-order drift
+  - generate constrained `RepairCandidate` / `RepairVerdict` records for accepted or pending fixes
+  - run row-level `revalidation_status` after accepted repair so failed or unresolved rows can be gated out of Imperial summary output
+  - keep diagnostics in the snapshot/backend, while the default raw Spec List frontend hides those review/order hints
 9. Remove plumbing fixtures from appliance rows so they only appear on room rows.
 10. Apply the fixed `Global Conservative` profile for every builder:
   - room identity is source-driven
@@ -214,6 +219,7 @@
   - left column = `AREA / ITEM`
   - right column = lightly cleaned `SUPPLIER - SPECS / DESCRIPTION - NOTES`
   - preserve original handle-block wording order; do not aggressively split `HANDLES` text into artificial description/note fragments
+  - prefer the most complete accepted raw-row/layout continuation text over truncated visual-subrow fragments when building the displayed value for desk / shelf / robe / study style rows
   - only retain `Drawers`, `Hinges`, `Flooring`, and `Sink` beneath the raw rows
   - omit `Tap` from Imperial room cards
 8. Filter plumbing fixtures out of the `Appliances` table and export.
@@ -222,6 +228,7 @@
   - first line: normalized material text
   - second line: `Room: A | B | C`
   - room lists are de-duplicated and kept in source spec order
+  - rows with failing or unresolved non-handle-specific `revalidation_status` are excluded from summary aggregation; handle-specific provenance fallback is allowed only for tightly scoped summary recovery
 10. Render appliance official links as a clickable wrapped `Product` column.
 11. Render non-room joinery sections such as `FEATURE TALL DOORS` in a dedicated `Special Sections` block instead of folding them into nearby rooms.
 12. Show `Generated at`, `Extraction duration`, and the current PDF QA status in Brisbane time / human-readable duration format on the raw Spec List page.
@@ -232,6 +239,7 @@
 17. Below roughly `1280px`, remove fixed wide-table minimum widths, force card containers to `min-width: 0`, and suppress page-level horizontal overflow so the raw snapshot remains readable in 1080p half-screen windows without horizontal dragging.
 18. Shared UI density is intentionally tighter than the original baseline; the common stylesheet should shrink fonts and spacing to roughly 75% visual scale across jobs, builders, QA, and spec-list pages without using browser-level zoom.
 19. Room-card sorting should treat grouped vanity titles such as `VANITIES` as part of the vanity/bathroom priority bucket instead of leaving them in generic `Other`.
+20. Imperial debug metadata such as issue types, repair verdicts, order hints, and revalidation hints remain available in backend snapshot payloads, but the default frontend rendering suppresses them unless a debug-oriented UI is introduced later.
 
 ### 3.7 Upload Interaction
 1. Job detail uses the existing upload POST route.

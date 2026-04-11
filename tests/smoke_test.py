@@ -2785,6 +2785,65 @@ H55784Z03AU
         self.assertEqual(by_type["Dishwasher"].make, "Miele")
         self.assertEqual(by_type["Dishwasher"].model_no, "G4220 (HG03)")
 
+    def test_extract_appliances_from_imperial_layout_rows_keeps_freestanding_cooker_and_dishwasher(self) -> None:
+        page = {
+            "page_no": 7,
+            "raw_text": "APPLIANCES",
+            "text": "",
+            "page_layout": {
+                "page_type": "appliance",
+                "rows": [
+                    {
+                        "row_label": "FREESTANDING COOKER (KITCHEN)",
+                        "value_region_text": "Bosch Series 6 90cm Dual Fuel Range Cooker - freestanding Model HSB738357A - Dimensions 900-950x898x600mm",
+                        "supplier_region_text": "By others",
+                        "notes_region_text": "",
+                        "row_kind": "other",
+                    },
+                    {
+                        "row_label": "DISHWASHER (KITCHEN)",
+                        "value_region_text": "Bosch Series 6 60cm Freestanding Dishwasher - Stainless Steel Model SMS6HCI01A",
+                        "supplier_region_text": "By others",
+                        "notes_region_text": "",
+                        "row_kind": "other",
+                    },
+                ],
+            },
+        }
+        rows = parsing_module._extract_appliances_from_pages("imperial-appliances.pdf", [page], builder_name="Imperial")
+        by_type = {row.appliance_type: row for row in rows}
+        self.assertEqual(by_type["Freestanding Stove"].make, "Bosch")
+        self.assertEqual(by_type["Freestanding Stove"].model_no, "HSB738357A")
+        self.assertEqual(by_type["Dishwasher"].make, "Bosch")
+        self.assertEqual(by_type["Dishwasher"].model_no, "SMS6HCI01A")
+
+    def test_appliance_model_context_allows_freestanding_dishwasher(self) -> None:
+        evidence = (
+            "DISHWASHER (KITCHEN) Bosch Series 6 60cm Freestanding Dishwasher - "
+            "Stainless Steel Model SMS6HCI01A By others"
+        )
+        self.assertTrue(
+            parsing_module._appliance_model_context_matches_type(
+                evidence,
+                "Dishwasher",
+                "SMS6HCI01A",
+            )
+        )
+
+    def test_noisy_appliance_model_detects_spaced_dimensions(self) -> None:
+        self.assertTrue(
+            parsing_module._looks_like_noisy_appliance_model(
+                "950 x 898X600MM",
+                "Freestanding Stove",
+            )
+        )
+        self.assertTrue(
+            parsing_module._looks_like_noisy_appliance_model(
+                "900-950 x 898 x 600 mm",
+                "Freestanding Stove",
+            )
+        )
+
     def test_merge_page_layouts_combines_rows_and_drops_footer_noise(self) -> None:
         docling_layout = {
             "page_type": "joinery",
@@ -3617,6 +3676,77 @@ H55784Z03AU
         )
         self.assertEqual(rows[0]["value"], "Barchie - Woodgate Round Cabinet Knob SKU:Part No: 422.33.030 Casters")
 
+    def test_flatten_imperial_material_rows_exposes_repair_diagnostics(self) -> None:
+        rows = _flatten_imperial_material_rows(
+            {
+                "material_rows": [
+                    {
+                        "area_or_item": "SPLASHBACK",
+                        "supplier": "",
+                        "specs_or_description": "Tiles by others Installed By Imperial",
+                        "notes": "",
+                        "tags": ["other_material"],
+                        "page_no": 1,
+                        "row_order": 1,
+                        "issues": [
+                            {"issue_type": "label_contamination"},
+                        ],
+                        "repair_verdicts": [
+                            {"issue_type": "label_contamination", "status": "accepted"},
+                            {"issue_type": "row_order_drift", "status": "needs_review"},
+                        ],
+                        "repair_log": [
+                            {"issue_type": "label_contamination", "status": "accepted"},
+                        ],
+                        "revalidation_issues": [
+                            {"issue_type": "repair_revalidation_failed", "related_issue_type": "row_order_drift"},
+                        ],
+                        "revalidation_status": "needs_review",
+                        "needs_review": False,
+                        "provenance": {},
+                    }
+                ]
+            }
+        )
+        self.assertEqual(rows[0]["issue_types"], ["label_contamination"])
+        self.assertEqual(rows[0]["accepted_repair_types"], ["label_contamination"])
+        self.assertEqual(rows[0]["pending_repair_types"], ["row_order_drift"])
+        self.assertEqual(rows[0]["revalidation_issue_types"], ["row_order_drift"])
+        self.assertEqual(rows[0]["repair_log_count"], 1)
+        self.assertTrue(rows[0]["needs_review"])
+        self.assertEqual(rows[0]["review_display_status"], "order_hint")
+
+    def test_flatten_imperial_material_rows_uses_order_hint_for_row_order_only_review(self) -> None:
+        rows = _flatten_imperial_material_rows(
+            {
+                "material_rows": [
+                    {
+                        "area_or_item": "BASE CABINETRY COLOUR",
+                        "supplier": "Polytec",
+                        "specs_or_description": "Boston Oak - Woodmatt",
+                        "notes": "",
+                        "tags": ["door_colours"],
+                        "page_no": 1,
+                        "row_order": 1,
+                        "issues": [
+                            {"issue_type": "row_order_drift"},
+                        ],
+                        "repair_verdicts": [
+                            {"issue_type": "row_order_drift", "status": "needs_review"},
+                        ],
+                        "revalidation_issues": [
+                            {"related_issue_type": "row_order_drift"},
+                        ],
+                        "revalidation_status": "needs_review",
+                        "needs_review": False,
+                        "provenance": {},
+                    }
+                ]
+            }
+        )
+        self.assertTrue(rows[0]["needs_review"])
+        self.assertEqual(rows[0]["review_display_status"], "order_hint")
+
     def test_imperial_material_row_display_value_for_view_prefers_layout_text_for_raw_row_fidelity(self) -> None:
         display = parsing_module._imperial_material_row_display_value_for_view(
             {
@@ -3723,6 +3853,146 @@ H55784Z03AU
         self.assertEqual(
             display,
             "[Polytec] - 33MM MDF Floating shelf with internal steel support and Bullnose edge | Florentine Walnut - Woodmatt (Flat fronts, not curved), Std Whiteboard internal - (Vertical Grain)",
+        )
+
+    def test_imperial_material_row_display_value_for_view_ignores_truncated_visual_subrow_for_evyn_shelf(self) -> None:
+        display = parsing_module._imperial_material_row_display_value_for_view(
+            {
+                "area_or_item": "EVYN'S ROOM DRAWERS & SHELF",
+                "supplier": "Polytec",
+                "specs_or_description": "33MM MDF Floating shelf with internal steel support and Bullnose edge Florentine Walnut - Woodmatt (Flat fronts, not curved), Std Whiteboard internal",
+                "notes": "Vertical Grain",
+                "tags": ["other_material"],
+                "provenance": {
+                    "layout_value_text": "33MM MDF Floating shelf with internal steel support and Bullnose edge Florentine Walnut - Woodmatt (Flat fronts, not curved), Std Whiteboard internal Vertical Grain",
+                    "layout_supplier_text": "Polytec",
+                    "layout_notes_text": "Vertical Grain",
+                    "visual_subrows": [
+                        {
+                            "area_or_item": "EVYN'S ROOM DRAWERS & SHELF",
+                            "specs_or_description": "33MM MDF Floating shelf with internal",
+                            "supplier": "Polytec",
+                            "notes": "",
+                            "separator_kind_from_previous": "visible",
+                        }
+                    ],
+                },
+            }
+        )
+        self.assertEqual(
+            display,
+            "[Polytec] - 33MM MDF Floating shelf with internal steel support and Bullnose edge | Florentine Walnut - Woodmatt (Flat fronts, not curved), Std Whiteboard internal - (Vertical Grain)",
+        )
+
+    def test_imperial_material_row_display_value_for_view_ignores_truncated_visual_subrow_for_cabinetry_colour(self) -> None:
+        display = parsing_module._imperial_material_row_display_value_for_view(
+            {
+                "area_or_item": "BASE CABINETRY COLOUR",
+                "supplier": "Laminex",
+                "specs_or_description": "Alabaster Natural Colour Code: 203",
+                "notes": "",
+                "tags": ["door_colours"],
+                "provenance": {
+                    "layout_value_text": "Alabaster Natural Colour Code: 203",
+                    "layout_supplier_text": "Laminex",
+                    "visual_subrows": [
+                        {
+                            "area_or_item": "BASE CABINETRY COLOUR",
+                            "specs_or_description": "Natural",
+                            "supplier": "Laminex",
+                            "notes": "",
+                            "separator_kind_from_previous": "visible",
+                        }
+                    ],
+                },
+            }
+        )
+        self.assertEqual(display, "[Laminex] - Alabaster Natural Colour Code: 203")
+
+    def test_imperial_material_row_display_value_for_view_prefers_longer_layout_continuation_for_desk_base(self) -> None:
+        display = parsing_module._imperial_material_row_display_value_for_view(
+            {
+                "area_or_item": "DESK BENCHTOP AND DESK BASE CABINETRY COLOUR",
+                "supplier": "Polytec",
+                "specs_or_description": "100mm Laminated Apron Benchtop- Boston Oak - Woodmatt (Flat fronts, not curved)",
+                "notes": "Vertical Grain",
+                "tags": ["door_colours"],
+                "provenance": {
+                    "layout_value_text": "100mm Laminated Apron Benchtop- Boston Oak - Woodmatt\nBoston Oak - Woodmatt (Flat fronts, not curved)",
+                    "layout_supplier_text": "Polytec",
+                    "layout_notes_text": "Vertical Grain",
+                    "visual_subrows": [
+                        {
+                            "area_or_item": "DESK BENCHTOP AND DESK BASE",
+                            "specs_or_description": "Oak - Woodmatt",
+                            "supplier": "",
+                            "notes": "",
+                            "separator_kind_from_previous": "visible",
+                        }
+                    ],
+                },
+            }
+        )
+        self.assertEqual(
+            display,
+            "[Polytec] - 100mm Laminated Apron Benchtop- Boston Oak - Woodmatt | Boston Oak - Woodmatt (Flat fronts, not curved) - (Vertical Grain)",
+        )
+
+    def test_imperial_material_row_display_value_for_view_does_not_promote_layout_finish_spillover_for_floating_shelves(self) -> None:
+        display = parsing_module._imperial_material_row_display_value_for_view(
+            {
+                "area_or_item": "FLOATING SHELVES",
+                "supplier": "Polytec",
+                "specs_or_description": "33MM MDF Floating shelf with internal steel support and Bullnose edge",
+                "notes": "Vertical Grain",
+                "tags": ["other_material"],
+                "provenance": {
+                    "layout_value_text": "33MM MDF Floating shelf with internal steel support and Bullnose edge Boston Oak - Woodmatt (Flat fronts, not curved) - Thermolaminated curved end panels",
+                    "layout_supplier_text": "Polytec",
+                    "layout_notes_text": "Vertical Grain",
+                    "visual_subrows": [
+                        {
+                            "area_or_item": "FLOATING SHELVES",
+                            "specs_or_description": "33MM MDF Floating shelf with internal",
+                            "supplier": "",
+                            "notes": "",
+                            "separator_kind_from_previous": "visible",
+                        }
+                    ],
+                },
+            }
+        )
+        self.assertEqual(
+            display,
+            "[Polytec] - 33MM MDF Floating shelf with internal steel support and Bullnose edge - (Vertical Grain)",
+        )
+
+    def test_imperial_material_row_display_value_for_view_ignores_truncated_visual_subrow_for_trouser_rack(self) -> None:
+        display = parsing_module._imperial_material_row_display_value_for_view(
+            {
+                "area_or_item": "TROUSER RACK",
+                "supplier": "Furnware",
+                "specs_or_description": "storg riki pull-out trouser rack 900mm, anthracite - STWR.TRK900.ANT | DESK - 2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN",
+                "notes": "",
+                "tags": ["other_material"],
+                "provenance": {
+                    "layout_value_text": "storg riki pull-out trouser rack 900mm, anthracite - STWR.TRK900.ANT",
+                    "layout_supplier_text": "Furnware",
+                    "visual_subrows": [
+                        {
+                            "area_or_item": "TROUSER RACK",
+                            "specs_or_description": "storg riki pull-out trouser rack 900mm,",
+                            "supplier": "Furnware",
+                            "notes": "",
+                            "separator_kind_from_previous": "visible",
+                        }
+                    ],
+                },
+            }
+        )
+        self.assertEqual(
+            display,
+            "[Furnware] - storg riki pull-out trouser rack 900mm, anthracite - STWR.TRK900.ANT | DESK - 2163 Voda Profile Handle Brushed Nickel 300mm - SO-2163-300-BN",
         )
 
     def test_imperial_material_row_display_value_for_view_splits_single_supplier_handle_block_into_visual_subrows(self) -> None:
@@ -4579,6 +4849,105 @@ H55784Z03AU
             "[Titus Tekform] - Voda Profile Handle Matt Black 40mm | SO-2163-40-MB | Size shown varies"
         )
         self.assertEqual(candidates, ["Voda Profile Handle Matt Black 40mm - SO-2163-40-MB"])
+
+    def test_imperial_handle_summary_semantic_candidates_split_drawers_and_doors(self) -> None:
+        import App.main as main_module
+
+        candidates = main_module._imperial_semantic_handle_summary_candidates(
+            "[Momo] - DRAWERS - Momo Trianon Handle Satin Brass | DOORS - Momo Lugo Knob Satin Brass"
+        )
+        self.assertEqual(
+            candidates,
+            [
+                "DRAWERS - Momo Trianon Handle Satin Brass",
+                "DOORS - Momo Lugo Knob Satin Brass",
+            ],
+        )
+
+    def test_imperial_handle_summary_semantic_candidates_keep_hampton_with_product_code_single_item(self) -> None:
+        import App.main as main_module
+
+        candidates = main_module._imperial_semantic_handle_summary_candidates(
+            "[Handle House] - Hampton Handle, Urban Brass - Product Code: HANDLEHUB - (Horizontal on all)"
+        )
+        self.assertEqual(candidates, ["Hampton Handle, Urban Brass - Product Code: HANDLEHUB"])
+
+    def test_imperial_self_repair_trims_cabinetry_colour_spillover(self) -> None:
+        rows = [
+            {
+                "area_or_item": "BASE CABINETRY COLOUR",
+                "supplier": "Polytec Door and Drawer",
+                "specs_or_description": (
+                    "Door and Drawer Thermolaminated - Classic White - Matt "
+                    "Drawer Profile Drawer Handle Thermolaminated - Classic White - Matt - BACK OF"
+                ),
+                "notes": "Profile - Lismore Style 4 - Half Rail = Type 3 Position = Handle B",
+                "tags": ["door_colours"],
+                "page_no": 1,
+                "row_order": 1,
+                "confidence": 1.0,
+                "provenance": {
+                    "layout_row_label": "BASE CABINETRY COLOUR",
+                    "layout_value_text": (
+                        "Door and Drawer Thermolaminated - Classic White - Matt "
+                        "Drawer Profile Drawer Handle Thermolaminated - Classic White - Matt - "
+                        "BACK OF ISLAND BACK AND SIDES OF ISLAND PANELLING"
+                    ),
+                    "layout_supplier_text": "Polytec Door and Drawer",
+                },
+            }
+        ]
+        repaired = parsing_module._imperial_self_repair_material_rows(rows)
+        self.assertEqual(repaired[0]["supplier"], "Polytec")
+        self.assertEqual(repaired[0]["specs_or_description"], "Thermolaminated - Classic White - Matt")
+
+    def test_imperial_consolidate_handle_rows_prefers_secondary_handle_subrows(self) -> None:
+        rows = [
+            {
+                "area_or_item": "HANDLES",
+                "supplier": "",
+                "specs_or_description": (
+                    "Momo - Trianon D Handle 128mm Polytec - As Doors "
+                    "MOULDING (ISLAND BACK AND SIDES INCL. COLUMNS) Traditional Profile - Classic White Matt"
+                ),
+                "notes": "",
+                "tags": ["handles"],
+                "page_no": 1,
+                "row_order": 4,
+                "confidence": 1.0,
+                "provenance": {},
+            },
+            {
+                "area_or_item": "DRAWERS",
+                "supplier": "Momo",
+                "specs_or_description": "Trianon D Handle 128mm In White & Brushed Nickel - Part no: TCM3622.WHBRN.FG",
+                "notes": "Knobs on Doors, Handles on Drawers (Horizontal)",
+                "tags": ["handles"],
+                "page_no": 1,
+                "row_order": 5,
+                "confidence": 1.0,
+                "provenance": {},
+            },
+            {
+                "area_or_item": "DOORS",
+                "supplier": "Momo",
+                "specs_or_description": "Lugo Knob 38mm In Brushed Nickel - Part no: 3238.BRN.FG",
+                "notes": "",
+                "tags": ["handles"],
+                "page_no": 1,
+                "row_order": 6,
+                "confidence": 1.0,
+                "provenance": {},
+            },
+        ]
+        consolidated = parsing_module._imperial_consolidate_handle_rows(rows)
+        self.assertEqual(len(consolidated), 1)
+        handle_row = consolidated[0]
+        self.assertEqual(handle_row["area_or_item"], "HANDLES")
+        self.assertIn("DRAWERS - Momo - Trianon D Handle 128mm", handle_row["specs_or_description"])
+        self.assertIn("DOORS - Momo - Lugo Knob 38mm", handle_row["specs_or_description"])
+        self.assertNotIn("MOULDING", handle_row["specs_or_description"].upper())
+        self.assertNotIn("POLYTEC", handle_row["specs_or_description"].upper())
 
     def test_imperial_summary_excludes_under_dryer_benchtop_from_shared_material_rooms(self) -> None:
         summary = _build_material_summary(
@@ -14335,6 +14704,14 @@ H55784Z03AU
     def test_imperial_upstand_area_text_starts_row(self) -> None:
         self.assertTrue(extraction_service._imperial_five_column_item_starts_row("210MM HIGH 9MM THICK UPSTAND"))
 
+    def test_imperial_profile_and_moulding_area_text_start_rows(self) -> None:
+        self.assertTrue(extraction_service._imperial_five_column_item_starts_row("DOOR AND DRAWER PROFILE"))
+        self.assertTrue(extraction_service._imperial_five_column_item_starts_row("MOULDING"))
+
+    def test_imperial_glass_doors_only_is_label_continuation(self) -> None:
+        self.assertTrue(extraction_service._imperial_five_column_item_is_label_continuation("DOORS ONLY)"))
+        self.assertTrue(extraction_service._imperial_five_column_item_is_label_continuation("GLASS DOORS ONLY"))
+
     def test_imperial_low_confidence_grid_row_keeps_desk_handle_rows(self) -> None:
         row = extraction_service.ImperialGridRow(
             room_scope="ROOM",
@@ -14993,6 +15370,138 @@ H55784Z03AU
             "Handles - Barchie Woodgate Round Cabinet Knob | SKU:Part No: 422.33.030 | Casters"
         )
         self.assertEqual(candidates, ["Woodgate Round Cabinet Knob"])
+
+    def test_imperial_handle_summary_candidates_keep_allegra_knob_code_and_finish(self) -> None:
+        import App.main as app_main
+
+        candidates = app_main._imperial_semantic_handle_summary_candidates(
+            "[Allegra] - Knob - 6368-K in brushed nickel - Base doors and overhead doors only"
+        )
+        self.assertEqual(candidates, ["Knob - 6368-K in brushed nickel"])
+        self.assertEqual(
+            store._verification_semantic_imperial_handle_summary_candidates(
+                "[Allegra] - Knob - 6368-K in brushed nickel - Base doors and overhead doors only"
+            ),
+            ["Knob - 6368-K in brushed nickel"],
+        )
+        self.assertFalse(
+            app_main._imperial_summary_values_equivalent(
+                "handles",
+                "6368-160-brushed nickel",
+                "Knob - 6368-K in brushed nickel",
+            )
+        )
+        self.assertFalse(
+            store._verification_imperial_summary_values_equivalent(
+                "handles",
+                "6368-160-brushed nickel",
+                "Knob - 6368-K in brushed nickel",
+            )
+        )
+
+    def test_imperial_summary_builder_falls_back_to_area_item_for_missing_handle_tag(self) -> None:
+        import App.main as app_main
+
+        snapshot = {
+            "rooms": [
+                {
+                    "room_order": 1,
+                    "original_room_label": "KITCHEN",
+                    "material_rows": [
+                        {
+                            "area_or_item": "HANDLES - BASE DRAWERS",
+                            "supplier": "Allegra",
+                            "specs_or_description": "6368-160-brushed nickel",
+                            "notes": "Horizontal Install",
+                            "tags": [],
+                            "page_no": 2,
+                            "row_order": 10,
+                            "confidence": "high",
+                            "provenance": {},
+                            "needs_review": False,
+                            "display_lines": [
+                                "[Allegra] - 6368-160-brushed nickel - (Horizontal Install)"
+                            ],
+                        }
+                    ],
+                }
+            ]
+        }
+        summary = app_main._build_imperial_material_summary(snapshot)
+        self.assertEqual(summary["handles"]["count"], 1)
+        self.assertEqual(summary["handles"]["entries"][0]["text"], "6368-160-brushed nickel")
+        self.assertEqual(summary["handles"]["entries"][0]["rooms_display"], "KITCHEN")
+        self.assertTrue(
+            store._imperial_verification_row_is_summary_worthy(
+                area_or_item="HANDLES - BASE DRAWERS",
+                extracted_value="[Allegra] - 6368-160-brushed nickel - (Horizontal Install)",
+                tags=[],
+                needs_review=False,
+            )
+        )
+        self.assertTrue(
+            store._imperial_verification_row_is_summary_worthy(
+                area_or_item="BASE CABINETRY COLOUR",
+                extracted_value="[Polytec] - Boston Oak - Woodmatt",
+                tags=["door_colours"],
+                needs_review=True,
+                item={
+                    "issues": [{"issue_type": "row_order_drift"}],
+                    "repair_verdicts": [{"issue_type": "row_order_drift", "status": "needs_review"}],
+                    "revalidation_issues": [{"related_issue_type": "row_order_drift"}],
+                },
+            )
+        )
+        self.assertTrue(
+            store._imperial_verification_row_is_summary_worthy(
+                area_or_item="HANDLES - BASE DRAWERS",
+                extracted_value="",
+                tags=["handles"],
+                needs_review=True,
+                item={
+                    "issues": [{"issue_type": "handle_block_over_split"}],
+                    "repair_verdicts": [{"issue_type": "handle_block_over_split", "status": "needs_review"}],
+                    "revalidation_issues": [{"related_issue_type": "handle_block_over_split"}],
+                    "provenance": {
+                        "layout_value_text": "KETHY PM2817 / 288 / MSIL Matt Silver 288 Hole centres - 312 OA SIZE Polytec Horizontal Install"
+                    },
+                },
+            )
+        )
+        checklist = store._build_imperial_snapshot_verification_checklist(
+            {
+                "rooms": [
+                    {
+                        "room_order": 1,
+                        "original_room_label": "KITCHEN",
+                        "page_refs": "2",
+                        "material_rows": [
+                            {
+                                "area_or_item": "HANDLES - BASE DRAWERS",
+                                "supplier": "Allegra",
+                                "specs_or_description": "6368-160-brushed nickel",
+                                "notes": "Horizontal Install",
+                                "tags": [],
+                                "page_no": 2,
+                                "row_order": 10,
+                                "needs_review": False,
+                                "provenance": {},
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+        handle_summary_item = next(
+            item for item in checklist if item["section_type"] == "summary" and item["field_name"] == "Handles"
+        )
+        self.assertIn("6368-160-brushed nickel", handle_summary_item["extracted_value"])
+
+    def test_extract_appliance_placeholder_model_keeps_std_space_by_client(self) -> None:
+        self.assertEqual(
+            parsing_module._extract_appliance_placeholder_model("MICROWAVE STD SPACE BY CLIENT"),
+            "STD SPACE BY CLIENT",
+        )
 
     def test_imperial_handle_supplier_display_prefers_handle_suppliers_over_cabinetry_suppliers(self) -> None:
         supplier = parsing_module._imperial_handle_supplier_display(
@@ -15793,6 +16302,530 @@ H55784Z03AU
             ]
         )
         self.assertEqual(rows[0]["specs_or_description"], "Outback Clay Natural Colour Code: 2601")
+
+    def test_imperial_self_repair_recovers_base_colour_prefix_and_trims_splashback_spillover(self) -> None:
+        rows = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "SPLASHBACK Tiles",
+                    "supplier": "Polytec",
+                    "specs_or_description": "Tiles by others Installed By Imperial Polar White Matt",
+                    "notes": "STD tile with white grout",
+                    "tags": ["other_material"],
+                    "page_no": 1,
+                    "row_order": 1,
+                    "confidence": 0.9,
+                    "provenance": {
+                        "layout_value_text": "Tiles by others Installed By Imperial",
+                        "layout_supplier_text": "Tiles by others Installed By Imperial",
+                        "layout_notes_text": "STD tile with white grout",
+                    },
+                    "needs_review": False,
+                },
+                {
+                    "area_or_item": "BASE CABINETRY COLOUR",
+                    "supplier": "Polytec",
+                    "specs_or_description": "Flat Door",
+                    "notes": "",
+                    "tags": ["door_colours"],
+                    "page_no": 1,
+                    "row_order": 2,
+                    "confidence": 0.95,
+                    "provenance": {
+                        "layout_value_text": "Flat Door",
+                        "layout_supplier_text": "Polytec",
+                        "page_text_last_prefix_line": "Polytec",
+                        "page_text_leading_value_line": "Polar White Matt",
+                        "page_text_following_lines": [
+                            "Polar White Matt",
+                            "BASE CABINETRY COLOUR",
+                            "Flat Door",
+                            "Polytec",
+                        ],
+                        "page_text_known_supplier": "Polytec",
+                    },
+                    "needs_review": False,
+                },
+            ]
+        )
+        by_label = {row["area_or_item"]: row for row in rows}
+        self.assertEqual(by_label["SPLASHBACK"]["supplier"], "")
+        self.assertEqual(by_label["SPLASHBACK"]["specs_or_description"], "Tiles by others Installed By Imperial")
+        self.assertEqual(by_label["SPLASHBACK"]["notes"], "STD tile with white grout")
+        self.assertEqual(by_label["BASE CABINETRY COLOUR"]["specs_or_description"], "Polar White Matt Flat Door")
+
+    def test_imperial_self_repair_strips_knob_spillover_from_previous_handle_row(self) -> None:
+        rows = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "HANDLES - TALL CABS /PANTRY CABS ONLY",
+                    "supplier": "Allegra",
+                    "specs_or_description": "6368-224-brushed nickel - 6368-K in brushed nickel - Base doors and overhead doors only",
+                    "notes": "Vertical Install",
+                    "tags": ["handles"],
+                    "page_no": 2,
+                    "row_order": 5,
+                    "confidence": 0.95,
+                    "provenance": {
+                        "layout_value_text": "6368-224-brushed nickel - 6368-K in brushed nickel - Base doors and overhead doors only",
+                        "page_text_handle_block": "6368-224-brushed nickel | 6368-K in brushed nickel | Base doors and overhead doors only",
+                    },
+                    "needs_review": False,
+                },
+                {
+                    "area_or_item": "KNOB",
+                    "supplier": "Allegra",
+                    "specs_or_description": "Knob 6368-K in brushed nickel",
+                    "notes": "Base doors and overhead doors only",
+                    "tags": ["handles"],
+                    "page_no": 2,
+                    "row_order": 6,
+                    "confidence": 0.95,
+                    "provenance": {
+                        "layout_value_text": "Knob 6368-K in brushed nickel",
+                        "layout_notes_text": "Base doors and overhead doors only",
+                    },
+                    "needs_review": False,
+                },
+            ]
+        )
+        by_label = {row["area_or_item"]: row for row in rows}
+        self.assertEqual(
+            by_label["HANDLES - TALL CABS /PANTRY CABS ONLY"]["specs_or_description"],
+            "6368-224-brushed nickel",
+        )
+        self.assertEqual(
+            parsing_module.normalize_space(
+                str(
+                    by_label["HANDLES - TALL CABS /PANTRY CABS ONLY"]
+                    .get("provenance", {})
+                    .get("layout_value_text", "")
+                )
+            ),
+            "6368-224-brushed nickel",
+        )
+        self.assertEqual(
+            by_label["KNOB"]["specs_or_description"],
+            "Knob 6368-K in brushed nickel",
+        )
+        issue_types = {
+            issue.get("issue_type")
+            for issue in by_label["HANDLES - TALL CABS /PANTRY CABS ONLY"].get("issues", [])
+            if isinstance(issue, dict)
+        }
+        self.assertIn("cross_row_spillover", issue_types)
+
+    def test_imperial_self_repair_attaches_label_contamination_issue(self) -> None:
+        rows = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "SPLASHBACK Tiles",
+                    "supplier": "",
+                    "specs_or_description": "Tiles by others Installed By Imperial",
+                    "notes": "STD tile with white grout",
+                    "tags": ["other_material"],
+                    "page_no": 1,
+                    "row_order": 1,
+                    "confidence": 0.95,
+                    "provenance": {
+                        "raw_area_or_item": "SPLASHBACK Tiles",
+                        "layout_value_text": "Tiles by others Installed By Imperial",
+                    },
+                    "needs_review": False,
+                }
+            ]
+        )
+        issue_types = {
+            issue.get("issue_type")
+            for issue in rows[0].get("issues", [])
+            if isinstance(issue, dict)
+        }
+        self.assertIn("label_contamination", issue_types)
+        accepted_repairs = [
+            verdict
+            for verdict in rows[0].get("repair_verdicts", [])
+            if isinstance(verdict, dict) and verdict.get("status") == "accepted"
+        ]
+        self.assertTrue(
+            any(verdict.get("issue_type") == "label_contamination" for verdict in accepted_repairs)
+        )
+        self.assertTrue(
+            any(
+                verdict.get("issue_type") == "label_contamination"
+                and verdict.get("revalidation_status") == "passed"
+                for verdict in accepted_repairs
+            )
+        )
+        self.assertEqual(rows[0].get("revalidation_status"), "passed")
+
+    def test_imperial_self_repair_attaches_row_order_drift_issue_when_canonical_order_conflicts(self) -> None:
+        rows = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "BASE CABINETRY COLOUR",
+                    "supplier": "Polytec",
+                    "specs_or_description": "Polar White Matt Flat Door",
+                    "notes": "",
+                    "tags": ["door_colours"],
+                    "page_no": 1,
+                    "row_order": 1,
+                    "confidence": 0.95,
+                    "provenance": {
+                        "canonical_row_order": 4,
+                    },
+                    "needs_review": False,
+                }
+            ]
+        )
+        issue_types = {
+            issue.get("issue_type")
+            for issue in rows[0].get("issues", [])
+            if isinstance(issue, dict)
+        }
+        self.assertIn("row_order_drift", issue_types)
+        needs_review_repairs = [
+            verdict
+            for verdict in rows[0].get("repair_verdicts", [])
+            if isinstance(verdict, dict) and verdict.get("status") == "needs_review"
+        ]
+        self.assertTrue(
+            any(verdict.get("issue_type") == "row_order_drift" for verdict in needs_review_repairs)
+        )
+        self.assertTrue(
+            any(
+                verdict.get("issue_type") == "row_order_drift"
+                and verdict.get("revalidation_status") == "pending"
+                for verdict in needs_review_repairs
+            )
+        )
+        self.assertEqual(rows[0].get("revalidation_status"), "needs_review")
+        self.assertTrue(rows[0].get("needs_review", False))
+
+    def test_imperial_self_repair_does_not_flag_row_order_drift_for_matching_canonical_order(self) -> None:
+        rows = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "BASE CABINETRY COLOUR",
+                    "supplier": "Polytec",
+                    "specs_or_description": "Polar White Matt Flat Door",
+                    "notes": "",
+                    "tags": ["door_colours"],
+                    "page_no": 1,
+                    "row_order": 1,
+                    "confidence": 0.95,
+                    "provenance": {
+                        "canonical_row_order": 1,
+                    },
+                    "needs_review": False,
+                }
+            ]
+        )
+        issue_types = {
+            issue.get("issue_type")
+            for issue in rows[0].get("issues", [])
+            if isinstance(issue, dict)
+        }
+        self.assertNotIn("row_order_drift", issue_types)
+
+    def test_imperial_self_repair_attaches_handle_block_over_split_issue(self) -> None:
+        rows = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "HANDLES",
+                    "supplier": "Furnware",
+                    "specs_or_description": "Tall Door Handles - Momo Hinoki Wood Big D 832mm Handle Oak-HIN0682.832.OAK",
+                    "notes": "",
+                    "tags": ["handles"],
+                    "page_no": 3,
+                    "row_order": 2,
+                    "confidence": 0.95,
+                    "provenance": {
+                        "layout_value_text": "Tall Door Handles - Momo Hinoki Wood Big D 832mm Handle Oak-HIN0682.832.OAK",
+                        "page_text_handle_block": "Tall Door Handles - Momo Hinoki Wood Big D 832mm Handle Oak-HIN0682.832.OAK | High Split Handle - Momo hinoki wood big d 416mm handle oak-HIN0682.416.OAK",
+                        "absorbed_inline_handle_texts": [
+                            "High Split Handle - Momo hinoki wood big d 416mm handle oak-HIN0682.416.OAK"
+                        ],
+                    },
+                    "needs_review": False,
+                }
+            ]
+        )
+        issue_types = {
+            issue.get("issue_type")
+            for issue in rows[0].get("issues", [])
+            if isinstance(issue, dict)
+        }
+        self.assertIn("handle_block_over_split", issue_types)
+        accepted_repairs = [
+            verdict
+            for verdict in rows[0].get("repair_verdicts", [])
+            if isinstance(verdict, dict) and verdict.get("status") == "accepted"
+        ]
+        self.assertTrue(
+            any(
+                verdict.get("issue_type") == "handle_block_over_split"
+                and verdict.get("target_field") == "display_lines"
+                and verdict.get("revalidation_status") == "passed"
+                for verdict in accepted_repairs
+            )
+        )
+
+    def test_imperial_self_repair_records_cross_row_spillover_repair_log(self) -> None:
+        rows = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "HANDLES - TALL CABS /PANTRY CABS ONLY",
+                    "supplier": "Allegra",
+                    "specs_or_description": "6368-224-brushed nickel - 6368-K in brushed nickel - Base doors and overhead doors only",
+                    "notes": "Vertical Install",
+                    "tags": ["handles"],
+                    "page_no": 2,
+                    "row_order": 5,
+                    "confidence": 0.95,
+                    "provenance": {
+                        "layout_value_text": "6368-224-brushed nickel - 6368-K in brushed nickel - Base doors and overhead doors only",
+                        "page_text_handle_block": "6368-224-brushed nickel | 6368-K in brushed nickel | Base doors and overhead doors only",
+                    },
+                    "needs_review": False,
+                },
+                {
+                    "area_or_item": "KNOB",
+                    "supplier": "Allegra",
+                    "specs_or_description": "Knob 6368-K in brushed nickel",
+                    "notes": "Base doors and overhead doors only",
+                    "tags": ["handles"],
+                    "page_no": 2,
+                    "row_order": 6,
+                    "confidence": 0.95,
+                    "provenance": {
+                        "layout_value_text": "Knob 6368-K in brushed nickel",
+                        "layout_notes_text": "Base doors and overhead doors only",
+                    },
+                    "needs_review": False,
+                },
+            ]
+        )
+        repaired_row = next(
+            row
+            for row in rows
+            if parsing_module.normalize_space(str(row.get("area_or_item", "") or ""))
+            == "HANDLES - TALL CABS /PANTRY CABS ONLY"
+        )
+        repair_log = [entry for entry in repaired_row.get("repair_log", []) if isinstance(entry, dict)]
+        self.assertTrue(
+            any(
+                entry.get("issue_type") == "cross_row_spillover"
+                and entry.get("status") == "accepted"
+                and isinstance(entry.get("before"), dict)
+                and isinstance(entry.get("after"), dict)
+                and entry["before"].get("specs_or_description")
+                != entry["after"].get("specs_or_description")
+                for entry in repair_log
+            )
+        )
+        accepted_verdicts = [
+            verdict
+            for verdict in repaired_row.get("repair_verdicts", [])
+            if isinstance(verdict, dict) and verdict.get("issue_type") == "cross_row_spillover"
+        ]
+        self.assertTrue(
+            any(verdict.get("revalidation_status") == "passed" for verdict in accepted_verdicts)
+        )
+
+    def test_imperial_revalidation_marks_failed_when_accepted_label_repair_did_not_hold(self) -> None:
+        rows = parsing_module._imperial_attach_material_row_issues(
+            [
+                {
+                    "area_or_item": "SPLASHBACK Tiles",
+                    "supplier": "",
+                    "specs_or_description": "Tiles by others Installed By Imperial",
+                    "notes": "",
+                    "tags": ["other_material"],
+                    "page_no": 1,
+                    "row_order": 1,
+                    "confidence": 0.95,
+                    "provenance": {
+                        "_repair_events": [
+                            {
+                                "issue_type": "label_contamination",
+                                "action": "replace",
+                                "target_field": "area_or_item",
+                                "before": "SPLASHBACK Tiles",
+                                "after": "SPLASHBACK",
+                                "reason": "Trimmed value text out of AREA / ITEM.",
+                                "confidence": 0.98,
+                                "status": "accepted",
+                            }
+                        ]
+                    },
+                    "needs_review": False,
+                }
+            ]
+        )
+        self.assertEqual(rows[0].get("revalidation_status"), "failed")
+        self.assertTrue(rows[0].get("needs_review", False))
+        failed_verdicts = [
+            verdict
+            for verdict in rows[0].get("repair_verdicts", [])
+            if isinstance(verdict, dict)
+            and verdict.get("issue_type") == "label_contamination"
+            and verdict.get("revalidation_status") == "failed"
+        ]
+        self.assertTrue(failed_verdicts)
+        revalidation_issues = [
+            issue
+            for issue in rows[0].get("revalidation_issues", [])
+            if isinstance(issue, dict)
+        ]
+        self.assertTrue(
+            any(issue.get("issue_type") == "repair_revalidation_failed" for issue in revalidation_issues)
+        )
+
+    def test_imperial_summary_skips_revalidation_needs_review_rows(self) -> None:
+        import App.main as main_module
+
+        item = {
+            "title": "BASE CABINETRY COLOUR",
+            "value": "[Polytec] - Polar White Matt Flat Door",
+            "tags": ["door_colours"],
+            "needs_review": False,
+            "revalidation_status": "needs_review",
+            "revalidation_issue_types": ["label_contamination"],
+        }
+        self.assertFalse(main_module._imperial_material_row_is_summary_worthy(item, "door_colours"))
+
+    def test_imperial_summary_allows_row_order_only_review_rows(self) -> None:
+        import App.main as main_module
+
+        item = {
+            "title": "BASE CABINETRY COLOUR",
+            "value": "[Polytec] - Polar White Matt Flat Door",
+            "tags": ["door_colours"],
+            "needs_review": False,
+            "revalidation_status": "needs_review",
+            "revalidation_issue_types": ["row_order_drift"],
+            "pending_repair_types": ["row_order_drift"],
+        }
+        self.assertTrue(main_module._imperial_material_row_is_summary_worthy(item, "door_colours"))
+
+    def test_imperial_summary_allows_handle_specific_review_fallback_rows(self) -> None:
+        import App.main as main_module
+
+        item = {
+            "title": "HANDLES - BASE DRAWERS",
+            "value": "",
+            "display_lines": ["[Kethy] - PM2817 / 288 / MSIL Matt Silver 288 Hole centres - 312 OA SIZE - (Horizontal Install)"],
+            "tags": ["handles"],
+            "needs_review": False,
+            "revalidation_status": "needs_review",
+            "revalidation_issue_types": ["handle_block_over_split"],
+            "pending_repair_types": ["handle_block_over_split"],
+        }
+        self.assertTrue(main_module._imperial_material_row_is_summary_worthy(item, "handles"))
+
+    def test_imperial_summary_uses_handle_provenance_fallback_sources(self) -> None:
+        import App.main as main_module
+
+        snapshot = {
+            "builder_name": "Imperial",
+            "rooms": [
+                {
+                    "room_key": "Kitchen",
+                    "original_room_label": "KITCHEN",
+                    "room_order": 1,
+                    "material_rows": [
+                        {
+                            "area_or_item": "HANDLES - BASE DRAWERS",
+                            "supplier": "",
+                            "specs_or_description": "",
+                            "notes": "",
+                            "tags": ["handles"],
+                            "page_no": 2,
+                            "row_order": 1,
+                            "needs_review": False,
+                            "revalidation_status": "needs_review",
+                            "revalidation_issue_types": ["handle_block_over_split"],
+                            "pending_repair_types": ["handle_block_over_split"],
+                            "provenance": {
+                                "layout_value_text": "KETHY PM2817 / 288 / MSIL Matt Silver 288 Hole centres - 312 OA SIZE Polytec Horizontal Install"
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+        summary = main_module._build_imperial_material_summary(snapshot)
+        self.assertEqual(summary["handles"]["count"], 1)
+        self.assertTrue("PM2817 / 288 / MSIL" in summary["handles"]["entries"][0]["text"])
+
+    def test_imperial_summary_does_not_append_handle_fallback_sources_when_display_lines_exist(self) -> None:
+        import App.main as main_module
+
+        snapshot = {
+            "builder_name": "Imperial",
+            "rooms": [
+                {
+                    "room_key": "Kitchen",
+                    "original_room_label": "KITCHEN",
+                    "room_order": 1,
+                    "material_rows": [
+                        {
+                            "area_or_item": "HANDLES - BASE DRAWERS",
+                            "supplier": "Kethy",
+                            "specs_or_description": "PM2817 / 288 / MSIL Matt Silver 288 Hole centres - 312 OA SIZE",
+                            "notes": "Horizontal Install",
+                            "tags": ["handles"],
+                            "page_no": 2,
+                            "row_order": 1,
+                            "needs_review": True,
+                            "revalidation_status": "needs_review",
+                            "issues": [
+                                {"issue_type": "row_order_drift"},
+                                {"issue_type": "handle_block_over_split"},
+                            ],
+                            "repair_verdicts": [
+                                {
+                                    "issue_type": "handle_block_over_split",
+                                    "status": "accepted",
+                                    "target_field": "display_lines",
+                                    "revalidation_status": "passed",
+                                },
+                                {
+                                    "issue_type": "row_order_drift",
+                                    "status": "needs_review",
+                                    "revalidation_status": "pending",
+                                },
+                            ],
+                            "provenance": {
+                                "layout_value_text": "KETHY PM2817 / 288 / MSIL Matt Silver 288 Hole centres - 312 OA SIZE Polytec Horizontal Install",
+                                "page_text_handle_block": "- BASE DRAWERS | KETHY",
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+        summary = main_module._build_imperial_material_summary(snapshot)
+        texts = [entry["text"] for entry in summary["handles"]["entries"]]
+        self.assertEqual(texts, ["PM2817 / 288 / MSIL Matt Silver 288 Hole centres - 312 OA SIZE"])
+
+    def test_imperial_splashback_display_ignores_layout_supplier_and_dedupes_tile_notes(self) -> None:
+        row = {
+            "area_or_item": "SPLASHBACK",
+            "supplier": "",
+            "specs_or_description": "Tiles by others Installed By Imperial",
+            "notes": "others Installed By Imperial STD tile with white grout - STD tile with white grout",
+            "tags": ["other_material"],
+            "provenance": {
+                "layout_supplier_text": "Polytec",
+                "layout_value_text": "Tiles by others Installed By Imperial Polar White Matt",
+                "layout_notes_text": "others Installed By Imperial STD tile with white grout - STD tile with white grout",
+            },
+        }
+        self.assertEqual(
+            parsing_module._imperial_material_row_display_value_for_view(row),
+            "Tiles by others Installed By Imperial - (STD tile with white grout)",
+        )
 
     def test_imperial_self_repair_drops_wrong_last_prefix_when_layout_value_is_clean_suffix(self) -> None:
         rows = parsing_module._imperial_self_repair_material_rows(
@@ -17804,6 +18837,72 @@ H55784Z03AU
         )
         self.assertEqual(row["handles"], ["Laundry: Allegra - 3750 128 MB OA = 138mm"])
 
+    def test_imperial_postprocess_material_rows_drops_stray_handle_detail_row(self) -> None:
+        rows = [
+            {
+                "area_or_item": "HANDLES",
+                "supplier": "Momo",
+                "specs_or_description": "DOORS - Lugo Knob 38mm In Brushed Nickel - Part no: 3238.BRN.FG | DRAWERS - Trianon D Handle 128mm In White & Brushed Nickel - Part no: TCM3622.WHBRN.FG",
+                "notes": "",
+                "page_no": 1,
+                "row_order": 10,
+                "tags": ["handles"],
+                "provenance": {
+                    "absorbed_inline_handle_texts": [
+                        "DOORS - Lugo Knob 38mm In Brushed Nickel - Part no: 3238.BRN.FG",
+                        "DRAWERS - Trianon D Handle 128mm In White & Brushed Nickel - Part no: TCM3622.WHBRN.FG",
+                    ]
+                },
+            },
+            {
+                "area_or_item": "DRAWERS - Momo Trianon D Handle 128mm In White & Brushed Nickel - Part no: TCM3622.WHBRN.FG",
+                "supplier": "Momo",
+                "specs_or_description": "DRAWERS - Trianon D Handle 128mm In White & Brushed Nickel - Part no: TCM3622.WHBRN.FG",
+                "notes": "",
+                "page_no": 1,
+                "row_order": 11,
+                "tags": ["handles"],
+                "provenance": {},
+            },
+        ]
+        processed = parsing_module._imperial_postprocess_material_rows(rows)
+        self.assertEqual(len(processed), 1)
+        self.assertEqual(processed[0]["area_or_item"], "HANDLES")
+
+    def test_imperial_clean_material_row_label_text_trims_repeated_spillover(self) -> None:
+        cleaned = parsing_module._imperial_clean_material_row_label_text(
+            "DECORATIVE FLUTES (FRONT&REAR OF ISLAND COLUMNS) DECORATIVE FLUTES (FRONT&REAR OF Thermolaminated ISLAND COLUMNS)"
+        )
+        self.assertEqual(cleaned, "DECORATIVE FLUTES (FRONT&REAR OF ISLAND COLUMNS)")
+
+    def test_normalize_imperial_handle_summary_value_strips_handle_row_scope_prefix(self) -> None:
+        summary = _build_material_summary(
+            {
+                "builder_name": "Imperial",
+                "rooms": [
+                    {
+                        "room_label": "KITCHEN",
+                        "material_rows": [
+                            {
+                                "area_or_item": "HANDLES - TALL CABS /PANTRY CABS ONLY",
+                                "supplier": "Allegra",
+                                "specs_or_description": "6368-224-brushed nickel Allegra Vertical Install",
+                                "notes": "",
+                                "tags": ["handles"],
+                                "page_no": 1,
+                                "row_order": 1,
+                                "revalidation_status": "passed",
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+        self.assertEqual(
+            summary["handles"]["entries"][0]["display_text"],
+            "6368-224-brushed nickel Allegra",
+        )
+
     def test_apply_snapshot_cleaning_rules_recovers_laundry_allegra_handle_from_evidence(self) -> None:
         cleaned = parsing_module.apply_snapshot_cleaning_rules(
             {
@@ -18409,6 +19508,47 @@ H55784Z03AU
         ]
         overlays = parsing_module._clarendon_collect_afc_fixture_overlays(documents)
         self.assertEqual(overlays["laundry"]["tap_info"], "HARMONY MENO MIXER (50000)")
+
+    def test_imperial_clean_cabinetry_colour_notes_clears_profile_setup_spillover(self) -> None:
+        cleaned = parsing_module._imperial_clean_cabinetry_colour_notes(
+            "BASE CABINETRY COLOUR",
+            "Profile - Lismore Style 4 - Half Rail = Type 3 Position = Handle B - Door and Drawer Profile - Lismore Style 4 - Half Rail",
+        )
+        self.assertEqual(cleaned, "")
+
+    def test_imperial_best_visual_subrow_prefers_material_fragment(self) -> None:
+        row = {
+            "area_or_item": "BASE CABINETRY COLOUR",
+            "provenance": {
+                "visual_subrows": [
+                    {
+                        "area_or_item": "BASE CABINETRY COLOUR",
+                        "supplier": "Polytec",
+                        "specs_or_description": "Thermolaminated - Classic White - Matt",
+                        "notes": "Half Rail",
+                    },
+                    {
+                        "area_or_item": "",
+                        "supplier": "",
+                        "specs_or_description": "Drawer Handle Position = Handle B",
+                        "notes": "",
+                    },
+                ]
+            },
+        }
+        best = parsing_module._imperial_best_visual_subrow_for_row(row)
+        self.assertEqual(best.get("supplier"), "Polytec")
+        self.assertEqual(best.get("specs_or_description"), "Thermolaminated - Classic White - Matt")
+
+    def test_imperial_filter_handle_block_text_drops_foreign_sections(self) -> None:
+        filtered = parsing_module._imperial_filter_handle_block_text(
+            "DRAWERS - Momo Trianon D Handle 128mm In White & Brushed Nickel - Part no: TCM3622.WHBRN.FG | "
+            "MOULDING (ISLAND BACK AND SIDES INCL. COLUMNS) Traditional Profile - Classic White Matt | "
+            "DOORS - Momo Lugo Knob 38mm In Brushed Nickel - Part no: 3238.BRN.FG"
+        )
+        self.assertIn("DRAWERS - Momo Trianon D Handle 128mm", filtered)
+        self.assertIn("DOORS - Momo Lugo Knob 38mm", filtered)
+        self.assertNotIn("MOULDING", filtered.upper())
 
     def _mark_raw_spec_qa_passed(self, job_id: int) -> None:
         verification = store.get_job_snapshot_verification(job_id, "raw_spec")

@@ -93,6 +93,11 @@
   - Imperial `Material Summary` now aggregates directly from tagged `material_rows`; `Door Colours`, `Handles`, and `Bench Tops` are grouped by normalized material text and each item renders a de-duplicated `Room: ...` list in source spec order
   - `tests/fixtures/imperial_37867_gold.json` is now the highest-priority Imperial gold fixture, covering room order, row order, handle-block preservation, summary output, and retained bottom fields against the source PDF
   - Imperial `job 60 / 37867` now passes source-PDF QA on run `1838`, which is the current live acceptance sample for the raw-row + self-repair presentation model
+  - Imperial `material_rows` now carry explicit second-pass parser diagnostics and repair metadata (`issues`, `repair_candidates`, `repair_verdicts`, `repair_log`, `revalidation_issues`, `revalidation_status`) so parser-side review/recovery is structured instead of implicit
+  - Imperial summary aggregation now respects `revalidation_status`, excluding rows that fail or remain unresolved outside tightly scoped handle-specific fallback cases
+  - Imperial raw-row frontend diagnostics such as `Order hint`, `Review`, `Issues`, `Repairs`, `Pending`, and `Revalidation` are now hidden by default in `spec-list`; the backend still retains them for parser analysis and future debug tooling
+  - Imperial continuation/display assembly now prefers fuller accepted layout/raw-row continuation over truncated visual-subrow snippets, which fixed the continuation-heavy desk/shelf family on `job 60`
+  - `job 60 / run 2037 / build local-c061c5e6` is the current live continuation acceptance sample: desk/robe/study/shelf rows restored to source-PDF fidelity and PDF QA passed (`65 pass / 26 na / 0 fail / 0 pending`)
 - all room cards and exports now support a global `Tall` material field for tall cabinets / tall doors / tall panels when the source provides that split
 - room cards and exports now also support optional `Floating Shelf`, conditional `Shelf`, explicit `LED Yes/No`, dedicated `LED Note`, ordered `Accessories`, and curated accessory `Others` rows
   - `Shelf` is now restricted to WIL/WIR/WIP/linen/robe-fit-out style rooms; a plain `PANTRY` keeps `Shelf` only when its local evidence clearly shows walk-in/open-shelving fit-out wording such as `WIP`, `Open Shelving`, or `Shelving Only`
@@ -216,6 +221,8 @@
 - Continue strengthening Imperial `AREA / ITEM` label-cell recovery so more rows come from true label cells instead of regex fallback
 - Continue enriching Imperial row/cell provenance so every rendered raw row and summary entry can be traced back to specific source cells
 - Continue lifting Imperial sinkware/appliance pages toward the same structured-row discipline without reintroducing `Tap` into Imperial primary UI/QA
+- Continue reducing true row-boundary misses on long merged-cell Imperial pages so fewer rows need second-pass repair or fallback continuation
+- Continue deciding which current `needs_review` issue types are safe to upgrade from passive diagnostics into automatic accepted repairs
 - Extend deterministic model-page probing beyond the currently supported appliance brand patterns
 - Expand model-number coverage for more appliance naming patterns beyond the current explicit rules
 - Build the future comparison UI and diff logic

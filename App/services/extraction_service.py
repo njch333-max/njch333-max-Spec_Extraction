@@ -1833,6 +1833,11 @@ def _imperial_visual_fragment_from_row(
             default=0.0,
         )
     current_top = min(top_candidates) if top_candidates else 0.0
+    separator_confidence = _imperial_separator_confidence_for_boundary(
+        separator_model,
+        previous_bottom=previous_bottom,
+        current_top=current_top,
+    )
     return {
         "area_or_item": parsing.normalize_space(row.area_or_item),
         "specs_or_description": parsing.normalize_space(row.specs_or_description),
@@ -1841,11 +1846,8 @@ def _imperial_visual_fragment_from_row(
         "row_band": int(provenance.get("row_band", 0) or 0),
         "top": current_top,
         "bottom": max(bottom_candidates) if bottom_candidates else current_top,
-        "separator_confidence_from_previous": _imperial_separator_confidence_for_boundary(
-            separator_model,
-            previous_bottom=previous_bottom,
-            current_top=current_top,
-        ),
+        "separator_confidence_from_previous": separator_confidence,
+        "separator_kind_from_previous": separator_confidence,
     }
 
 
@@ -2154,6 +2156,11 @@ def _imperial_force_raw_area_row_start(
         combined_text,
     ):
         return True
+    if re.search(
+        r"(?i)\b(?:moulding|decorative flutes?|panelling|profile|drawer handle position|door(?:\s+and\s+drawer)?\s+profile|gpo|glass doors only|back and sides(?: of island)?|bin)\b",
+        cleaned_area,
+    ):
+        return True
     return False
 
 
@@ -2363,6 +2370,9 @@ def _build_imperial_five_column_rows_from_cells(
         provenance = {
             "page_no": int(page_no or 0),
             "row_band": int(row_band),
+            "canonical_row_order": int(row_band),
+            "row_band_top": min((float(cell.top or 0.0) for cell in row_cells if float(cell.top or 0.0) > 0.0), default=0.0),
+            "row_band_bottom": max((float(cell.bottom or 0.0) for cell in row_cells if float(cell.bottom or 0.0) > 0.0), default=0.0),
             "area_or_item": _imperial_row_role_provenance(row_cells, "label"),
             "specs_or_description": _imperial_row_role_provenance(row_cells, "description"),
             "image": _imperial_row_role_provenance(row_cells, "image"),
@@ -2372,6 +2382,17 @@ def _build_imperial_five_column_rows_from_cells(
             "match_source": match_source,
             "raw_area_or_item": original_area_or_item,
             "separator_model": (separator_model or ImperialSeparatorModel()).to_dict(),
+            "visual_subrows": [
+                {
+                    "separator_kind_from_previous": "visible",
+                    "top": min((float(cell.top or 0.0) for cell in row_cells if float(cell.top or 0.0) > 0.0), default=0.0),
+                    "bottom": max((float(cell.bottom or 0.0) for cell in row_cells if float(cell.bottom or 0.0) > 0.0), default=0.0),
+                    "area_or_item": parsing.normalize_space(area_or_item),
+                    "specs_or_description": parsing.normalize_space(specs_or_description),
+                    "supplier": parsing.normalize_space(supplier),
+                    "notes": parsing.normalize_space(notes),
+                }
+            ],
         }
         if recovered_area_or_item:
             provenance["recovered_area_or_item"] = recovered_area_or_item
@@ -2503,6 +2524,26 @@ def _repair_imperial_five_column_rows(rows: list[ImperialFiveColumnRow]) -> list
             )
             for idx, candidate in enumerate(chunk)
         ]
+        merged_provenance["visual_subrows"] = _imperial_visual_subrows_from_fragments(
+            list(merged_provenance["visual_fragments"])
+        )
+        merged_provenance["canonical_row_order"] = int(current.row_order or 0)
+        merged_provenance["row_band_top"] = min(
+            (
+                float(fragment.get("top", 0.0) or 0.0)
+                for fragment in merged_provenance["visual_fragments"]
+                if float(fragment.get("top", 0.0) or 0.0) > 0.0
+            ),
+            default=float(merged_provenance.get("row_band_top", 0.0) or 0.0),
+        )
+        merged_provenance["row_band_bottom"] = max(
+            (
+                float(fragment.get("bottom", 0.0) or 0.0)
+                for fragment in merged_provenance["visual_fragments"]
+                if float(fragment.get("bottom", 0.0) or 0.0) > 0.0
+            ),
+            default=float(merged_provenance.get("row_band_bottom", 0.0) or 0.0),
+        )
         if overflow:
             merged_provenance["area_or_item_overflow"] = overflow
         return ImperialFiveColumnRow(
@@ -2556,12 +2597,27 @@ def _repair_imperial_five_column_rows(rows: list[ImperialFiveColumnRow]) -> list
             candidate_text,
         ):
             return False
+        if re.search(r"(?i)\b(?:cabinetry colour|colour)\b", current_label) and re.search(
+            r"(?i)\b(?:moulding|decorative flutes?|panelling|drawer handle position|door(?:\s+and\s+drawer)?\s+profile|gpo|cut out required)\b",
+            candidate_text,
+        ):
+            return False
         if current_kind == "handle" and re.search(
             r"(?i)\b(?:lighting|led|strip lighting|cabinetry and kicks|recessed kick)\b",
             candidate_text,
         ):
             return False
+        if current_kind == "handle" and re.search(
+            r"(?i)\b(?:moulding|accessory|bin|kickboards?|decorative flutes?|panelling|drawer(?:\s+and\s+door)?\s+profile)\b",
+            candidate_text,
+        ):
+            return False
         if "BENCHTOP" in current_label.upper() and re.search(r"(?i)\b(?:cabinetry colour|kickboards?|frame detail)\b", candidate_text):
+            return False
+        if re.search(r"(?i)\b(?:SPLASHBACK|UPSTAND)\b", current_label) and re.search(
+            r"(?i)\b(?:cabinetry colour|handles?|knob|kickboards?|moulding|decorative flutes?|panelling)\b",
+            candidate_text,
+        ):
             return False
         if "CABINETRY COLOUR" in current_label.upper() and re.search(r"(?i)\b(?:benchtop|bin|lighting)\b", candidate_text):
             return False
@@ -2837,7 +2893,7 @@ def _build_imperial_logical_rows_from_cells(
                 note_parts=[],
                 row_kind=current_kind,
                 page_no=int(page_no or 0),
-                row_order=int(item.row_order or index),
+                row_order=int(_coerce_provenance_dict(item.provenance).get("canonical_row_order", item.row_order or index) or index),
                 repair_source="cell_grid_repair",
                 position_scope=_imperial_grid_row_position_scope(current_label, current_kind),
                 confidence=_normalize_confidence_value(item.confidence),
@@ -2865,7 +2921,7 @@ def _build_imperial_logical_rows_from_cells(
                 note_parts=[],
                 row_kind=str(item.row_kind or "other"),
                 page_no=int(page_no or 0),
-                row_order=int(item.row_order or index),
+                row_order=int(_coerce_provenance_dict(item.provenance).get("canonical_row_order", item.row_order or index) or index),
                 repair_source="cell_grid_repair",
                 position_scope=_imperial_grid_row_position_scope(label, str(item.row_kind or "other")),
                 confidence=_normalize_confidence_value(item.confidence),
@@ -2929,6 +2985,10 @@ def _imperial_five_column_item_is_label_continuation(area_or_item: str) -> bool:
         "SHELVING & TALL CABINETRY",
         "AND SLIDING DOORS",
         "BACK AND SIDES",
+        "OF ISLAND PANELLING",
+        "GLASS DOORS ONLY",
+        "DOORS ONLY",
+        "DOORS ONLY)",
         "DOOR FRAMES AND",
         "FRAMES AND KICKBOARDS",
         "DRAWERS AND OPEN SHELVING)",
@@ -2951,6 +3011,8 @@ def _imperial_five_column_item_is_label_continuation(area_or_item: str) -> bool:
     if re.fullmatch(r"(?i)(?:DOORS|DRAWERS)-\d+MM", cleaned):
         return True
     if re.match(r"(?i)^CABINETRY\s+COLOUR\b", cleaned):
+        return True
+    if re.match(r"(?i)^(?:OF\s+ISLAND\s+PANELLING|GLASS\s+DOORS\s+ONLY)\)?$", cleaned):
         return True
     return False
 
@@ -2979,10 +3041,58 @@ def _imperial_five_column_item_starts_row(area_or_item: str) -> bool:
         return False
     return bool(
         re.search(
-            r"(?i)\b(?:benchtop|colour|cabinetry|handles?|knob|kickboards?|splashback|upstand|bin|lighting|rail|accessories|floating shelves?|open shelves?|frame|drawers?|doors?|gpo|internals?|shelving|bookshelf|partitions|ironing\s+board|trouser\s+rack|hanging\s+rail|robe\s+internals?)\b",
+            r"(?i)\b(?:benchtop|colour|cabinetry|handles?|knob|kickboards?|splashback|upstand|bin|lighting|rail|accessories|floating shelves?|open shelves?|frame|drawers?|doors?|gpo|internals?|shelving|bookshelf|partitions|ironing\s+board|trouser\s+rack|hanging\s+rail|robe\s+internals?|moulding|decorative flutes?|panelling|profile|drawer handle position|door(?:\s+and\s+drawer)?\s+profile|glass doors only|back and sides(?: of island)?)\b",
             cleaned,
         )
     )
+
+
+def _imperial_visual_subrows_from_fragments(fragments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not fragments:
+        return []
+    grouped: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    for index, fragment in enumerate(fragments):
+        if not isinstance(fragment, dict):
+            continue
+        separator_kind = parsing.normalize_space(
+            str(
+                fragment.get("separator_kind_from_previous", "")
+                or fragment.get("separator_confidence_from_previous", "")
+                or ""
+            )
+        ).lower()
+        start_new = (
+            current is None
+            or index == 0
+            or separator_kind in {"visible", "inferred_high"}
+        )
+        if start_new:
+            current = {
+                "separator_kind_from_previous": separator_kind or ("visible" if index == 0 else "none"),
+                "top": float(fragment.get("top", 0.0) or 0.0),
+                "bottom": float(fragment.get("bottom", 0.0) or 0.0),
+                "area_or_item": parsing.normalize_space(str(fragment.get("area_or_item", "") or "")),
+                "specs_or_description": parsing.normalize_space(str(fragment.get("specs_or_description", "") or "")),
+                "supplier": parsing.normalize_space(str(fragment.get("supplier", "") or "")),
+                "notes": parsing.normalize_space(str(fragment.get("notes", "") or "")),
+            }
+            grouped.append(current)
+            continue
+        for key in ("area_or_item", "specs_or_description", "supplier", "notes"):
+            existing = parsing.normalize_space(str(current.get(key, "") or ""))
+            incoming = parsing.normalize_space(str(fragment.get(key, "") or ""))
+            if not incoming:
+                continue
+            if not existing:
+                current[key] = incoming
+            elif incoming.upper() not in existing.upper():
+                current[key] = parsing.normalize_space(f"{existing} | {incoming}")
+        current["bottom"] = max(
+            float(current.get("bottom", 0.0) or 0.0),
+            float(fragment.get("bottom", 0.0) or 0.0),
+        )
+    return grouped
 
 
 def _imperial_row_kind_from_area_or_item(area_or_item: str) -> str:

@@ -893,19 +893,27 @@ def _build_imperial_snapshot_verification_checklist(snapshot: dict[str, Any]) ->
                 notes = _verification_text(item.get("notes", ""))
                 raw_summary_value = " - ".join(part for part in (supplier, description, notes) if part)
                 extracted_value = _verification_text(parsing._imperial_material_row_display_value_for_view(item))
+                if not extracted_value and _imperial_verification_row_is_handle_summary_review_fallback(item):
+                    fallback_sources = _verification_handle_summary_fallback_sources(item)
+                    if fallback_sources:
+                        extracted_value = fallback_sources[0]
                 if not extracted_value:
                     extracted_value = raw_summary_value
                 if not extracted_value:
                     continue
                 tags = [str(tag).strip() for tag in (item.get("tags", []) or []) if str(tag).strip()]
-                primary_tag = tags[0] if tags else "other_material"
+                primary_tag = _imperial_verification_summary_bucket_key_for_row(
+                    area_or_item=area_or_item,
+                    tags=tags,
+                )
                 if primary_tag not in summary_entries:
                     continue
                 if not _imperial_verification_row_is_summary_worthy(
                     area_or_item=area_or_item,
                     extracted_value=extracted_value,
                     tags=tags,
-                    needs_review=bool(item.get("needs_review", False)),
+                    needs_review=_imperial_verification_effective_needs_review(item),
+                    item=item,
                 ):
                     continue
                 field_name = f"{primary_tag}: {area_or_item}"
@@ -918,40 +926,50 @@ def _build_imperial_snapshot_verification_checklist(snapshot: dict[str, Any]) ->
                     extracted_value=extracted_value,
                     source_page_refs=source_page_refs,
                 )
-                for summary_text in _verification_summary_values_for_bucket(
-                    primary_tag,
-                    raw_summary_value or extracted_value,
-                    supplier=supplier,
-                ):
-                    entry = _verification_find_imperial_summary_entry(
+                summary_source_value = raw_summary_value or extracted_value
+                summary_source_values = [summary_source_value] if summary_source_value else []
+                if primary_tag == "handles" and extracted_value:
+                    summary_source_values = [extracted_value]
+                    used_handle_fallback = not bool(_verification_text(parsing._imperial_material_row_display_value_for_view(item)))
+                    if used_handle_fallback and _imperial_verification_row_is_handle_summary_review_fallback(item):
+                        for fallback_source in _verification_handle_summary_fallback_sources(item):
+                            if fallback_source and fallback_source not in summary_source_values:
+                                summary_source_values.append(fallback_source)
+                for summary_source in summary_source_values:
+                    for summary_text in _verification_summary_values_for_bucket(
                         primary_tag,
-                        list(summary_entries[primary_tag].values()),
-                        summary_text,
-                    )
-                    if entry is None:
-                        entry = {"text": summary_text, "rooms": []}
-                        summary_entries[primary_tag][summary_text.lower()] = entry
-                    elif _verification_imperial_summary_value_quality(
-                        primary_tag,
-                        summary_text,
-                    ) > _verification_imperial_summary_value_quality(
-                        primary_tag,
-                        entry.get("text", ""),
+                        summary_source,
+                        supplier=supplier,
                     ):
-                        old_key = next(
-                            (
-                                key
-                                for key, value in summary_entries[primary_tag].items()
-                                if value is entry
-                            ),
-                            "",
+                        entry = _verification_find_imperial_summary_entry(
+                            primary_tag,
+                            list(summary_entries[primary_tag].values()),
+                            summary_text,
                         )
-                        if old_key:
-                            summary_entries[primary_tag].pop(old_key, None)
-                        entry["text"] = summary_text
-                        summary_entries[primary_tag][summary_text.lower()] = entry
-                    if room_label and room_label not in entry["rooms"]:
-                        entry["rooms"].append(room_label)
+                        if entry is None:
+                            entry = {"text": summary_text, "rooms": []}
+                            summary_entries[primary_tag][summary_text.lower()] = entry
+                        elif _verification_imperial_summary_value_quality(
+                            primary_tag,
+                            summary_text,
+                        ) > _verification_imperial_summary_value_quality(
+                            primary_tag,
+                            entry.get("text", ""),
+                        ):
+                            old_key = next(
+                                (
+                                    key
+                                    for key, value in summary_entries[primary_tag].items()
+                                    if value is entry
+                                ),
+                                "",
+                            )
+                            if old_key:
+                                summary_entries[primary_tag].pop(old_key, None)
+                            entry["text"] = summary_text
+                            summary_entries[primary_tag][summary_text.lower()] = entry
+                        if room_label and room_label not in entry["rooms"]:
+                            entry["rooms"].append(room_label)
         for field_name, source_key in (
             ("drawers", "drawers_soft_close"),
             ("hinges", "hinges_soft_close"),
@@ -996,20 +1014,49 @@ def _imperial_verification_summary_bucket_key(tags: list[str]) -> str:
     return ""
 
 
+def _imperial_verification_summary_bucket_key_for_row(
+    *,
+    area_or_item: str,
+    tags: list[str],
+) -> str:
+    bucket_key = _imperial_verification_summary_bucket_key(tags)
+    if bucket_key:
+        return bucket_key
+    title = _verification_text(area_or_item)
+    title_upper = title.upper()
+    if "BENCHTOP" in title_upper:
+        return "bench_tops"
+    if re.search(r"(?i)\b(?:handles?|knob)\b", title):
+        return "handles"
+    if re.search(r"(?i)\b(?:colour|frame|bar back|panel)\b", title):
+        return "door_colours"
+    return ""
+
+
 def _imperial_verification_row_is_summary_worthy(
     *,
     area_or_item: str,
     extracted_value: str,
     tags: list[str],
     needs_review: bool,
+    item: dict[str, Any] | None = None,
 ) -> bool:
     if needs_review:
-        return False
-    bucket_key = _imperial_verification_summary_bucket_key(tags)
+        if _imperial_verification_row_is_only_row_order_review(item or {}):
+            pass
+        elif _imperial_verification_row_is_handle_summary_review_fallback(item or {}):
+            pass
+        else:
+            return False
+    bucket_key = _imperial_verification_summary_bucket_key_for_row(area_or_item=area_or_item, tags=tags)
     if not bucket_key:
         return False
     title = _verification_text(area_or_item)
     value = _verification_text(extracted_value)
+    if bucket_key == "handles" and not value and _imperial_verification_row_is_handle_summary_review_fallback(item or {}):
+        fallback_sources = _verification_handle_summary_fallback_sources(item or {})
+        if fallback_sources:
+            value = " | ".join(fallback_sources)
     normalized_value = _verification_normalize_summary_value(bucket_key, value)
     if not title or not value:
         return False
@@ -1040,6 +1087,101 @@ def _imperial_verification_row_is_summary_worthy(
             return False
         return True
     return False
+
+
+def _imperial_verification_effective_needs_review(item: dict[str, Any]) -> bool:
+    if not isinstance(item, dict):
+        return False
+    if bool(item.get("needs_review", False)):
+        return True
+    revalidation_status = _verification_text(item.get("revalidation_status", "")).lower()
+    return revalidation_status in {"needs_review", "failed", "pending"}
+
+
+def _imperial_verification_accepted_issue_types(item: dict[str, Any]) -> set[str]:
+    if not isinstance(item, dict):
+        return set()
+    accepted_issue_types: set[str] = set()
+    for verdict in item.get("repair_verdicts", []) or []:
+        if not isinstance(verdict, dict):
+            continue
+        if _verification_text(verdict.get("status", "")).lower() != "accepted":
+            continue
+        revalidation_status = _verification_text(verdict.get("revalidation_status", "")).lower()
+        if revalidation_status and revalidation_status != "passed":
+            continue
+        issue_type = _verification_text(verdict.get("issue_type", "")).lower()
+        if issue_type:
+            accepted_issue_types.add(issue_type)
+    return accepted_issue_types
+
+
+def _imperial_verification_review_issue_types(item: dict[str, Any]) -> set[str]:
+    if not isinstance(item, dict):
+        return set()
+    issue_types: set[str] = set()
+    for issue in item.get("issues", []) or []:
+        if isinstance(issue, dict):
+            issue_type = _verification_text(issue.get("issue_type", "")).lower()
+            if issue_type:
+                issue_types.add(issue_type)
+    for verdict in item.get("repair_verdicts", []) or []:
+        if isinstance(verdict, dict) and _verification_text(verdict.get("status", "")).lower() in {"needs_review", "pending"}:
+            issue_type = _verification_text(verdict.get("issue_type", "")).lower()
+            if issue_type:
+                issue_types.add(issue_type)
+    for issue in item.get("revalidation_issues", []) or []:
+        if isinstance(issue, dict):
+            issue_type = _verification_text(issue.get("related_issue_type", "") or issue.get("issue_type", "")).lower()
+            if issue_type:
+                issue_types.add(issue_type)
+    issue_types -= _imperial_verification_accepted_issue_types(item)
+    return issue_types
+
+
+def _imperial_verification_row_is_only_row_order_review(item: dict[str, Any]) -> bool:
+    issue_types = _imperial_verification_review_issue_types(item)
+    return bool(issue_types) and issue_types <= {"row_order_drift"}
+
+
+def _imperial_verification_row_is_handle_summary_review_fallback(item: dict[str, Any]) -> bool:
+    issue_types = _imperial_verification_review_issue_types(item)
+    return bool(issue_types) and issue_types <= {
+        "row_order_drift",
+        "handle_block_over_split",
+        "cross_row_spillover",
+        "supplier_notes_misassignment",
+    }
+
+
+def _verification_handle_summary_fallback_sources(item: dict[str, Any]) -> list[str]:
+    if not isinstance(item, dict):
+        return []
+    provenance = item.get("provenance", {}) if isinstance(item.get("provenance", {}), dict) else {}
+    sources: list[str] = []
+    for key in ("layout_value_text", "page_text_handle_block"):
+        text = _verification_text(provenance.get(key, ""))
+        if text and text not in sources:
+            sources.append(text)
+    visual_fragments = provenance.get("visual_fragments", [])
+    if isinstance(visual_fragments, list):
+        fragment_lines: list[str] = []
+        for fragment in visual_fragments:
+            if not isinstance(fragment, dict):
+                continue
+            fragment_line = parsing._compose_supplier_description_note(
+                _verification_text(fragment.get("supplier", "")),
+                _verification_text(fragment.get("specs_or_description", "")),
+                _verification_text(fragment.get("notes", "")),
+            )
+            fragment_line = _verification_text(fragment_line)
+            if fragment_line:
+                fragment_lines.append(fragment_line)
+        if fragment_lines:
+            combined = " | ".join(fragment_lines)
+            if combined not in sources:
+                sources.append(combined)
+    return sources
 
 
 def _verification_imperial_summary_token_set(text: str) -> set[str]:
@@ -1118,6 +1260,28 @@ def _verification_imperial_summary_overlap_ratio(left: str, right: str) -> float
     return float(len(shared)) / float(min(len(left_tokens), len(right_tokens)))
 
 
+def _verification_imperial_handle_summary_identity_tokens(text: str) -> set[str]:
+    normalized = _verification_text(text)
+    if not normalized:
+        return set()
+    tokens = {
+        parsing.normalize_space(match.group(0)).upper()
+        for match in re.finditer(
+            r"(?i)\b(?:S\d+\.\d+\.[A-Z]+|HT\d+\s*-\s*\d+\s*-\s*[A-Z]+|SO-\d+-[A-Z0-9-]+|\d{3,5}-[A-Z0-9]+)\b",
+            normalized,
+        )
+    }
+    if re.search(r"(?i)\bknob\b", normalized):
+        tokens.add("KNOB")
+    if re.search(r"(?i)\bvoda\s+profile\s+handle\b", normalized):
+        tokens.add("VODA")
+    if re.search(r"(?i)\bbevel\s+edge\s+finger\s+pull\b", normalized):
+        tokens.add("BEVEL_EDGE_FINGER_PULL")
+    if re.search(r"(?i)\bpush\s+to\s+open\b|\bPTO\b", normalized):
+        tokens.add("PTO")
+    return tokens
+
+
 def _verification_imperial_summary_value_quality(bucket_key: str, text: str) -> float:
     cleaned = _verification_text(text)
     quality = float(len(_verification_imperial_summary_token_set(cleaned)))
@@ -1153,6 +1317,11 @@ def _verification_imperial_summary_values_equivalent(bucket_key: str, left: str,
         return False
     if left_text.lower() == right_text.lower():
         return True
+    if bucket_key == "handles":
+        left_identity = _verification_imperial_handle_summary_identity_tokens(left_text)
+        right_identity = _verification_imperial_handle_summary_identity_tokens(right_text)
+        if left_identity and right_identity and left_identity != right_identity:
+            return False
     left_tokens = _verification_imperial_summary_anchor_token_set(bucket_key, left_text)
     right_tokens = _verification_imperial_summary_anchor_token_set(bucket_key, right_text)
     if min(len(left_tokens), len(right_tokens)) < 2:
@@ -1454,6 +1623,16 @@ def _verification_normalize_imperial_handle_summary_value(value: str) -> str:
     chute_match = re.search(r"(?i)\b(?:CHUTE\s+DOOR\s*-\s*)?(S225\.160\.MBK)\b", text)
     if chute_match:
         return f"CHUTE DOOR - {parsing.normalize_space(chute_match.group(1)).rstrip('.') }."
+    allegra_knob_match = re.search(
+        r"(?i)\bKnob\b(?:\s*-\s*|\s+)(?P<code>[A-Z0-9.-]*K)\b(?:\s+in\s+(?P<finish>[A-Za-z ]+?))?(?=\s*(?:-|$|\(|\|))",
+        text,
+    )
+    if allegra_knob_match:
+        knob_text = f"Knob - {parsing.normalize_space(allegra_knob_match.group('code'))}"
+        finish = parsing.normalize_space(allegra_knob_match.group("finish") or "")
+        if finish:
+            knob_text = f"{knob_text} in {finish}"
+        return knob_text
     knob_match = re.search(
         r"(?i)\b(?P<body>(?:[A-Z][A-Za-z0-9& ]+\s*-\s*)?(?:Woodgate\s+Round\s+Cabinet\s+Knob|[^|]*?\b(?:cabinet\s+)?knob\b[^|]*?)(?:SKU:Part No:\s*[A-Z0-9.]+)?)",
         text,
@@ -1536,6 +1715,7 @@ def _verification_semantic_imperial_handle_summary_candidates(value: str) -> lis
         r"(?i)\bHigh Split Handle\s*-\s*[^|]+",
         r"(?i)\bDrawers?\s*-\s*Bevel Edge finger pull\b",
         r"(?i)\bBevel edge finger pull(?:\s+on\s+lowers)?\b",
+        r"(?i)\bKnob\s*-\s*[A-Z0-9.-]*K\b[^|]*",
         r"(?i)\b(?:Handles?\s*-\s*)?(?:Barchie\s+)?Woodgate\s+Round\s+Cabinet\s+Knob(?:\s*\|\s*SKU:Part No:\s*[A-Z0-9.]+)?\b",
         r"(?i)\bDESK\s*-\s*\d+\s+Voda\s+Profile\s+Handle\s+(?:Brushed\s+Nickel|Matt\s+Black)\s+\d+\s*mm\s*-\s*SO-2163-[A-Z0-9-]+\b",
         r"(?i)\bBENCHSEAT DRAWERS?\s*-\s*PTO\b",
