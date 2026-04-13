@@ -17,6 +17,8 @@ For every major change, these files must be updated together:
 - `Project_state.md`
 - `AGENTS.md`
 
+For Imperial structural parser work, also update `IMPERIAL_GRID_TRACKER.md` as the durable execution tracker.
+
 If a change affects user-visible behavior, architecture, storage, deployment, workflow, extraction logic, or Git tooling, treat it as a major change.
 
 ## Source Of Truth
@@ -92,6 +94,7 @@ If a change affects user-visible behavior, architecture, storage, deployment, wo
 30. Formal spec exports are locked behind PDF QA. Do not treat a raw spec snapshot as complete, export-ready, or fixed until the current raw snapshot verification is `passed`.
 31. Parser-accuracy work is only complete after the affected live rerun passes PDF QA against the source PDF page-by-page. Older webpages and older snapshots are reference material only.
 32. When adjusting shared frontend presentation, keep grouped vanity titles such as `VANITIES` in the same room-priority bucket as `Bathroom / Ensuite / Powder`, and preserve the tighter ~75% application-level UI density unless the user explicitly asks to change it.
+33. `IMPERIAL_GRID_TRACKER.md` is the authoritative execution tracker for Imperial structure work. Before starting Imperial structural changes, read it first; after each focused work cycle, update What changed / What regressed / What is still broken / Next target there before treating the cycle as closed.
 
 ## Verification Expectations
 - The app should boot with `uvicorn App.main:app`

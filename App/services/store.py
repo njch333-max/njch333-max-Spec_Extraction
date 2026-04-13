@@ -892,7 +892,14 @@ def _build_imperial_snapshot_verification_checklist(snapshot: dict[str, Any]) ->
                 description = _verification_text(item.get("specs_or_description", ""))
                 notes = _verification_text(item.get("notes", ""))
                 raw_summary_value = " - ".join(part for part in (supplier, description, notes) if part)
-                extracted_value = _verification_text(parsing._imperial_material_row_display_value_for_view(item))
+                display_lines = [
+                    _verification_text(line)
+                    for line in parsing._imperial_material_row_display_lines_for_view(item)
+                    if _verification_text(line)
+                ]
+                extracted_value = _verification_text(" | ".join(display_lines))
+                if not extracted_value:
+                    extracted_value = _verification_text(parsing._imperial_material_row_display_value_for_view(item))
                 if not extracted_value and _imperial_verification_row_is_handle_summary_review_fallback(item):
                     fallback_sources = _verification_handle_summary_fallback_sources(item)
                     if fallback_sources:
@@ -926,11 +933,17 @@ def _build_imperial_snapshot_verification_checklist(snapshot: dict[str, Any]) ->
                     extracted_value=extracted_value,
                     source_page_refs=source_page_refs,
                 )
-                summary_source_value = raw_summary_value or extracted_value
-                summary_source_values = [summary_source_value] if summary_source_value else []
+                summary_source_values: list[str] = []
+                for source_text in display_lines:
+                    if source_text and source_text not in summary_source_values:
+                        summary_source_values.append(source_text)
+                for source_text in (extracted_value, raw_summary_value):
+                    if source_text and source_text not in summary_source_values:
+                        summary_source_values.append(source_text)
                 if primary_tag == "handles" and extracted_value:
-                    summary_source_values = [extracted_value]
-                    used_handle_fallback = not bool(_verification_text(parsing._imperial_material_row_display_value_for_view(item)))
+                    used_handle_fallback = not bool(display_lines) and not bool(
+                        _verification_text(parsing._imperial_material_row_display_value_for_view(item))
+                    )
                     if used_handle_fallback and _imperial_verification_row_is_handle_summary_review_fallback(item):
                         for fallback_source in _verification_handle_summary_fallback_sources(item):
                             if fallback_source and fallback_source not in summary_source_values:
@@ -976,31 +989,56 @@ def _build_imperial_snapshot_verification_checklist(snapshot: dict[str, Any]) ->
             ("flooring", "flooring"),
             ("sink", "sink_info"),
         ):
+            extracted_value = _verification_text(room.get(source_key, ""))
+            if field_name == "sink" and not extracted_value:
+                extracted_value = _verification_text(room.get("basin_info", ""))
             _append_verification_item(
                 checklist,
                 section_type="room",
                 entity_label=room_label,
                 field_name=field_name,
-                extracted_value=_verification_text(room.get(source_key, "")),
+                extracted_value=extracted_value,
                 source_page_refs=room_page_refs,
             )
+    live_summary = _verification_live_imperial_material_summary(snapshot)
     for bucket_key, label in (
         ("door_colours", "Door Colours"),
         ("handles", "Handles"),
         ("bench_tops", "Bench Tops"),
     ):
+        live_bucket = live_summary.get(bucket_key, {}) if isinstance(live_summary, dict) else {}
+        live_entries = live_bucket.get("entries", []) if isinstance(live_bucket, dict) else []
+        extracted_value = " | ".join(
+            f"{_verification_text(entry.get('display_text') or entry.get('text'))} (Room: {_verification_text(entry.get('rooms_display')) or '-'})"
+            for entry in live_entries
+            if _verification_text(entry.get("display_text") or entry.get("text"))
+        )
+        if not extracted_value:
+            extracted_value = " | ".join(
+                f"{entry['text']} (Room: {' | '.join(entry['rooms']) or '-'})"
+                for entry in summary_entries[bucket_key].values()
+            )
         _append_verification_item(
             checklist,
             section_type="summary",
             entity_label="Material Summary",
             field_name=label,
-            extracted_value=" | ".join(
-                f"{entry['text']} (Room: {' | '.join(entry['rooms']) or '-'})"
-                for entry in summary_entries[bucket_key].values()
-            ),
+            extracted_value=extracted_value,
             source_page_refs="",
         )
     return checklist
+
+
+def _verification_live_imperial_material_summary(snapshot: dict[str, Any]) -> dict[str, Any]:
+    try:
+        from App import main as app_main
+
+        summary = app_main._build_imperial_material_summary(snapshot)
+        if isinstance(summary, dict):
+            return summary
+    except Exception:
+        return {}
+    return {}
 
 
 def _imperial_verification_summary_bucket_key(tags: list[str]) -> str:
@@ -1595,6 +1633,8 @@ def _verification_normalize_handle_summary_value(value: str) -> str:
 
 def _verification_normalize_imperial_handle_summary_value(value: str) -> str:
     text = parsing.normalize_space(value)
+    if re.fullmatch(r"(?i)none", text):
+        return ""
     text = re.sub(r"^\[[^\]]+\]\s*-\s*", "", text)
     text = re.sub(r"(?i)\s*-\s*\((Vertical|Horizontal)\)\s*$", r" - \1", text)
     text = re.sub(

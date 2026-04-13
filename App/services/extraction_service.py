@@ -1059,36 +1059,48 @@ class ImperialSeparatorModel:
             "inferred_horizontal_edges": [float(value) for value in self.inferred_horizontal_edges],
             "visible_vertical_segments": [
                 {
+                    "orientation": str(item.get("orientation", "vertical") or "vertical"),
                     "edge": float(item.get("edge", 0.0) or 0.0),
                     "start": float(item.get("start", 0.0) or 0.0),
                     "end": float(item.get("end", 0.0) or 0.0),
+                    "source": str(item.get("source", "visible_line") or "visible_line"),
+                    "confidence": str(item.get("confidence", "visible") or "visible"),
                 }
                 for item in self.visible_vertical_segments
                 if isinstance(item, dict)
             ],
             "visible_horizontal_segments": [
                 {
+                    "orientation": str(item.get("orientation", "horizontal") or "horizontal"),
                     "edge": float(item.get("edge", 0.0) or 0.0),
                     "start": float(item.get("start", 0.0) or 0.0),
                     "end": float(item.get("end", 0.0) or 0.0),
+                    "source": str(item.get("source", "visible_line") or "visible_line"),
+                    "confidence": str(item.get("confidence", "visible") or "visible"),
                 }
                 for item in self.visible_horizontal_segments
                 if isinstance(item, dict)
             ],
             "inferred_vertical_segments": [
                 {
+                    "orientation": str(item.get("orientation", "vertical") or "vertical"),
                     "edge": float(item.get("edge", 0.0) or 0.0),
                     "start": float(item.get("start", 0.0) or 0.0),
                     "end": float(item.get("end", 0.0) or 0.0),
+                    "source": str(item.get("source", "inferred") or "inferred"),
+                    "confidence": str(item.get("confidence", "inferred_high") or "inferred_high"),
                 }
                 for item in self.inferred_vertical_segments
                 if isinstance(item, dict)
             ],
             "inferred_horizontal_segments": [
                 {
+                    "orientation": str(item.get("orientation", "horizontal") or "horizontal"),
                     "edge": float(item.get("edge", 0.0) or 0.0),
                     "start": float(item.get("start", 0.0) or 0.0),
                     "end": float(item.get("end", 0.0) or 0.0),
+                    "source": str(item.get("source", "inferred") or "inferred"),
+                    "confidence": str(item.get("confidence", "inferred_high") or "inferred_high"),
                 }
                 for item in self.inferred_horizontal_segments
                 if isinstance(item, dict)
@@ -1504,9 +1516,12 @@ def _imperial_separator_segments(
                 continue
             for edge in sorted(set(round(value, 1) for value in edges)):
                 segments.append({
+                    "orientation": "horizontal",
                     "edge": edge,
                     "start": round(x0, 1),
                     "end": round(x1, 1),
+                    "source": "visible_rect" if any(key in item for key in ("height", "width")) else "visible_line",
+                    "confidence": "visible",
                 })
         else:
             if bottom <= top:
@@ -1518,9 +1533,12 @@ def _imperial_separator_segments(
                 continue
             for edge in sorted(set(round(value, 1) for value in edges)):
                 segments.append({
+                    "orientation": "vertical",
                     "edge": edge,
                     "start": round(top, 1),
                     "end": round(bottom, 1),
+                    "source": "visible_rect" if any(key in item for key in ("height", "width")) else "visible_line",
+                    "confidence": "visible",
                 })
     normalized: list[dict[str, float]] = []
     seen: set[tuple[float, float, float]] = set()
@@ -1566,9 +1584,12 @@ def _imperial_bridge_separator_segments_across_images(
                         continue
                     inferred.append(
                         {
+                            "orientation": "horizontal",
                             "edge": round((float(left.get("edge", 0.0) or 0.0) + float(right.get("edge", 0.0) or 0.0)) / 2.0, 1),
                             "start": round(float(left.get("start", 0.0) or 0.0), 1),
                             "end": round(float(right.get("end", 0.0) or 0.0), 1),
+                            "source": "bridge_over_image",
+                            "confidence": "inferred_high",
                         }
                     )
     else:
@@ -1591,9 +1612,12 @@ def _imperial_bridge_separator_segments_across_images(
                         continue
                     inferred.append(
                         {
+                            "orientation": "vertical",
                             "edge": round((float(above.get("edge", 0.0) or 0.0) + float(below.get("edge", 0.0) or 0.0)) / 2.0, 1),
                             "start": round(float(above.get("start", 0.0) or 0.0), 1),
                             "end": round(float(below.get("end", 0.0) or 0.0), 1),
+                            "source": "bridge_over_image",
+                            "confidence": "inferred_high",
                         }
                     )
     normalized: list[dict[str, float]] = []
@@ -1742,6 +1766,7 @@ def _enrich_imperial_separator_model_for_row_bands(
         return separator_model
     inferred_horizontal_edges = list(separator_model.inferred_horizontal_edges)
     visible_horizontal_edges = list(separator_model.visible_horizontal_edges)
+    inferred_horizontal_segments = list(separator_model.inferred_horizontal_segments)
     for previous, current in zip(row_bands, row_bands[1:]):
         previous_top = float(previous.get("top", 0.0) or 0.0)
         current_top = float(current.get("top", 0.0) or 0.0)
@@ -1752,11 +1777,33 @@ def _enrich_imperial_separator_model_for_row_bands(
             continue
         gap = current_top - previous_top
         current_text = parsing.normalize_space(str(current.get("text", "") or ""))
+        start = min((float(word[1]) for word in list(previous.get("words", []) or []) + list(current.get("words", []) or [])), default=0.0)
+        end = max((float(word[1]) for word in list(previous.get("words", []) or []) + list(current.get("words", []) or [])), default=0.0)
         if gap >= 18.0:
             inferred_horizontal_edges.append(midpoint)
+            inferred_horizontal_segments.append(
+                {
+                    "orientation": "horizontal",
+                    "edge": midpoint,
+                    "start": round(start, 1),
+                    "end": round(end, 1),
+                    "source": "row_gap",
+                    "confidence": "inferred_high",
+                }
+            )
             continue
         if current_text and _imperial_five_column_item_starts_row(current_text):
             inferred_horizontal_edges.append(midpoint)
+            inferred_horizontal_segments.append(
+                {
+                    "orientation": "horizontal",
+                    "edge": midpoint,
+                    "start": round(start, 1),
+                    "end": round(end, 1),
+                    "source": "row_gap",
+                    "confidence": "inferred_low",
+                }
+            )
     return ImperialSeparatorModel(
         visible_vertical_edges=list(separator_model.visible_vertical_edges),
         visible_horizontal_edges=list(separator_model.visible_horizontal_edges),
@@ -1765,8 +1812,43 @@ def _enrich_imperial_separator_model_for_row_bands(
         visible_vertical_segments=list(separator_model.visible_vertical_segments),
         visible_horizontal_segments=list(separator_model.visible_horizontal_segments),
         inferred_vertical_segments=list(separator_model.inferred_vertical_segments),
-        inferred_horizontal_segments=list(separator_model.inferred_horizontal_segments),
+        inferred_horizontal_segments=list(inferred_horizontal_segments),
         image_bboxes=list(separator_model.image_bboxes),
+    )
+
+
+def _imperial_separator_segment_for_boundary(
+    separator_model: ImperialSeparatorModel,
+    *,
+    previous_bottom: float,
+    current_top: float,
+) -> dict[str, Any]:
+    if previous_bottom <= 0 or current_top <= 0 or current_top <= previous_bottom:
+        return {}
+    midpoint = (previous_bottom + current_top) / 2.0
+    boundary_min = previous_bottom + 1.5
+    boundary_max = current_top + 3.5
+
+    def _best_match(segments: list[dict[str, Any]]) -> dict[str, Any]:
+        best: dict[str, Any] = {}
+        best_score = float("inf")
+        for segment in segments:
+            if not isinstance(segment, dict):
+                continue
+            edge = float(segment.get("edge", 0.0) or 0.0)
+            if not edge:
+                continue
+            if not (abs(edge - midpoint) <= 6.0 or boundary_min <= edge <= boundary_max):
+                continue
+            score = abs(edge - midpoint)
+            if score < best_score:
+                best_score = score
+                best = dict(segment)
+        return best
+
+    return (
+        _best_match(list(separator_model.visible_horizontal_segments))
+        or _best_match(list(separator_model.inferred_horizontal_segments))
     )
 
 
@@ -1838,6 +1920,11 @@ def _imperial_visual_fragment_from_row(
         previous_bottom=previous_bottom,
         current_top=current_top,
     )
+    separator_segment = _imperial_separator_segment_for_boundary(
+        separator_model,
+        previous_bottom=previous_bottom,
+        current_top=current_top,
+    )
     return {
         "area_or_item": parsing.normalize_space(row.area_or_item),
         "specs_or_description": parsing.normalize_space(row.specs_or_description),
@@ -1848,6 +1935,7 @@ def _imperial_visual_fragment_from_row(
         "bottom": max(bottom_candidates) if bottom_candidates else current_top,
         "separator_confidence_from_previous": separator_confidence,
         "separator_kind_from_previous": separator_confidence,
+        "separator_segment_from_previous": separator_segment,
     }
 
 
@@ -2984,6 +3072,9 @@ def _imperial_five_column_item_is_label_continuation(area_or_item: str) -> bool:
         "SHELVING",
         "SHELVING & TALL CABINETRY",
         "AND SLIDING DOORS",
+        "INCLUDING",
+        "OPEN SHELVING",
+        "TALL OPEN SHELVING",
         "BACK AND SIDES",
         "OF ISLAND PANELLING",
         "GLASS DOORS ONLY",
@@ -3012,7 +3103,10 @@ def _imperial_five_column_item_is_label_continuation(area_or_item: str) -> bool:
         return True
     if re.match(r"(?i)^CABINETRY\s+COLOUR\b", cleaned):
         return True
-    if re.match(r"(?i)^(?:OF\s+ISLAND\s+PANELLING|GLASS\s+DOORS\s+ONLY)\)?$", cleaned):
+    if re.match(
+        r"(?i)^(?:INCLUDING|OPEN\s+SHELVING|TALL\s+OPEN\s+SHELVING|OF\s+ISLAND\s+PANELLING|GLASS\s+DOORS\s+ONLY)\)?$",
+        cleaned,
+    ):
         return True
     return False
 

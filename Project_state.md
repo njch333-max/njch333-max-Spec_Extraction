@@ -98,6 +98,7 @@
   - Imperial raw-row frontend diagnostics such as `Order hint`, `Review`, `Issues`, `Repairs`, `Pending`, and `Revalidation` are now hidden by default in `spec-list`; the backend still retains them for parser analysis and future debug tooling
   - Imperial continuation/display assembly now prefers fuller accepted layout/raw-row continuation over truncated visual-subrow snippets, which fixed the continuation-heavy desk/shelf family on `job 60`
   - `job 60 / run 2037 / build local-c061c5e6` is the current live continuation acceptance sample: desk/robe/study/shelf rows restored to source-PDF fidelity and PDF QA passed (`65 pass / 26 na / 0 fail / 0 pending`)
+  - `IMPERIAL_GRID_TRACKER.md` now exists as the durable execution tracker for Imperial structure work; it records locked decisions, staged grid/row/semantic phases, the Imperial regression matrix (`52 / 55 / 56 / 59 / 60 / 61 / 62`), current blockers, and the next live acceptance target
 - all room cards and exports now support a global `Tall` material field for tall cabinets / tall doors / tall panels when the source provides that split
 - room cards and exports now also support optional `Floating Shelf`, conditional `Shelf`, explicit `LED Yes/No`, dedicated `LED Note`, ordered `Accessories`, and curated accessory `Others` rows
   - `Shelf` is now restricted to WIL/WIR/WIP/linen/robe-fit-out style rooms; a plain `PANTRY` keeps `Shelf` only when its local evidence clearly shows walk-in/open-shelving fit-out wording such as `WIP`, `Open Shelving`, or `Shelving Only`
@@ -204,6 +205,7 @@
 - All new `spec` parse runs now default to field-level PDF QA. A parser fix is not considered complete until the latest live run passes that QA against the source PDF.
 
 ## Remaining Work
+- Continue driving Imperial structure work from `IMPERIAL_GRID_TRACKER.md` instead of ad hoc sample-by-sample cleanup, with `job 62` currently acting as the next live blocker
 - Refine OCR fallback for image-heavy PDFs
 - Improve room-section detection for more builder formats
 - Improve official product URL lookup accuracy, size extraction coverage, and brand coverage

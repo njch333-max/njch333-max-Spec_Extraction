@@ -141,6 +141,11 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 
 ### 4.5 Engineering Workflow
 - The project should be ready to live in a GitHub repository with Codex-centered PR review.
+- Imperial structural-parser work must follow the dedicated tracker flow:
+  - read `IMPERIAL_GRID_TRACKER.md` before starting work,
+  - pick one primary blocker per cycle,
+  - complete local checks -> deploy -> fresh rerun -> source-PDF QA,
+  - then update `IMPERIAL_GRID_TRACKER.md` before closing the cycle.
 - Default collaboration flow should be:
   - stable default branch
   - short-lived feature branches
@@ -396,6 +401,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Imperial jobs use title-driven section parsing so kitchen, pantry, laundry, bar, bath/ensuite, and other selection-sheet sections stay isolated, footer/signature blocks are ignored, and `FEATURE TALL DOORS` is shown separately from room cards.
 - Imperial jobs now use cell-aware raw material rows as the primary joinery/material output, constrained self-repair to catch row-order and column-spill bugs before persistence, and a dedicated `37867` source-PDF gold fixture as the highest-priority regression gate for room order, row order, handle preservation, and summary accuracy.
 - Imperial jobs now also rely on explicit second-pass issue detection and revalidation to decide whether repaired rows may participate in `Material Summary`, while frontend diagnostics remain hidden by default and live acceptance is anchored by `job 60 / run 2037` for the continuation-heavy desk/shelf family.
+- Imperial structural parser work now uses `IMPERIAL_GRID_TRACKER.md` as the durable execution tracker. That file is the authoritative place for locked decisions, staged grid/row/semantic phases, the live Imperial regression matrix, open blockers, and the next acceptance target.
 - The completion workflow for confirmed changes includes deployment to `spec.lxtransport.online`, successful service restarts, and live verification on the affected page or job.
 - SQLite persists Builders, Jobs, files, run history, raw results, and reviewed results.
 - Worker can process queued spec and drawing runs separately from the web process.

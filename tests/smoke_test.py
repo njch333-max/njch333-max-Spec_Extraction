@@ -2817,6 +2817,37 @@ H55784Z03AU
         self.assertEqual(by_type["Dishwasher"].make, "Bosch")
         self.assertEqual(by_type["Dishwasher"].model_no, "SMS6HCI01A")
 
+    def test_extract_appliances_from_imperial_layout_rows_uses_raw_placeholder_rows_when_layout_is_sparse(self) -> None:
+        page = {
+            "page_no": 9,
+            "raw_text": (
+                "APPLIANCES\n"
+                "OVEN/COOKTOP COMBO (KITCHEN) N / A - By others By others\n"
+                "RANGEHOOD (KITCHEN) 86cm Integrated rangehood N / A - By others By others\n"
+                "DISHWASHER (KITCHEN) Specs - TBC N / A - By others By others\n"
+                "WASHING MACHINE (LAUNDRY) Specs - TBC N / A - By others By others\n"
+                "DRYER (LAUNDRY) Specs - TBC N / A - By others By others\n"
+            ),
+            "text": "",
+            "page_layout": {
+                "page_type": "appliance",
+                "rows": [
+                    {
+                        "row_label": "RANGEHOOD (KITCHEN)",
+                        "value_region_text": "86cm Integrated rangehood",
+                        "supplier_region_text": "",
+                        "notes_region_text": "N / A - By others By others",
+                        "row_kind": "other",
+                    }
+                ],
+            },
+        }
+        rows = parsing_module._extract_appliances_from_pages("imperial-appliances.pdf", [page], builder_name="Imperial")
+        self.assertEqual(
+            {row.appliance_type for row in rows},
+            {"Cooktop", "Rangehood", "Dishwasher", "Washing Machine", "Dryer"},
+        )
+
     def test_appliance_model_context_allows_freestanding_dishwasher(self) -> None:
         evidence = (
             "DISHWASHER (KITCHEN) Bosch Series 6 60cm Freestanding Dishwasher - "
@@ -4707,6 +4738,30 @@ H55784Z03AU
             "Polytec - Florentine Walnut Woodmatt - Style 4 - Berrilee - Vertical Grain (Room: KITCHEN | PANTRY)",
             summary_items["Door Colours"],
         )
+
+    def test_imperial_finalize_material_rows_cleans_quantity_polluted_door_label_and_tags_as_door_colour(self) -> None:
+        rows = parsing_module._imperial_finalize_material_rows(
+            [
+                {
+                    "area_or_item": "DOORS 2 X Sliding",
+                    "supplier": "Polytec",
+                    "specs_or_description": "Robe doors - Black Wenge- Matt",
+                    "notes": "",
+                    "tags": ["other_material"],
+                    "page_no": 8,
+                    "row_order": 3,
+                    "provenance": {
+                        "canonical_label": "DOORS 2 X Sliding",
+                        "raw_area_or_item": "DOORS 2 X Sliding",
+                        "layout_row_label": "DOORS 2 X Sliding",
+                    },
+                }
+            ]
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["area_or_item"], "DOORS")
+        self.assertEqual(rows[0]["tags"], ["door_colours"])
+        self.assertEqual(rows[0]["specs_or_description"], "Robe doors - Black Wenge- Matt")
 
     def test_imperial_cell_logical_rows_merge_unlabeled_description_prefixes(self) -> None:
         cells = [
@@ -10969,6 +11024,32 @@ H55784Z03AU
             ],
         )
 
+    def test_imperial_assign_sinkware_cluster_parts_keeps_room_specific_lines_local(self) -> None:
+        assigned = parsing_module._imperial_assign_sinkware_cluster_parts(
+            [
+                ("KITCHEN", "Existing Sink and Tap to be used"),
+                ("LAUNDRY", "Memo Hugo Single bowl sink 425W x 445H x 220D"),
+            ],
+            [],
+            [
+                "KITCHEN Taphole location: No hole cut out required",
+                "LAUNDRY Mizu Drift sink mixer - Matte Black",
+            ],
+        )
+        self.assertEqual(
+            assigned,
+            [
+                [
+                    "Existing Sink and Tap to be used",
+                    "KITCHEN Taphole location: No hole cut out required",
+                ],
+                [
+                    "Memo Hugo Single bowl sink 425W x 445H x 220D",
+                    "LAUNDRY Mizu Drift sink mixer - Matte Black",
+                ],
+            ],
+        )
+
     def test_parse_documents_imperial_job38_layout_rows_drive_row_local_fields(self) -> None:
         documents = [
             {
@@ -11198,6 +11279,23 @@ H55784Z03AU
         self.assertIn("Fridge", by_type)
         self.assertEqual(by_type["Freestanding Stove"].model_no, "WFE9515SD")
         self.assertEqual(by_type["Rangehood"].model_no, "WRJ600UCS")
+
+    def test_imperial_extract_appliances_promotes_oven_cooktop_combo_to_freestanding_stove(self) -> None:
+        text = (
+            "APPLIANCES\n"
+            "OVEN/COOKTOP COMBO (KITCHEN)\n"
+            "Electrolux EFEP956DSE\n"
+            "90cm freestanding oven & induction cooktop\n"
+        )
+        rows = parsing_module._extract_appliances(
+            text,
+            "imperial-appliances.pdf",
+            [{"page_no": 9, "raw_text": text, "text": text}],
+        )
+        by_type = {row.appliance_type: row for row in rows}
+        self.assertIn("Freestanding Stove", by_type)
+        self.assertEqual(by_type["Freestanding Stove"].make, "Electrolux")
+        self.assertEqual(by_type["Freestanding Stove"].model_no, "EFEP956DSE")
 
     def test_extract_appliances_keeps_multiline_dishwasher_model(self) -> None:
         text = (
@@ -14342,6 +14440,92 @@ H55784Z03AU
         self.assertNotIn("appliance", fields)
         self.assertNotIn("fields", fields)
 
+    def test_imperial_snapshot_verification_checklist_prefers_display_lines_for_handle_rows_and_omits_none_summary(self) -> None:
+        pantry_handle_description = (
+            "PANTRY DOOR HANDLES - Titus Tekform - NO handles on Upper cabinetry - Finger pull only "
+            "Doors - Momo Graf Knurled D Handle 160mm In Dull Brushed Nickel Part no: G0430.160.DBR "
+            "Drawers - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel Part no: G0430.256.DBR "
+            "- Horizontal on Drawers Handle located at the top of front drawer front on Upper cabinetry "
+            "- Finger pull only - Momo Graf Knurled D Handle Horizontal on Drawers"
+        )
+        checklist = store._build_imperial_snapshot_verification_checklist(
+            {
+                "rooms": [
+                    {
+                        "room_order": 1,
+                        "original_room_label": "PANTRY",
+                        "page_refs": "2",
+                        "material_rows": [
+                            {
+                                "area_or_item": "HANDLES",
+                                "supplier": "",
+                                "specs_or_description": pantry_handle_description,
+                                "notes": "",
+                                "tags": ["handles"],
+                                "page_no": 2,
+                                "row_order": 3,
+                                "needs_review": True,
+                                "issues": [{"issue_type": "handle_block_over_split"}],
+                                "repair_verdicts": [{"issue_type": "handle_block_over_split", "status": "needs_review"}],
+                                "revalidation_issues": [{"related_issue_type": "handle_block_over_split"}],
+                                "provenance": {"layout_value_text": pantry_handle_description},
+                            }
+                        ],
+                    },
+                    {
+                        "room_order": 2,
+                        "original_room_label": "WIR",
+                        "page_refs": "5",
+                        "material_rows": [
+                            {
+                                "area_or_item": "HANDLES",
+                                "supplier": "",
+                                "specs_or_description": "None",
+                                "notes": "",
+                                "tags": ["handles"],
+                                "page_no": 5,
+                                "row_order": 1,
+                                "provenance": {},
+                            }
+                        ],
+                    },
+                ]
+            }
+        )
+        pantry_handle_item = next(
+            item
+            for item in checklist
+            if item["section_type"] == "room"
+            and item["entity_label"] == "PANTRY"
+            and item["field_name"] == "handles: HANDLES"
+        )
+        self.assertIn("No handles on Upper cabinetry - (Finger pull only)", pantry_handle_item["extracted_value"])
+        self.assertIn(
+            "[Titus Tekform] - Doors - Momo Graf Knurled D Handle 160mm In Dull Brushed Nickel - Part no: G0430.160.DBR",
+            pantry_handle_item["extracted_value"],
+        )
+        self.assertIn(
+            "[Titus Tekform] - Drawers - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel - Part no: G0430.256.DBR - (Horizontal on Drawers)",
+            pantry_handle_item["extracted_value"],
+        )
+        handle_summary_item = next(
+            item for item in checklist if item["section_type"] == "summary" and item["field_name"] == "Handles"
+        )
+        self.assertIn(
+            "No handles on Upper cabinetry - Finger pull only (Room: PANTRY)",
+            handle_summary_item["extracted_value"],
+        )
+        self.assertIn(
+            "DOORS - Momo Graf Knurled D Handle 160mm In Dull Brushed Nickel - Part no: G0430.160.DBR (Room: PANTRY)",
+            handle_summary_item["extracted_value"],
+        )
+        self.assertIn(
+            "DRAWERS - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel - Part no: G0430.256.DBR (Room: PANTRY)",
+            handle_summary_item["extracted_value"],
+        )
+        self.assertNotIn("None", handle_summary_item["extracted_value"])
+        self.assertNotIn("Room: WIR", handle_summary_item["extracted_value"])
+
     def test_clarendon_false_appliance_filter_rejects_drawing_noise_with_bulkhead_tokens(self) -> None:
         self.assertTrue(
             parsing_module._looks_like_clarendon_false_appliance(
@@ -14711,6 +14895,31 @@ H55784Z03AU
     def test_imperial_glass_doors_only_is_label_continuation(self) -> None:
         self.assertTrue(extraction_service._imperial_five_column_item_is_label_continuation("DOORS ONLY)"))
         self.assertTrue(extraction_service._imperial_five_column_item_is_label_continuation("GLASS DOORS ONLY"))
+        self.assertTrue(extraction_service._imperial_five_column_item_is_label_continuation("INCLUDING"))
+        self.assertTrue(extraction_service._imperial_five_column_item_is_label_continuation("TALL OPEN SHELVING"))
+
+    def test_imperial_short_value_rows_trim_following_handle_and_shelf_spillover(self) -> None:
+        self.assertEqual(
+            parsing_module._imperial_trim_material_row_short_value_spillover(
+                "LIGHTING",
+                "LED Strip Lighting provision Upper cabinetry - No Handles, finger pull only",
+            ),
+            "LED Strip Lighting provision",
+        )
+        self.assertEqual(
+            parsing_module._imperial_trim_material_row_short_value_spillover(
+                "KICKBOARDS",
+                "As Doors SHELVES 50MM Floating Shelves with internal steel support",
+            ),
+            "As Doors",
+        )
+        self.assertEqual(
+            parsing_module._imperial_trim_material_row_short_value_spillover(
+                "HANGING RAIL",
+                "Oval wardrobe tube, ribbed, aluminium 1400R.36.ALU LIGHTING LED Strip Lighting provision",
+            ),
+            "Oval wardrobe tube, ribbed, aluminium 1400R.36.ALU",
+        )
 
     def test_imperial_low_confidence_grid_row_keeps_desk_handle_rows(self) -> None:
         row = extraction_service.ImperialGridRow(
@@ -15929,6 +16138,721 @@ H55784Z03AU
             lines,
             ["[Kethy] - PM2817 / 288 / MSIL | Matt Silver | 288 Hole centres - 312 OA SIZE - (Horizontal Install)"],
         )
+
+    def test_imperial_material_row_display_lines_keep_generic_handle_subitems_together(self) -> None:
+        lines = parsing_module._imperial_material_row_display_lines_for_view(
+            {
+                "area_or_item": "HANDLES",
+                "supplier": "",
+                "specs_or_description": "No handles on Upper cabinetry - Finger pull only Doors - Momo Graf Knurled D Handle 160mm Drawers - Momo Graf Knurled D Handle 256mm",
+                "notes": "",
+                "tags": ["handles"],
+                "provenance": {
+                    "visual_fragments": [
+                        {
+                            "area_or_item": "NO HANDLES OVERHEADS",
+                            "supplier": "",
+                            "specs_or_description": "No handles on Upper cabinetry - Finger pull only",
+                            "notes": "",
+                            "separator_confidence_from_previous": "none",
+                        },
+                        {
+                            "area_or_item": "",
+                            "supplier": "",
+                            "specs_or_description": "Doors - Momo Graf Knurled D Handle 160mm",
+                            "notes": "",
+                            "separator_confidence_from_previous": "inferred_low",
+                        },
+                        {
+                            "area_or_item": "",
+                            "supplier": "",
+                            "specs_or_description": "Drawers - Momo Graf Knurled D Handle 256mm",
+                            "notes": "",
+                            "separator_confidence_from_previous": "inferred_low",
+                        },
+                    ]
+                },
+            }
+        )
+        self.assertEqual(
+            lines,
+            [
+                "No handles on Upper cabinetry - Finger pull only | Doors - Momo Graf Knurled D Handle 160mm | Drawers - Momo Graf Knurled D Handle 256mm"
+            ],
+        )
+
+    def test_imperial_material_row_display_lines_prefer_known_momo_graf_family_split(self) -> None:
+        lines = parsing_module._imperial_material_row_display_lines_for_view(
+            {
+                "area_or_item": "HANDLES",
+                "supplier": "Titus Tekform",
+                "specs_or_description": (
+                    "Upper cabinetry - No Handles, finger pull ONLY "
+                    "Drawers - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel Part no: G0430.256.DBR "
+                    "Doors - Momo Graf Knurled D Handle 160mm In Dull Brushed Nickel Part no: G0430.160.DBR "
+                    "Horizontal on Drawers"
+                ),
+                "notes": "Handle located at the top of front drawer front",
+                "tags": ["handles"],
+                "provenance": {},
+            }
+        )
+        self.assertEqual(
+            lines,
+            [
+                "No handles on Upper cabinetry - (Finger pull only)",
+                "[Titus Tekform] - Doors - Momo Graf Knurled D Handle 160mm In Dull Brushed Nickel - Part no: G0430.160.DBR - (Handle located at the top of front drawer front)",
+                "[Titus Tekform] - Drawers - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel - Part no: G0430.256.DBR - (Horizontal on Drawers)",
+            ],
+        )
+
+    def test_imperial_trim_material_row_short_value_spillover_clears_leading_foreign_note(self) -> None:
+        self.assertEqual(
+            parsing_module._imperial_trim_material_row_short_value_spillover(
+                "LIGHTING",
+                "at the top of front drawer",
+            ),
+            "",
+        )
+
+    def test_imperial_material_row_display_lines_move_supplier_gpo_spill_to_notes(self) -> None:
+        lines = parsing_module._imperial_material_row_display_lines_for_view(
+            {
+                "area_or_item": "BASE CABINETRY COLOUR",
+                "supplier": "Polytec 2 x GPO's installed inside the cabinetry",
+                "specs_or_description": "Black Wenge - Venette",
+                "notes": "",
+                "tags": ["door_colours"],
+                "provenance": {},
+            }
+        )
+        self.assertEqual(
+            lines,
+            ["[Polytec] - Black Wenge - Venette - (2 x GPO's installed inside the cabinetry)"],
+        )
+
+    def test_imperial_material_row_display_lines_prefer_known_handle_split_over_overmerged_visual_line(self) -> None:
+        lines = parsing_module._imperial_material_row_display_lines_for_view(
+            {
+                "area_or_item": "HANDLES",
+                "supplier": "Titus Tekform",
+                "specs_or_description": "160mm In Dull Brushed Nickel Part no: G0430.160.DBR - Momo Graf Knurled D Handle In Dull Brushed Nickel Part no: G0430.256.DBR - Horizontal front on Drawers",
+                "notes": "Handle located at the top of front drawer front | Horizontal on Drawers",
+                "tags": ["handles"],
+                "provenance": {
+                    "layout_value_text": "Upper cabinetry - No Handles, finger pull ONLY | Doors - Momo Graf Knurled D Handle 160mm In Dull Brushed Nickel Part no: G0430.160.DBR Handle located at the top of front drawer front | Drawers - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel Part no: G0430.256.DBR Horizontal on Drawers",
+                    "evidence_snippet": "HANDLES Upper cabinetry - No Handles, finger pull ONLY Doors - Momo Graf Knurled D Handle 160mm In Dull Brushed Nickel Part no: G0430.160.DBR Handle located at the top of front drawer front Drawers - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel Part no: G0430.256.DBR Horizontal on Drawers",
+                    "visual_fragments": [
+                        {
+                            "area_or_item": "HANDLES",
+                            "specs_or_description": "160mm In Dull Brushed Nickel Part no: G0430.160.DBR - Momo Graf Knurled D Handle In Dull Brushed Nickel Part no: G0430.256.DBR - Horizontal front on Drawers",
+                            "supplier": "Titus Tekform",
+                            "notes": "Handle located at the top of front drawer front | Horizontal on Drawers",
+                            "separator_confidence_from_previous": "visible",
+                        }
+                    ],
+                },
+            }
+        )
+        self.assertEqual(
+            lines,
+            [
+                "No handles on Upper cabinetry - (Finger pull only)",
+                "[Titus Tekform] - Doors - Momo Graf Knurled D Handle 160mm In Dull Brushed Nickel - Part no: G0430.160.DBR - (Handle located at the top of front drawer front)",
+                "[Titus Tekform] - Drawers - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel - Part no: G0430.256.DBR - (Horizontal on Drawers)",
+            ],
+        )
+
+    def test_imperial_material_row_display_lines_restore_hanging_rail_from_evidence(self) -> None:
+        lines = parsing_module._imperial_material_row_display_lines_for_view(
+            {
+                "area_or_item": "HANGING RAIL",
+                "supplier": "Furnware",
+                "specs_or_description": "15mm x 30mm x 3.6m, aluminium",
+                "notes": "",
+                "tags": ["other_material"],
+                "provenance": {
+                    "layout_supplier_text": "Furnware",
+                    "layout_value_text": "15mm x 30mm x 3.6m, aluminium",
+                    "evidence_snippet": "Oval wardrobe tube, ribbed, aluminium, HANGING RAIL 15mm x 30mm x 3.6m, aluminium - Furnware 1400R.36.ALU",
+                    "visual_fragments": [
+                        {
+                            "area_or_item": "HANGING RAIL",
+                            "specs_or_description": "15mm x 30mm x 3.6m, aluminium",
+                            "supplier": "Furnware",
+                            "notes": "",
+                            "separator_confidence_from_previous": "visible",
+                        }
+                    ],
+                },
+            }
+        )
+        self.assertEqual(
+            lines,
+            ["[Furnware] - Oval wardrobe tube, ribbed, aluminium, 15mm x 30mm x 3.6m, aluminium - 1400R.36.ALU"],
+        )
+
+    def test_imperial_material_row_display_lines_restore_hanging_rail_from_evidence_without_visual_fragments(self) -> None:
+        lines = parsing_module._imperial_material_row_display_lines_for_view(
+            {
+                "area_or_item": "HANGING RAIL",
+                "supplier": "Furnware",
+                "specs_or_description": "15mm x 30mm x 3.6m, aluminium",
+                "notes": "",
+                "tags": ["other_material"],
+                "provenance": {
+                    "layout_supplier_text": "Furnware",
+                    "layout_value_text": "15mm x 30mm x 3.6m, aluminium",
+                    "evidence_snippet": (
+                        "HANGING RAIL Oval wardrobe tube, ribbed, aluminium, "
+                        "15mm x 30mm x 3.6m, aluminium - Furnware 1400R.36.ALU"
+                    ),
+                },
+            }
+        )
+        self.assertEqual(
+            lines,
+            ["[Furnware] - Oval wardrobe tube, ribbed, aluminium, 15mm x 30mm x 3.6m, aluminium - 1400R.36.ALU"],
+        )
+
+    def test_imperial_material_row_display_lines_use_evidence_to_split_kitchen_handle_row(self) -> None:
+        lines = parsing_module._imperial_material_row_display_lines_for_view(
+            {
+                "area_or_item": "HANDLES",
+                "supplier": "Titus Tekform",
+                "specs_or_description": "160mm In Dull Brushed Nickel Part no: G0430.160.DBR - Momo Graf Knurled D Handle In Dull Brushed Nickel Part no: G0430.256.DBR - Horizontal front on Drawers",
+                "notes": "Handle located at the top of front drawer front | Horizontal on Drawers",
+                "tags": ["handles"],
+                "provenance": {
+                    "evidence_snippet": (
+                        "HANDLES Upper cabinetry - No Handles, finger pull ONLY "
+                        "Drawers - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel Part no: G0430.256.DBR "
+                        "Doors - Momo Graf Knurled D Handle 160mm In Dull Brushed Nickel Part no: G0430.160.DBR "
+                        "Horizontal on Drawers Titus Tekform"
+                    ),
+                },
+            }
+        )
+        self.assertEqual(
+            lines,
+            [
+                "No handles on Upper cabinetry - (Finger pull only)",
+                "[Titus Tekform] - Doors - Momo Graf Knurled D Handle 160mm In Dull Brushed Nickel - Part no: G0430.160.DBR - (Handle located at the top of front drawer front)",
+                "[Titus Tekform] - Drawers - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel - Part no: G0430.256.DBR - (Horizontal on Drawers)",
+            ],
+        )
+
+    def test_imperial_self_repair_moves_upper_no_handles_from_lighting_to_next_handle_row(self) -> None:
+        rows = parsing_module._imperial_repair_adjacent_material_row_spillovers(
+            [
+                {
+                    "area_or_item": "LIGHTING",
+                    "supplier": "",
+                    "specs_or_description": "LED Strip Lighting provision",
+                    "notes": "",
+                    "tags": ["other_material"],
+                    "page_no": 1,
+                    "row_order": 10,
+                    "provenance": {
+                        "layout_value_text": "LED Strip Lighting provision Upper cabinetry - No Handles, finger pull ONLY",
+                    },
+                },
+                {
+                    "area_or_item": "HANDLES",
+                    "supplier": "Titus Tekform",
+                    "specs_or_description": "160mm In Dull Brushed Nickel Part no: G0430.160.DBR - Momo Graf Knurled D Handle In Dull Brushed Nickel Part no: G0430.256.DBR",
+                    "notes": "Horizontal on Drawers",
+                    "tags": ["handles"],
+                    "page_no": 1,
+                    "row_order": 11,
+                    "provenance": {
+                        "layout_value_text": "160mm In Dull Brushed Nickel Part no: G0430.160.DBR - Momo Graf Knurled D Handle In Dull Brushed Nickel Part no: G0430.256.DBR",
+                    },
+                },
+            ]
+        )
+        self.assertEqual(len(rows), 2)
+        self.assertIn(
+            "No handles on Upper cabinetry - Finger pull only",
+            str(rows[1].get("provenance", {}).get("page_text_handle_block", "")),
+        )
+
+    def test_imperial_self_repair_moves_hanging_rail_prefix_from_previous_row(self) -> None:
+        rows = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "HANDLES",
+                    "supplier": "Allegra",
+                    "specs_or_description": "Oval Allegra - Cabinet Handle Style 2103 - SKU: 2103 - 40mm - Brushed Grey wardrobe tube, ribbed, aluminium",
+                    "notes": "",
+                    "tags": ["handles"],
+                    "page_no": 1,
+                    "row_order": 20,
+                    "provenance": {
+                        "layout_value_text": "Cabinet Handle Style 2103 - SKU: 2103 - 40mm - Brushed Grey Oval wardrobe tube, ribbed, aluminium",
+                    },
+                },
+                {
+                    "area_or_item": "HANGING RAIL",
+                    "supplier": "Furnware",
+                    "specs_or_description": "15mm x 30mm x 3.6m, aluminium - 1400R.36.ALU",
+                    "notes": "",
+                    "tags": ["other_material"],
+                    "page_no": 1,
+                    "row_order": 21,
+                    "provenance": {
+                        "layout_value_text": "15mm x 30mm x 3.6m, aluminium - 1400R.36.ALU",
+                    },
+                },
+            ]
+        )
+        self.assertEqual(
+            rows[1]["specs_or_description"],
+            "Oval wardrobe tube, ribbed, aluminium, 15mm x 30mm x 3.6m, aluminium - 1400R.36.ALU",
+        )
+        self.assertNotIn("Oval wardrobe tube", rows[0]["specs_or_description"])
+
+    def test_imperial_trim_material_row_spillover_strips_upper_including_prefix_and_gpo_supplier_noise(self) -> None:
+        rows = parsing_module._imperial_trim_material_row_spillover(
+            [
+                {
+                    "area_or_item": "UPPER CABINETRY COLOUR INCLUDING TALL OPEN SHELVING",
+                    "supplier": "Polytec",
+                    "specs_or_description": "INCLUDING Black Wenge - Venette",
+                    "notes": "",
+                    "tags": ["door_colours"],
+                },
+                {
+                    "area_or_item": "BASE CABINETRY COLOUR",
+                    "supplier": "Polytec 2 x GPO's installed inside the cabinetry",
+                    "specs_or_description": "Black Wenge - Venette",
+                    "notes": "",
+                    "tags": ["door_colours"],
+                },
+            ]
+        )
+        self.assertEqual(rows[0]["specs_or_description"], "Black Wenge - Venette")
+        self.assertEqual(rows[1]["supplier"], "Polytec")
+        self.assertIn("2 x GPO's installed inside the cabinetry", rows[1]["notes"])
+
+    def test_imperial_trim_material_row_spillover_normalizes_split_gpo_note_and_trailing_quantity(self) -> None:
+        rows = parsing_module._imperial_trim_material_row_spillover(
+            [
+                {
+                    "area_or_item": "BASE CABINETRY COLOUR",
+                    "supplier": "Polytec 2 x GPO's installed",
+                    "specs_or_description": "Black Wenge - Venette 2 x",
+                    "notes": "inside the cabinetry",
+                    "tags": ["door_colours"],
+                },
+                {
+                    "area_or_item": "BENCHTOP",
+                    "supplier": "Caesarstone 2 x Cut-outs either side of benchtop for GPO's",
+                    "specs_or_description": "20mm Stone 4600 Organic White - PR 2 x",
+                    "notes": "",
+                    "tags": ["bench_tops"],
+                },
+            ]
+        )
+        self.assertEqual(rows[0]["supplier"], "Polytec")
+        self.assertEqual(rows[0]["specs_or_description"], "Black Wenge - Venette")
+        self.assertEqual(rows[0]["notes"], "2 x GPO's installed inside the cabinetry")
+        self.assertEqual(rows[1]["supplier"], "Caesarstone")
+        self.assertEqual(rows[1]["specs_or_description"], "20mm Stone 4600 Organic White - PR")
+        self.assertEqual(rows[1]["notes"], "2 x Cut-outs either side of benchtop for GPO's")
+
+    def test_imperial_clean_material_row_label_text_normalizes_mixed_no_handles_label(self) -> None:
+        self.assertEqual(
+            parsing_module._imperial_clean_material_row_label_text("NO handles Doors"),
+            "HANDLES",
+        )
+
+    def test_imperial_layout_display_prefers_full_hanging_rail_description(self) -> None:
+        self.assertTrue(
+            parsing_module._imperial_layout_display_should_replace_primary(
+                label_text="HANGING RAIL",
+                primary_tag="other_material",
+                primary_description="15mm x 30mm x 3.6m, aluminium",
+                layout_description="Oval wardrobe tube, ribbed, aluminium, 15mm x 30mm x 3.6m, aluminium - 1400R.36.ALU",
+            )
+        )
+
+    def test_normalize_imperial_handle_summary_value_drops_none_and_restores_upper_no_handles(self) -> None:
+        import App.main as app_main
+
+        self.assertEqual(app_main._normalize_imperial_handle_summary_value("None"), "")
+        self.assertEqual(
+            app_main._normalize_imperial_handle_summary_value("on Upper cabinetry - Finger pull only"),
+            "No handles on Upper cabinetry - Finger pull only",
+        )
+
+    def test_imperial_handle_summary_skips_fallback_when_display_already_has_handle_families(self) -> None:
+        import App.main as app_main
+
+        item = {
+            "supplier": "",
+            "issues": [{"issue_type": "handle_block_over_split"}],
+            "display_lines": [
+                "No handles on Upper cabinetry - Finger pull only | Doors - Momo Graf Knurled D Handle 160mm In Dull Brushed Nickel Part no: G0430.160.DBR | Drawers - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel Part no: G0430.256.DBR"
+            ],
+            "provenance": {
+                "layout_value_text": "Doors - Momo Graf Knurled D Handle 160mm In Dull Brushed Nickel Part no: G0430.160.DBR | Drawers - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel Part no: G0430.256.DBR | on Upper cabinetry - Finger pull only"
+            },
+        }
+        self.assertFalse(
+            app_main._imperial_handle_summary_should_append_fallback_sources(item, item["display_lines"])
+        )
+
+    def test_imperial_handle_summary_candidates_prefer_split_display_lines_over_combined_value(self) -> None:
+        import App.main as app_main
+
+        item = {
+            "supplier": "Titus Tekform",
+            "display_lines": [
+                "No handles on Upper cabinetry - (Finger pull only)",
+                "[Titus Tekform] - Doors - Momo Graf Knurled D Handle 160mm In Dull Brushed Nickel - Part no: G0430.160.DBR",
+                "[Titus Tekform] - Drawers - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel - Part no: G0430.256.DBR - (Horizontal on Drawers)",
+            ],
+            "display_value": "[Titus Tekform] - 160mm In Dull Brushed Nickel Part no: G0430.160.DBR - Momo Graf Knurled D Handle In Dull Brushed Nickel Part no: G0430.256.DBR - Horizontal front on Drawers",
+            "value": "",
+            "specs_or_description": "Upper cabinetry - No Handles, finger pull ONLY Drawers - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel Part no: G0430.256.DBR Doors - Momo Graf Knurled D Handle 160mm In Dull Brushed Nickel Part no: G0430.160.DBR Horizontal on Drawers",
+            "notes": "",
+            "provenance": {},
+            "issues": [],
+            "revalidation_status": "passed",
+        }
+        self.assertEqual(
+            app_main._imperial_material_row_handle_summary_candidates(item),
+            [
+                "No handles on Upper cabinetry - Finger pull only",
+                "DOORS - Momo Graf Knurled D Handle 160mm In Dull Brushed Nickel - Part no: G0430.160.DBR",
+                "DRAWERS - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel - Part no: G0430.256.DBR",
+            ],
+        )
+
+    def test_imperial_handle_summary_candidates_ignore_dirty_combined_source_when_display_lines_cover_same_families(self) -> None:
+        import App.main as app_main
+
+        item = {
+            "supplier": "Titus Tekform",
+            "display_lines": [
+                "No handles on Upper cabinetry - (Finger pull only)",
+                "[Titus Tekform] - Doors - Momo Graf Knurled D Handle 160mm In Dull Brushed Nickel - Part no: G0430.160.DBR - (Handle located at the top of front drawer front)",
+                "[Titus Tekform] - Drawers - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel - Part no: G0430.256.DBR - (Horizontal on Drawers)",
+            ],
+            "display_value": "[Titus Tekform] - 160mm In Dull Brushed Nickel Part no: G0430.160.DBR - Momo Graf Knurled D Handle In Dull Brushed Nickel Part no: G0430.256.DBR - Horizontal front on Drawers",
+            "value": "",
+            "specs_or_description": "160mm In Dull Brushed Nickel Part no: G0430.160.DBR - Momo Graf Knurled D Handle In Dull Brushed Nickel Part no: G0430.256.DBR - Horizontal front on Drawers",
+            "notes": "Handle located at the top of front drawer front | Horizontal on Drawers",
+            "provenance": {},
+            "issues": [],
+            "revalidation_status": "passed",
+        }
+        self.assertEqual(
+            app_main._imperial_material_row_handle_summary_candidates(item),
+            [
+                "No handles on Upper cabinetry - Finger pull only",
+                "DOORS - Momo Graf Knurled D Handle 160mm In Dull Brushed Nickel - Part no: G0430.160.DBR",
+                "DRAWERS - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel - Part no: G0430.256.DBR",
+            ],
+        )
+
+    def test_imperial_handle_summary_candidates_prefer_clean_display_lines_over_polluted_single_combined_value(self) -> None:
+        import App.main as app_main
+
+        item = {
+            "supplier": "Allegra",
+            "display_lines": [
+                "[Allegra] - Cabinet Handle Style 2103 - SKU: 2103 - 40mm - Brushed Grey - (Note: Size shown differs from selection ie. 40mm)"
+            ],
+            "display_value": "[Allegra] - Cabinet Handle Style 2103 - SKU: 2103 - 40mm - Brushed Grey - (Note: Size shown differs from selection ie. 40mm)",
+            "value": "",
+            "specs_or_description": "Oval Allegra - Cabinet Handle Style 2103 - SKU: 2103 - 40mm - Brushed Grey wardrobe tube, ribbed, aluminium",
+            "notes": "Note: Size shown differs from selection ie. 40mm",
+            "provenance": {},
+            "issues": [],
+            "revalidation_status": "passed",
+        }
+        self.assertEqual(
+            app_main._imperial_material_row_handle_summary_candidates(item),
+            ["Cabinet Handle Style 2103 - SKU: 2103 - 40mm - Brushed Grey - (Note: Size shown differs from selection ie. 40mm)"],
+        )
+
+    def test_imperial_handle_summary_fallback_skips_label_order_only_review_when_display_lines_are_clean(self) -> None:
+        import App.main as app_main
+
+        item = {
+            "supplier": "Allegra",
+            "display_lines": [
+                "[Allegra] - Cabinet Handle Style 2103 - SKU: 2103 - 40mm - Brushed Grey - (Note: Size shown differs from selection ie. 40mm)"
+            ],
+            "display_value": "[Allegra] - Cabinet Handle Style 2103 - SKU: 2103 - 40mm - Brushed Grey - (Note: Size shown differs from selection ie. 40mm)",
+            "value": "",
+            "specs_or_description": "Oval Allegra - Cabinet Handle Style 2103 SKU: 2103 - 40mm - Brushed Grey wardrobe tube, ribbed, aluminium",
+            "notes": "Note: Size shown differs from selection ie. 40mm",
+            "issues": [
+                {"issue_type": "label_contamination"},
+                {"issue_type": "row_order_drift"},
+            ],
+            "revalidation_status": "needs_review",
+            "provenance": {
+                "layout_value_text": "Cabinet Handle – Style 2103 SKU: 2103 - 40mm - Brushed Grey Note: Size shown wardrobe tube, ribbed, aluminium"
+            },
+        }
+        self.assertFalse(
+            app_main._imperial_handle_summary_should_append_fallback_sources(item, item["display_lines"])
+        )
+        self.assertEqual(
+            app_main._imperial_material_row_handle_summary_candidates(item),
+            ["Cabinet Handle Style 2103 - SKU: 2103 - 40mm - Brushed Grey - (Note: Size shown differs from selection ie. 40mm)"],
+        )
+
+    def test_imperial_material_row_display_lines_recover_style_2103_note_from_page_text_following_lines(self) -> None:
+        lines = parsing_module._imperial_material_row_display_lines_for_view(
+            {
+                "area_or_item": "HANDLES",
+                "supplier": "Allegra",
+                "specs_or_description": "Oval Allegra - Cabinet Handle Style 2103 SKU: 2103 - 40mm - Brushed Grey Note: Size shown",
+                "notes": "",
+                "tags": ["handles"],
+                "provenance": {
+                    "page_text_following_lines": [
+                        "Note: Size shown differs from selection ie. 40mm",
+                    ],
+                },
+            }
+        )
+        self.assertEqual(
+            lines,
+            ["[Allegra] - Cabinet Handle Style 2103 - SKU: 2103 - 40mm - Brushed Grey - (Note: Size shown differs from selection ie. 40mm)"],
+        )
+
+    def test_imperial_summary_material_candidates_extract_textured_finish_from_dirty_row_text(self) -> None:
+        import App.main as app_main
+
+        self.assertEqual(
+            app_main._imperial_summary_material_candidates(
+                "door_colours",
+                "[Polytec] - Reface all 'Lower Cabinetry' Doors, Drawers & Panels - Black Wenge - Venette",
+                "Polytec",
+            ),
+            ["Polytec - Black Wenge - Venette"],
+        )
+        self.assertEqual(
+            app_main._imperial_summary_material_candidates(
+                "door_colours",
+                "[Polytec] - Robe hatshelf on support rails, single hanging - Black Wenge - Ravine (STD not Softclose",
+                "Polytec",
+            ),
+            ["Polytec - Black Wenge - Ravine"],
+        )
+        self.assertEqual(
+            app_main._imperial_summary_material_candidates(
+                "bench_tops",
+                "[Caesarstone] - 20mm Stone - (either side of benchtop for) - (2 x Cut-outs) 4600 Organic White - PR - (GPO's)",
+                "Caesarstone",
+            ),
+            ["Caesarstone - 20mm Stone - 4600 Organic White - PR"],
+        )
+        self.assertEqual(
+            app_main._imperial_summary_values_for_bucket(
+                "door_colours",
+                "[Polytec] - Robe single hanging with top shelf and adjustable shelves - ALL Standard Whiteboard",
+                app_main._normalize_door_colour_summary_value,
+                supplier="Polytec",
+            ),
+            [],
+        )
+
+    def test_imperial_should_use_sequential_sinkware_parser_for_multi_heading_utility_page(self) -> None:
+        lines = [
+            "SINKWARE (LAUNDRY) Memo Hugo Single bowl sink",
+            "425W x 445H x 220D - Sink Mounting - TBC By Others",
+            "Taphole location: TBC - Tap: Mizu Drift",
+            "Gooseneck Sink Mixer",
+            "SINKWARE (KITCHEN)",
+            "Bench top is to remain",
+            "Existing Sink and Tap to be used - Sink",
+            "Mounting - TBC",
+            "By Others",
+            "Taphole location: No hole cut out required",
+        ]
+        self.assertTrue(parsing_module._imperial_should_use_sequential_sinkware_parser(lines))
+
+    def test_imperial_extract_non_joinery_blocks_keeps_sinkware_clusters_local_for_job62_shape(self) -> None:
+        text = "\n".join(
+            [
+                "SINKWARE (LAUNDRY) Memo Hugo Single bowl sink",
+                "425W x 445H x 220D - Sink Mounting - TBC By Others",
+                "Taphole location: TBC - Tap: Mizu Drift",
+                "Gooseneck Sink Mixer",
+                "SINKWARE (KITCHEN)",
+                "Bench top is to remain",
+                "Existing Sink and Tap to be used - Sink",
+                "Mounting - TBC",
+                "By Others",
+                "Taphole location: No hole cut out required",
+            ]
+        )
+        blocks = parsing_module._imperial_extract_non_joinery_blocks(text, "sinkware")
+        self.assertEqual(
+            blocks,
+            [
+                ("LAUNDRY", "Memo Hugo Single bowl sink 425W x 445H x 220D - Sink Mounting - TBC By Others - Taphole location: TBC"),
+                ("KITCHEN", "Bench top is to remain Existing Sink and Tap to be used - Sink Mounting - TBC - Taphole location: No hole cut out required"),
+            ],
+        )
+
+    def test_imperial_extract_non_joinery_blocks_keeps_sinkware_clusters_local_for_heading_first_job62_shape(self) -> None:
+        text = "\n".join(
+            [
+                "Taphole location: No hole cut out required",
+                "Bench top is to remain",
+                "SINKWARE (KITCHEN) Existing Sink and Tap to be used - Sink By Others",
+                "Mounting - TBC",
+                "Taphole location: TBC - Tap: Mizu Drift",
+                "Memo Hugo Single bowl sink Gooseneck Sink Mixer",
+                "SINKWARE (LAUNDRY) By Others",
+                "425W x 445H x 220D - Sink Mounting - TBC",
+            ]
+        )
+        blocks = parsing_module._imperial_extract_non_joinery_blocks(text, "sinkware")
+        self.assertEqual(
+            blocks,
+            [
+                ("KITCHEN", "Existing Sink and Tap to be used - Sink By Others Mounting - TBC - Taphole location: No hole cut out required"),
+                ("LAUNDRY", "Memo Hugo Single bowl sink 425W x 445H x 220D - Sink Mounting - TBC By Others - Taphole location: TBC"),
+            ],
+        )
+
+    def test_imperial_sinkware_line_role_treats_size_mounting_line_as_continuation(self) -> None:
+        self.assertEqual(
+            parsing_module._imperial_sinkware_line_role("425W x 445H x 220D - Sink Mounting - TBC By Others"),
+            "",
+        )
+        self.assertEqual(
+            parsing_module._imperial_sinkware_line_role("Memo Hugo Single bowl sink 425W x 445H x 220D - Sink Mounting - TBC By Others"),
+            "sink",
+        )
+
+    def test_display_imperial_material_row_title_keeps_generic_handles_title(self) -> None:
+        import App.main as app_main
+
+        title = app_main._display_imperial_material_row_title(
+            {
+                "area_or_item": "HANDLES",
+                "tags": ["handles"],
+                "provenance": {
+                    "fragment_area_or_items": [
+                        "NO handles Doors",
+                        "HANDLES",
+                    ]
+                },
+            }
+        )
+        self.assertEqual(title, "HANDLES")
+
+    def test_imperial_clean_cabinetry_colour_description_strips_including_prefix(self) -> None:
+        self.assertEqual(
+            parsing_module._imperial_clean_cabinetry_colour_description(
+                "UPPER CABINETRY COLOUR INCLUDING TALL OPEN SHELVING",
+                "INCLUDING Black Wenge - Venette",
+            ),
+            "Black Wenge - Venette",
+        )
+
+    def test_imperial_layout_row_cabinetry_colour_text_strips_label_continuation_prefix(self) -> None:
+        text = parsing_module._imperial_layout_row_cabinetry_colour_text(
+            {
+                "row_label": "UPPER CABINETRY COLOUR INCLUDING TALL OPEN SHELVING",
+                "value_text": "INCLUDING Black Wenge - Venette",
+                "supplier_text": "Polytec",
+                "notes_text": "",
+            }
+        )
+        self.assertEqual(text, "Polytec - Black Wenge - Venette")
+
+    def test_imperial_extract_known_handle_display_lines_from_text_parses_momo_graf_block(self) -> None:
+        lines = parsing_module._imperial_extract_known_handle_display_lines_from_text(
+            "Upper cabinetry - No Handles, finger pull ONLY | "
+            "Doors - Momo Graf Knurled D Handle 160mm In Dull Brushed Nickel Part no: G0430.160.DBR Handle located at the top of front drawer front | "
+            "Drawers - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel Part no: G0430.256.DBR Horizontal on Drawers",
+            default_supplier="Titus Tekform",
+        )
+        self.assertEqual(
+            lines,
+            [
+                "No handles on Upper cabinetry - (Finger pull only)",
+                "[Titus Tekform] - Doors - Momo Graf Knurled D Handle 160mm In Dull Brushed Nickel - Part no: G0430.160.DBR - (Handle located at the top of front drawer front)",
+                "[Titus Tekform] - Drawers - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel - Part no: G0430.256.DBR - (Horizontal on Drawers)",
+            ],
+        )
+
+    def test_imperial_material_row_can_merge_upper_cabinetry_colour_including_continuation(self) -> None:
+        self.assertTrue(
+            parsing_module._imperial_material_row_can_merge_into_previous(
+                {
+                    "area_or_item": "UPPER CABINETRY COLOUR INCLUDING",
+                    "supplier": "Polytec",
+                    "specs_or_description": "Black Wenge - Venette",
+                },
+                {
+                    "area_or_item": "TALL OPEN SHELVING",
+                    "supplier": "",
+                    "specs_or_description": "",
+                },
+            )
+        )
+
+    def test_imperial_self_repair_ignores_label_continuation_prefix_line_for_upper_colour(self) -> None:
+        rows = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "UPPER CABINETRY COLOUR INCLUDING TALL OPEN SHELVING",
+                    "supplier": "Polytec",
+                    "specs_or_description": "Black Wenge - Venette",
+                    "notes": "",
+                    "tags": ["door_colours"],
+                    "page_no": 2,
+                    "row_order": 3,
+                    "provenance": {
+                        "page_text_leading_value_line": "TALL OPEN SHELVING PolytecBlack Wenge - Venette",
+                        "layout_row_label": "UPPER CABINETRY COLOUR INCLUDING TALL OPEN SHELVING",
+                        "layout_value_text": "INCLUDING Black Wenge - Venette",
+                    },
+                }
+            ]
+        )
+        self.assertEqual(rows[0]["specs_or_description"], "Black Wenge - Venette")
+
+    def test_imperial_separator_model_to_dict_keeps_segment_source_and_confidence(self) -> None:
+        model = extraction_service.ImperialSeparatorModel(
+            visible_horizontal_segments=[
+                {
+                    "orientation": "horizontal",
+                    "edge": 120.0,
+                    "start": 32.0,
+                    "end": 540.0,
+                    "source": "visible_line",
+                    "confidence": "visible",
+                }
+            ],
+            inferred_horizontal_segments=[
+                {
+                    "orientation": "horizontal",
+                    "edge": 240.0,
+                    "start": 32.0,
+                    "end": 540.0,
+                    "source": "bridge_over_image",
+                    "confidence": "inferred_high",
+                }
+            ],
+        )
+        payload = model.to_dict()
+        self.assertEqual(payload["visible_horizontal_segments"][0]["source"], "visible_line")
+        self.assertEqual(payload["visible_horizontal_segments"][0]["confidence"], "visible")
+        self.assertEqual(payload["inferred_horizontal_segments"][0]["source"], "bridge_over_image")
+        self.assertEqual(payload["inferred_horizontal_segments"][0]["confidence"], "inferred_high")
 
     def test_imperial_material_row_display_lines_remove_duplicate_bullnose_phrase(self) -> None:
         lines = parsing_module._imperial_material_row_display_lines_for_view(
@@ -19516,6 +20440,27 @@ H55784Z03AU
         )
         self.assertEqual(cleaned, "")
 
+    def test_imperial_clean_cabinetry_colour_notes_clears_cabinet_height_tail(self) -> None:
+        cleaned = parsing_module._imperial_clean_cabinetry_colour_notes(
+            "UPPER CABINETRY COLOUR",
+            "4700mmLength",
+        )
+        self.assertEqual(cleaned, "")
+
+    def test_imperial_clean_cabinetry_colour_description_clears_softclose_tail(self) -> None:
+        cleaned = parsing_module._imperial_clean_cabinetry_colour_description(
+            "BASE CABINETRY COLOUR",
+            "Robe hatshelf on support rails, single hanging - Black Wenge - Ravine (STD not Softclose",
+        )
+        self.assertEqual(cleaned, "Robe hatshelf on support rails, single hanging - Black Wenge - Ravine")
+
+    def test_imperial_clean_cabinetry_colour_description_trims_trailing_door_and_drawer_tail(self) -> None:
+        cleaned = parsing_module._imperial_clean_cabinetry_colour_description(
+            "UPPER CABINETRY COLOUR (GLASS DOORS ONLY)",
+            "Thermo - Classic White - Matt - Door Frame 4 - Type I - Four Rebate - Clear Glass Door and Drawer",
+        )
+        self.assertEqual(cleaned, "Thermo - Classic White - Matt - Door Frame 4 - Type I - Four Rebate - Clear Glass")
+
     def test_imperial_best_visual_subrow_prefers_material_fragment(self) -> None:
         row = {
             "area_or_item": "BASE CABINETRY COLOUR",
@@ -19549,6 +20494,476 @@ H55784Z03AU
         self.assertIn("DRAWERS - Momo Trianon D Handle 128mm", filtered)
         self.assertIn("DOORS - Momo Lugo Knob 38mm", filtered)
         self.assertNotIn("MOULDING", filtered.upper())
+
+    def test_imperial_extract_known_handle_display_lines_recovers_glued_size_note(self) -> None:
+        lines = parsing_module._imperial_extract_known_handle_display_lines_from_text(
+            "Cabinet Handle Style 2103 SKU: 2103 - 40mm - Brushed GreyNote: Size shown differs from selection ie. 40mm Allegra"
+        )
+        self.assertEqual(
+            lines,
+            [
+                "[Allegra] - Cabinet Handle Style 2103 - SKU: 2103 - 40mm - Brushed Grey - (Note: Size shown differs from selection ie. 40mm)"
+            ],
+        )
+
+    def test_imperial_material_row_display_lines_prefer_known_momo_split_with_shared_note(self) -> None:
+        lines = parsing_module._imperial_material_row_display_lines_for_view(
+            {
+                "area_or_item": "HANDLES",
+                "supplier": "Momo",
+                "specs_or_description": (
+                    "DOORS - Lugo Knob 38mm In Brushed Nickel - Part no: 3238.BRN.FG "
+                    "DRAWERS - Trianon D Handle 128mm In White & Brushed Nickel"
+                ),
+                "notes": "",
+                "tags": ["handles"],
+                "provenance": {
+                    "layout_value_text": (
+                        "DRAWERS -Momo Trianon D Handle 128mm In White & Brushed Nickel - Part no: TCM3622.WHBRN.FG "
+                        "Knobs on Doors, Handles on Drawers (Horizontal) "
+                        "DOORS - Momo Lugo Knob 38mm In Brushed Nickel - Part no: 3238.BRN.FG"
+                    ),
+                    "evidence_snippet": (
+                        "HANDLES DRAWERS -Momo Trianon D Handle 128mm In White & Brushed Nickel - Part no: TCM3622.WHBRN.FG "
+                        "Knobs on Doors, Handles on Drawers (Horizontal) "
+                        "DOORS - Momo Lugo Knob 38mm In Brushed Nickel - Part no: 3238.BRN.FG"
+                    ),
+                },
+            }
+        )
+        self.assertEqual(
+            lines,
+            [
+                "[Momo] - DOORS - Lugo Knob 38mm In Brushed Nickel - Part no: 3238.BRN.FG",
+                "[Momo] - DRAWERS - Trianon D Handle 128mm In White & Brushed Nickel - Part no: TCM3622.WHBRN.FG - (Knobs on Doors, Handles on Drawers (Horizontal))",
+            ],
+        )
+
+    def test_imperial_extract_known_handle_display_lines_recovers_polluted_lugo_and_trianon_rows(self) -> None:
+        lines = parsing_module._imperial_extract_known_handle_display_lines_from_text(
+            (
+                "DOORS Handle - Momo - Lugo Knob 38mm In Brushed Nickel - Part no: 3238.BRN.FG "
+                "DRAWERS - Polytec - Profile - Classic White Matt Momo Trianon D Handle 128mm "
+                "Knobs on Doors, In White & Brushed Nickel - Part no: - Handles on Drawers (Horizontal) "
+                "TCM3622.WHBRN.FG - Momo Lugo Knob 38mm In Brushed Nickel - Part no: 3238.BRN.FG"
+            )
+        )
+        self.assertEqual(
+            lines,
+            [
+                "[Momo] - DOORS - Lugo Knob 38mm In Brushed Nickel - Part no: 3238.BRN.FG",
+                "[Momo] - DRAWERS - Trianon D Handle 128mm In White & Brushed Nickel - Part no: TCM3622.WHBRN.FG - (Knobs on Doors, Handles on Drawers (Horizontal))",
+            ],
+        )
+
+    def test_imperial_material_row_display_lines_restore_hanging_rail_from_aluminum_evidence(self) -> None:
+        lines = parsing_module._imperial_material_row_display_lines_for_view(
+            {
+                "area_or_item": "HANGING RAIL",
+                "supplier": "Furnware",
+                "specs_or_description": "30mm x 3.6m, polished aluminum finish Part Number: 1400.36.CP - Chrome Plated",
+                "notes": "",
+                "tags": ["other_material"],
+                "provenance": {
+                    "layout_supplier_text": "Furnware",
+                    "layout_value_text": "30mm x 3.6m, polished aluminum finish Part Number: 1400.36.CP - Chrome Plated",
+                    "evidence_snippet": (
+                        "HANDLES DRAWERS -Momo Trianon D Handle 128mm In White & Brushed Nickel - Part no: TCM3622.WHBRN.FG "
+                        "HANGING RAIL Oval aluminum wardrobe tube, 15mm x 30mm x 3.6m, polished aluminum finish Part Number: 1400.36.CP - Chrome Plated Furnware "
+                        "BASE CABINETRY COLOUR Polytec"
+                    ),
+                },
+            }
+        )
+        self.assertEqual(
+            lines,
+            ["[Furnware] - Oval aluminum wardrobe tube, 15mm x 30mm x 3.6m, polished aluminum finish Part Number: 1400.36.CP - Chrome Plated"],
+        )
+
+    def test_imperial_material_row_display_lines_restore_hanging_rail_from_visual_fragments_with_aluminum_prefix(self) -> None:
+        lines = parsing_module._imperial_material_row_display_lines_for_view(
+            {
+                "area_or_item": "HANGING RAIL",
+                "supplier": "Furnware",
+                "specs_or_description": "30mm x 3.6m, polished aluminum finish Part Number: 1400.36.CP - Chrome Plated",
+                "notes": "",
+                "tags": ["other_material"],
+                "provenance": {
+                    "layout_supplier_text": "Furnware",
+                    "layout_value_text": "30mm x 3.6m, polished aluminum finish Part Number: 1400.36.CP - Chrome Plated",
+                    "evidence_snippet": (
+                        "HANGING RAIL Oval aluminum wardrobe tube, 15mm x 30mm x 3.6m, polished aluminum finish "
+                        "Part Number: 1400.36.CP - Chrome Plated Furnware BASE CABINETRY COLOUR Polytec"
+                    ),
+                    "visual_fragments": [
+                        {
+                            "area_or_item": "HANGING RAIL",
+                            "specs_or_description": "30mm x 3.6m, polished aluminum finish",
+                            "supplier": "Furnware",
+                            "notes": "",
+                            "separator_confidence_from_previous": "none",
+                            "separator_kind_from_previous": "none",
+                        }
+                    ],
+                },
+            }
+        )
+        self.assertEqual(
+            lines,
+            ["[Furnware] - Oval aluminum wardrobe tube, 15mm x 30mm x 3.6m, polished aluminum finish Part Number: 1400.36.CP - Chrome Plated"],
+        )
+
+    def test_imperial_material_row_display_lines_restore_hanging_rail_from_page_text_without_evidence_snippet(self) -> None:
+        lines = parsing_module._imperial_material_row_display_lines_for_view(
+            {
+                "area_or_item": "HANGING RAIL",
+                "supplier": "Furnware",
+                "specs_or_description": "30mm x 3.6m, polished aluminum finish Part Number: 1400.36.CP - Chrome Plated",
+                "notes": "",
+                "tags": ["other_material"],
+                "provenance": {
+                    "layout_supplier_text": "Furnware",
+                    "layout_value_text": "30mm x 3.6m, polished aluminum finish Part Number: 1400.36.CP - Chrome Plated",
+                    "page_text_leading_value_line": "Oval aluminum wardrobe tube, 15mm x",
+                    "page_text_following_lines": [
+                        "30mm x 3.6m, polished aluminum finish",
+                        "Part Number: 1400.36.CP - Chrome Plated",
+                        "Furnware",
+                    ],
+                    "visual_fragments": [
+                        {
+                            "area_or_item": "HANGING RAIL",
+                            "specs_or_description": "30mm x 3.6m, polished aluminum finish",
+                            "supplier": "Furnware",
+                            "notes": "",
+                            "separator_confidence_from_previous": "none",
+                            "separator_kind_from_previous": "none",
+                        }
+                    ],
+                },
+            }
+        )
+        self.assertEqual(
+            lines,
+            ["[Furnware] - Oval aluminum wardrobe tube, 15mm x 30mm x 3.6m, polished aluminum finish Part Number: 1400.36.CP - Chrome Plated"],
+        )
+
+    def test_imperial_normalize_row_gpo_cutout_display_compacts_split_notes(self) -> None:
+        self.assertEqual(
+            parsing_module._imperial_normalize_row_gpo_cutout_display(
+                "BASE CABINETRY COLOUR",
+                "Black Wenge - Venette 2 x",
+                "inside the cabinetry - 2 x GPO's installed inside the cabinetry",
+            ),
+            ("Black Wenge - Venette", "2 x GPO's installed inside the cabinetry"),
+        )
+        self.assertEqual(
+            parsing_module._imperial_normalize_row_gpo_cutout_display(
+                "BENCHTOP",
+                "20mm Stone 4600 Organic White - PR 2 x Cut-outs",
+                "either side of benchtop for GPO's - 2 x Cut-outs either side of benchtop for GPO's",
+            ),
+            ("20mm Stone 4600 Organic White - PR", "2 x Cut-outs either side of benchtop for GPO's"),
+        )
+
+    def test_imperial_material_row_is_summary_worthy_allows_clean_door_colour_candidate_with_row_order_hint(self) -> None:
+        import App.main as app_main
+
+        item = {
+            "title": "BASE CABINETRY COLOUR",
+            "value": "Polytec - Black Wenge - Venette 2 x - inside the cabinetry - 2 x GPO's installed inside the cabinetry",
+            "display_value": "[Polytec] - Black Wenge - Venette - (2 x GPO's installed inside the cabinetry)",
+            "supplier": "Polytec",
+            "tags": ["door_colours"],
+            "needs_review": True,
+            "revalidation_status": "needs_review",
+            "issue_types": ["row_order_drift"],
+            "pending_repair_types": ["row_order_drift"],
+        }
+        self.assertTrue(app_main._imperial_material_row_is_summary_worthy(item, "door_colours"))
+
+    def test_imperial_material_row_is_summary_worthy_allows_clean_door_colour_doors_row(self) -> None:
+        import App.main as app_main
+
+        item = {
+            "title": "DOORS",
+            "value": "[Polytec] - Robe doors - Black Wenge- Matt",
+            "display_value": "[Polytec] - Robe doors - Black Wenge- Matt",
+            "supplier": "Polytec",
+            "tags": ["door_colours"],
+            "needs_review": False,
+            "revalidation_status": "passed",
+        }
+        self.assertTrue(app_main._imperial_material_row_is_summary_worthy(item, "door_colours"))
+
+    def test_imperial_material_row_is_summary_worthy_allows_clean_door_colour_doors_row_with_label_review(self) -> None:
+        import App.main as app_main
+
+        item = {
+            "title": "DOORS",
+            "value": "[Polytec] - Robe doors - Black Wenge- Matt",
+            "display_value": "[Polytec] - Robe doors - Black Wenge- Matt",
+            "supplier": "Polytec",
+            "tags": ["door_colours"],
+            "needs_review": True,
+            "revalidation_status": "needs_review",
+            "issue_types": ["label_contamination"],
+            "pending_repair_types": ["label_contamination"],
+        }
+        self.assertTrue(app_main._imperial_material_row_is_summary_worthy(item, "door_colours"))
+
+    def test_imperial_material_row_display_lines_strip_embedded_supplier_before_raw_gyprock(self) -> None:
+        row = {
+            "area_or_item": "BASE CABINETRY COLOUR",
+            "supplier": "Imperial",
+            "specs_or_description": "Standard Whiteboard Internals with 2 x Imperial Raw Gyprock sliding robe doors",
+            "notes": "",
+            "tags": ["door_colours"],
+            "provenance": {"layout_supplier_text": "Imperial"},
+        }
+        self.assertEqual(
+            parsing_module._imperial_material_row_display_lines_for_view(row),
+            ["[Imperial] - Standard Whiteboard Internals with 2 x Raw Gyprock sliding robe doors"],
+        )
+
+    def test_imperial_material_row_display_lines_strip_cabinetry_colour_length_note_tail(self) -> None:
+        row = {
+            "area_or_item": "UPPER CABINETRY COLOUR",
+            "supplier": "Polytec",
+            "specs_or_description": "Black Wenge - Venette- Incl Colouroured bottom panel of OHC",
+            "notes": "4700mmLength",
+            "tags": ["door_colours"],
+        }
+        self.assertEqual(
+            parsing_module._imperial_material_row_display_lines_for_view(row),
+            ["[Polytec] - Black Wenge - Venette- Incl Colouroured bottom panel of OHC"],
+        )
+
+    def test_imperial_material_row_display_lines_strip_cabinetry_colour_softclose_note_tail(self) -> None:
+        row = {
+            "area_or_item": "BASE CABINETRY COLOUR",
+            "supplier": "Polytec",
+            "specs_or_description": "Robe hatshelf on support rails, single hanging - Black Wenge - Ravine",
+            "notes": "STD not Softclose",
+            "tags": ["door_colours"],
+        }
+        self.assertEqual(
+            parsing_module._imperial_material_row_display_lines_for_view(row),
+            ["[Polytec] - Robe hatshelf on support rails, single hanging - Black Wenge - Ravine"],
+        )
+
+    def test_imperial_material_row_display_lines_strip_cabinetry_colour_tails_from_visual_subrows(self) -> None:
+        row = {
+            "area_or_item": "UPPER CABINETRY COLOUR",
+            "supplier": "Polytec",
+            "specs_or_description": "Black Wenge - Venette- Incl Colouroured bottom panel of OHC",
+            "notes": "4700mmLength",
+            "tags": ["door_colours"],
+            "provenance": {
+                "visual_subrows": [
+                    {
+                        "area_or_item": "UPPER CABINETRY COLOUR",
+                        "supplier": "Polytec",
+                        "specs_or_description": "Black Wenge - Venette- Incl Colouroured bottom panel of OHC",
+                        "notes": "4700mmLength",
+                    }
+                ]
+            },
+        }
+        self.assertEqual(
+            parsing_module._imperial_material_row_display_lines_for_view(row),
+            ["[Polytec] - Black Wenge - Venette- Incl Colouroured bottom panel of OHC"],
+        )
+
+    def test_imperial_material_row_display_lines_prefer_primary_for_truncated_cabinetry_colour_fragment(self) -> None:
+        row = {
+            "area_or_item": "UPPER CABINETRY COLOUR",
+            "supplier": "Polytec",
+            "specs_or_description": "Black Wenge - Venette- Incl Colouroured bottom panel of OHC",
+            "notes": "",
+            "tags": ["door_colours"],
+            "provenance": {
+                "layout_value_text": "Black Wenge - Venette- Incl Colouroured bottom panel of OHC",
+                "layout_supplier_text": "Polytec",
+                "layout_notes_text": "4700mmLength",
+                "visual_subrows": [
+                    {
+                        "separator_kind_from_previous": "visible",
+                        "area_or_item": "UPPER CABINETRY COLOUR Black",
+                        "specs_or_description": "Wenge - Venette- Incl Colouroured",
+                        "supplier": "Polytec",
+                        "notes": "4700mmLength",
+                    }
+                ],
+            },
+        }
+        self.assertEqual(
+            parsing_module._imperial_material_row_display_lines_for_view(row),
+            ["[Polytec] - Black Wenge - Venette- Incl Colouroured bottom panel of OHC"],
+        )
+
+    def test_imperial_material_row_display_lines_prefer_primary_for_wir_cabinetry_colour_fragment(self) -> None:
+        row = {
+            "area_or_item": "BASE CABINETRY COLOUR",
+            "supplier": "Polytec",
+            "specs_or_description": "Robe hatshelf on support rails, single hanging - Black Wenge - Ravine",
+            "notes": "",
+            "tags": ["door_colours"],
+            "provenance": {
+                "layout_value_text": "Robe hatshelf on support rails, single hanging - Black Wenge - Ravine (STD not Softclose",
+                "layout_supplier_text": "Polytec",
+                "layout_notes_text": "",
+                "visual_subrows": [
+                    {
+                        "separator_kind_from_previous": "visible",
+                        "area_or_item": "BASE CABINETRY COLOUR",
+                        "specs_or_description": "hanging - Black Wenge - Ravine (STD not",
+                        "supplier": "Polytec",
+                        "notes": "",
+                    }
+                ],
+            },
+            "needs_review": True,
+            "issues": [{"issue_type": "row_order_drift"}],
+        }
+        self.assertEqual(
+            parsing_module._imperial_material_row_display_lines_for_view(row),
+            ["[Polytec] - Robe hatshelf on support rails, single hanging - Black Wenge - Ravine"],
+        )
+
+    def test_imperial_self_repair_material_rows_strip_cabinetry_colour_label_tail(self) -> None:
+        repaired = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "BASE CABINETRY COLOUR Standard",
+                    "supplier": "Imperial",
+                    "specs_or_description": "Whiteboard Internals with 2 x",
+                    "notes": "",
+                    "page_no": 1,
+                    "row_order": 1,
+                    "tags": ["door_colours"],
+                    "provenance": {},
+                }
+            ]
+        )
+        self.assertEqual(repaired[0]["area_or_item"], "BASE CABINETRY COLOUR")
+
+    def test_imperial_self_repair_material_rows_preserve_allowed_cabinetry_colour_continuation(self) -> None:
+        repaired = parsing_module._imperial_self_repair_material_rows(
+            [
+                {
+                    "area_or_item": "UPPER CABINETRY COLOUR INCLUDING TALL OPEN SHELVING",
+                    "supplier": "Polytec",
+                    "specs_or_description": "Black Wenge - Venette",
+                    "notes": "",
+                    "page_no": 1,
+                    "row_order": 1,
+                    "tags": ["door_colours"],
+                    "provenance": {},
+                }
+            ]
+        )
+        self.assertEqual(repaired[0]["area_or_item"], "UPPER CABINETRY COLOUR INCLUDING TALL OPEN SHELVING")
+
+    def test_build_appliance_row_strips_placeholder_duplication_and_footer_noise(self) -> None:
+        row = parsing_module._build_appliance_row(
+            "Dishwasher",
+            "N / A - By others By others\nSpecs - TBC\nSpecs - TBC\nSIGNATURE: SIGNED DATE:",
+            "DISHWASHER (KITCHEN) N / A - By others By others\nSpecs - TBC\nSpecs - TBC\nSIGNATURE: SIGNED DATE:",
+            "Colour Selection.pdf",
+            [{"page_no": 9, "text": "DISHWASHER (KITCHEN) N / A - By others Specs - TBC"}],
+            0.72,
+        )
+        self.assertIsNotNone(row)
+        self.assertEqual(row.model_no, "N / A - By others")
+        self.assertNotIn("SIGNATURE", row.evidence_snippet)
+        self.assertNotIn("By others By others", row.evidence_snippet)
+        self.assertNotIn("Specs - TBC Specs - TBC", row.evidence_snippet)
+
+    def test_imperial_hanging_rail_description_from_pipe_separated_page_text(self) -> None:
+        evidence = (
+            "Oval aluminum wardrobe tube, 15mm x | "
+            "Oval aluminum wardrobe tube, 15mm x | "
+            "30mm x 3.6m, polished aluminum finish | "
+            "Part Number: 1400.36.CP - Chrome Plated | Furnware"
+        )
+        self.assertEqual(
+            parsing_module._imperial_hanging_rail_description_from_evidence(
+                "30mm x 3.6m, polished aluminum finish Part Number: 1400.36.CP - Chrome Plated",
+                evidence,
+            ),
+            "Oval aluminum wardrobe tube, 15mm x 30mm x 3.6m, polished aluminum finish Part Number: 1400.36.CP - Chrome Plated",
+        )
+
+    def test_imperial_extract_non_joinery_blocks_includes_basin_headings_for_sinkware(self) -> None:
+        text = """
+SINKWARE & TAPWARE
+SINKWARE (KITCHEN) Sink Mounting - Undermount - Boston 853x461x255 Butler Sink Double Bowl
+BASIN (MASTER ENSUITE) Basin Mounting - Semi Inset - Bekken IIon Semi Inset Basin White - CPS252070
+BASIN (BATHROOM) Basin Mounting - Semi Inset - Bekken IIon Semi Inset Basin White - CPS252070
+SINKWARE (LAUNDRY) Sink Mounting - Topmount - Flushline 45L Tub Only - CPS130020
+BASIN (POWDER) Basin Mounting - Semi Inset - Bekken IIon Semi Inset Basin White - CPS252070
+"""
+        blocks = parsing_module._imperial_extract_non_joinery_blocks(text, "sinkware")
+        by_room = {room: value for room, value in blocks}
+        self.assertIn("KITCHEN", by_room)
+        self.assertIn("LAUNDRY", by_room)
+        self.assertIn("MASTER ENSUITE", by_room)
+        self.assertIn("BATHROOM", by_room)
+        self.assertIn("POWDER", by_room)
+        self.assertIn("Bekken", by_room["MASTER ENSUITE"])
+        self.assertIn("Bekken", by_room["BATHROOM"])
+        self.assertIn("Bekken", by_room["POWDER"])
+
+    def test_flatten_imperial_rooms_uses_basin_as_sink_fallback(self) -> None:
+        import App.main as app_main
+
+        rows = app_main._flatten_imperial_rooms(
+            {
+                "rooms": [
+                    {
+                        "room_key": "bathroom",
+                        "original_room_label": "BATHROOM",
+                        "room_order": 1,
+                        "material_rows": [],
+                        "sink_info": "",
+                        "basin_info": "Bekken IIon Semi Inset Basin White - CPS252070",
+                        "drawers_soft_close": "",
+                        "hinges_soft_close": "",
+                        "flooring": "Tiled - Recessed Plinth",
+                        "source_file": "source.pdf",
+                        "page_refs": "8",
+                        "evidence_snippet": "",
+                        "confidence": 0.72,
+                    }
+                ]
+            }
+        )
+        self.assertEqual(rows[0]["sink_info"], "Bekken IIon Semi Inset Basin White - CPS252070")
+
+    def test_imperial_verification_checklist_uses_basin_as_sink_fallback(self) -> None:
+        checklist = store._build_imperial_snapshot_verification_checklist(
+            {
+                "rooms": [
+                    {
+                        "room_key": "bathroom",
+                        "original_room_label": "BATHROOM",
+                        "room_name": "BATHROOM",
+                        "room_order": 1,
+                        "page_refs": "8",
+                        "material_rows": [],
+                        "sink_info": "",
+                        "basin_info": "Bekken IIon Semi Inset Basin White - CPS252070",
+                        "drawers_soft_close": "",
+                        "hinges_soft_close": "",
+                        "flooring": "Tiled - Recessed Plinth",
+                    }
+                ]
+            }
+        )
+        sink_items = [item for item in checklist if item.get("field_name") == "sink"]
+        self.assertEqual(len(sink_items), 1)
+        self.assertEqual(sink_items[0]["extracted_value"], "Bekken IIon Semi Inset Basin White - CPS252070")
 
     def _mark_raw_spec_qa_passed(self, job_id: int) -> None:
         verification = store.get_job_snapshot_verification(job_id, "raw_spec")

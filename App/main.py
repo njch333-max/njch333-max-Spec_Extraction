@@ -837,7 +837,7 @@ def _flatten_imperial_rooms(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
                 "original_room_label": _display_value(row.get("original_room_label", "")),
                 "room_order": int(row.get("room_order", 0) or 0),
                 "material_rows": material_rows,
-                "sink_info": _display_value(row.get("sink_info", "")),
+                "sink_info": _display_value(row.get("sink_info", "")) or _display_value(row.get("basin_info", "")),
                 "drawers_soft_close": _normalize_soft_close_display(row.get("drawers_soft_close", ""), "drawer"),
                 "hinges_soft_close": _normalize_soft_close_display(row.get("hinges_soft_close", ""), "hinge"),
                 "flooring": _display_value(row.get("flooring", "")),
@@ -1081,11 +1081,14 @@ def _imperial_material_row_is_door_colour_summary_review_fallback(item: dict[str
         "row_order_drift",
         "cross_row_spillover",
         "supplier_notes_misassignment",
+        "label_contamination",
     }:
         return False
     title = _display_value(item.get("title", ""))
     value = _display_value(item.get("value", ""))
     if not title or not value:
+        return False
+    if "label_contamination" in issue_types and not re.search(r"(?i)\bdoors?\b", title):
         return False
     cleaned_value = parsing._imperial_clean_cabinetry_colour_description(title, value)
     cleaned_notes = parsing._imperial_clean_cabinetry_colour_notes(title, _display_value(item.get("notes", "")))
@@ -1192,6 +1195,15 @@ def _imperial_handle_summary_should_append_fallback_sources(
                 fallback_candidates.append(candidate)
     if not fallback_candidates:
         return False
+    if display_candidates:
+        review_issue_types = _imperial_material_row_review_issue_types(item)
+        if review_issue_types and review_issue_types <= {"row_order_drift", "label_contamination"}:
+            return False
+        has_doors_family = any(re.search(r"(?i)\bDOORS?\s*-", candidate) for candidate in display_candidates)
+        has_drawers_family = any(re.search(r"(?i)\bDRAWERS?\s*-", candidate) for candidate in display_candidates)
+        has_no_handles_family = any(re.search(r"(?i)\bno\s+handles?\b", candidate) for candidate in display_candidates)
+        if (has_doors_family and has_drawers_family) or (has_no_handles_family and (has_doors_family or has_drawers_family)):
+            return False
     for candidate in fallback_candidates:
         if _imperial_summary_value_quality("handles", candidate) < 0:
             continue
@@ -1221,6 +1233,14 @@ def _display_imperial_material_row_title(item: dict[str, Any]) -> str:
     if not title:
         return ""
     title = parsing.normalize_space(re.sub(r"(?i)\(([^)]+)\)\s*\(\1\)", r"(\1)", title))
+    bucket_key = _imperial_summary_bucket_key_for_item(
+        {
+            "title": title,
+            "tags": item.get("tags", []),
+        }
+    )
+    if bucket_key == "handles" or re.search(r"(?i)\b(?:handles?|knob)\b", title):
+        return title
     provenance = item.get("provenance", {})
     if not isinstance(provenance, dict):
         return title
@@ -1291,6 +1311,8 @@ def _imperial_summary_bucket_key_for_item(item: dict[str, Any]) -> str:
 def _imperial_material_row_is_summary_worthy(item: dict[str, Any], bucket_key: str) -> bool:
     title = _display_value(item.get("title", ""))
     value = _display_value(item.get("value", ""))
+    display_value = _display_value(item.get("display_value", "")) or value
+    supplier = _display_value(item.get("supplier", ""))
     if bucket_key == "handles" and not value:
         display_lines = [
             _display_value(line)
@@ -1305,6 +1327,11 @@ def _imperial_material_row_is_summary_worthy(item: dict[str, Any], bucket_key: s
                 value = " | ".join(fallback_sources)
     title_upper = title.upper()
     value_upper = value.upper()
+    material_candidates = (
+        _imperial_summary_material_candidates(bucket_key, display_value, supplier)
+        if bucket_key in {"door_colours", "bench_tops"}
+        else []
+    )
     normalized_value = {
         "door_colours": _normalize_door_colour_summary_value(value),
         "handles": _normalize_imperial_handle_summary_value(value),
@@ -1341,9 +1368,20 @@ def _imperial_material_row_is_summary_worthy(item: dict[str, Any], bucket_key: s
         )
     if bucket_key == "door_colours":
         if not re.search(r"(?i)\b(?:colour|frame|bar back|panel)\b", title):
-            return False
+            if not (
+                "door_colours" in {str(tag).strip().lower() for tag in item.get("tags", []) if str(tag).strip()}
+                and re.search(r"(?i)\bdoors?\b", title)
+                and material_candidates
+                and not re.search(
+                    r"(?i)\b(?:handle|fingerpull|bevel edge|kethy|allegra|momo|bronte|knob|touch catch|no handles?)\b",
+                    display_value,
+                )
+            ):
+                return False
         if re.search(r"(?i)\b(?:internals?|kickboards?|open shelving|drawers?\b)\b", title):
             return False
+        if material_candidates:
+            return True
         if re.search(r"(?i)\b(?:gpo|spice tray|drawer gpo|lighting|led strip|bin\b|casters?|handle|fingerpull|knob)\b", value):
             return False
         return True
@@ -2287,7 +2325,18 @@ def _build_imperial_material_summary(snapshot: dict[str, Any]) -> dict[str, dict
                         summary_texts = _imperial_material_row_handle_summary_candidates(item)
                     else:
                         summary_texts = []
-                        for source_text in [item["value"]]:
+                        source_texts: list[str] = []
+                        for display_line in item.get("display_lines", []) or []:
+                            normalized_line = _display_value(display_line)
+                            if normalized_line and normalized_line not in source_texts:
+                                source_texts.append(normalized_line)
+                        for source_text in (
+                            _display_value(item.get("display_value", "")),
+                            _display_value(item.get("value", "")),
+                        ):
+                            if source_text and source_text not in source_texts:
+                                source_texts.append(source_text)
+                        for source_text in source_texts:
                             summary_texts.extend(
                                 _imperial_summary_values_for_bucket(
                                     bucket_key,
@@ -2401,6 +2450,7 @@ def _split_material_values(value: Any) -> list[str]:
 
 def _normalize_door_colour_summary_value(value: str) -> str:
     text = parsing.normalize_space(value)
+    text = re.sub(r"(?i)^INCLUDING\b\s*", "", text)
     text = re.sub(r"(?i)\bCOLOURED?\b", "", text)
     text = re.sub(r"(?i)\bREFER TO DRAWINGS(?: FOR ALLOCATIONS)?\b.*$", "", text)
     text = re.sub(r"(?i)\bBLUM\s+AVENTOS\b.*$", "", text)
@@ -2436,9 +2486,12 @@ def _normalize_handle_summary_value(value: str) -> str:
     return _strip_summary_location_tail(
         text,
         (
+            r"(?i)\bhandle located\b.*$",
             r"(?i)\bdoor location\b.*$",
             r"(?i)\bdown\s*drawer location\b.*$",
             r"(?i)\bdrawer location\b.*$",
+            r"(?i)\bhorizontal\s+on\s+drawers?\b.*$",
+            r"(?i)\bvertical\s+on\s+doors?\b.*$",
             r"(?i)\b(?:centre|center)\s+to\s+profile\b.*$",
             r"(?i)\bto\s+(?:base|upper|overhead|base cabinets?|upper cabinets?|cabinet locations?)\b.*$",
         ),
@@ -2447,6 +2500,8 @@ def _normalize_handle_summary_value(value: str) -> str:
 
 def _normalize_imperial_handle_summary_value(value: str) -> str:
     text = parsing.normalize_space(value)
+    if not text or re.fullmatch(r"(?i)none", text):
+        return ""
     if re.fullmatch(r"\[[^\]]+\](?:\s*-\s*)?", text):
         return ""
     text = re.sub(r"^\[[^\]]+\]\s*-\s*", "", text)
@@ -2467,6 +2522,7 @@ def _normalize_imperial_handle_summary_value(value: str) -> str:
     )
     text = re.sub(r"(?i)\b(?:Furnware|Titus Tekform|Polytec|Laminex|Kethy|Allegra|Momo|Barchie|Lincoln Sentry|ABI Interiors)\b\s*-\s*", "", text)
     text = re.sub(r"(?i)\b(?:Furnware|Titus Tekform|Polytec|Laminex|Kethy|Allegra|Momo|Barchie|Lincoln Sentry|ABI Interiors)\b$", "", text).strip(" -|;,")
+    text = re.sub(r"(?i)^on\s+Upper\s+cabinetry\s*-\s*Finger\s+pull\s+only\b", "No handles on Upper cabinetry - Finger pull only", text)
     text = re.sub(r"(?i)\b(?:Horizontal|Vertical)\s+Install\b.*$", "", text).strip(" -|;,")
     text = re.sub(r"(?i)\bKnobs?\s+on\s+Doors?,?\s*", "", text).strip(" -|;,")
     text = re.sub(r"(?i)\bKnobs?\s+on\s+Doors?,?\s+Handles?\s+on\s+Drawers?(?:\s*\([^)]*\))?\b.*$", "", text).strip(" -|;,")
@@ -2539,7 +2595,7 @@ def _normalize_imperial_handle_summary_value(value: str) -> str:
     if prefixed_item_match:
         prefixed_text = parsing.normalize_space(prefixed_item_match.group("body")).strip(" -|;,")
         prefixed_text = re.sub(r"(?i)\b(DRAWERS?|DOORS?)\s*-\s*", lambda m: f"{m.group(1).upper()} - ", prefixed_text, count=1)
-        return prefixed_text
+        return _normalize_handle_summary_value(prefixed_text)
     knob_match = re.search(
         r"(?i)\b(?P<body>(?:[A-Z][A-Za-z0-9& ]+\s*-\s*)?(?:Woodgate\s+Round\s+Cabinet\s+Knob|[^|]*?\b(?:cabinet\s+)?knob\b[^|]*?)(?:SKU:Part No:\s*[A-Z0-9.]+)?)",
         text,
@@ -2577,6 +2633,8 @@ def _normalize_imperial_handle_summary_value(value: str) -> str:
             text,
         )
     )
+    if re.search(r"(?i)\bno\s+handles?\s+on\s+upper\s+cabinetry\b", text) and re.search(r"(?i)\bfinger\s+pull\s+only\b", text):
+        return "No handles on Upper cabinetry - Finger pull only"
     if re.search(r"(?i)\bno\s+handles?\b", text) and not complex_markers and not re.search(r"(?i)\bbevel\s+edge\s+finger\s+pull\b", text):
         return "No handles"
     if re.search(r"(?i)\btouch\s+catch\b", text):
@@ -2994,7 +3052,12 @@ def _imperial_semantic_handle_summary_candidates(value: str) -> list[str]:
             if not re.fullmatch(r"(?i)SO-2163-[A-Z0-9-]+", value)
         ]
     _append_candidates(fallback_values)
-    return _filter_candidates(candidate_pool)
+    filtered_candidates = _filter_candidates(candidate_pool)
+    if any(re.search(r"(?i)\bno\s+handles?\s+on\s+upper\s+cabinetry\b", candidate) for candidate in filtered_candidates):
+        filtered_candidates = [
+            candidate for candidate in filtered_candidates if candidate.lower() != "no handles"
+        ] or filtered_candidates
+    return filtered_candidates
 
 
 def _normalize_benchtop_summary_value(value: str) -> str:
@@ -3054,6 +3117,10 @@ def _imperial_summary_material_candidates(
     text = parsing.normalize_space(raw_value)
     if not text or bucket_key not in {"door_colours", "bench_tops"}:
         return []
+    text = re.sub(r"^\[[^\]]+\]\s*-\s*", "", text).strip()
+    analysis_text = parsing.normalize_space(
+        re.sub(r"(?i)\((Vertical Grain|Horizontal Grain)\)", r"\1", text)
+    )
     candidates: list[str] = []
     colour_code_patterns = (
         r"(?i)\b([A-Za-z][A-Za-z ]+?)\s*-\s*Natural\s*-\s*Colour Code:\s*(\d{2,4})\b",
@@ -3061,7 +3128,7 @@ def _imperial_summary_material_candidates(
         r"(?i)\b([A-Za-z][A-Za-z ]+?)\s*-\s*Colour Code:\s*(\d{2,4})\b",
     )
     for pattern in colour_code_patterns:
-        for match in re.finditer(pattern, text):
+        for match in re.finditer(pattern, analysis_text):
             material = parsing.normalize_space(match.group(1))
             code = parsing.normalize_space(match.group(2))
             if not material or not code:
@@ -3081,7 +3148,7 @@ def _imperial_summary_material_candidates(
     woodmatt_pattern = re.compile(
         r"(?i)\b([A-Za-z][A-Za-z ]+?)\s*-\s*(Woodmatt|Matt)(?:\s*\([^)]*\))?(?:\s*-\s*(Vertical Grain|Horizontal Grain))?\b"
     )
-    for match in woodmatt_pattern.finditer(text):
+    for match in woodmatt_pattern.finditer(analysis_text):
         material = parsing.normalize_space(match.group(1))
         finish = parsing.normalize_space(match.group(2))
         grain = parsing.normalize_space(match.group(3) or "")
@@ -3106,6 +3173,72 @@ def _imperial_summary_material_candidates(
         normalized = _normalize_benchtop_summary_value(composed) if bucket_key == "bench_tops" else _normalize_door_colour_summary_value(composed)
         if normalized and normalized not in candidates:
             candidates.append(normalized)
+    finish_suffix_pattern = re.compile(
+        r"(?i)\b([A-Za-z][A-Za-z ]+?)\s+(Woodmatt|Matt)\b(?:\s*-\s*(Style\s+\d+\s*-\s*[A-Za-z0-9 ]+))?(?:\s*-\s*(Vertical Grain|Horizontal Grain))?\b"
+    )
+    for match in finish_suffix_pattern.finditer(analysis_text):
+        material = parsing.normalize_space(match.group(1))
+        finish = parsing.normalize_space(match.group(2))
+        style = parsing.normalize_space(match.group(3) or "")
+        grain = parsing.normalize_space(match.group(4) or "")
+        if not material or material.upper() in {"STYLE", "PROFILE", "NATURAL", "STANDARD"}:
+            continue
+        supplier_hint = _imperial_summary_material_supplier(
+            bucket_key,
+            analysis_text,
+            supplier,
+            material_kind="woodmatt",
+        )
+        material_with_finish = parsing.normalize_space(f"{material} {finish}")
+        composed = " - ".join(part for part in (supplier_hint, material_with_finish, style, grain) if part)
+        normalized = _normalize_benchtop_summary_value(composed) if bucket_key == "bench_tops" else _normalize_door_colour_summary_value(composed)
+        if normalized and normalized not in candidates:
+            candidates.append(normalized)
+    textured_finish_pattern = re.compile(
+        r"(?i)\b([A-Za-z][A-Za-z' ]+?)\s*-\s*(Venette|Ravine)\b"
+    )
+    for match in textured_finish_pattern.finditer(analysis_text):
+        material = parsing.normalize_space(match.group(1))
+        finish = parsing.normalize_space(match.group(2))
+        if not material or material.upper() in {"STYLE", "PROFILE", "NATURAL", "STANDARD"}:
+            continue
+        material = re.sub(
+            r"(?i)^.*?\b(?:reface\s+all|doors?|drawers?|panels?|single\s+hanging|robe\s+hatshelf\s+on\s+support\s+rails)\b\s*",
+            "",
+            material,
+        ).strip(" -;,/")
+        material = parsing.normalize_space(material)
+        if not material:
+            continue
+        supplier_hint = _imperial_summary_material_supplier(
+            bucket_key,
+            text,
+            supplier,
+            material_kind="woodmatt",
+        )
+        composed = " - ".join(part for part in (supplier_hint, material, finish) if part)
+        normalized = _normalize_benchtop_summary_value(composed) if bucket_key == "bench_tops" else _normalize_door_colour_summary_value(composed)
+        if normalized and normalized not in candidates:
+            candidates.append(normalized)
+    stone_pattern = re.compile(
+        r"(?is)\b(\d+\s*mm\s+Stone)\b.*?\b(\d{3,4}\s+[A-Za-z][A-Za-z ]+?)\s*-\s*([A-Z]{1,4})\b"
+    )
+    for match in stone_pattern.finditer(analysis_text):
+        thickness = parsing.normalize_space(match.group(1))
+        material = parsing.normalize_space(match.group(2))
+        code = parsing.normalize_space(match.group(3))
+        if not thickness or not material or not code:
+            continue
+        supplier_hint = _imperial_summary_material_supplier(
+            bucket_key,
+            text,
+            supplier,
+            material_kind="stone",
+        )
+        composed = " - ".join(part for part in (supplier_hint, thickness, f"{material} - {code}") if part)
+        normalized = _normalize_benchtop_summary_value(composed) if bucket_key == "bench_tops" else _normalize_door_colour_summary_value(composed)
+        if normalized and normalized not in candidates:
+            candidates.append(normalized)
     return candidates
 
 
@@ -3127,6 +3260,13 @@ def _imperial_summary_values_for_bucket(
         material_candidates = _imperial_summary_material_candidates(bucket_key, raw_value, supplier)
         if material_candidates:
             candidates = material_candidates
+        elif re.search(
+            r"(?i)\b(?:raw\s+gyprock|sliding\s+robe\s+doors|standard\s+whiteboard\s+internals|robe\s+hatshelf|single\s+hanging|adjustable\s+shelves)\b",
+            raw_value,
+        ):
+            candidates = []
+        elif bucket_key == "bench_tops" and re.search(r"(?i)\b(?:cut-?outs?|GPO'?S?)\b", raw_value):
+            candidates = []
     for candidate in candidates:
         normalized_candidate = normalizer(candidate)
         normalized = _display_value(
@@ -3135,6 +3275,8 @@ def _imperial_summary_values_for_bucket(
         if not normalized or normalized in values:
             continue
         if bucket_key == "handles" and re.match(r"(?i)^(?:pto|drawers?|benchseat)$", normalized):
+            continue
+        if bucket_key == "handles" and normalized.lower() == "none":
             continue
         if bucket_key == "handles" and re.match(
             r"(?i)^(?:base|upper|overhead|tall|pantry|chute)\s+(?:doors?|drawers?|cabs?|cabinets?)$",
@@ -3168,12 +3310,12 @@ def _imperial_material_row_handle_summary_candidates(item: dict[str, Any]) -> li
     if not isinstance(item, dict):
         return []
     supplier = _display_value(item.get("supplier", ""))
-    summary_sources: list[str] = []
     display_lines = [
         _display_value(line)
         for line in item.get("display_lines", []) or []
         if _display_value(line)
     ]
+    summary_sources: list[str] = []
     if display_lines:
         summary_sources.extend(display_lines)
     display_value = _display_value(item.get("display_value", "")) or _display_value(item.get("value", ""))
@@ -3182,11 +3324,60 @@ def _imperial_material_row_handle_summary_candidates(item: dict[str, Any]) -> li
         _display_value(item.get("specs_or_description", "")),
         _display_value(item.get("notes", "")),
     )
+    display_line_candidates: list[str] = []
+    for line in display_lines:
+        for candidate in _imperial_summary_values_for_bucket(
+            "handles",
+            line,
+            _normalize_imperial_handle_summary_value,
+            supplier=supplier,
+        ):
+            if candidate and candidate not in display_line_candidates:
+                display_line_candidates.append(candidate)
     if not display_value:
         display_value = raw_composed_value
-    if display_value:
+    combined_candidates: list[str] = []
+    for combined_source in (display_value, raw_composed_value):
+        if not combined_source:
+            continue
+        for candidate in _imperial_summary_values_for_bucket(
+            "handles",
+            combined_source,
+            _normalize_imperial_handle_summary_value,
+            supplier=supplier,
+        ):
+            if candidate and candidate not in combined_candidates:
+                combined_candidates.append(candidate)
+    display_line_families = parsing._imperial_handle_display_line_family_keys(display_line_candidates)
+    combined_families = parsing._imperial_handle_display_line_family_keys(combined_candidates)
+    use_display_lines_as_truth = (
+        bool(display_line_candidates)
+        and (
+            (
+                len(display_lines) >= 2
+                and (
+                    not combined_candidates
+                    or all(
+                        any(_imperial_summary_values_equivalent("handles", candidate, existing) for existing in display_line_candidates)
+                        for candidate in combined_candidates
+                    )
+                )
+            )
+            or (
+                display_line_families
+                and combined_families
+                and combined_families <= display_line_families
+            )
+            or any(
+                parsing._imperial_handle_text_has_foreign_section_pollution(source_text)
+                for source_text in (display_value, raw_composed_value)
+                if source_text
+            )
+        )
+    )
+    if display_value and not use_display_lines_as_truth:
         summary_sources.append(display_value)
-    if raw_composed_value and raw_composed_value not in summary_sources:
+    if raw_composed_value and raw_composed_value not in summary_sources and not use_display_lines_as_truth:
         summary_sources.append(raw_composed_value)
     if _imperial_material_row_is_handle_summary_review_fallback(item):
         if (not display_lines) or _imperial_handle_summary_should_append_fallback_sources(item, display_lines):

@@ -161,6 +161,7 @@
   - preserving the existing checkpoint/history/restore flow
 - `.github/PULL_REQUEST_TEMPLATE.md` and `.github/CODEOWNERS` define the default review shape once the remote repository is connected.
 - Expected review focus for parser work is regression safety rather than code style: room-local ownership, builder-specific finalizers, PDF QA gating, and UI/export/schema consistency.
+- `IMPERIAL_GRID_TRACKER.md` is the durable execution tracker for Imperial structural work. It maps the current codebase to three staged phases (`Grid Truth`, `Row Assembly`, `Semantic / Summary`) and records the live regression matrix, open blockers, and next target so Imperial work does not depend on chat-session memory.
 - Operational rule: use `fix this bug` as the default path for PDF-grounded live defects with a clear target field/room/result. Use `review this PR` when the code change affects shared parser flow, grouped-row cleanup, builder finalizers, or PDF QA state transitions.
  - `tests/fixtures/imperial_37867_gold.json` is the highest-priority Imperial regression fixture. Any change that affects Imperial raw rows, row order, handle preservation, summary grouping, or retained bottom fields must pass that fixture before broader Imperial reruns.
   - parse table-style rows so `BENCHTOPS`, `SPLASHBACK`, `UPPER CABINETRY COLOUR + TALL CABINETS`, `BASE CABINETRY COLOUR`, `KICKBOARDS`, and `HANDLES` stay on their own row boundaries
@@ -240,6 +241,10 @@
 18. Shared UI density is intentionally tighter than the original baseline; the common stylesheet should shrink fonts and spacing to roughly 75% visual scale across jobs, builders, QA, and spec-list pages without using browser-level zoom.
 19. Room-card sorting should treat grouped vanity titles such as `VANITIES` as part of the vanity/bathroom priority bucket instead of leaving them in generic `Other`.
 20. Imperial debug metadata such as issue types, repair verdicts, order hints, and revalidation hints remain available in backend snapshot payloads, but the default frontend rendering suppresses them unless a debug-oriented UI is introduced later.
+21. Ongoing Imperial structural work is tracked outside the rendered UI in `IMPERIAL_GRID_TRACKER.md`. The intended implementation order is:
+  - strengthen `ImperialSeparatorModel` and separator provenance in `extraction_service.py`
+  - stabilize `AREA / ITEM` anchored row assembly before later parsing stages
+  - then tighten semantic subitems and summary inputs in `parsing.py` / `main.py`
 
 ### 3.7 Upload Interaction
 1. Job detail uses the existing upload POST route.
