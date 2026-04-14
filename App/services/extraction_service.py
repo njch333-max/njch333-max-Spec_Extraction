@@ -1256,6 +1256,8 @@ _IMPERIAL_TABLE_REPAIR_ROW_SPECS: tuple[tuple[str, str, str], ...] = (
     (r"(?i)^WALL\s+RUN\s+BENCHTOP\b", "WALL RUN BENCHTOP", "material"),
     (r"(?i)^DESK\s+BENCHTOP\s+AND\s+DESK\s+BASE\s+CABINETRY\s+COLOUR\b", "DESK BENCHTOP AND DESK BASE CABINETRY COLOUR", "material"),
     (r"(?i)^FEATURE\s+COLOUR\s+BAR\s+BACK\s*\+\s*BAR\s+BACK\s+DOOR\b", "FEATURE COLOUR BAR BACK + BAR BACK DOOR", "material"),
+    (r"(?i)^FEATURE\s+BAR\s+BACK\b", "FEATURE BAR BACK", "material"),
+    (r"(?i)^BAR\s+BACK\b", "BAR BACK", "material"),
     (r"(?i)^UPPER\s+CABINETRY\s+COLOUR\s*\+\s*FRIDGE\s+PANELS?\s+AND\s+FRIDGE\s+OVERHEAD\b", "UPPER CABINETRY COLOUR + FRIDGE PANELS AND FRIDGE OVERHEAD", "material"),
     (r"(?i)^UPPER\s+CABINETRY\s+COLOUR\s*\+\s*TALL\s+CABINETS?\b", "UPPER CABINETRY COLOUR + TALL CABINETS", "material"),
     (r"(?i)^BASE\s*\+\s*OVERHEAD(?:S)?\s*\+\s*OPEN\s+OVERHEADS?\s*\+\s*TALLS?\b", "BASE + OVERHEAD + OPEN OVERHEADS + TALLS", "material"),
@@ -3116,7 +3118,7 @@ def _imperial_five_column_item_starts_row(area_or_item: str) -> bool:
     if not cleaned or _imperial_five_column_item_is_label_continuation(cleaned):
         return False
     upper = cleaned.upper()
-    if upper in {"AREA / ITEM", "COLOUR", "HIGH", "TALL", "LAUNDRY", "DESK"}:
+    if upper in {"AREA / ITEM", "COLOUR", "HIGH", "TALL", "LAUNDRY", "DESK", "PROFILE"}:
         return False
     if any(
         marker in upper
@@ -3135,7 +3137,7 @@ def _imperial_five_column_item_starts_row(area_or_item: str) -> bool:
         return False
     return bool(
         re.search(
-            r"(?i)\b(?:benchtop|colour|cabinetry|handles?|knob|kickboards?|splashback|upstand|bin|lighting|rail|accessories|floating shelves?|open shelves?|frame|drawers?|doors?|gpo|internals?|shelving|bookshelf|partitions|ironing\s+board|trouser\s+rack|hanging\s+rail|robe\s+internals?|moulding|decorative flutes?|panelling|profile|drawer handle position|door(?:\s+and\s+drawer)?\s+profile|glass doors only|back and sides(?: of island)?)\b",
+            r"(?i)\b(?:benchtop|colour|cabinetry|handles?|knob|kickboards?|splashback|upstand|bin|lighting|rail|accessories|floating shelves?|open shelves?|frame|drawers?|doors?|gpo|internals?|shelving|bookshelf|partitions|ironing\s+board|trouser\s+rack|hanging\s+rail|robe\s+internals?|moulding|decorative flutes?|panelling|profile|drawer handle position|door(?:\s+and\s+drawer)?\s+profile|glass doors only|bar back|back and sides(?: of island)?)\b",
             cleaned,
         )
     )
@@ -3388,6 +3390,22 @@ def _should_defer_imperial_word_grid_fragment_to_next_row(
         return bool(
             re.search(
                 r"(?i)\b(?:handles?|tall door handles?|high split handle|voda profile handle|momo|tekform|knob|bevel edge|finger pull|no handles?)\b",
+                fragment_text,
+            )
+        )
+    if "BAR BACK" in next_label_upper and "CABINETRY COLOUR" in current_label:
+        return bool(
+            re.search(
+                r"(?i)\b(?:profile\s*panel|calcutta|bar\s+back|panel\b|to\s+bar\s+back\s+only)\b",
+                fragment_text,
+            )
+        )
+    if next_label_upper == "FLOATING SHELVES" and (
+        "BAR BACK" in current_label or "CABINETRY COLOUR" in current_label
+    ):
+        return bool(
+            re.search(
+                r"(?i)\b(?:tasmanian|oak|woodmatt|floating\s+shelves?|51mm\s+thick|steel\s+support|bullnose|square\s+edge)\b",
                 fragment_text,
             )
         )

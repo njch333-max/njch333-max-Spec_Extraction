@@ -41,6 +41,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 ### 4.2 Job Management
 - Create jobs with unique `job_no`.
 - Each job must belong to exactly one Builder.
+- The website job's assigned Builder is the authoritative routing identity for parsing, QA, and regression coverage. PDF header text such as `Client`, `Builder`, logos, or sheet styling must not override that Builder classification.
 - List jobs with status summary.
 - Allow sorting the Jobs list by `Created` or `Last Updated`.
 - Allow `job_no` search from the main job list using partial-match input and explicit submit.
@@ -97,6 +98,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Imperial row-order diagnostics are now advisory only unless a true canonical-order conflict is proven. Mere disagreement between legacy order signals must not mark every row as review-failed or wipe the summary.
 - Imperial continuation handling must prefer complete same-cell / same-band continuation over truncated fragment display. Legitimate continuation fragments such as `Colour Code:`, `Vertical Grain`, `steel support`, `Bullnose edge`, `Square edge`, `anthracite`, `Part Number`, `SKU`, `Std Whiteboard internal`, and `Flat fronts, not curved` must stay with the owning row unless a stronger new-row anchor exists.
 - For all non-drawing table/grid-first page families, values must be read from the recovered table/grid rows first and only lightly normalized afterward. Field ordering and UI presentation must happen after extraction, not before it.
+- Builder routing must stay job-scoped. If a job is assigned to `Imperial` in the app, the parser, QA, and regression expectations must follow the Imperial route even when the uploaded PDF is an Evoca-style, Simonds-style, or otherwise delegated selection sheet.
 - Layout analysis must emit `page_type`, `section_label`, `room_label`, `room_blocks`, and `rows`, and later extraction stages may only read values from those matched blocks instead of scanning freely across the page.
 - After shared structure extraction, every builder must pass through a builder-specific finalizer stage. The shared layer owns page classification, room/row block detection, and common noise cleanup; builder finalizers own final room-title preservation, overlay merge priority, fixture blacklist enforcement, and grouped-row/property-row cleanup.
 - All builders must use the fixed `Global Conservative` profile based on the accepted `37016` output style.
@@ -214,6 +216,8 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - The PDF QA checklist must cover room titles, room material fields, fixtures, soft-close states, flooring, accessories/others, and appliance rows.
 - The latest raw spec snapshot remains visible before QA, but must be clearly marked as `Pending PDF QA` until signed off.
 - Formal spec exports are blocked until the latest raw spec PDF QA status is `passed`.
+- PDF QA signoff is strict source-PDF signoff: each checklist item must be reviewed against the source PDF field-by-field.
+- A non-empty extracted value is not sufficient for `pass`. Bulk `pass/na` signoff based only on value presence is invalid.
 - The PDF QA workflow must support:
   - saving checklist progress,
   - marking a snapshot `passed` only when all checklist items are `pass` or `na`,
@@ -402,6 +406,8 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Imperial jobs now use cell-aware raw material rows as the primary joinery/material output, constrained self-repair to catch row-order and column-spill bugs before persistence, and a dedicated `37867` source-PDF gold fixture as the highest-priority regression gate for room order, row order, handle preservation, and summary accuracy.
 - Imperial jobs now also rely on explicit second-pass issue detection and revalidation to decide whether repaired rows may participate in `Material Summary`, while frontend diagnostics remain hidden by default and live acceptance is anchored by `job 60 / run 2037` for the continuation-heavy desk/shelf family.
 - Imperial structural parser work now uses `IMPERIAL_GRID_TRACKER.md` as the durable execution tracker. That file is the authoritative place for locked decisions, staged grid/row/semantic phases, the live Imperial regression matrix, open blockers, and the next acceptance target.
+- Imperial structural work now treats `grid boundary recovery` as the first truth layer. If `AREA / ITEM` and `SPECS / DESCRIPTION` bleed together, that is a structure-layer defect and must be fixed before relying on downstream cleanup, summary normalization, or PDF QA signoff.
+- For Imperial room cards, `AREA / ITEM` must prefer the original table label text from the source cell. Internal normalization may still support tags and constrained repair, but the UI must not synthesize a different title unless the original label is actually missing.
 - The completion workflow for confirmed changes includes deployment to `spec.lxtransport.online`, successful service restarts, and live verification on the affected page or job.
 - SQLite persists Builders, Jobs, files, run history, raw results, and reviewed results.
 - Worker can process queued spec and drawing runs separately from the web process.

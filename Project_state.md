@@ -28,6 +28,9 @@
 - Workflow rule is now explicit:
   - default to `fix this bug` for specific live defects that are already PDF-grounded
   - use `review this PR` for shared parser, grouped-row, builder-finalizer, or PDF-QA state-flow changes
+- Builder classification is website-owned, not PDF-owned:
+  - parsing, QA scope, and regression routing follow the job's assigned Builder in the app
+  - PDF header text such as `Client`, `Builder`, logos, or sheet styling may describe the source document but must not override the website Builder route
 - Application code is implemented:
   - FastAPI web app
   - SQLite persistence
@@ -99,6 +102,8 @@
   - Imperial continuation/display assembly now prefers fuller accepted layout/raw-row continuation over truncated visual-subrow snippets, which fixed the continuation-heavy desk/shelf family on `job 60`
   - `job 60 / run 2037 / build local-c061c5e6` is the current live continuation acceptance sample: desk/robe/study/shelf rows restored to source-PDF fidelity and PDF QA passed (`65 pass / 26 na / 0 fail / 0 pending`)
   - `IMPERIAL_GRID_TRACKER.md` now exists as the durable execution tracker for Imperial structure work; it records locked decisions, staged grid/row/semantic phases, the Imperial regression matrix (`52 / 55 / 56 / 59 / 60 / 61 / 62`), current blockers, and the next live acceptance target
+  - Imperial structure work now explicitly treats `grid boundary recovery` as the first truth layer: if `AREA / ITEM` and `SPECS / DESCRIPTION` bleed together, the defect is tracked as a separator / row-assembly failure rather than a summary-only issue
+  - Imperial room cards now have a locked display rule that `AREA / ITEM` should prefer the original table label text where available; parser normalization is still allowed internally for tags and constrained repair, but the UI should not invent a cleaner replacement title unless the original label is missing
 - all room cards and exports now support a global `Tall` material field for tall cabinets / tall doors / tall panels when the source provides that split
 - room cards and exports now also support optional `Floating Shelf`, conditional `Shelf`, explicit `LED Yes/No`, dedicated `LED Note`, ordered `Accessories`, and curated accessory `Others` rows
   - `Shelf` is now restricted to WIL/WIR/WIP/linen/robe-fit-out style rooms; a plain `PANTRY` keeps `Shelf` only when its local evidence clearly shows walk-in/open-shelving fit-out wording such as `WIP`, `Open Shelving`, or `Shelving Only`
@@ -203,9 +208,12 @@
 - Confirmed implementation work is only done after production deployment and live verification succeed on `spec.lxtransport.online`
 - Parser-accuracy work is only done after the affected live rerun is checked against the source PDF, not just against an older webpage or snapshot
 - All new `spec` parse runs now default to field-level PDF QA. A parser fix is not considered complete until the latest live run passes that QA against the source PDF.
+- `Field-level PDF QA signoff` is strict source-PDF signoff. Each checklist item must be checked against the source PDF itself; non-empty extracted values are not enough for `pass`.
+- Bulk `pass/na` write-backs based only on checklist value presence are invalid and must not be treated as accepted signoff.
 
 ## Remaining Work
-- Continue driving Imperial structure work from `IMPERIAL_GRID_TRACKER.md` instead of ad hoc sample-by-sample cleanup, with `job 62` currently acting as the next live blocker
+- Continue driving Imperial structure work from `IMPERIAL_GRID_TRACKER.md` instead of ad hoc sample-by-sample cleanup
+- Re-open `job 64` under strict PDF QA. The earlier bulk `pass/na` write-back was invalid because it did not perform field-by-field source-PDF review.
 - Refine OCR fallback for image-heavy PDFs
 - Improve room-section detection for more builder formats
 - Improve official product URL lookup accuracy, size extraction coverage, and brand coverage

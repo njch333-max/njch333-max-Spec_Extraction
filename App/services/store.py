@@ -794,15 +794,17 @@ def _build_snapshot_verification_checklist(snapshot: dict[str, Any]) -> list[dic
         if not isinstance(appliance, dict):
             continue
         entity_label = _verification_text(appliance.get("appliance_type", "")) or "Appliance"
-        extracted_value = " | ".join(
-            value
-            for value in (
-                _verification_text(appliance.get("make", "")),
-                _verification_text(appliance.get("model_no", "")),
-                _verification_text(appliance.get("overall_size", "")),
+        extracted_value = _verification_appliance_evidence_text(appliance)
+        if not extracted_value:
+            extracted_value = " | ".join(
+                value
+                for value in (
+                    _verification_text(appliance.get("make", "")),
+                    _verification_text(appliance.get("model_no", "")),
+                    _verification_text(appliance.get("overall_size", "")),
+                )
+                if value
             )
-            if value
-        )
         _append_verification_item(
             checklist,
             section_type="appliance",
@@ -829,6 +831,7 @@ def _build_snapshot_verification_checklist(snapshot: dict[str, Any]) -> list[dic
 
 def _build_imperial_snapshot_verification_checklist(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     checklist: list[dict[str, Any]] = []
+    appliance_row_fallbacks: dict[str, str] = {}
     rooms = snapshot.get("rooms", [])
     ordered_rooms = sorted(
         [room for room in rooms if isinstance(room, dict)],
@@ -913,6 +916,26 @@ def _build_imperial_snapshot_verification_checklist(snapshot: dict[str, Any]) ->
                     area_or_item=area_or_item,
                     tags=tags,
                 )
+                source_page_refs = _verification_text(item.get("page_no", "")) or room_page_refs
+                row_bucket = primary_tag or "other_material"
+                field_name = f"{row_bucket}: {area_or_item}"
+                _append_verification_item(
+                    checklist,
+                    section_type="room",
+                    entity_label=room_label,
+                    field_name=field_name,
+                    extracted_value=extracted_value,
+                    source_page_refs=source_page_refs,
+                )
+                appliance_label_key = _verification_appliance_label_key(area_or_item)
+                if appliance_label_key and extracted_value:
+                    existing_appliance_fallback = appliance_row_fallbacks.get(appliance_label_key, "")
+                    if (
+                        not existing_appliance_fallback
+                        or _verification_appliance_text_quality(extracted_value)
+                        > _verification_appliance_text_quality(existing_appliance_fallback)
+                    ):
+                        appliance_row_fallbacks[appliance_label_key] = extracted_value
                 if primary_tag not in summary_entries:
                     continue
                 if not _imperial_verification_row_is_summary_worthy(
@@ -923,16 +946,6 @@ def _build_imperial_snapshot_verification_checklist(snapshot: dict[str, Any]) ->
                     item=item,
                 ):
                     continue
-                field_name = f"{primary_tag}: {area_or_item}"
-                source_page_refs = _verification_text(item.get("page_no", "")) or room_page_refs
-                _append_verification_item(
-                    checklist,
-                    section_type="room",
-                    entity_label=room_label,
-                    field_name=field_name,
-                    extracted_value=extracted_value,
-                    source_page_refs=source_page_refs,
-                )
                 summary_source_values: list[str] = []
                 for source_text in display_lines:
                     if source_text and source_text not in summary_source_values:
@@ -1000,6 +1013,35 @@ def _build_imperial_snapshot_verification_checklist(snapshot: dict[str, Any]) ->
                 extracted_value=extracted_value,
                 source_page_refs=room_page_refs,
             )
+    appliances = snapshot.get("appliances", [])
+    for appliance in appliances if isinstance(appliances, list) else []:
+        if not isinstance(appliance, dict):
+            continue
+        entity_label = _verification_text(appliance.get("appliance_type", "")) or "Appliance"
+        extracted_value = _verification_appliance_evidence_text(appliance)
+        fallback_value = appliance_row_fallbacks.get(_verification_appliance_label_key(entity_label), "")
+        if fallback_value and _verification_appliance_text_quality(fallback_value) > _verification_appliance_text_quality(
+            extracted_value
+        ):
+            extracted_value = fallback_value
+        if not extracted_value:
+            extracted_value = " | ".join(
+                value
+                for value in (
+                    _verification_text(appliance.get("make", "")),
+                    _verification_text(appliance.get("model_no", "")),
+                    _verification_text(appliance.get("overall_size", "")),
+                )
+                if value
+            )
+        _append_verification_item(
+            checklist,
+            section_type="appliance",
+            entity_label=entity_label,
+            field_name="appliance",
+            extracted_value=extracted_value,
+            source_page_refs=_verification_text(appliance.get("page_refs", "")),
+        )
     live_summary = _verification_live_imperial_material_summary(snapshot)
     for bucket_key, label in (
         ("door_colours", "Door Colours"),
@@ -1039,6 +1081,30 @@ def _verification_live_imperial_material_summary(snapshot: dict[str, Any]) -> di
     except Exception:
         return {}
     return {}
+
+
+def _verification_appliance_evidence_text(appliance: dict[str, Any]) -> str:
+    return _verification_text(
+        parsing._clean_appliance_capture_text(str(appliance.get("evidence_snippet", "") or ""))
+    )
+
+
+def _verification_appliance_label_key(value: str) -> str:
+    normalized = _verification_text(value).upper()
+    normalized = re.sub(r"[^A-Z0-9]+", " ", normalized)
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def _verification_appliance_text_quality(value: str) -> float:
+    cleaned = _verification_text(value)
+    if not cleaned:
+        return 0.0
+    quality = float(len(re.findall(r"[A-Za-z0-9]+", cleaned)))
+    quality += 2.0 if " - " in cleaned else 0.0
+    quality += 1.5 if cleaned.startswith("[") else 0.0
+    if re.search(r"(?i)\b(?:built in|drink|beverage|slimline hood|drain tray|wok|marine grade)\b", cleaned):
+        quality += 2.0
+    return quality
 
 
 def _imperial_verification_summary_bucket_key(tags: list[str]) -> str:
@@ -1298,6 +1364,26 @@ def _verification_imperial_summary_overlap_ratio(left: str, right: str) -> float
     return float(len(shared)) / float(min(len(left_tokens), len(right_tokens)))
 
 
+def _verification_imperial_summary_finish_tokens(text: str) -> set[str]:
+    normalized = _verification_text(text).upper()
+    if not normalized:
+        return set()
+    tokens: set[str] = set()
+    finish_patterns = (
+        ("RAVINE", r"\bRAVINE\b"),
+        ("VENETTE", r"\bVENETTE\b"),
+        ("WOODMATT", r"\bWOODMATT\b"),
+        ("MATT", r"\bMATT\b|\bMATTE\b"),
+        ("NATURAL", r"\bNATURAL\b"),
+        ("GLOSS", r"\bGLOSS\b"),
+        ("ULTRAMATT", r"\bULTRAMATT\b"),
+    )
+    for token, pattern in finish_patterns:
+        if re.search(pattern, normalized):
+            tokens.add(token)
+    return tokens
+
+
 def _verification_imperial_handle_summary_identity_tokens(text: str) -> set[str]:
     normalized = _verification_text(text)
     if not normalized:
@@ -1356,9 +1442,36 @@ def _verification_imperial_summary_values_equivalent(bucket_key: str, left: str,
     if left_text.lower() == right_text.lower():
         return True
     if bucket_key == "handles":
+        generic_handle_values = {"push to open", "no handles", "bevel edge finger pull"}
         left_identity = _verification_imperial_handle_summary_identity_tokens(left_text)
         right_identity = _verification_imperial_handle_summary_identity_tokens(right_text)
         if left_identity and right_identity and left_identity != right_identity:
+            return False
+        if left_identity and right_identity and left_identity == right_identity:
+            def _handle_family(text: str) -> str:
+                if re.search(r"(?i)\bDRAWERS?\s*-", text):
+                    return "drawers"
+                if re.search(r"(?i)\bDOORS?\s*-", text):
+                    return "doors"
+                if re.search(r"(?i)\b(?:no\s+handles?|touch\s+catch|push\s+to\s+open)\b", text):
+                    return "generic"
+                return ""
+            left_family = _handle_family(left_text)
+            right_family = _handle_family(right_text)
+            if left_family and left_family == right_family:
+                return True
+            if (left_text.lower() in generic_handle_values and right_family) or (
+                right_text.lower() in generic_handle_values and left_family
+            ):
+                return False
+            if not left_family or not right_family:
+                return True
+        if left_text.lower() in generic_handle_values or right_text.lower() in generic_handle_values:
+            return False
+    if bucket_key == "door_colours":
+        left_finishes = _verification_imperial_summary_finish_tokens(left_text)
+        right_finishes = _verification_imperial_summary_finish_tokens(right_text)
+        if left_finishes and right_finishes and left_finishes != right_finishes:
             return False
     left_tokens = _verification_imperial_summary_anchor_token_set(bucket_key, left_text)
     right_tokens = _verification_imperial_summary_anchor_token_set(bucket_key, right_text)
@@ -1643,12 +1756,12 @@ def _verification_normalize_imperial_handle_summary_value(value: str) -> str:
         text,
     )
     text = re.sub(
-        r"(?i)\b(?:Furnware|Titus Tekform|Polytec|Laminex|Kethy|Allegra|Momo|Barchie|Lincoln Sentry|ABI Interiors)\b\s*-\s*",
+        r"(?i)\b(?:Furnware|Titus Tekform|Polytec|Laminex|Kethy|Allegra|Barchie|Lincoln Sentry|ABI Interiors)\b\s*-\s*",
         "",
         text,
     )
     text = re.sub(
-        r"(?i)\b(?:Furnware|Titus Tekform|Polytec|Laminex|Kethy|Allegra|Momo|Barchie|Lincoln Sentry|ABI Interiors)\b$",
+        r"(?i)\b(?:Furnware|Titus Tekform|Polytec|Laminex|Kethy|Allegra|Barchie|Lincoln Sentry|ABI Interiors)\b$",
         "",
         text,
     ).strip(" -|;,")
@@ -1657,6 +1770,10 @@ def _verification_normalize_imperial_handle_summary_value(value: str) -> str:
         return "UPPER - FINGERPULL"
     if re.search(r"(?i)\bBASE\s*-\s*BEVEL\s+EDGE\s+FINGERPULL\b", text):
         return "BASE - BEVEL EDGE FINGERPULL"
+    if re.search(r"(?i)\bno\s+handles?\s+on\s+(?:upper\s+cabinetry|uppers?)\b", text) and re.search(r"(?i)\bfinger\s+pull\s+only\b", text):
+        return "No handles on Upper cabinetry - Finger pull only"
+    if re.search(r"(?i)\bno\s+handles?\s+on\s+(?:upper\s+cabinetry|uppers?)\b", text) and re.search(r"(?i)\bPTO(?:\s+where\s+required)?\b", text):
+        return "No handles on Upper cabinetry - PTO where required"
     tall_code_match = re.search(r"(?i)\b(?:TALL\s*-\s*)?(S225\.280\.MBK)\b", text)
     if tall_code_match:
         return f"TALL - {parsing.normalize_space(tall_code_match.group(1)).rstrip('.') }."
@@ -1701,6 +1818,18 @@ def _verification_normalize_imperial_handle_summary_value(value: str) -> str:
         if re.search(r"(?i)\bBlack\s+Olive\s+Colour\b", text):
             base = f"{base} - Black Olive Colour"
         return parsing.normalize_space(base)
+    square_d_match = re.search(
+        r"(?i)\b(?:TALLS?\s*-\s*)?7202\s+Square\s+D\s+Handle\s+Brushed(?:\s*\|\s*|\s+)Anthracite\s+320mm\s*-\s*(608\.8E18\.320\.016)\b",
+        text,
+    )
+    if square_d_match:
+        return f"TALLS - 7202 Square D Handle Brushed Anthracite 320mm - {parsing.normalize_space(square_d_match.group(1))}"
+    voda_ba_match = re.search(
+        r"(?i)\b(?:BASES?\s*-\s*)?2163\s+Voda\s+Profile\s+Handle\s+Brushed(?:\s*\|\s*|\s+)Anthracite\s*-\s*(SO-2163-200-BA\s*&\s*SO-2163-300-BA|SO-2163-200-BA&SO-2163-300-BA)\b",
+        text,
+    )
+    if voda_ba_match:
+        return f"BASES - 2163 Voda Profile Handle Brushed Anthracite - {parsing.normalize_space(voda_ba_match.group(1).replace('&', ' & '))}"
     complex_markers = bool(
         re.search(
             r"(?i)\b(?:tall door handles?|high split handle|voda profile handle|hinoki|tekform|so-[a-z0-9-]+|hin[0-9a-z.-]+|benchseat drawers\s*-\s*pto)\b",

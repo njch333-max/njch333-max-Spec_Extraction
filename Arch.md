@@ -95,6 +95,7 @@
   - run room-local overlay merge
   - run the builder finalizer
   - render and sort fields only after extraction is complete
+5c. Builder routing identity is owned by the website job record, not by uploaded PDF header text. `Client`, `Builder`, logos, or external sheet branding may describe document origin, but they must not override the parser/finalizer/QA route implied by the job's assigned Builder.
 6. Run heuristic extraction into canonical schema, then rebuild shared fields through `layout_rows -> row-fragment -> row-local mapping` so supplier, model, profile, note, and value text stay attached to the owning row.
 7. Run a builder-finalizer dispatch stage:
    - the shared layer owns page classification, room/row block detection, room-local overlays, and generic noise cleanup
@@ -105,6 +106,7 @@
   - after the five-column cell-aware recovery stage, persist `material_rows` as the primary truth layer instead of treating the split door-colour / benchtop fields as the main output
   - each row carries `area_or_item`, `supplier`, `specs_or_description`, `notes`, `tags`, `page_no`, `row_order`, `confidence`, `needs_review`, and row/cell provenance
   - room order follows spec appearance order, and row order follows source table order; no later display or finalize stage may re-sort Imperial material rows by tag or inferred semantics
+  - this Imperial route still applies when the uploaded PDF is another builder's delegated colour-consult sheet, as long as the website job itself is classified as `Imperial`
 8b. Imperial joinery/material rows now pass through an explicit second-pass control loop before persistence:
   - detect row-local `FieldIssue` objects such as label contamination, cross-row spillover, handle over-splitting, short-value/orphan fragments, and true canonical-order drift
   - generate constrained `RepairCandidate` / `RepairVerdict` records for accepted or pending fixes
@@ -162,6 +164,8 @@
 - `.github/PULL_REQUEST_TEMPLATE.md` and `.github/CODEOWNERS` define the default review shape once the remote repository is connected.
 - Expected review focus for parser work is regression safety rather than code style: room-local ownership, builder-specific finalizers, PDF QA gating, and UI/export/schema consistency.
 - `IMPERIAL_GRID_TRACKER.md` is the durable execution tracker for Imperial structural work. It maps the current codebase to three staged phases (`Grid Truth`, `Row Assembly`, `Semantic / Summary`) and records the live regression matrix, open blockers, and next target so Imperial work does not depend on chat-session memory.
+- Architectural rule for Imperial structure work: `grid boundary recovery` is the upstream truth layer. When `AREA / ITEM` absorbs `SPECS / DESCRIPTION`, or merged-cell content spills across rows, the fix belongs in separator recovery / row assembly first, not in summary cleanup or UI-only patching.
+- Display rule for Imperial room cards: preserve the source-table `AREA / ITEM` label when it is available. Parser-side normalization remains valid for tags, matching, and constrained repair, but the rendered title should not replace the original label text with a synthesized variant.
 - Operational rule: use `fix this bug` as the default path for PDF-grounded live defects with a clear target field/room/result. Use `review this PR` when the code change affects shared parser flow, grouped-row cleanup, builder finalizers, or PDF QA state transitions.
  - `tests/fixtures/imperial_37867_gold.json` is the highest-priority Imperial regression fixture. Any change that affects Imperial raw rows, row order, handle preservation, summary grouping, or retained bottom fields must pass that fixture before broader Imperial reruns.
   - parse table-style rows so `BENCHTOPS`, `SPLASHBACK`, `UPPER CABINETRY COLOUR + TALL CABINETS`, `BASE CABINETRY COLOUR`, `KICKBOARDS`, and `HANDLES` stay on their own row boundaries
@@ -205,6 +209,8 @@
 3. `checklist_json` stores field-level items such as room title, benchtops, cabinetry colour splits, toe kick, bulkheads, floating shelf, shelf, handles, accessories/others, sink/basin/tap, drawers/hinges/flooring, and appliance rows.
 3a. Imperial joinery/material QA is now an explicit exception: the primary checklist focus is `material_rows` correctness, tag correctness, summary correctness, and the retained bottom fields (`Drawers`, `Hinges`, `Flooring`, `Sink`). `Tap` is intentionally excluded from Imperial primary QA.
 4. The PDF QA page edits those checklist items directly and can save, mark pass, or mark fail.
+4a. Final PDF QA signoff is source-PDF, field-by-field signoff. A checklist item is not `pass` merely because `extracted_value` is non-empty.
+4b. Automated bulk `pass/na` writes based only on non-empty extracted values are invalid as final signoff and must not be recorded as accepted QA.
 5. `passed` is only valid when every checklist item is `pass` or `na` and no item is `fail`.
 6. Raw snapshots remain visible while QA is pending or failed, but formal exports are blocked until the latest raw-spec verification is `passed`.
 
