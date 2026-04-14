@@ -21671,7 +21671,7 @@ def _finalize_evoca_rooms(
 
         # If raw-text recovery confirms the Underbench colour/finish is explicitly blank,
         # treat any structure-first base colour value as spillover and clear it.
-        if data.get("_underbench_colour_blank") and "door_colours_base" not in data:
+        if data.get("_underbench_colour_blank"):
             row["door_colours_base"] = ""
         for list_field in ("toe_kick", "bulkheads", "handles"):
             if list_field in data:
