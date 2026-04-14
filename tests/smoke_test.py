@@ -14167,6 +14167,49 @@ H55784Z03AU
         overlay = extraction_service._extract_generic_layout_overlay(section, documents=documents)
         self.assertEqual(overlay["original_room_label"], "Ensuite 3")
 
+    def test_extract_generic_layout_overlay_strips_anchor_echo_from_drawers_other_item(self) -> None:
+        section = {
+            "original_section_label": "Kitchen",
+            "page_type": "joinery",
+            "file_name": "evoca.pdf",
+            "page_nos": [8],
+            "text": "Kitchen",
+            "layout_rows": [
+                {"row_label": "Drawers", "value_region_text": "Drawers", "supplier_region_text": "Drawers", "notes_region_text": "", "row_kind": "material"},
+                {
+                    "row_label": "Standard",
+                    "value_region_text": "Standard",
+                    "supplier_region_text": "1x Set of 4 Drawers with Cutlery Tray to 1st Drawer",
+                    "notes_region_text": "",
+                    "row_kind": "material",
+                },
+                {
+                    "row_label": "Pot",
+                    "value_region_text": "Pot",
+                    "supplier_region_text": "2 x Banks of 3 Drawers",
+                    "notes_region_text": "",
+                    "row_kind": "material",
+                },
+                {
+                    "row_label": "Bin",
+                    "value_region_text": "Bin",
+                    "supplier_region_text": "Pull out bin system (2 x 29 Litre bins& 450mm wide)",
+                    "notes_region_text": "",
+                    "row_kind": "accessory",
+                },
+            ],
+        }
+        overlay = extraction_service._extract_generic_layout_overlay(section, documents=[])
+        self.assertEqual(
+            overlay["other_items"],
+            [
+                {
+                    "label": "Drawers",
+                    "value": "1x Set of 4 Drawers with Cutlery Tray to 1st Drawer - 2 x Banks of 3 - Pull out bin system (2 x 29 Litre bins& 450mm wide)",
+                }
+            ],
+        )
+
     def test_resolve_generic_room_label_from_documents_handles_vanity_proxy_room(self) -> None:
         row = {
             "original_room_label": "Vanity",
@@ -19736,6 +19779,7 @@ H55784Z03AU
                     {
                         "raw_text": (
                             "15 CABINETS\n"
+                            "All Cabinets include Soft Close Hinges & Runners, lined internally with White Melamine & includes ABS edging.\n"
                             "Kitchen\n"
                             "No shelf to cupboard underneath sink\n"
                             "- Benchtops\nManufacturer Quantum Quartz\nColour Champagne\nIsland Colour As Above\nEdge Profile 20mm Arissed\nIsland Edge Profile 40mm Arissed\nWaterfall End to Island Not Applicable\n"
@@ -19787,11 +19831,24 @@ H55784Z03AU
         self.assertEqual(kitchen["door_colours_base"], "Polytec - Belgian Oak Matt")
         self.assertIn("Finger Grip", " | ".join(kitchen["handles"]))
         self.assertEqual(kitchen["splashback"], "Champagne Quantum Zero Stone Splashback")
+        self.assertEqual(kitchen["drawers_soft_close"], "Soft Close")
+        self.assertEqual(kitchen["hinges_soft_close"], "Soft Close")
         laundry = next(row for row in rooms if row["room_key"] == "laundry")
         self.assertEqual(laundry["door_colours_base"], "Polytec - Belgian Oak Matt")
         self.assertIn("Spin Gun Metal Gooseneck", laundry["tap_info"])
+        self.assertIn("4062-128-TG", " | ".join(laundry["handles"]))
+        self.assertIn("Door Handle", " | ".join(laundry["handles"]))
+        self.assertEqual(laundry["drawers_soft_close"], "Soft Close")
+        self.assertEqual(laundry["hinges_soft_close"], "Soft Close")
         bathroom = next(row for row in rooms if row["room_key"] == "bathroom")
         self.assertIn("Eden Bench Mount", bathroom["basin_info"])
+        self.assertIn("4062-128-TG", " | ".join(bathroom["handles"]))
+        self.assertEqual(bathroom["drawers_soft_close"], "Soft Close")
+        self.assertEqual(bathroom["hinges_soft_close"], "Soft Close")
+        ensuite = next(row for row in rooms if row["room_key"] == "ensuite")
+        self.assertIn("4062-128-TG", " | ".join(ensuite["handles"]))
+        self.assertEqual(ensuite["drawers_soft_close"], "Soft Close")
+        self.assertEqual(ensuite["hinges_soft_close"], "Soft Close")
         butlers = next(row for row in rooms if row["room_key"] == "butlers")
         self.assertEqual(butlers["bench_tops_other"], "")
         self.assertEqual(butlers["door_colours_base"], "")
@@ -19836,6 +19893,8 @@ H55784Z03AU
         self.assertIn(("Freestanding Stove", "Fisher & Paykel", "OR90SCG1LX1"), signatures)
         self.assertIn(("Rangehood", "Fisher & Paykel", "HP90ICSX4"), signatures)
         self.assertIn(("Dishwasher", "Fisher & Paykel", "DW60FC1X2"), signatures)
+        dishwasher = next(row for row in appliances if row["appliance_type"] == "Dishwasher")
+        self.assertIn("Freestanding", dishwasher["evidence_snippet"])
 
     def test_evoca_finalize_rooms_prefers_table_rows_for_clean_fixture_recovery(self) -> None:
         rooms = [
@@ -19889,21 +19948,21 @@ H55784Z03AU
                             [
                                 ["20 PLUMBING FIXTURES & TAPWARE", None, None, ""],
                                 ["", "Kitchen", None, None],
-                                ["-", "Sink\nModel\nType\nAccessories", "", None],
+                                ["-", "Sink\nManufacturer & Model\nType\nAccessories", "", None],
                                 [None, None, "Burazzo 450mm Gun Metal Single Bowl Sink (BU454525S-GM) ($370)", None],
                                 [None, None, "#N/A\nNot Applicable", None],
                                 ["-", "Sink Mixer\nType\nLocation", "", None],
                                 [None, None, "Zara Gun Metal Pull-Out (ZA120-GM)", None],
                                 [None, None, "Centre of Sink", None],
                                 ["", "Laundry", None, None],
-                                ["-", "Tub\nModel\nType", "", None],
+                                ["-", "Tub\nManufacturer & Model\nType", "", None],
                                 [None, None, "Stella Inset Stainless Steel 45 Litre (YH236C)", None],
                                 [None, None, "Overmount", None],
                                 ["-", "Tub Mixer\nType\nLocation", "", None],
                                 [None, None, "Spin Gun Metal Gooseneck (SP120-GM)", None],
                                 [None, None, "Corner of Tub", None],
                                 ["", "Bathroom", None, None],
-                                ["-", "Basin\nModel\nType", "", None],
+                                ["-", "Basin\nManufacturer & Model\nType", "", None],
                                 [None, None, "Eden Bench Mount Gloss White (FL135-W)", None],
                                 [None, None, "Overmount", None],
                                 ["-", "Basin Mixer\nType\nLocation", "", None],
@@ -19916,6 +19975,20 @@ H55784Z03AU
                         "page_no": 15,
                         "raw_text": "23 TILING / HARD FLOORING Kitchen & Laundry Splashback Champagne Quantum Zero Stone Splashback",
                         "text": "",
+                        "text_blocks": [
+                            {"x0": 26.3, "y0": 40.0, "x1": 175.6, "y1": 52.0, "text": "23 TILING / HARD FLOORING"},
+                            {"x0": 31.0, "y0": 72.0, "x1": 256.1, "y1": 81.0, "text": "-\nSupplier\nBeaumont Tiles"},
+                            {"x0": 47.3, "y0": 86.5, "x1": 84.9, "y1": 95.5, "text": "Tile Range"},
+                            {"x0": 199.6, "y0": 86.5, "x1": 519.4, "y1": 95.5, "text": "Omniform (Floor & Wall), Casper White (Wall), Subway (Kitchen, & Laundry Splashback)"},
+                            {"x0": 47.3, "y0": 101.0, "x1": 100.8, "y1": 110.0, "text": "Floor Tile Type"},
+                            {"x0": 199.6, "y0": 101.0, "x1": 248.5, "y1": 110.0, "text": "Pressed-edge"},
+                            {"x0": 47.3, "y0": 115.5, "x1": 342.7, "y1": 124.5, "text": "Standard Floor Tile Size\n300mm x 300mm OR 450mm x 450mm"},
+                            {"x0": 31.0, "y0": 231.7, "x1": 131.7, "y1": 240.7, "text": "-\nVinyl, Hybrid or Timber"},
+                            {"x0": 70.7, "y0": 246.2, "x1": 342.2, "y1": 255.2, "text": "Type\nEvo Hybrid (1842mm x 230mm x 7mm)"},
+                            {"x0": 70.7, "y0": 260.8, "x1": 94.9, "y1": 269.8, "text": "Colour"},
+                            {"x0": 199.6, "y0": 260.8, "x1": 226.4, "y1": 269.8, "text": "Walnut"},
+                            {"x0": 26.3, "y0": 302.1, "x1": 146.2, "y1": 314.1, "text": "24 GLASS SPLASHBACK"},
+                        ],
                     },
                 ],
             }
@@ -19925,12 +19998,22 @@ H55784Z03AU
         self.assertEqual(kitchen["door_colours_base"], "Polytec - Belgian Oak Matt")
         self.assertIn("Burazzo 450mm Gun Metal Single Bowl Sink", kitchen["sink_info"])
         self.assertIn("Zara Gun Metal Pull-Out", kitchen["tap_info"])
+        self.assertEqual(kitchen["flooring"], "Evo Hybrid (1842mm x 230mm x 7mm) - Walnut")
         laundry = next(row for row in rooms if row["room_key"] == "laundry")
         self.assertIn("Stella Inset Stainless Steel 45 Litre", laundry["sink_info"])
         self.assertIn("Spin Gun Metal Gooseneck", laundry["tap_info"])
+        self.assertIn("4062-128-TG", " | ".join(laundry["handles"]))
+        self.assertIn("Door Handle", " | ".join(laundry["handles"]))
+        self.assertEqual(laundry["flooring"], "Evo Hybrid (1842mm x 230mm x 7mm) - Walnut")
         bathroom = next(row for row in rooms if row["room_key"] == "bathroom")
         self.assertIn("Eden Bench Mount Gloss White", bathroom["basin_info"])
         self.assertIn("Spin Gun Metal Tall Basin Mixer", bathroom["tap_info"])
+        self.assertIn("4062-128-TG", " | ".join(bathroom["handles"]))
+        self.assertIn("Door Handle", " | ".join(bathroom["handles"]))
+        self.assertEqual(
+            bathroom["flooring"],
+            "Beaumont Tiles - Omniform (Floor & Wall), Casper White (Wall), Subway (Kitchen, & Laundry Splashback) - Pressed-edge - 300mm x 300mm OR 450mm x 450mm",
+        )
         butlers = next(row for row in rooms if row["room_key"] == "butlers")
         self.assertEqual(butlers["door_colours_base"], "")
         self.assertEqual(butlers["bench_tops_other"], "")
@@ -19949,8 +20032,11 @@ H55784Z03AU
                             [
                                 ["17 APPLIANCES, ACCESSORIES & HOT WATER UNIT", None, None, ""],
                                 ["-", "Appliances\nFreestanding Cooker\nHot Plate\nSecond Hot Plate\nOven\nSecond Oven\nMicrowave\nRangehood\nDishwasher", "", None],
-                                [None, None, "Fisher & Paykel 900mm Dual Fuel OR90SCG1LX1 (Electric & Gas)", None],
-                                [None, None, "Not Applicable\nNot Applicable", None],
+                                [None, None, "Not Applicable", None],
+                                [None, None, "Fisher & Paykel 900mm 5 Zone Induction Cooktop CI905DTB4 (Electric)", None],
+                                [None, None, "Not Applicable", None],
+                                [None, None, "Fisher & Paykel 900mm Oven OB90S9LEX2 (Electric)", None],
+                                [None, None, "Not Applicable", None],
                                 [None, None, "Not Applicable", None],
                                 [None, None, "Fisher & Paykel 900mm Undermount Rangehood (HP90ICSX4)", None],
                                 [None, None, "Fisher & Paykel 600mm Freestanding (DW60FC1X2)", None],
@@ -19962,9 +20048,12 @@ H55784Z03AU
         ]
         parsing_module._finalize_evoca_appliances(appliances, documents)
         signatures = {(row["appliance_type"], row["make"], row["model_no"]) for row in appliances}
-        self.assertIn(("Freestanding Stove", "Fisher & Paykel", "OR90SCG1LX1"), signatures)
+        self.assertIn(("Cooktop", "Fisher & Paykel", "CI905DTB4"), signatures)
+        self.assertIn(("Oven", "Fisher & Paykel", "OB90S9LEX2"), signatures)
         self.assertIn(("Rangehood", "Fisher & Paykel", "HP90ICSX4"), signatures)
         self.assertIn(("Dishwasher", "Fisher & Paykel", "DW60FC1X2"), signatures)
+        dishwasher = next(row for row in appliances if row["appliance_type"] == "Dishwasher")
+        self.assertIn("Freestanding", dishwasher["evidence_snippet"])
 
     def test_imperial_table_repair_extracts_feature_overheads_as_separate_row(self) -> None:
         raw_text = (
@@ -20360,7 +20449,7 @@ H55784Z03AU
         self.assertEqual(
             merged,
             [
-                "7298-128-TG Door Vertical Drawer Horizontal",
+                "7298-128-TG Door Handle Vertical Drawer Handle Horizontal",
                 "Finger Grip",
             ],
         )

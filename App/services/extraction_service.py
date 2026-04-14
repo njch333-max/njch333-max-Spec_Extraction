@@ -9308,6 +9308,9 @@ def _collect_generic_block_parts(block: dict[str, Any]) -> dict[str, list[str]]:
             parts.setdefault("note", []).append(note_text)
             _append_generic_ordered_fragment(parts, note_text, label=label)
         elif label:
+            text = _strip_generic_anchor_echo(text, anchor_label)
+            if not text:
+                continue
             if _normalize_generic_row_label(text) == label:
                 continue
             parts.setdefault("note", []).append(text)
@@ -9354,6 +9357,24 @@ def _strip_generic_property_prefix(text: str, label: str) -> str:
     pattern = rf"(?i)^\s*{re.escape(normalized_label)}(?:\s*&\s*finish)?\s*:?\s*"
     cleaned = re.sub(pattern, "", cleaned)
     return parsing.normalize_space(cleaned).strip(" -;,")
+
+
+def _strip_generic_anchor_echo(text: str, anchor_label: str) -> str:
+    cleaned = _clean_generic_fragment(text)
+    anchor = parsing.normalize_space(anchor_label)
+    if not cleaned or not anchor:
+        return cleaned
+    anchor_pattern = re.sub(r"\\ ", r"\\s+", re.escape(anchor))
+    prefix_pattern = rf"(?i)^(?:{anchor_pattern}(?:\s*[-:]\s*|\s+))*{anchor_pattern}(?:\s*[-:]\s*|\s+)?"
+    prefix_match = re.match(prefix_pattern, cleaned)
+    stripped = re.sub(prefix_pattern, "", cleaned).strip(" -;,")
+    if stripped:
+        return parsing.normalize_space(stripped)
+    if prefix_match:
+        return ""
+    if re.fullmatch(rf"(?i)(?:{anchor_pattern})(?:\s*[-:]\s*|\s+|$)+", cleaned):
+        return ""
+    return cleaned
 
 
 def _extract_generic_inline_property_pairs(text: str) -> list[tuple[str, str]]:

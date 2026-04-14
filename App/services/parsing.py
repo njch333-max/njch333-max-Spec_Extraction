@@ -21632,7 +21632,19 @@ def _finalize_evoca_rooms(
 ) -> None:
     _finalize_grouped_row_builder_rooms(rooms, overlays, documents)
     recovered = _evoca_collect_room_recovery_data(documents)
+    flooring_values = _evoca_extract_flooring_values(documents)
+    soft_close_default = "Soft Close" if _evoca_has_global_soft_close_note(documents) else ""
     if not recovered:
+        if flooring_values:
+            for row in rooms:
+                flooring_value = _evoca_flooring_for_room(str(row.get("room_key", "") or ""), flooring_values)
+                if flooring_value and not normalize_space(str(row.get("flooring", "") or "")):
+                    row["flooring"] = flooring_value
+        if soft_close_default:
+            for row in rooms:
+                if _evoca_room_has_cabinetry_payload(row):
+                    row["drawers_soft_close"] = soft_close_default
+                    row["hinges_soft_close"] = soft_close_default
         return
     room_index = {_evoca_room_lookup_key(row.get("room_key", "")): row for row in rooms}
     for room_key, data in recovered.items():
@@ -21694,6 +21706,16 @@ def _finalize_evoca_rooms(
         row["bulkheads"] = _evoca_clean_material_entries(row.get("bulkheads", []))
         row["bench_tops"] = _rebuild_benchtop_entries(row)
         row["door_panel_colours"] = _rebuild_door_panel_colours(row)
+    if flooring_values:
+        for row in rooms:
+            flooring_value = _evoca_flooring_for_room(str(row.get("room_key", "") or ""), flooring_values)
+            if flooring_value and not normalize_space(str(row.get("flooring", "") or "")):
+                row["flooring"] = flooring_value
+    if soft_close_default:
+        for row in rooms:
+            if _evoca_room_has_cabinetry_payload(row):
+                row["drawers_soft_close"] = soft_close_default
+                row["hinges_soft_close"] = soft_close_default
 
 
 EVOCA_ROOM_HEADINGS: dict[str, str] = {
@@ -21847,9 +21869,9 @@ _EVOCA_SECTION_DEFAULT_LABELS: dict[str, tuple[str, ...]] = {
     "Underbench": ("Manufacturer", "Colour & Finish", "Kickboard", "Handles", "Door Handle", "Drawer Handle", "Pantry Door Handle", "Bin & Pot Drawers Handle"),
     "Overhead Cupboards": ("Manufacturer", "Colour & Finish", "Handles"),
     "Pantry Doors": ("Manufacturer", "Colour & Finish", "Kickboard", "Handles", "Door Handle", "Drawer Handle"),
-    "Sink": ("Model", "Type", "Accessories"),
-    "Tub": ("Model", "Type"),
-    "Basin": ("Model", "Type"),
+    "Sink": ("Manufacturer & Model", "Type", "Accessories"),
+    "Tub": ("Manufacturer & Model", "Type"),
+    "Basin": ("Manufacturer & Model", "Type"),
     "Sink Mixer": ("Type", "Location"),
     "Tub Mixer": ("Type", "Location"),
     "Basin Mixer": ("Type", "Location"),
@@ -21895,7 +21917,8 @@ def _evoca_collect_subsection_lines(lines: list[str], headings: tuple[str, ...])
         if normalize_space(line).lower() in room_headings:
             break
         canonical = _evoca_canonical_section_header(line).lower()
-        if canonical in {header.lower() for header in _EVOCA_CANONICAL_SECTION_HEADERS} and canonical not in normalized_headings:
+        embedded_field_header = canonical in {"drawers", "shaving cabinets"} and not line.startswith("- ")
+        if canonical in {header.lower() for header in _EVOCA_CANONICAL_SECTION_HEADERS} and canonical not in normalized_headings and not embedded_field_header:
             break
         if line.startswith("- ") and canonical not in normalized_headings:
             break
@@ -22010,7 +22033,9 @@ def _evoca_clean_handle_entries(values: Any) -> list[str]:
         text = normalize_space(str(value or ""))
         if not text or _evoca_is_not_applicable(text):
             continue
-        text = re.sub(r"(?i)\b(?:manufacturer|colour\s*&\s*finish|handles?)\b", "", text)
+        text = re.sub(r"(?i)^\s*manufacturer\b[:\s-]*", "", text)
+        text = re.sub(r"(?i)^\s*colour\s*&\s*finish\b[:\s-]*", "", text)
+        text = re.sub(r"(?i)^\s*handles?\b[:\s-]*", "", text)
         text = re.sub(r"(?i)#n/?a", " ", text)
         text = text.replace("*", " ")
         text = normalize_space(text).strip(" -;,")
@@ -22073,6 +22098,162 @@ def _evoca_extract_splashback_value(documents: list[dict[str, object]]) -> str:
             if value and not _evoca_is_not_applicable(value):
                 return value
     return ""
+
+
+def _evoca_sorted_text_blocks(page: dict[str, Any]) -> list[dict[str, Any]]:
+    return sorted(
+        [
+            block
+            for block in page.get("text_blocks", []) or []
+            if isinstance(block, dict) and normalize_space(str(block.get("text", "") or ""))
+        ],
+        key=lambda block: (float(block.get("y0", 0.0) or 0.0), float(block.get("x0", 0.0) or 0.0)),
+    )
+
+
+def _evoca_right_aligned_block_value(
+    blocks: list[dict[str, Any]],
+    anchor: dict[str, Any],
+    *,
+    y_tolerance: float = 3.5,
+) -> str:
+    anchor_y = float(anchor.get("y0", 0.0) or 0.0)
+    anchor_x1 = float(anchor.get("x1", 0.0) or 0.0)
+    candidates = [
+        normalize_space(str(block.get("text", "") or ""))
+        for block in blocks
+        if abs(float(block.get("y0", 0.0) or 0.0) - anchor_y) <= y_tolerance
+        and float(block.get("x0", 0.0) or 0.0) > anchor_x1 + 12.0
+        and normalize_space(str(block.get("text", "") or ""))
+    ]
+    return normalize_space(" ".join(candidates))
+
+
+def _evoca_extract_block_field_value(
+    blocks: list[dict[str, Any]],
+    label_pattern: str,
+    *,
+    y_min: float = 0.0,
+    y_max: float = 1_000_000.0,
+) -> str:
+    for block in blocks:
+        block_y = float(block.get("y0", 0.0) or 0.0)
+        if block_y < y_min or block_y > y_max:
+            continue
+        raw_text = str(block.get("text", "") or "")
+        lines = [normalize_space(line) for line in raw_text.splitlines() if normalize_space(line)]
+        for index, line in enumerate(lines):
+            if not re.fullmatch(label_pattern, line, re.IGNORECASE):
+                continue
+            inline_value = normalize_space(" ".join(lines[index + 1 :])).strip(" -;,")
+            if inline_value and not _evoca_is_not_applicable(inline_value):
+                return inline_value
+            right_value = _evoca_right_aligned_block_value(blocks, block).strip(" -;,")
+            if right_value and not _evoca_is_not_applicable(right_value):
+                return right_value
+    return ""
+
+
+def _evoca_extract_flooring_values(documents: list[dict[str, object]]) -> dict[str, str]:
+    for document in documents:
+        for page in document.get("pages", []):
+            raw_text = str(page.get("raw_text") or page.get("text") or "")
+            if "23 TILING / HARD FLOORING" not in raw_text.upper():
+                continue
+            blocks = _evoca_sorted_text_blocks(page)
+            if not blocks:
+                continue
+            hybrid_anchor = next(
+                (
+                    block
+                    for block in blocks
+                    if re.search(r"(?i)\bVinyl,\s*Hybrid\s+or\s+Timber\b", normalize_space(str(block.get("text", "") or "")))
+                ),
+                None,
+            )
+            if hybrid_anchor is None:
+                continue
+            hybrid_y = float(hybrid_anchor.get("y0", 0.0) or 0.0)
+            next_section_y = next(
+                (
+                    float(block.get("y0", 0.0) or 0.0)
+                    for block in blocks
+                    if float(block.get("y0", 0.0) or 0.0) > hybrid_y
+                    and re.search(r"(?i)^24\s+GLASS\s+SPLASHBACK\b", normalize_space(str(block.get("text", "") or "")))
+                ),
+                hybrid_y + 200.0,
+            )
+            supplier = _evoca_extract_block_field_value(blocks, r"-?\s*Supplier", y_max=hybrid_y - 1.0)
+            tile_range = _evoca_extract_block_field_value(blocks, r"Tile\s+Range", y_max=hybrid_y - 1.0)
+            floor_tile_type = _evoca_extract_block_field_value(blocks, r"Floor\s+Tile\s+Type", y_max=hybrid_y - 1.0)
+            floor_tile_size = _evoca_extract_block_field_value(blocks, r"Standard\s+Floor\s+Tile\s+Size", y_max=hybrid_y - 1.0)
+            hybrid_type = _evoca_extract_block_field_value(blocks, r"Type", y_min=hybrid_y - 1.0, y_max=next_section_y - 1.0)
+            hybrid_colour = _evoca_extract_block_field_value(blocks, r"Colour", y_min=hybrid_y - 1.0, y_max=next_section_y - 1.0)
+            values: dict[str, str] = {}
+            main_floor = normalize_space(" - ".join(part for part in (hybrid_type, hybrid_colour) if part))
+            if main_floor and not _evoca_is_not_applicable(main_floor):
+                values["main"] = main_floor
+            wet_floor = normalize_space(" - ".join(part for part in (supplier, tile_range, floor_tile_type, floor_tile_size) if part))
+            if wet_floor and not _evoca_is_not_applicable(wet_floor):
+                values["wet"] = wet_floor
+            if values:
+                return values
+    return {}
+
+
+def _evoca_flooring_for_room(room_key: str, flooring_values: dict[str, str]) -> str:
+    normalized_key = normalize_room_key(room_key)
+    if normalized_key in {"kitchen", "butlers", "pantry", "laundry", "study_desk", "make_up_desk"}:
+        return normalize_space(flooring_values.get("main", ""))
+    if normalized_key in {"bathroom", "powder", "ensuite", "ensuite_1", "ensuite_2", "ensuite_3", "ensuite_4", "ensuite_5"}:
+        return normalize_space(flooring_values.get("wet", ""))
+    return ""
+
+
+def _evoca_has_global_soft_close_note(documents: list[dict[str, object]]) -> bool:
+    for document in documents:
+        for page in document.get("pages", []):
+            text = str(page.get("raw_text") or page.get("text") or "")
+            if re.search(r"(?i)\bAll Cabinets include Soft Close Hinges\s*&\s*Runners\b", text):
+                return True
+    return False
+
+
+def _evoca_room_has_cabinetry_payload(row: dict[str, Any]) -> bool:
+    return any(
+        normalize_space(str(row.get(field_name, "") or ""))
+        for field_name in (
+            "bench_tops_wall_run",
+            "bench_tops_island",
+            "bench_tops_other",
+            "door_colours_overheads",
+            "door_colours_base",
+            "door_colours_tall",
+            "door_colours_island",
+            "door_colours_bar_back",
+            "floating_shelf",
+            "shelf",
+            "sink_info",
+            "basin_info",
+            "tap_info",
+            "splashback",
+            "flooring",
+        )
+    ) or bool(_coerce_string_list(row.get("handles", [])))
+
+
+def _evoca_extract_plumbing_model_from_mapping(values: dict[str, Any]) -> str:
+    model = normalize_space(str(values.get("Manufacturer & Model", "") or values.get("Model", "") or ""))
+    if re.fullmatch(r"(?i)\d+\s*x", model):
+        return ""
+    return model
+
+
+def _evoca_extract_plumbing_model_from_lines(lines: list[str]) -> str:
+    model = _evoca_first_field(lines, ("Manufacturer & Model", "Model"))
+    if re.fullmatch(r"(?i)\d+\s*x", normalize_space(model)):
+        return ""
+    return model
 
 
 def _evoca_room_lookup_key(room_key: Any) -> str:
@@ -22319,7 +22500,7 @@ def _evoca_collect_room_recovery_data_from_tables(documents: list[dict[str, obje
         sink_map = _evoca_lookup_section_mapping(sections, "Sink", "Tub", "Basin")
         tap_map = _evoca_lookup_section_mapping(sections, "Sink Mixer", "Tub Mixer", "Basin Mixer")
         values: dict[str, Any] = {"_label": label}
-        model = sink_map.get("Model", "")
+        model = _evoca_extract_plumbing_model_from_mapping(sink_map)
         type_value = sink_map.get("Type", "")
         tap_type = tap_map.get("Type", "")
         location = tap_map.get("Location", "")
@@ -22446,7 +22627,7 @@ def _evoca_collect_room_recovery_data_from_text(documents: list[dict[str, object
         values: dict[str, Any] = {"_label": label}
         sink_lines = _evoca_collect_subsection_lines(lines, ("- Sink", "- Tub", "- Basin"))
         tap_lines = _evoca_collect_subsection_lines(lines, ("- Sink Mixer", "- Tub Mixer", "- Basin Mixer"))
-        model = _evoca_first_field(sink_lines, ("Model",))
+        model = _evoca_extract_plumbing_model_from_lines(sink_lines)
         type_value = _evoca_first_field(sink_lines, ("Type",))
         tap_type = _evoca_first_field(tap_lines, ("Type",))
         location = _evoca_first_field(tap_lines, ("Location",))
@@ -22516,15 +22697,24 @@ def _finalize_evoca_appliances(appliances: list[dict[str, Any]], documents: list
                     lookahead += 1
                 mapped = _evoca_align_table_labels(labels, values)
                 value_pool = [normalize_space(item) for item in values if normalize_space(item)]
-                for appliance_type, source_key in (
-                    ("Freestanding Stove", "Freestanding Cooker"),
-                    ("Rangehood", "Rangehood"),
-                    ("Dishwasher", "Dishwasher"),
+                for appliance_type, source_keys in (
+                    ("Freestanding Stove", ("Freestanding Cooker", "Freestanding Stove")),
+                    ("Cooktop", ("Hot Plate", "Cooktop")),
+                    ("Oven", ("Oven",)),
+                    ("Rangehood", ("Rangehood",)),
+                    ("Dishwasher", ("Dishwasher",)),
                 ):
-                    details = normalize_space(mapped.get(source_key, ""))
+                    details = next(
+                        (normalize_space(mapped.get(source_key, "")) for source_key in source_keys if normalize_space(mapped.get(source_key, ""))),
+                        "",
+                    )
                     if not details:
                         if appliance_type == "Freestanding Stove":
                             details = next((item for item in value_pool if "OR90SCG1LX1" in item.upper()), "")
+                        elif appliance_type == "Cooktop":
+                            details = next((item for item in value_pool if re.search(r"(?i)\b(?:cooktop|induction)\b", item)), "")
+                        elif appliance_type == "Oven":
+                            details = next((item for item in value_pool if re.search(r"(?i)\boven\b", item)), "")
                         elif appliance_type == "Rangehood":
                             details = next((item for item in value_pool if "HP90ICSX4" in item.upper()), "")
                         elif appliance_type == "Dishwasher":
@@ -22532,8 +22722,6 @@ def _finalize_evoca_appliances(appliances: list[dict[str, Any]], documents: list
                     if not details or _evoca_is_not_applicable(details):
                         continue
                     evidence = f"{appliance_type}: {details}"
-                    if appliance_type == "Dishwasher":
-                        evidence = normalize_space(re.sub(r"(?i)\bfreestanding\b", "", evidence))
                     row_data = _build_appliance_row(appliance_type, details, evidence, file_name, [{"page_no": page_no, "text": details}], 0.72)
                     if row_data is None and appliance_type == "Dishwasher":
                         make = _guess_make(details)
@@ -22564,19 +22752,22 @@ def _finalize_evoca_appliances(appliances: list[dict[str, Any]], documents: list
             text = str(page.get("raw_text") or page.get("text") or "")
             if "17 APPLIANCES" not in text.upper():
                 continue
+            recovered_types = {row.appliance_type.lower() for row in recovered}
             patterns = (
                 ("Freestanding Stove", r"Freestanding Cooker\s+(?P<details>Fisher\s*&\s*Paykel.*?OR90SCG1LX1.*?)(?=Hot Plate|Second Hot Plate|Oven\b|Second Oven|Microwave\b|Rangehood\b|Dishwasher\b|$)"),
+                ("Cooktop", r"Hot Plate\s+(?P<details>.*?Cooktop.*?)(?=Second Hot Plate|Oven\b|Second Oven|Microwave\b|Rangehood\b|Dishwasher\b|$)"),
+                ("Oven", r"Oven\s+(?P<details>.*?Oven.*?)(?=Second Oven|Microwave\b|Rangehood\b|Dishwasher\b|$)"),
                 ("Rangehood", r"Rangehood\s+(?P<details>Fisher\s*&\s*Paykel.*?HP90ICSX4.*?)(?=Dishwasher\b|- Hot Water Unit|$)"),
                 ("Dishwasher", r"Dishwasher\s+(?P<details>Fisher\s*&\s*Paykel.*?DW60FC1X2(?:[^\n]*)?)"),
             )
             for appliance_type, pattern in patterns:
+                if appliance_type.lower() in recovered_types:
+                    continue
                 match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
                 if not match:
                     continue
                 details = normalize_space(match.group("details"))
                 evidence = f"{appliance_type}: {details}"
-                if appliance_type == "Dishwasher":
-                    evidence = normalize_space(re.sub(r"(?i)\bfreestanding\b", "", evidence))
                 row = _build_appliance_row(appliance_type, details, evidence, file_name, [page], 0.72)
                 if row is None and appliance_type == "Dishwasher":
                     make = _guess_make(details)
