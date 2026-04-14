@@ -22011,6 +22011,7 @@ def _evoca_clean_handle_entries(values: Any) -> list[str]:
         if not text or _evoca_is_not_applicable(text):
             continue
         text = re.sub(r"(?i)\b(?:manufacturer|colour\s*&\s*finish|handles?)\b", "", text)
+        text = re.sub(r"(?i)#n/?a", " ", text)
         text = text.replace("*", " ")
         text = normalize_space(text).strip(" -;,")
         if text:
