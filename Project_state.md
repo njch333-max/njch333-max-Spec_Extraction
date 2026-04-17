@@ -118,6 +118,7 @@
   - Imperial appliance extraction now has a row-first layout path for appliance pages so placeholder rows such as `Specs - TBC` keep page/evidence and image-column text such as `N / A - By others` does not become the model text
   - Imperial `job 67 / run 2207` is the current hard-boundary acceptance sample: strict source-PDF QA passed after fixing benchtop header bleed, `WFE x 1` visual-break preservation, `Mirrorred` source spelling, seven appliance rows, and sinkware/basin `behind sink/basin` taphole tails
   - Imperial `job 64 / run 2212` is the current targeted ACCESSORIES regression sample: non-adjacent `GPO` spillover now merges back into `ACCESSORIES` and survives later self-repair cleanup
+  - Imperial `job 64 / run 2225` is now strict source-PDF signed off with `61 pass / 1 na / 0 pending`; the cycle verified `ACCESSORIES / GPO`, source-case flooring, `450mm BIN`, `By Imperial` feature cabinetry/handles, Door Colours/Handles/Bench Tops summary grouping, seven appliance rows, and sinkware supplier/mounting/taphole tails
 - all room cards and exports now support a global `Tall` material field for tall cabinets / tall doors / tall panels when the source provides that split
 - room cards and exports now also support optional `Floating Shelf`, conditional `Shelf`, explicit `LED Yes/No`, dedicated `LED Note`, ordered `Accessories`, and curated accessory `Others` rows
   - `Shelf` is now restricted to WIL/WIR/WIP/linen/robe-fit-out style rooms; a plain `PANTRY` keeps `Shelf` only when its local evidence clearly shows walk-in/open-shelving fit-out wording such as `WIP`, `Open Shelving`, or `Shelving Only`
@@ -227,9 +228,9 @@
 
 ## Remaining Work
 - Continue driving Imperial structure work from `IMPERIAL_GRID_TRACKER.md` instead of ad hoc sample-by-sample cleanup
-- Run a targeted fresh live rerun for Imperial `job 64` after the accessory, handle, boundary-straddling label, and supplier-cell ownership rollback fixes; `run 2213` proved the overlay/parser function was correct but final snapshot postprocess still needed to preserve accepted `GPO -> ACCESSORIES`, `run 2214` exposed handle label spillover around `Momo HANDLES oval`, `run 2215` exposed the provenance-only brand-prefix path after the label had already been normalized to `HANDLES`, `run 2216` exposed visual-subrow rebuild trimming that recovered prefix back out, `run 2217` exposed the same prefix loss in display/checklist generation, `run 2218` exposed `450mm BIN` as a label/value boundary-straddle, `run 2219` exposed the same `450mm` prefix being lost from display/checklist visual fragments after raw rows were correct, and `run 2220` exposed `By Imperial` supplier cells being present in provenance but absent from room/checklist values
+- Imperial `job 64` post-Phase-2A rollback cycle is closed on `run 2225 / build local-558f04eb` with strict source-PDF QA `passed` (`61 pass / 1 na / 0 pending`). The verified fixes include accepted `GPO -> ACCESSORIES` preservation, handle label/value spillover recovery, boundary-straddling `450mm BIN`, `By Imperial` supplier-cell backfill, feature-cabinetry summary gating, bench-top separator cleanup, seven appliance rows, and sinkware `By Others` / `Undermount` / taphole-tail repair.
 - When reviewing Imperial debug overlays, treat `unrepaired_grid_rows` as evidence of the original row split only; acceptance must use repaired `grid_rows`, live parser output, and source-PDF QA
-- Re-open `job 64` under strict PDF QA. The earlier bulk `pass/na` write-back was invalid because it did not perform field-by-field source-PDF review.
+- Do not reopen `job 64` unless a new live regression is reported; the earlier invalid bulk signoff has been replaced by strict source-PDF field QA on `run 2225`.
 - Refine OCR fallback for image-heavy PDFs
 - Improve room-section detection for more builder formats
 - Improve official product URL lookup accuracy, size extraction coverage, and brand coverage
