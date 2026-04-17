@@ -258,6 +258,7 @@
   - coalesce adjacent row bands before cell extraction only when separator evidence is soft (`none` / `inferred_low`) and row evidence supports same-cell continuation
   - repair weak-boundary leading fragments at the five-column row assembly layer, for example assigning `GPO` accessory text to the following `ACCESSORIES` row when no hard separator proves a separate row
   - keep debug overlay row semantics aligned with the parser path: repaired rows are shown as `grid_rows`; unrepaired intermediate rows are retained only as `unrepaired_grid_rows`
+  - protect accepted leading-fragment repairs during material-row postprocess, so later accessory cleanup cannot remove the recovered `GPO` prefix before persistence
   - stabilize `AREA / ITEM` anchored row assembly before later parsing stages
   - then tighten semantic subitems and summary inputs in `parsing.py` / `main.py`
 

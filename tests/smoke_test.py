@@ -23101,6 +23101,23 @@ H55784Z03AU
             ["[Furnware] - sockets - Black - (Island bench, front of MW cupboard)"],
         )
 
+    def test_imperial_material_row_display_lines_preserve_repaired_accessories_gpo_prefix(self) -> None:
+        row = {
+            "area_or_item": "ACCESSORIES",
+            "supplier": "",
+            "specs_or_description": "GPO - Double Powerpoint with 2xUSB sockets - Black",
+            "notes": "Island bench, front of MW cupboard",
+            "tags": ["other_material"],
+            "provenance": {
+                "leading_fragment_repair": "gpo_to_accessories",
+                "layout_value_text": "GPO - Double Powerpoint with 2xUSB sockets - Black- (Island bench, front of MW cupboard)",
+            },
+        }
+        self.assertEqual(
+            parsing_module._imperial_material_row_display_lines_for_view(row),
+            ["GPO - Double Powerpoint with 2xUSB sockets - Black - (Island bench, front of MW cupboard)"],
+        )
+
     def test_imperial_extract_non_joinery_blocks_includes_basin_headings_for_sinkware(self) -> None:
         text = """
 SINKWARE & TAPWARE
@@ -23146,6 +23163,35 @@ BASIN (POWDER) Basin Mounting - Semi Inset - Bekken IIon Semi Inset Basin White 
         )
         self.assertEqual(processed[0]["supplier"], "")
         self.assertEqual(processed[0]["specs_or_description"], "sockets - Black")
+        self.assertEqual(processed[0]["notes"], "Island bench, front of MW cupboard")
+
+    def test_imperial_postprocess_material_rows_preserves_leading_fragment_gpo_accessories(self) -> None:
+        processed = parsing_module._imperial_postprocess_material_rows(
+            [
+                {
+                    "area_or_item": "ACCESSORIES",
+                    "supplier": "",
+                    "specs_or_description": "GPO - Double Powerpoint with 2xUSB sockets - Black- (Island bench, front of MW cupboard)",
+                    "notes": "",
+                    "tags": ["other_material"],
+                    "page_no": 1,
+                    "row_order": 7,
+                    "provenance": {
+                        "leading_fragment_repair": "gpo_to_accessories",
+                        "layout_value_text": "GPO - Double Powerpoint with 2xUSB sockets - Black- (Island bench, front of MW cupboard)",
+                        "leading_fragment_row": {
+                            "area_or_item": "GPO",
+                            "specs_or_description": "- Double Powerpoint with 2xUSB",
+                        },
+                    },
+                }
+            ]
+        )
+        self.assertEqual(processed[0]["supplier"], "")
+        self.assertEqual(
+            processed[0]["specs_or_description"],
+            "GPO - Double Powerpoint with 2xUSB sockets - Black",
+        )
         self.assertEqual(processed[0]["notes"], "Island bench, front of MW cupboard")
 
     def test_imperial_postprocess_material_rows_rebuilds_hanging_rail_from_local_evidence(self) -> None:

@@ -8030,8 +8030,9 @@ def _imperial_material_row_display_lines_for_view(row: dict[str, Any]) -> list[s
             ):
                 primary_description_display = normalize_space(layout_description)
             if row_label.upper() == "ACCESSORIES":
-                primary_description_display = _imperial_trim_accessory_row_spillover(primary_description_display)
-                primary_notes_display = _imperial_trim_accessory_row_spillover(primary_notes_display)
+                if not _imperial_accessory_row_preserves_gpo_prefix(provenance):
+                    primary_description_display = _imperial_trim_accessory_row_spillover(primary_description_display)
+                    primary_notes_display = _imperial_trim_accessory_row_spillover(primary_notes_display)
             if re.search(r"(?i)\b(?:BASE|UPPER|OVERHEAD|TALL|ISLAND|FEATURE|FRAME|PANELLING)\s+CABINETRY\s+COLOUR\b", row_label):
                 primary_description_display = _imperial_clean_cabinetry_colour_description(row_label, primary_description_display)
                 primary_notes_display = _imperial_clean_cabinetry_colour_notes(row_label, primary_notes_display)
@@ -8083,8 +8084,9 @@ def _imperial_material_row_display_lines_for_view(row: dict[str, Any]) -> list[s
     ):
         description_display = normalize_space(layout_description)
     if label_text.upper() == "ACCESSORIES":
-        description_display = _imperial_trim_accessory_row_spillover(description_display)
-        notes_display = _imperial_trim_accessory_row_spillover(notes_display)
+        if not _imperial_accessory_row_preserves_gpo_prefix(provenance):
+            description_display = _imperial_trim_accessory_row_spillover(description_display)
+            notes_display = _imperial_trim_accessory_row_spillover(notes_display)
     if re.search(r"(?i)\b(?:cabinetry colour|benchtop|lighting|kickboards|hanging rail)\b", label_text):
         description_display = _imperial_trim_material_row_short_value_spillover(label_text, description_display)
         notes_display = _imperial_trim_material_row_short_value_spillover(label_text, notes_display)
@@ -10519,6 +10521,15 @@ def _imperial_trim_accessory_row_spillover(text: str) -> str:
     return normalize_space(cleaned).strip(" -|;,")
 
 
+def _imperial_accessory_row_preserves_gpo_prefix(provenance: dict[str, Any] | None) -> bool:
+    if not isinstance(provenance, dict):
+        return False
+    return (
+        normalize_space(str(provenance.get("leading_fragment_repair", "") or "")).lower() == "gpo_to_accessories"
+        or bool(provenance.get("merged_gpo_spillover"))
+    )
+
+
 def _imperial_trim_hanging_rail_row_spillover(text: str) -> str:
     cleaned = normalize_space(text)
     if not cleaned:
@@ -10545,6 +10556,7 @@ def _imperial_rebuild_accessory_row_from_provenance(
     provenance: dict[str, Any] | None,
 ) -> tuple[str, str]:
     provenance = provenance if isinstance(provenance, dict) else {}
+    preserve_gpo_prefix = _imperial_accessory_row_preserves_gpo_prefix(provenance)
     prefix_lines = provenance.get("page_text_prefix_lines", [])
     if not isinstance(prefix_lines, list):
         prefix_lines = []
@@ -10560,7 +10572,15 @@ def _imperial_rebuild_accessory_row_from_provenance(
         if cleaned:
             candidates.append(cleaned)
     for candidate in candidates:
-        trimmed = _imperial_trim_accessory_row_spillover(candidate)
+        cleaned_candidate = normalize_space(candidate)
+        if (
+            preserve_gpo_prefix
+            and re.search(r"(?i)\bGPO\b", cleaned_candidate)
+            and re.search(r"(?i)\b(?:double\s+powerpoint|powerpoint|USB|sockets?)\b", cleaned_candidate)
+        ):
+            trimmed = cleaned_candidate
+        else:
+            trimmed = _imperial_trim_accessory_row_spillover(candidate)
         if not trimmed or not re.search(r"(?i)\bsockets?\b", trimmed):
             continue
         trimmed = normalize_space(trimmed).strip(" -|;,")

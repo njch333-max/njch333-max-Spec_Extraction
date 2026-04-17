@@ -103,12 +103,13 @@
 
 ## Next Actions
 - Primary live blocker: none after `job 67 / run 2207` signoff.
-- Current structural target: run a targeted fresh live rerun for `job 64` after Phase 2A overlay/parser verification. The deployed parser now reassigns weak-boundary leading `GPO` fragments into the following `ACCESSORIES` row when the fragment is clearly an accessory value prelude, while preserving visible / `inferred_high` hard boundaries. The debug overlay must be read with `grid_rows` as the post-repair parser view and `unrepaired_grid_rows` as diagnostic evidence only.
+- Current structural target: rerun `job 64` after fixing the downstream postprocess rollback found on fresh run `2213`. The deployed grid/row assembler correctly reassigned the weak-boundary leading `GPO` fragment into `ACCESSORIES`, but parser postprocess then trimmed the accepted `GPO` prefix back out of the final snapshot. The local fix now treats `leading_fragment_repair = gpo_to_accessories` as accepted evidence that must be preserved.
 - Target order:
-  1. Run a targeted live parser rerun for `job 64` before treating the cycle as accepted
-  2. Source-PDF check the rerun for `ACCESSORIES / GPO`, flooring source case, and existing sink/appliance behavior
-  3. Phase 1C only if future overlays cannot explain a boundary; current live overlays are explainable
-  4. Phase 3 semantic follow-up remains later: handle subitems, sinkware cluster-local assignment, and appliance row-first tightening
+  1. Deploy the postprocess rollback fix
+  2. Run a targeted live parser rerun for `job 64`
+  3. Source-PDF check the rerun for `ACCESSORIES / GPO`, flooring source case, and existing sink/appliance behavior
+  4. Phase 1C only if future overlays cannot explain a boundary; current live overlays are explainable
+  5. Phase 3 semantic follow-up remains later: handle subitems, sinkware cluster-local assignment, and appliance row-first tightening
 - Standing rule during live analysis:
   - if `AREA / ITEM` and `SPECS / DESCRIPTION` are bleeding together, treat that as a grid/row-assembly blocker first, not a summary or UI bug
   - do not close a cycle by only cleaning the displayed text if the raw row boundary is still wrong
@@ -147,3 +148,4 @@
 - `2026-04-17`: Phase 2A local implementation added `ACCESSORIES` / `GPO` canonical row specs and a constrained five-column repair for leading `GPO` fragments before `ACCESSORIES`. The repair only fires across soft boundaries and only when `GPO` carries accessory-value evidence such as `Powerpoint`, `USB`, or `socket`; a visible / `inferred_high` boundary blocks the merge. Local tests now cover both the positive `GPO -> ACCESSORIES` ownership repair and the visible-boundary non-merge case. Verification: `python -m compileall App tests tools` passed and `831` smoke tests passed.
 - `2026-04-17`: Phase 2A debug overlay semantics were corrected so `grid_rows` reflects the same repaired row view used by the parser, while `unrepaired_grid_rows` keeps the pre-repair five-column rows for boundary diagnosis. This prevents false live-analysis failures where the parser output is fixed but the overlay still displays an unrepaired intermediate row split.
 - `2026-04-17`: Phase 2A was deployed as build `7c4728e` and `job 64 page 1` overlay was regenerated under `/opt/spec-extraction/tmp/imperial_grid_debug_live_phase2a/job64/`. Verified live: repaired `grid_rows` now shows `BENCHTOP / 20mm Stone WFE's x 2 / By Others` and one `ACCESSORIES / GPO - Double Powerpoint with 2xUSB sockets - Black- (Island bench, front of MW cupboard)` row with `leading_fragment_repair = gpo_to_accessories`; `GPO` remains only in `unrepaired_grid_rows` as the original weak-boundary fragment. The production parser function returned the same rows with `unresolved 0`. A fresh full `job 64` rerun and source-PDF QA are still required before closing the Phase 2A cycle.
+- `2026-04-17`: Fresh `job 64 / run 2213` exposed a downstream rollback: the overlay/parser function preserved the full `GPO - Double Powerpoint with 2xUSB sockets - Black- (Island bench, front of MW cupboard)` value, but final snapshot postprocess reduced it to `sockets - Black` plus notes. Local fix now bypasses legacy accessory `GPO` prefix trimming when provenance has `leading_fragment_repair = gpo_to_accessories` or `merged_gpo_spillover`. Verification: targeted accessory tests passed, `python -m compileall App tests tools` passed, and `833` smoke tests passed.
