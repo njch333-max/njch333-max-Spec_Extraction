@@ -23251,6 +23251,18 @@ H55784Z03AU
             processed[0]["specs_or_description"],
             "450mm Short Pull-Out - (Short drawer on bottom) - 2 x 29Ltr Buckets",
         )
+        processed[0]["provenance"]["visual_fragments"] = [
+            {
+                "area_or_item": "450mm BIN",
+                "specs_or_description": "Short Pull-Out - (Short drawer on bottom) - 2 x 29Ltr Buckets",
+                "supplier": "Furnware",
+                "notes": "",
+            }
+        ]
+        self.assertEqual(
+            parsing_module._imperial_material_row_display_lines_for_view(processed[0]),
+            ["[Furnware] - 450mm Short Pull-Out - (Short drawer on bottom) - 2 x 29Ltr Buckets"],
+        )
 
     def test_imperial_extract_non_joinery_blocks_includes_basin_headings_for_sinkware(self) -> None:
         text = """

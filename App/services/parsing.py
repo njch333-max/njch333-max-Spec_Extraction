@@ -7167,6 +7167,12 @@ def _imperial_visual_fragments_to_display_lines(
                 or (generic_handle_row and not _imperial_handle_block_entry_starts(description))
             ):
                 supplier = ""
+        elif label:
+            cleaned_fragment_label = _imperial_clean_material_row_label_text(label)
+            if cleaned_fragment_label.upper() == row_label.upper():
+                label_spillover = _imperial_extract_material_row_label_spillover(label, cleaned_fragment_label)
+                if label_spillover and label_spillover.upper() not in description.upper():
+                    description = normalize_space(f"{label_spillover} {description}").strip(" -|;,")
         if (
             primary_tag == "handles"
             and label
