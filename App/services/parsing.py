@@ -12588,6 +12588,11 @@ def _imperial_postprocess_material_rows(rows: list[dict[str, Any]]) -> list[dict
             label = f"{label})"
         cleaned_label = _imperial_clean_material_row_label_text(label)
         label_spillover = _imperial_extract_material_row_label_spillover(label, cleaned_label)
+        if not label_spillover:
+            label_spillover = _imperial_extract_material_row_label_spillover_from_provenance(
+                provenance,
+                cleaned_label,
+            )
         if cleaned_label and cleaned_label != label:
             _imperial_record_repair_event(
                 row,
@@ -13358,6 +13363,41 @@ def _imperial_extract_material_row_label_spillover(label: str, cleaned_label: st
         return normalize_brand_casing_text(suffix)
     if resolved.upper() == "FEATURE CABINETRY" and re.fullmatch(r"(?i)open", suffix):
         return "Open"
+    return ""
+
+
+def _imperial_extract_material_row_label_spillover_from_provenance(
+    provenance: dict[str, Any],
+    cleaned_label: str,
+) -> str:
+    resolved = normalize_space(cleaned_label).strip(" -|;,")
+    if resolved.upper() != "HANDLES":
+        return ""
+    candidates: list[str] = []
+    for key in ("raw_area_or_item", "layout_row_label"):
+        value = normalize_space(str(provenance.get(key, "") or ""))
+        if value:
+            candidates.append(value)
+    area_cell = provenance.get("area_or_item", {})
+    if isinstance(area_cell, dict):
+        value = normalize_space(str(area_cell.get("text", "") or ""))
+        if value:
+            candidates.append(value)
+    visual_fragments = provenance.get("visual_fragments", [])
+    if isinstance(visual_fragments, list):
+        for fragment in visual_fragments:
+            if not isinstance(fragment, dict):
+                continue
+            value = normalize_space(str(fragment.get("area_or_item", "") or ""))
+            if value:
+                candidates.append(value)
+    for candidate in _unique(candidates):
+        candidate_label = _imperial_clean_material_row_label_text(candidate)
+        if candidate_label.upper() != "HANDLES":
+            continue
+        spillover = _imperial_extract_material_row_label_spillover(candidate, candidate_label)
+        if spillover:
+            return spillover
     return ""
 
 
