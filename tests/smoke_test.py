@@ -23230,6 +23230,28 @@ H55784Z03AU
             ["[Furnware] - Momo flapp pull handle 256mm in brushed black - FPH256.BBL - (Horizontal on ALL)"],
         )
 
+    def test_imperial_postprocess_material_rows_moves_bin_size_prefix_back_to_description(self) -> None:
+        processed = parsing_module._imperial_postprocess_material_rows(
+            [
+                {
+                    "area_or_item": "450mm BIN",
+                    "supplier": "Furnware",
+                    "specs_or_description": "Short Pull-Out - (Short drawer on bottom) - 2 x 29Ltr Buckets",
+                    "notes": "",
+                    "tags": ["other_material"],
+                    "provenance": {
+                        "area_or_item": {"text": "450mm BIN"},
+                        "specs_or_description": {"text": "Short Pull-Out - (Short drawer on bottom) - 2 x 29Ltr Buckets"},
+                    },
+                }
+            ]
+        )
+        self.assertEqual(processed[0]["area_or_item"], "BIN")
+        self.assertEqual(
+            processed[0]["specs_or_description"],
+            "450mm Short Pull-Out - (Short drawer on bottom) - 2 x 29Ltr Buckets",
+        )
+
     def test_imperial_extract_non_joinery_blocks_includes_basin_headings_for_sinkware(self) -> None:
         text = """
 SINKWARE & TAPWARE

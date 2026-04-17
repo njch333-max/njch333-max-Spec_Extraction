@@ -257,6 +257,7 @@
   - strengthen `ImperialSeparatorModel` and separator provenance in `extraction_service.py`
   - coalesce adjacent row bands before cell extraction only when separator evidence is soft (`none` / `inferred_low`) and row evidence supports same-cell continuation
   - repair weak-boundary leading fragments at the five-column row assembly layer, for example assigning `GPO` accessory text to the following `ACCESSORIES` row when no hard separator proves a separate row
+  - correct boundary-straddling size prefixes during Imperial postprocess, for example moving `450mm` from `AREA / ITEM` back into the `BIN` value when visible grid evidence places it on the description side
   - keep debug overlay row semantics aligned with the parser path: repaired rows are shown as `grid_rows`; unrepaired intermediate rows are retained only as `unrepaired_grid_rows`
   - protect accepted leading-fragment repairs during material-row postprocess, so later accessory cleanup cannot remove the recovered `GPO` prefix before persistence
   - repair handle label/value spillover during material-row postprocess and display/checklist rendering, so contaminated labels such as `Momo HANDLES oval` become `HANDLES` before visual fragments and summary aggregation run, recover valid same-cell brand prefixes from provenance when the final label was already normalized, and prevent visual-subrow cleanup from trimming those accepted prefixes back out

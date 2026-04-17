@@ -13308,6 +13308,8 @@ def _imperial_clean_material_row_label_text(label: str) -> str:
     cleaned = normalize_space(label).strip(" -|;,")
     if not cleaned:
         return ""
+    if re.match(r"(?i)^\d+\s*mm\s+BIN\b", cleaned):
+        return "BIN"
     cleaned = re.sub(r"(?i)^(DOORS?)\s+\d+\s*X\b.*$", lambda match: normalize_space(match.group(1)), cleaned)
     cleaned = re.sub(r"(?i)^(DRAWERS?)\s+\d+\s*X\b.*$", lambda match: normalize_space(match.group(1)), cleaned)
     if re.match(r"(?i)^ACCESSORIES?\s+[a-z]", cleaned):
@@ -13366,6 +13368,10 @@ def _imperial_extract_material_row_label_spillover(label: str, cleaned_label: st
             prefix = normalize_space(original[: handle_match.start()]).strip(" -|;,()")
             if _imperial_is_handle_brand_prefix(prefix):
                 return normalize_brand_casing_text(prefix)
+    if resolved.upper() == "BIN":
+        bin_match = re.match(r"(?i)^(?P<prefix>\d+\s*mm)\s+BIN\b", original)
+        if bin_match:
+            return normalize_space(bin_match.group("prefix"))
     if not original.upper().startswith(resolved.upper()):
         return ""
     suffix = normalize_space(original[len(resolved) :]).strip(" -|;,()")
