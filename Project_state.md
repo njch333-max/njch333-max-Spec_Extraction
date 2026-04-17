@@ -219,7 +219,7 @@
 
 ## Remaining Work
 - Continue driving Imperial structure work from `IMPERIAL_GRID_TRACKER.md` instead of ad hoc sample-by-sample cleanup
-- Deploy and live-verify Imperial Phase 1B row-band coalescing on `job 67`, `job 64`, and `job 62` overlays before moving to Phase 2A row assembly
+- Continue with Imperial Phase 2A row assembly: live Phase 1B overlays verified soft continuation on `job 67` and `job 62`, while `job 64 / GPO / ACCESSORIES` remains an assembler ownership problem rather than a separator-only problem
 - Re-open `job 64` under strict PDF QA. The earlier bulk `pass/na` write-back was invalid because it did not perform field-by-field source-PDF review.
 - Refine OCR fallback for image-heavy PDFs
 - Improve room-section detection for more builder formats

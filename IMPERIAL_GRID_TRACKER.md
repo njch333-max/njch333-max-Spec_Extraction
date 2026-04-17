@@ -103,13 +103,12 @@
 
 ## Next Actions
 - Primary live blocker: none after `job 67 / run 2207` signoff.
-- Current structural target: deploy and live-verify Phase 1B separator-aware row-band coalescing on the representative PDFs from Phase 1A (`job 67`, `job 64`, `job 62`).
+- Current structural target: Phase 2A `AREA / ITEM` anchored row assembly. Phase 1B live overlay proved the grid/coalescing layer can now keep soft same-cell continuation together, but `job 64 / GPO / ACCESSORIES` still needs assembler-level ownership repair because the leading `GPO` fragment is seen before the owning `ACCESSORIES` label.
 - Target order:
-  1. Deploy Phase 1B and regenerate overlays for `job 67`, `job 64`, and `job 62`
-  2. Confirm `BENCHTOP / WFE x 1`, long-label continuation, and visible hard row breaks behave as expected
-  3. If live overlay is correct but output still fails, move to Phase 2A `AREA / ITEM` anchored row assembly
-  4. If overlay still cannot explain the boundary, continue Phase 1C separator solver work
-  5. Phase 3 semantic follow-up remains later: handle subitems, sinkware cluster-local assignment, and appliance row-first tightening
+  1. Phase 2A: explicitly handle leading row fragments that visually precede their owning `AREA / ITEM` label in weak-boundary bands
+  2. Phase 2A: make `AREA / ITEM` anchoring decide whether labels such as `GPO` are real rows or description preludes for a following label like `ACCESSORIES`
+  3. Phase 1C only if overlay cannot explain a boundary; current live overlays are explainable
+  4. Phase 3 semantic follow-up remains later: handle subitems, sinkware cluster-local assignment, and appliance row-first tightening
 - Standing rule during live analysis:
   - if `AREA / ITEM` and `SPECS / DESCRIPTION` are bleeding together, treat that as a grid/row-assembly blocker first, not a summary or UI bug
   - do not close a cycle by only cleaning the displayed text if the raw row boundary is still wrong
@@ -144,3 +143,4 @@
 - `2026-04-17`: Phase 1A grid-debug implementation added page-structure bboxes, cell-ownership provenance, word-level bbox propagation, `content_grid`/footer/table-header debug payloads, and `tools/imperial_grid_debug.py` for JSON/SVG overlay generation under `tmp/imperial_grid_debug/`. Local structural tests now cover bbox provenance, content-grid/footer exclusion, `inferred_low` non-hard-split behavior, and debug artifact generation.
 - `2026-04-17`: Phase 1A was deployed and exercised on real source PDFs for `job 67`, `job 64`, and `job 62`. JSON/SVG overlays were generated under `/opt/spec-extraction/tmp/imperial_grid_debug_live/`. The overlays confirmed correct high-level `content_grid`/footer separation and cell bboxes, but also proved the next blocker: no-boundary or `inferred_low` adjacent bands are still being handed to row assembly as separate bands. Evidence: `job 67 page 1` has `WFE x 1` as a second description band under `BENCHTOP` with no hard separator; `job 64 page 1` has `GPO` and `ACCESSORIES` split across adjacent bands with only weak separator evidence; `job 62 page 2` has `UPPER CABINETRY COLOUR INCLUDING` and `TALL OPEN SHELVING` split by `inferred_low` before a later `inferred_high` separator.
 - `2026-04-17`: Phase 1B local implementation added separator-aware row-band coalescing before cell extraction. `visible` and `inferred_high` separators remain hard boundaries; `none` and `inferred_low` can merge only when the current band is a same-cell continuation or label continuation. Local tests cover `BENCHTOP + WFE x 1`, `UPPER CABINETRY COLOUR INCLUDING + TALL OPEN SHELVING`, visible separator non-merge, `inferred_low` non-hard visual subrows, and a regression that prevents supplier-only `Polytec` preludes from merging into `SPLASHBACK`. Verification: `python -m compileall App tests tools` passed and `829` smoke tests passed.
+- `2026-04-17`: Phase 1B was deployed as build `aad69e3` and live overlays were regenerated under `/opt/spec-extraction/tmp/imperial_grid_debug_live_phase1b/`. Verified live: `job 67 page 1` now emits `BENCHTOP / 40mm Stone WFE x 1` from two coalesced bands (`visible`, `none`); `job 62 page 2` now emits `UPPER CABINETRY COLOUR INCLUDING TALL OPEN SHELVING / Black Wenge - Venette / Polytec` from two coalesced bands; `job 64 page 1` now coalesces `BENCHTOP / WFE's x 2` and keeps the trailing `cupboard)` with `ACCESSORIES`, but still leaves `GPO` as a separate leading row fragment. That remaining case is classified as Phase 2A row-assembler ownership, not Phase 1B separator recovery.
