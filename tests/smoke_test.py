@@ -11356,6 +11356,39 @@ H55784Z03AU
             ],
         )
 
+    def test_imperial_sinkware_parser_keeps_single_word_undermount_and_supplier(self) -> None:
+        text = (
+            "SINKWARE & TAPWARE\n"
+            "AREA / ITEM SPECS / DESCRIPTION IMAGE SUPPLIER NOTES\n"
+            "Burazzo 650mm Stainless Steel Single Bowl\n"
+            "Taphole location: In Stone, centered behind\n"
+            "SINK (PANTRY) Sink (BU654520S)- Sink Mounting - By Others\n"
+            "sink\n"
+            "Undermount\n"
+            "Stella Inset Stainless Steel 45 Litre\n"
+            "SINK (LAUNDRY) By Others Taphole location: In Sink corner LHS\n"
+            "(YH236C) - Sink Mounting - Topmount -\n"
+        )
+        blocks = dict(parsing_module._imperial_extract_non_joinery_blocks(text, "sinkware"))
+        self.assertIn("PANTRY", blocks)
+        self.assertIn("By Others", blocks["PANTRY"])
+        self.assertIn("Undermount", blocks["PANTRY"])
+        self.assertIn("Taphole location: In Stone, centered behind sink", blocks["PANTRY"])
+
+    def test_imperial_fixture_overlay_prefers_complete_supplier_and_mounting_candidate(self) -> None:
+        existing = (
+            "Burazzo 650mm Stainless Steel Single Bowl Sink (BU654520S)- "
+            "Sink Mounting - Taphole location: In Stone, centered behind sink"
+        )
+        candidate = (
+            "Burazzo 650mm Stainless Steel Single Bowl Sink (BU654520S)- "
+            "Sink Mounting - By Others - Taphole location: In Stone, centered behind sink - Undermounted"
+        )
+        self.assertEqual(
+            parsing_module._imperial_prefer_fixture_overlay_text(existing, candidate, "sink"),
+            candidate,
+        )
+
     def test_imperial_assign_sinkware_cluster_parts_keeps_room_specific_lines_local(self) -> None:
         assigned = parsing_module._imperial_assign_sinkware_cluster_parts(
             [

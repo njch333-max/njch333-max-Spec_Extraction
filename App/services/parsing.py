@@ -26005,7 +26005,10 @@ def _imperial_extract_sequential_sinkware_blocks(lines: list[str]) -> list[tuple
         if _imperial_is_supplier_only_line(line):
             index += 1
             continue
-        if re.fullmatch(r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?", normalize_space(line)):
+        if re.fullmatch(r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?", normalize_space(line)) and not re.fullmatch(
+            r"(?i)(?:undermount|undermounted|topmount|topmounted)",
+            normalize_space(line),
+        ):
             index += 1
             continue
         if normalize_space(line).lower() == "behind sink":
@@ -26022,8 +26025,18 @@ def _imperial_extract_sequential_sinkware_blocks(lines: list[str]) -> list[tuple
             continue
         role = _imperial_sinkware_line_role(line)
         note_like = _imperial_is_non_joinery_note_line(line, "sinkware") or bool(
-            re.search(r"(?i)\b(?:part number|product code|undermounted|behind sink|sink pre-?punched hole|centre of sink|center of sink)\b", line)
+            re.search(r"(?i)\b(?:part number|product code|undermount(?:ed)?|behind sink|sink pre-?punched hole|centre of sink|center of sink)\b", line)
         )
+        if role in {"sink", "basin"} and current_room and normalized_line.lower() in {"sink", "basin"} and current_lines:
+            appended_to_taphole = False
+            for recent_index in range(len(current_lines) - 1, max(-1, len(current_lines) - 4), -1):
+                if re.search(r"(?i)\btaphole location\s*:.*\bbehind$", normalize_space(current_lines[recent_index])):
+                    current_lines[recent_index] = normalize_space(f"{current_lines[recent_index]} {normalized_line}")
+                    appended_to_taphole = True
+                    index += 1
+                    break
+            if appended_to_taphole:
+                continue
         if role in {"sink", "basin"}:
             next_is_heading = bool(_imperial_match_sinkware_heading(next_significant_line(index + 1))) or heading_ahead_after_sink_preamble(index + 1)
             if current_room:
@@ -26037,6 +26050,20 @@ def _imperial_extract_sequential_sinkware_blocks(lines: list[str]) -> list[tuple
             index += 1
             continue
         if current_room:
+            if (
+                current_has_primary()
+                and normalized_line.lower() in {"sink", "basin"}
+                and current_lines
+            ):
+                appended_to_taphole = False
+                for recent_index in range(len(current_lines) - 1, max(-1, len(current_lines) - 4), -1):
+                    if re.search(r"(?i)\btaphole location\s*:.*\bbehind$", normalize_space(current_lines[recent_index])):
+                        current_lines[recent_index] = normalize_space(f"{current_lines[recent_index]} {normalized_line}")
+                        appended_to_taphole = True
+                        index += 1
+                        break
+                if appended_to_taphole:
+                    continue
             if current_has_primary() and note_completes_current_primary(line):
                 current_lines.append(line)
                 index += 1
@@ -26612,7 +26639,7 @@ def _imperial_clean_non_joinery_body(body: str, kind: str) -> str:
             continue
         if lines and not _is_imperial_page_noise_line(line) and not re.match(r"(?i)^(?:SINKWARE|TAPWARE|SINK ACCESSORIES|NOTES)\b", line):
             previous = lines[-1]
-            if previous.endswith(("TO", "OF", "IN", "WITH", "UNDERMOUTNED", "UNDERMOUT", "INSTAL", "INSTALLED")) or line[:1].islower():
+            if previous.endswith(("TO", "OF", "IN", "WITH", "UNDERMOUNTED", "UNDERMOUNT", "UNDERMOUTNED", "UNDERMOUT", "INSTAL", "INSTALLED")) or line[:1].islower():
                 lines[-1] = normalize_space(f"{previous} {line}")
                 continue
         lines.append(line)
@@ -26653,9 +26680,6 @@ def _imperial_clean_non_joinery_body(body: str, kind: str) -> str:
                 pending_taphole = False
                 continue
             pending_taphole = False
-        if "UNDERMOUT" in upper:
-            notes.append("Undermounted")
-            continue
         if re.match(r"(?i)^n\s*/?\s*a\b.*\bby others\b", line):
             continue
         if re.match(r"(?i)^.*\bBY IMPERIAL\b$", line):
@@ -26703,6 +26727,7 @@ def _imperial_clean_non_joinery_body(body: str, kind: str) -> str:
         if doubled and doubled in value_text:
             value_text = normalize_space(value_text.replace(doubled, repeated_value)).strip(" -;,")
     if kind == "sinkware":
+        value_text = re.sub(r"(?i)\bUNDERMOUTNED\b", "Undermounted", value_text)
         value_text = re.sub(r"(?i)\bN\s*/\s*A\b(?:\s*-\s*By others(?:\s+By others)?)?", "", value_text).strip(" -;,")
         value_text = re.sub(
             r"(?i)\b(undermount(?:ed)?\s*-\s*specs\s*tbc)\s+\1\b",
@@ -26950,6 +26975,15 @@ def _imperial_prefer_fixture_overlay_text(existing: str, candidate: str, fixture
             re.search(r"(?i)\bTaphole location\s*:\s*.*\b(?:centered|centred)?\s*behind$", existing_text)
         )
         existing_has_any_taphole = bool(re.search(r"(?i)\bTaphole location\s*:", existing_text))
+        candidate_has_supplier = bool(re.search(r"(?i)\bBy Others\b", candidate_text))
+        existing_has_supplier = bool(re.search(r"(?i)\bBy Others\b", existing_text))
+        candidate_has_mounting = bool(re.search(r"(?i)\b(?:undermount(?:ed)?|topmount|above counter)\b", candidate_text))
+        existing_has_mounting = bool(re.search(r"(?i)\b(?:undermount(?:ed)?|topmount|above counter)\b", existing_text))
+        if candidate_has_complete_taphole and (
+            (candidate_has_supplier and not existing_has_supplier)
+            or (candidate_has_mounting and not existing_has_mounting)
+        ):
+            return candidate_text
         if candidate_has_complete_taphole and (existing_has_incomplete_taphole or not existing_has_any_taphole):
             return candidate_text
     return _yellowwood_prefer_overlay_text(existing_text, candidate_text, fixture_kind)
