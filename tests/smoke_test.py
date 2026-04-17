@@ -18139,6 +18139,67 @@ H55784Z03AU
         self.assertEqual(unresolved, [])
         self.assertEqual([row.row_label for row in rows], ["KICKBOARDS", "LIGHTING"])
 
+    def test_imperial_row_assembler_merges_gpo_leading_fragment_into_accessories(self) -> None:
+        page_words = (
+            (10.0, 10.0, 95.0, 20.0, "AREA / ITEM"),
+            (10.0, 310.0, 455.0, 20.0, "SPECS / DESCRIPTION"),
+            (10.0, 650.0, 690.0, 20.0, "IMAGE"),
+            (10.0, 800.0, 860.0, 20.0, "SUPPLIER"),
+            (30.0, 130.0, 150.0, 42.0, "GPO"),
+            (30.0, 310.0, 418.0, 42.0, "- Double Powerpoint with 2xUSB"),
+            (44.0, 120.0, 190.0, 56.0, "ACCESSORIES"),
+            (44.0, 275.0, 305.0, 56.0, "sockets"),
+            (44.0, 315.0, 515.0, 56.0, "- Black- (Island bench, front of MW"),
+            (58.0, 318.0, 365.0, 70.0, "cupboard)"),
+        )
+        rows, unresolved = extraction_service._extract_imperial_joinery_word_grid_rows(
+            page_words,
+            room_scope="KITCHEN",
+            page_no=1,
+            separator_model=extraction_service.ImperialSeparatorModel(),
+        )
+        self.assertEqual(unresolved, [])
+        self.assertEqual([row.row_label for row in rows], ["ACCESSORIES"])
+        self.assertEqual(
+            rows[0].description,
+            "GPO - Double Powerpoint with 2xUSB sockets - Black- (Island bench, front of MW cupboard)",
+        )
+        provenance = rows[0].provenance or {}
+        self.assertEqual(provenance.get("leading_fragment_repair"), "gpo_to_accessories")
+
+    def test_imperial_row_assembler_does_not_merge_gpo_into_accessories_across_visible_separator(self) -> None:
+        page_words = (
+            (10.0, 10.0, 95.0, 20.0, "AREA / ITEM"),
+            (10.0, 310.0, 455.0, 20.0, "SPECS / DESCRIPTION"),
+            (10.0, 650.0, 690.0, 20.0, "IMAGE"),
+            (10.0, 800.0, 860.0, 20.0, "SUPPLIER"),
+            (30.0, 130.0, 150.0, 42.0, "GPO"),
+            (30.0, 310.0, 418.0, 42.0, "- Double Powerpoint with 2xUSB"),
+            (58.0, 120.0, 190.0, 70.0, "ACCESSORIES"),
+            (58.0, 310.0, 390.0, 70.0, "Bin insert"),
+        )
+        separator_model = extraction_service.ImperialSeparatorModel(
+            visible_horizontal_edges=[50.0],
+            visible_horizontal_segments=[
+                {
+                    "orientation": "horizontal",
+                    "edge": 50.0,
+                    "start": 50.0,
+                    "end": 900.0,
+                    "source": "visible_line",
+                    "confidence": "visible",
+                }
+            ],
+        )
+        rows, unresolved = extraction_service._extract_imperial_joinery_word_grid_rows(
+            page_words,
+            room_scope="KITCHEN",
+            page_no=1,
+            separator_model=separator_model,
+        )
+        self.assertEqual(unresolved, [])
+        self.assertEqual([row.row_label for row in rows], ["GPO", "ACCESSORIES"])
+
     def test_imperial_grid_debug_writer_creates_json_and_svg_artifacts(self) -> None:
         from tools import imperial_grid_debug
 

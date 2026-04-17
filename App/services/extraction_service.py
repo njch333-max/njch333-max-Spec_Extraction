@@ -1303,6 +1303,8 @@ _IMPERIAL_TABLE_REPAIR_ROW_SPECS: tuple[tuple[str, str, str], ...] = (
     (r"(?i)^KICKBOARDS?\b", "KICKBOARDS", "material"),
     (r"(?i)^SPLASHBACK\b", "SPLASHBACK", "material"),
     (r"(?i)^BENCHTOP\b", "BENCHTOP", "material"),
+    (r"(?i)^ACCESSORIES\b", "ACCESSORIES", "accessory"),
+    (r"(?i)^GPO'?S?\b", "GPO", "accessory"),
     (r"(?i)^BIN\b", "BIN", "accessory"),
     (r"(?i)^DESK\s+GROMMETS?\b", "DESK GROMMETS", "accessory"),
     (r"(?i)^IRONING\s+BOARD\b", "IRONING BOARD", "accessory"),
@@ -3056,6 +3058,168 @@ def _repair_imperial_five_column_rows(rows: list[ImperialFiveColumnRow]) -> list
             needs_review=False,
         )
 
+    def _row_boundary_is_hard(previous: ImperialFiveColumnRow, upcoming: ImperialFiveColumnRow) -> bool:
+        previous_provenance = _coerce_provenance_dict(previous.provenance)
+        upcoming_provenance = _coerce_provenance_dict(upcoming.provenance)
+        previous_bottom = float(previous_provenance.get("row_band_bottom", 0.0) or 0.0)
+        upcoming_top = float(upcoming_provenance.get("row_band_top", 0.0) or 0.0)
+        if not previous_bottom or not upcoming_top:
+            return False
+        separator_dict = _coerce_provenance_dict(previous_provenance.get("separator_model")) or _coerce_provenance_dict(
+            upcoming_provenance.get("separator_model")
+        )
+        separator_model = ImperialSeparatorModel(**{
+            key: value
+            for key, value in separator_dict.items()
+            if key in {
+                "visible_vertical_edges",
+                "visible_horizontal_edges",
+                "inferred_vertical_edges",
+                "inferred_horizontal_edges",
+                "visible_vertical_segments",
+                "visible_horizontal_segments",
+                "inferred_vertical_segments",
+                "inferred_horizontal_segments",
+                "image_bboxes",
+            }
+        }) if separator_dict else ImperialSeparatorModel()
+        confidence = _imperial_separator_confidence_for_boundary(
+            separator_model,
+            previous_bottom=previous_bottom,
+            current_top=upcoming_top,
+        )
+        return confidence in {"visible", "inferred_high"}
+
+    def _should_merge_leading_accessory_fragment(
+        current: ImperialFiveColumnRow,
+        upcoming: ImperialFiveColumnRow,
+    ) -> bool:
+        if _row_boundary_is_hard(current, upcoming):
+            return False
+        current_area = parsing.normalize_space(current.area_or_item or current.canonical_label)
+        upcoming_area = parsing.normalize_space(upcoming.area_or_item or upcoming.canonical_label)
+        if not re.match(r"(?i)^GPO'?S?\b", current_area):
+            return False
+        if not re.match(r"(?i)^ACCESSORIES\b", upcoming_area):
+            return False
+        current_body = parsing.normalize_space(
+            " ".join(
+                part
+                for part in (current.specs_or_description, current.supplier, current.notes)
+                if parsing.normalize_space(part)
+            )
+        )
+        if not current_body:
+            return False
+        if current.supplier or current.notes:
+            return False
+        return bool(re.search(r"(?i)\b(?:powerpoint|socket|usb|gpo|double)\b", current_body) or current_body.startswith("-"))
+
+    def _merge_leading_accessory_fragment(
+        current: ImperialFiveColumnRow,
+        upcoming: ImperialFiveColumnRow,
+    ) -> ImperialFiveColumnRow:
+        target_label = "ACCESSORIES"
+        target_area, target_overflow = _imperial_split_area_or_item_overflow(
+            upcoming.area_or_item,
+            target_label,
+        )
+        current_fragment = parsing.normalize_space(
+            " ".join(
+                part
+                for part in (current.area_or_item, current.specs_or_description)
+                if parsing.normalize_space(part)
+            )
+        )
+        upcoming_description = _imperial_merge_area_overflow_into_description(
+            target_overflow,
+            upcoming.specs_or_description,
+            canonical_label=target_label,
+        )
+        merged_description = parsing.normalize_space(
+            " ".join(part for part in (current_fragment, upcoming_description) if parsing.normalize_space(part))
+        )
+        merged_supplier = parsing.normalize_space(
+            " ".join(part for part in (current.supplier, upcoming.supplier) if parsing.normalize_space(part))
+        )
+        merged_notes = parsing.normalize_space(
+            " ".join(part for part in (current.notes, upcoming.notes) if parsing.normalize_space(part))
+        )
+        merged_provenance = _coerce_provenance_dict(upcoming.provenance)
+        current_provenance = _coerce_provenance_dict(current.provenance)
+        separator_dict = _coerce_provenance_dict(merged_provenance.get("separator_model")) or _coerce_provenance_dict(
+            current_provenance.get("separator_model")
+        )
+        separator_model = ImperialSeparatorModel(**{
+            key: value
+            for key, value in separator_dict.items()
+            if key in {
+                "visible_vertical_edges",
+                "visible_horizontal_edges",
+                "inferred_vertical_edges",
+                "inferred_horizontal_edges",
+                "visible_vertical_segments",
+                "visible_horizontal_segments",
+                "inferred_vertical_segments",
+                "inferred_horizontal_segments",
+                "image_bboxes",
+            }
+        }) if separator_dict else ImperialSeparatorModel()
+        chunk = [current, upcoming]
+        merged_provenance["leading_fragment_repair"] = "gpo_to_accessories"
+        merged_provenance["leading_fragment_row"] = {
+            "row_order": int(current.row_order or 0),
+            "area_or_item": parsing.normalize_space(current.area_or_item),
+            "specs_or_description": parsing.normalize_space(current.specs_or_description),
+            "provenance": current_provenance,
+        }
+        merged_provenance["visual_fragments"] = [
+            _imperial_visual_fragment_from_row(
+                candidate,
+                separator_model=separator_model,
+                previous_row=chunk[idx - 1] if idx > 0 else None,
+            )
+            for idx, candidate in enumerate(chunk)
+        ]
+        merged_provenance["visual_subrows"] = _imperial_visual_subrows_from_fragments(
+            list(merged_provenance["visual_fragments"])
+        )
+        merged_provenance["canonical_row_order"] = int(current.row_order or upcoming.row_order or 0)
+        merged_provenance["row_band_top"] = min(
+            (
+                float(fragment.get("top", 0.0) or 0.0)
+                for fragment in merged_provenance["visual_fragments"]
+                if float(fragment.get("top", 0.0) or 0.0) > 0.0
+            ),
+            default=float(current_provenance.get("row_band_top", merged_provenance.get("row_band_top", 0.0)) or 0.0),
+        )
+        merged_provenance["row_band_bottom"] = max(
+            (
+                float(fragment.get("bottom", 0.0) or 0.0)
+                for fragment in merged_provenance["visual_fragments"]
+                if float(fragment.get("bottom", 0.0) or 0.0) > 0.0
+            ),
+            default=float(merged_provenance.get("row_band_bottom", 0.0) or 0.0),
+        )
+        return ImperialFiveColumnRow(
+            room_scope=upcoming.room_scope or current.room_scope,
+            row_order=int(current.row_order or upcoming.row_order or 0),
+            area_or_item=target_area or target_label,
+            specs_or_description=merged_description,
+            image=parsing.normalize_space(
+                " ".join(part for part in (current.image, upcoming.image) if parsing.normalize_space(part))
+            ),
+            supplier=merged_supplier,
+            notes=merged_notes,
+            canonical_label=target_label,
+            remainder="",
+            row_kind="accessory",
+            match_source="leading_fragment_repair",
+            confidence=max(_normalize_confidence_value(current.confidence), _normalize_confidence_value(upcoming.confidence)),
+            provenance=merged_provenance,
+            needs_review=False,
+        )
+
     def _continuation_compatible_with_current(current: ImperialFiveColumnRow, candidate: ImperialFiveColumnRow) -> bool:
         candidate_text = parsing.normalize_space(
             " ".join(
@@ -3123,6 +3287,10 @@ def _repair_imperial_five_column_rows(rows: list[ImperialFiveColumnRow]) -> list
     total = len(rows)
     while index < total:
         current = rows[index]
+        if index + 1 < total and _should_merge_leading_accessory_fragment(current, rows[index + 1]):
+            repaired.append(_merge_leading_accessory_fragment(current, rows[index + 1]))
+            index += 2
+            continue
         merged_row: ImperialFiveColumnRow | None = None
         consumed = 1
         max_span = min(5, total - index)

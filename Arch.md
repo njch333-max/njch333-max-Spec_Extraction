@@ -256,6 +256,7 @@
 21. Ongoing Imperial structural work is tracked outside the rendered UI in `IMPERIAL_GRID_TRACKER.md`. The intended implementation order is:
   - strengthen `ImperialSeparatorModel` and separator provenance in `extraction_service.py`
   - coalesce adjacent row bands before cell extraction only when separator evidence is soft (`none` / `inferred_low`) and row evidence supports same-cell continuation
+  - repair weak-boundary leading fragments at the five-column row assembly layer, for example assigning `GPO` accessory text to the following `ACCESSORIES` row when no hard separator proves a separate row
   - stabilize `AREA / ITEM` anchored row assembly before later parsing stages
   - then tighten semantic subitems and summary inputs in `parsing.py` / `main.py`
 

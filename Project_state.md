@@ -104,6 +104,7 @@
   - `IMPERIAL_GRID_TRACKER.md` now exists as the durable execution tracker for Imperial structure work; it records locked decisions, staged grid/row/semantic phases, the Imperial regression matrix (`52 / 55 / 56 / 59 / 60 / 61 / 62`), current blockers, and the next live acceptance target
   - Imperial structure work now explicitly treats `grid boundary recovery` as the first truth layer: if `AREA / ITEM` and `SPECS / DESCRIPTION` bleed together, the defect is tracked as a separator / row-assembly failure rather than a summary-only issue
   - Imperial Phase 1B row-band coalescing is now implemented locally: adjacent bands with no hard separator, or only `inferred_low`, can merge before cell extraction when they are same-cell continuation or label continuation, while `visible` and `inferred_high` remain hard row boundaries
+  - Imperial Phase 2A row assembly now has a constrained leading-fragment repair for `GPO -> ACCESSORIES`, so weak-boundary accessory preludes can be owned by the following original `AREA / ITEM` label instead of becoming standalone rows
   - Imperial room cards now have a locked display rule that `AREA / ITEM` should prefer the original table label text where available; parser normalization is still allowed internally for tags and constrained repair, but the UI should not invent a cleaner replacement title unless the original label is missing
   - Imperial hard-boundary parsing now rejects page header/meta/table-heading contamination before broader layout/vision candidates can override clean cell-grid rows; `IMAGE` cells are ignored as content and only remain usable as geometry signals for future grid recovery
   - Imperial supplier/notes ownership now includes a deterministic cell split for cases such as `Polytec Variation` plus `for Black - Venette`, and summary aggregation now rejects hard-boundary polluted rows before grouping `Door Colours`, `Handles`, or `Bench Tops`
@@ -219,7 +220,7 @@
 
 ## Remaining Work
 - Continue driving Imperial structure work from `IMPERIAL_GRID_TRACKER.md` instead of ad hoc sample-by-sample cleanup
-- Continue with Imperial Phase 2A row assembly: live Phase 1B overlays verified soft continuation on `job 67` and `job 62`, while `job 64 / GPO / ACCESSORIES` remains an assembler ownership problem rather than a separator-only problem
+- Deploy and live-verify Imperial Phase 2A row assembly on `job 64`, confirming `GPO` is no longer a standalone grid row and `ACCESSORIES` owns the full source value
 - Re-open `job 64` under strict PDF QA. The earlier bulk `pass/na` write-back was invalid because it did not perform field-by-field source-PDF review.
 - Refine OCR fallback for image-heavy PDFs
 - Improve room-section detection for more builder formats
@@ -359,6 +360,7 @@
   - footer/signature exclusion
   - Phase 1A grid-truth diagnostics: page-structure bboxes, cell-ownership provenance, segment source/confidence, and dev-only JSON/SVG overlays via `tools/imperial_grid_debug.py`
   - Phase 1B separator-aware row-band coalescing for no-boundary / `inferred_low` same-cell continuation, with hard-stop behavior for `visible` / `inferred_high` separators and supplier-only prelude regression coverage
+  - Phase 2A `AREA / ITEM` anchored row assembly for weak-boundary leading fragments such as `GPO` before `ACCESSORIES`, including hard-boundary non-merge coverage
   - row-boundary extraction of kitchen benchtops, splashback, base, overheads, tall, toe kick, handles, and bulkhead values
   - `FEATURE TALL DOORS` export into `special_sections[]` instead of room cards
   - `Tall` rendering on room cards and dedicated Excel export for `special_sections`
