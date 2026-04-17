@@ -23264,6 +23264,46 @@ H55784Z03AU
             ["[Furnware] - 450mm Short Pull-Out - (Short drawer on bottom) - 2 x 29Ltr Buckets"],
         )
 
+    def test_imperial_postprocess_material_rows_backfills_by_imperial_supplier_cell(self) -> None:
+        processed = parsing_module._imperial_postprocess_material_rows(
+            [
+                {
+                    "area_or_item": "HANDLES",
+                    "supplier": "",
+                    "specs_or_description": "Bevel Edge Finger Pull",
+                    "notes": "",
+                    "tags": ["handles"],
+                    "provenance": {
+                        "supplier": {"text": "By Imperial"},
+                        "specs_or_description": {"text": "Bevel Edge Finger Pull"},
+                    },
+                },
+                {
+                    "area_or_item": "FEATURE CABINETRY",
+                    "supplier": "",
+                    "specs_or_description": "Shaving Cabinet with Mirrorred doors - Open colourboard shelf below and sides. Standard Whiteboard Internals",
+                    "notes": "",
+                    "tags": ["door_colours"],
+                    "provenance": {
+                        "supplier": {"text": "By Imperial"},
+                        "specs_or_description": {"text": "Shaving Cabinet with Mirrorred doors - Open colourboard shelf below and sides. Standard Whiteboard Internals"},
+                    },
+                },
+            ]
+        )
+        self.assertEqual(processed[0]["supplier"], "By Imperial")
+        self.assertEqual(
+            parsing_module._imperial_material_row_display_lines_for_view(processed[0]),
+            ["[By Imperial] - Bevel Edge Finger Pull"],
+        )
+        self.assertEqual(processed[1]["supplier"], "By Imperial")
+        self.assertEqual(
+            parsing_module._imperial_material_row_display_lines_for_view(processed[1]),
+            [
+                "[By Imperial] - Shaving Cabinet with Mirrorred doors - Open colourboard shelf below and sides. Standard Whiteboard Internals"
+            ],
+        )
+
     def test_imperial_extract_non_joinery_blocks_includes_basin_headings_for_sinkware(self) -> None:
         text = """
 SINKWARE & TAPWARE
@@ -23404,7 +23444,11 @@ BASIN (POWDER) Basin Mounting - Semi Inset - Bekken IIon Semi Inset Basin White 
             ]
         )
         self.assertEqual(processed[0]["specs_or_description"], "Bevel Edge Finger Pull")
-        self.assertEqual(processed[0]["supplier"], "")
+        self.assertEqual(processed[0]["supplier"], "By Imperial")
+        self.assertEqual(
+            parsing_module._imperial_material_row_display_lines_for_view(processed[0]),
+            ["[By Imperial] - Bevel Edge Finger Pull"],
+        )
 
     def test_imperial_postprocess_material_rows_recovers_kickboards_material_from_local_provenance(self) -> None:
         processed = parsing_module._imperial_postprocess_material_rows(

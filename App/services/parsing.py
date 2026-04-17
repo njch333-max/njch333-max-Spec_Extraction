@@ -7675,7 +7675,14 @@ def _imperial_material_row_display_lines_for_view(row: dict[str, Any]) -> list[s
             r"(?i)\b(?:note:\s*size\s+shown\s+differs\s+from\s+selection|handle\s+located\s+at\s+the\s+top\s+of\s+front\s+drawer\s+front|horizontal\s+on\s+drawers?|finger\s+pull\s+only|no\s+handles?\s+on\s+upper\s+cabinetry)\b",
             handle_detail_evidence,
         ):
-            return [_imperial_material_row_display_line(supplier="", description=cleaned_raw_description, notes="")]
+            simple_supplier = supplier if normalize_space(supplier).upper() == "BY IMPERIAL" else ""
+            return [
+                _imperial_material_row_display_line(
+                    supplier=simple_supplier,
+                    description=cleaned_raw_description,
+                    notes="",
+                )
+            ]
         preserved_supplier_display = normalize_space(
             _imperial_display_joined_suppliers(provenance.get("preserved_handle_suppliers", ""))
         )
@@ -12605,6 +12612,21 @@ def _imperial_postprocess_material_rows(rows: list[dict[str, Any]]) -> list[dict
         supplier = normalize_space(str(row.get("supplier", "") or ""))
         description = normalize_space(str(row.get("specs_or_description", "") or ""))
         notes = normalize_space(str(row.get("notes", "") or ""))
+        if not supplier:
+            supplier_candidates: list[str] = []
+            layout_supplier = normalize_space(str(provenance.get("layout_supplier_text", "") or ""))
+            if layout_supplier:
+                supplier_candidates.append(layout_supplier)
+            supplier_cell = provenance.get("supplier", {})
+            if isinstance(supplier_cell, dict):
+                supplier_cell_text = normalize_space(str(supplier_cell.get("text", "") or ""))
+                if supplier_cell_text:
+                    supplier_candidates.append(supplier_cell_text)
+            for supplier_candidate in supplier_candidates:
+                known_supplier = _imperial_page_text_known_supplier(supplier_candidate)
+                if known_supplier:
+                    supplier = known_supplier
+                    break
         if label.count("(") > label.count(")") and not label.endswith(")"):
             label = f"{label})"
         cleaned_label = _imperial_clean_material_row_label_text(label)
@@ -27746,6 +27768,7 @@ ENTRY_SUPPLIER_HINTS = {
     "ABI Interiors",
     "Franke",
     "By Others",
+    "By Imperial",
 }
 IMPERIAL_SECTION_FIELD_PATTERNS: list[tuple[str, str]] = [
     ("overhead_feature_cabinetry", r"GLASS INLAY DOORS\s+TO OVERHEAD\s+FEATURE CABINETRY\b"),
