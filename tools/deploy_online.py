@@ -21,6 +21,7 @@ DEFAULT_INCLUDE_PATHS = (
     "Arch.md",
     "Project_state.md",
     "AGENTS.md",
+    "IMPERIAL_GRID_TRACKER.md",
 )
 
 SKIP_DIR_NAMES = {

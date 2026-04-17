@@ -922,6 +922,25 @@ def _flatten_imperial_material_rows(room: dict[str, Any]) -> list[dict[str, Any]
         supplier = _display_value(item.get("supplier", ""))
         description = _display_value(item.get("specs_or_description", ""))
         notes = _display_value(item.get("notes", ""))
+        supplier, notes = parsing._imperial_split_material_supplier_notes(supplier, notes)
+        supplier, description, notes = parsing._imperial_repair_hard_boundary_polluted_material_row(
+            title,
+            supplier,
+            description,
+            notes,
+        )
+        supplier, description, notes = parsing._imperial_normalize_benchtop_fields(
+            title,
+            supplier,
+            description,
+            notes,
+        )
+        supplier, description, notes = parsing._imperial_normalize_cabinetry_colour_fields(
+            title,
+            supplier,
+            description,
+            notes,
+        )
         if supplier:
             description = parsing._imperial_strip_supplier_duplication(supplier, description)
             notes = parsing._imperial_strip_supplier_duplication(supplier, notes)
@@ -1407,12 +1426,44 @@ def _imperial_summary_bucket_key_for_item(item: dict[str, Any]) -> str:
     return ""
 
 
+def _imperial_summary_text_has_header_pollution(text: str) -> bool:
+    cleaned = _display_value(text)
+    if not cleaned:
+        return False
+    return bool(
+        re.search(
+            r"(?i)\b(?:address|client|date|ceiling\s*height|cabinetry\s*height|bulkhead|shadowline)\s*:",
+            cleaned,
+        )
+        or re.search(r"(?i)\b(?:AREA\s*/\s*ITEM|SPECS\s*/\s*DESCRIPTION|JOINERY\s+SELECTION\s+SHEET)\b", cleaned)
+        or re.search(r"(?i)\b(?:ALL\s+COLOURS\s+SHOWN|PRODUCT\s+AVAILABILITY|DOCUMENT\s+REF|SIGNATURE|DESIGNER)\b", cleaned)
+        or re.search(r"(?i)\bSQUARE\s*SET\s*CEILING\s*HEIGHT\b", cleaned)
+    )
+
+
 def _imperial_material_row_is_summary_worthy(item: dict[str, Any], bucket_key: str) -> bool:
     title = _display_value(item.get("title", ""))
     title = re.sub(r"(?i)\bHANLDES\b", "HANDLES", title)
     value = _display_value(item.get("value", ""))
     display_value = _display_value(item.get("display_value", "")) or value
     supplier = _display_value(item.get("supplier", ""))
+    provenance = item.get("provenance", {}) if isinstance(item.get("provenance", {}), dict) else {}
+    pollution_probe = " ".join(
+        _display_value(part)
+        for part in (
+            title,
+            value,
+            display_value,
+            supplier,
+            item.get("notes", ""),
+            provenance.get("layout_value_text", ""),
+            provenance.get("layout_supplier_text", ""),
+            provenance.get("layout_notes_text", ""),
+        )
+        if _display_value(part)
+    )
+    if _imperial_summary_text_has_header_pollution(pollution_probe):
+        return False
     if bucket_key == "handles" and not value:
         display_lines = [
             _display_value(line)
@@ -3344,6 +3395,8 @@ def _imperial_summary_material_candidates(
     analysis_text = parsing.normalize_space(
         re.sub(r"(?i)\((Vertical Grain|Horizontal Grain)\)", r"\1", text)
     )
+    if bucket_key == "door_colours":
+        analysis_text = parsing.normalize_space(re.sub(r"\([^)]*\)", " ", analysis_text))
     candidates: list[str] = []
     colour_code_patterns = (
         r"(?i)\b([A-Za-z][A-Za-z ]+?)\s*-\s*Natural\s*-\s*Colour Code:\s*(\d{2,4})\b",
@@ -3462,6 +3515,12 @@ def _imperial_summary_material_candidates(
         normalized = _normalize_benchtop_summary_value(composed) if bucket_key == "bench_tops" else _normalize_door_colour_summary_value(composed)
         if normalized and normalized not in candidates:
             candidates.append(normalized)
+    if bucket_key == "door_colours":
+        candidates = [
+            candidate
+            for candidate in candidates
+            if not re.search(r"(?i)(?:^|\s+-\s+)(?:variation\s+for|for)\b", candidate)
+        ]
     return candidates
 
 

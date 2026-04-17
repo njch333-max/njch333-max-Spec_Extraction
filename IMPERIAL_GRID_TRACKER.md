@@ -69,7 +69,8 @@
 | 50 | Door-colour summary fallback, handle family fallback, final room-field backfill | Clean `Door Colours / Handles / Bench Tops` summary from raw rows, clean `door_colours_island` derivation, strict field-by-field QA on kitchen/appliance/sink pages | `2170` | `passed` |
 | 60 | Continuation-heavy desk / shelf / robe rows | Legal continuation retained, raw rows at least as strong as the source-heavy gold sample | `2037` | `passed` |
 | 61 | Base/upper contamination, handle grouping, appliance loss, sinkware ownership | Raw-row boundary cleanup, handle family separation, appliance recovery, sinkware ownership fix | `2064` | `passed` |
-| 62 | Short-value termination, pantry/kitchen handle subitems, sinkware/appliance overlays | Long-label stability completed; next focus is short-value hard stops, handle subitems, overlay isolation | `2067` | `passed` |
+| 62 | Short-value termination, pantry/kitchen handle subitems, sinkware/appliance overlays | Long-label stability completed; next focus is short-value hard stops, handle subitems, overlay isolation | `2209` | `targeted regression checked` |
+| 67 | First-row header/meta bleed into `BENCHTOP`, supplier/notes column split, raw spelling/case preservation, appliances/sinkware row-first ownership | Hard `content_grid` boundary, cell-owned supplier/notes split, `IMAGE` ignored as content, summary pollution gate, row-first appliance capture | `2207` | `passed` |
 
 `tests/fixtures/imperial_37867_gold.json` remains the highest-priority Imperial structural regression fixture.
 
@@ -78,7 +79,7 @@
 - Short-value row termination is still too weak on `KICKBOARDS`, `LIGHTING`, and similar rows.
 - Handle cells still need first-class subitem modeling instead of raw-string-first splitting.
 - `sinkware / appliances` remain structurally weaker than `joinery/material`.
-- No active live blocker is currently open in the tracked Imperial regression matrix.
+- Active live blocker cleared: `job 67 / run 2207` passed strict source-PDF QA after hard-boundary cleanup. Next blocker should move back to Phase 1 grid-truth work instead of more job-specific cleanup unless a new live failure is reported.
 
 ## Last Verified Live Jobs
 - `job 52 / run 1972`: `passed`
@@ -91,20 +92,20 @@
 - `job 62 / run 2067 / build local-7fd87645`: `passed` with `33 pass / 22 na / 0 fail / 0 pending`. Pantry long-label continuation remains stable; kitchen/dry bar/laundry short-value termination, hanging-rail preservation, current sinkware separation, and the current five-row appliance capture were re-verified on the latest build.
 - `job 61 / run 2064 / build local-7fd87645`: `passed` with `42 pass / 4 na / 0 fail / 0 pending`. The live fixes verified in this cycle were walk-in-robe hanging-rail continuation restoration, wet-area basin-to-sink fallback for room cards and PDF QA, stable five-row appliance capture, and preserving the recovered handle / cabinetry cleanup on the current snapshot.
 - `job 64 / run 2139 / build local-3c9b6cd2`: `passed` with `62 pass / 1 na / 0 fail / 0 pending`. The strict field-by-field QA on this run re-verified the repaired `GPO / ACCESSORIES` separation, original flooring case preservation (`Timber` / `Tiled`), sink/basin taphole carry-through, and current appliance capture including `Bar Fridge`. The only `N/A` item is `KITCHEN / sink`, because no kitchen sink row exists in the source sinkware page.
+- `job 64 / run 2212 / build local-7cc74371`: targeted regression check passed after the hard-boundary cycle. `GPO` no longer appears as a separate row and `ACCESSORIES` renders `GPO - Double Powerpoint with 2xUSB sockets - Black` with `Island bench, front of MW cupboard`; flooring remains source-case `Timber`.
+- `job 67 / run 2207 / build local-d251ab53`: `passed` with strict source-PDF QA. Verified `KITCHEN & PANTRY / BENCHTOP` as `[By Others] - 40mm Stone | WFE x 1`, clean `Polytec / BLACK - MATT / Variation for Black - Venette` supplier-notes ownership, source spelling `Mirrorred`, seven appliance rows including `Specs - TBC`, and sinkware/basin taphole ownership including `behind sink` / `behind basin`.
 - `job 41 / run 2155 / build local-9df1bf9a`: `passed` with strict field-by-field PDF QA. The live fixes verified in this cycle were `LAUNDRY + STORAGE NOOK` handle-family room ownership, `KICKBOARDS / NO HANDLES OVERHEADS / FEATURE COLOUR ...` short-value cleanup, and Imperial appliance dedupe so the Bosch `Cooktop` row no longer absorbs `Oven` evidence.
 - `job 51 / run 2165 / build local-478c8854`: `passed` with `39 pass / 3 na / 0 fail / 0 pending`. The live fixes verified in this cycle were preserving `OVERHEAD CABINETS TO BE OPEN SHELVES` through room-card rendering, retaining split `Blossom White RAVINE / Blossom White Matt` door-colour summary entries, and completing strict field-by-field PDF QA against the source kitchen/study, appliance, and sinkware sheets.
 - `2026-04-13 non-QA rerun coverage`: all remaining unique-address Imperial jobs outside the tracked blocker matrix were fresh rerun once and completed successfully on the current production worker queue. Deduped coverage set: `job 51/run 2085`, `50/2086`, `49/2087`, `48/2088`, `47/2089`, `44/2090`, `43/2091`, `42/2092`, `41/2095`, `40/2096`, `38/2098`, `36/2107`, `35/2108`, `34/2113`, `32/2114`, `31/2115`, `27/2116`. No duplicate addresses were found in the visible Imperial inventory at the time of the sweep.
 - `tests/fixtures/imperial_37867_gold.json` remains the highest-priority structural regression fixture.
 
 ## Next Actions
-- Primary live blocker: `job 48`
+- Primary live blocker: none after `job 67 / run 2207` signoff.
 - Target order:
-  1. Open `job 48` and perform strict source-PDF review on the fresh rerun snapshot before creating any new parser blocker
-  2. If `job 48` exposes a live blocker, fix that single blocker first and re-run strict PDF QA
-  3. Continue through the remaining fresh-rerun Imperial jobs one by one without duplicating addresses
-  4. Phase 1 grid-truth follow-up: segment-level separator provenance and debug overlay output
-  5. Phase 2 row-assembly follow-up: handle subitem modeling for pantry/kitchen style cells
-  6. Phase 3 semantic follow-up: stronger sinkware cluster-local assignment and appliance row-first capture
+  1. Phase 1 grid-truth follow-up: segment-level separator provenance and debug overlay output
+  2. Phase 2 row-assembly follow-up: handle subitem modeling for pantry/kitchen style cells
+  3. Phase 3 semantic follow-up: stronger sinkware cluster-local assignment and appliance row-first capture
+  4. If a new live failure is reported, first classify whether it is `content_grid`, `cell ownership`, `row assembly`, or `semantic summary` before adding cleanup rules
 - Standing rule during live analysis:
   - if `AREA / ITEM` and `SPECS / DESCRIPTION` are bleeding together, treat that as a grid/row-assembly blocker first, not a summary or UI bug
   - do not close a cycle by only cleaning the displayed text if the raw row boundary is still wrong
@@ -133,3 +134,6 @@
 - `2026-04-14`: `job 64` reached corrected live signoff on `run 2139 / build local-3c9b6cd2`. PDF QA is now `passed` with `62 pass / 1 na / 0 fail / 0 pending`. This closed the previously invalidated `run 2123` signoff after strict source-PDF review confirmed `GPO / ACCESSORIES` separation, source-case flooring preservation, and the current sink/appliance overlay behavior. The primary live blocker now moves to `job 41`.
 - `2026-04-14`: `job 41` reached strict live signoff on `run 2155 / build local-9df1bf9a`. The cycle closed after fixing Imperial appliance dedupe so the Bosch `Cooktop` row no longer absorbed `Oven` evidence. The next unverified Imperial rerun in the queue becomes `job 51`.
 - `2026-04-14`: `job 51` reached strict live signoff on `run 2165 / build local-478c8854`. PDF QA is now `passed` with `39 pass / 3 na / 0 fail / 0 pending`. This cycle closed after fixing a display-layer rollback that was showing `OVERHEAD CABINETS` instead of the already-correct stored label `OVERHEAD CABINETS TO BE OPEN SHELVES`; the continuation repair now updates provenance `raw_area_or_item` as well. The next unverified Imperial rerun in the queue becomes `job 50`.
+- `2026-04-17`: `job 67` was promoted to the active Imperial hard-boundary blocker. Local implementation now rejects header/meta/table-heading polluted layout candidates before they can override clean cell-grid rows, treats `IMAGE` as non-content, splits supplier/note tails by recovered cell ownership, adds a summary pollution gate, and adds row-first Imperial appliance capture for layout rows. Local smoke and compile checks passed; live deploy/rerun/PDF-QA is pending.
+- `2026-04-17`: `job 67` reached strict source-PDF signoff on `run 2207 / build local-d251ab53`. The cycle fixed `content_grid` hard-boundary leakage, supplier/notes ownership for `Polytec Variation for Black - Venette`, raw spelling preservation for `Mirrorred`, row-first appliance capture for seven rows, `WFE x 1` visual-break preservation, and sinkware taphole tail preservation for `behind sink/basin`. PDF QA was written as `passed` for the latest raw snapshot.
+- `2026-04-17`: Post-`job 67` regression found `job 64 / run 2208` still splitting `GPO` out of `ACCESSORIES`. A generic Imperial repair now merges non-adjacent `GPO` spillover fragments back into `ACCESSORIES` and protects that merged value from later self-repair rollback. `job 64 / run 2212 / build local-7cc74371` passed targeted regression (`ACCESSORIES` restored; flooring source case preserved). `job 62 / run 2209 / build local-d251ab53` completed as the companion regression check for long-label and short-value stability.

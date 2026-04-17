@@ -2951,6 +2951,41 @@ H55784Z03AU
         self.assertEqual(by_type["Washing Machine"].evidence_snippet, "WASHING MACHINE (LAUNDRY) Specs - TBC N / A - By others")
         self.assertEqual(by_type["Dryer"].evidence_snippet, "DRYER (LAUNDRY) Specs - TBC N / A - By others")
 
+    def test_extract_appliances_from_imperial_layout_rows_is_row_first_and_ignores_image_column(self) -> None:
+        page = {
+            "page_no": 5,
+            "raw_text": "APPLIANCES",
+            "text": "",
+            "page_layout": {
+                "page_type": "appliance",
+                "rows": [
+                    {
+                        "row_label": "OVEN (KITCHEN)",
+                        "value_region_text": "Fisher & Paykel 900mm Oven OB90S9LEX2 (Electric)",
+                        "image_region_text": "N / A - By others",
+                        "supplier_region_text": "By others",
+                        "notes_region_text": "",
+                        "row_kind": "other",
+                    },
+                    {
+                        "row_label": "WASHING MACHINE (LAUNDRY)",
+                        "value_region_text": "Specs - TBC",
+                        "image_region_text": "N / A - By others",
+                        "supplier_region_text": "By others",
+                        "notes_region_text": "",
+                        "row_kind": "other",
+                    },
+                ],
+            },
+        }
+        rows = parsing_module._extract_appliances_from_pages("imperial-appliances.pdf", [page], builder_name="Imperial")
+        by_type = {row.appliance_type: row for row in rows}
+        self.assertEqual(by_type["Oven"].make, "Fisher & Paykel")
+        self.assertEqual(by_type["Oven"].model_no, "OB90S9LEX2")
+        self.assertEqual(by_type["Washing Machine"].model_no, "Specs - TBC")
+        self.assertIn("5", by_type["Washing Machine"].page_refs)
+        self.assertNotIn("By othersFisher", " ".join(row.evidence_snippet for row in rows))
+
     def test_enrich_imperial_placeholder_appliance_row_merges_layout_specs_tbc(self) -> None:
         row = parsing_module.ApplianceRow(
             appliance_type="Washing Machine",
@@ -17906,6 +17941,216 @@ H55784Z03AU
         self.assertEqual(payload["inferred_horizontal_segments"][0]["source"], "bridge_over_image")
         self.assertEqual(payload["inferred_horizontal_segments"][0]["confidence"], "inferred_high")
 
+    def test_imperial_grid_merge_rejects_header_polluted_layout_candidate(self) -> None:
+        cell_row = extraction_service.ImperialGridRow(
+            room_scope="KITCHEN & PANTRY",
+            row_label="BENCHTOP",
+            description="40mm Stone | WFE x 1",
+            supplier="By Others",
+            row_kind="material",
+            row_order=1,
+            repair_source="cell_grid_repair",
+            confidence=0.72,
+        )
+        polluted_candidate = extraction_service.ImperialGridRow(
+            room_scope="KITCHEN & PANTRY",
+            row_label="BENCHTOP",
+            description=(
+                "Bulkhead:Colourboard IMAGE Yes 40mm Stone Cabinetry Height:2400mm "
+                "KITCHEN & PANTRY JOINERY SELECTION SHEET Address: Lot 1041 Rufous Street"
+            ),
+            supplier="By Others",
+            row_kind="material",
+            row_order=1,
+            repair_source="vision_table_repair",
+            confidence=0.98,
+        )
+        preferred = extraction_service._prefer_imperial_grid_row(cell_row, polluted_candidate)
+        self.assertEqual(preferred.description, "40mm Stone | WFE x 1")
+        self.assertNotIn("Bulkhead", preferred.description)
+
+    def test_imperial_layout_supplier_tail_stays_in_notes_cell(self) -> None:
+        row = extraction_service._imperial_grid_row_from_layout_row(
+            {
+                "row_label": "BASE CABINETRY COLOUR",
+                "value_region_text": "BLACK - MATT",
+                "supplier_region_text": "Polytec Variation",
+                "notes_region_text": "for Black - Venette",
+                "row_kind": "material",
+            },
+            room_scope="KITCHEN & PANTRY",
+        )
+        self.assertEqual(row.supplier, "Polytec")
+        self.assertEqual(row.description, "BLACK - MATT")
+        self.assertEqual(row.notes, "Variation for Black - Venette")
+
+    def test_imperial_finalize_material_rows_repairs_header_polluted_benchtop_and_supplier_tail(self) -> None:
+        rows = parsing_module._imperial_finalize_material_rows(
+            [
+                {
+                    "area_or_item": "BENCHTOP",
+                    "supplier": "By Others",
+                    "specs_or_description": (
+                        "Bulkhead:Colourboard WFE x 1 IMAGE Yes 40mm Stone Cabinetry Height:2400mm "
+                        "KITCHEN & PANTRY JOINERY SELECTION SHEET Address: Client: Date:"
+                    ),
+                    "notes": "",
+                    "tags": ["bench_tops"],
+                },
+                {
+                    "area_or_item": "BASE CABINETRY COLOUR",
+                    "supplier": "Polytec Variation",
+                    "specs_or_description": "BLACK - MATT",
+                    "notes": "for Black - Venette",
+                    "tags": ["door_colours"],
+                },
+            ]
+        )
+        by_label = {row["area_or_item"]: row for row in rows}
+        self.assertEqual(by_label["BENCHTOP"]["supplier"], "By Others")
+        self.assertEqual(by_label["BENCHTOP"]["specs_or_description"], "40mm Stone | WFE x 1")
+        self.assertEqual(by_label["BASE CABINETRY COLOUR"]["supplier"], "Polytec")
+        self.assertEqual(by_label["BASE CABINETRY COLOUR"]["specs_or_description"], "BLACK - MATT")
+        self.assertEqual(by_label["BASE CABINETRY COLOUR"]["notes"], "Variation for Black - Venette")
+
+    def test_imperial_finalize_material_rows_normalizes_cabinetry_colour_variation_tail(self) -> None:
+        rows = parsing_module._imperial_finalize_material_rows(
+            [
+                {
+                    "area_or_item": "UPPER CABINETRY COLOUR",
+                    "supplier": "Polytec",
+                    "specs_or_description": "BLACK - MATT Variation",
+                    "notes": "for Black - Venette - Variation for Black - Venette",
+                    "tags": ["door_colours"],
+                }
+            ]
+        )
+        self.assertEqual(rows[0]["supplier"], "Polytec")
+        self.assertEqual(rows[0]["specs_or_description"], "BLACK - MATT")
+        self.assertEqual(rows[0]["notes"], "Variation for Black - Venette")
+
+    def test_imperial_post_repair_normalization_preserves_truth_layer_fields(self) -> None:
+        rows = parsing_module._imperial_normalize_material_rows_after_repair(
+            [
+                {
+                    "area_or_item": "BASE CABINETRY COLOUR",
+                    "supplier": "Polytec",
+                    "specs_or_description": "BLACK - MATT Variation",
+                    "notes": "for Black - Venette - Variation for Black - Venette",
+                    "tags": ["door_colours"],
+                    "provenance": {},
+                },
+                {
+                    "area_or_item": "FEATURE CABINETRY",
+                    "supplier": "",
+                    "specs_or_description": (
+                        "Shaving Cabinet with Mirrrored doors - Open colourboard shelf below and sides. "
+                        "Standard Whiteboard Internals"
+                    ),
+                    "notes": "By Imperial",
+                    "tags": ["door_colours"],
+                    "provenance": {
+                        "page_text_following_lines": [
+                            "Shaving Cabinet with Mirrorred doors -",
+                            "Open colourboard shelf below and sides.",
+                            "Standard Whiteboard Internals",
+                            "By Imperial",
+                        ],
+                    },
+                },
+            ]
+        )
+        self.assertEqual(rows[0]["specs_or_description"], "BLACK - MATT")
+        self.assertEqual(rows[0]["notes"], "Variation for Black - Venette")
+        self.assertIn("Mirrorred doors", rows[1]["specs_or_description"])
+
+    def test_imperial_material_row_display_lines_ignore_header_polluted_provenance(self) -> None:
+        lines = parsing_module._imperial_material_row_display_lines_for_view(
+            {
+                "area_or_item": "BENCHTOP",
+                "supplier": "By Others",
+                "specs_or_description": "40mm Stone | WFE x 1",
+                "notes": "",
+                "tags": ["bench_tops"],
+                "provenance": {
+                    "layout_supplier_text": "By Others",
+                    "layout_value_text": (
+                        "Bulkhead:Colourboard WFE x 1 IMAGE Yes 40mm Stone "
+                        "Cabinetry Height:2400mm KITCHEN & PANTRY JOINERY SELECTION SHEET"
+                    ),
+                    "layout_notes_text": "Address: Lot 1041 Rufous Street",
+                    "page_text_following_lines": ["Cabinetry Height:2400mm", "40mm Stone"],
+                },
+            }
+        )
+        self.assertEqual(lines, ["[By Others] - 40mm Stone | WFE x 1"])
+
+    def test_imperial_material_row_display_lines_split_layout_supplier_tail(self) -> None:
+        lines = parsing_module._imperial_material_row_display_lines_for_view(
+            {
+                "area_or_item": "BASE CABINETRY COLOUR",
+                "supplier": "Polytec",
+                "specs_or_description": "BLACK - MATT",
+                "notes": "Variation for Black - Venette",
+                "tags": ["door_colours"],
+                "provenance": {
+                    "layout_supplier_text": "Polytec Variation",
+                    "layout_value_text": "BLACK - MATT",
+                    "layout_notes_text": "for Black - Venette",
+                },
+            }
+        )
+        self.assertEqual(lines, ["[Polytec] - BLACK - MATT - (Variation for Black - Venette)"])
+
+    def test_imperial_flatten_and_summary_split_supplier_tail(self) -> None:
+        import App.main as app_main
+
+        room = {
+            "original_room_label": "KITCHEN & PANTRY",
+            "room_order": 1,
+            "material_rows": [
+                {
+                    "area_or_item": "BASE CABINETRY COLOUR",
+                    "supplier": "Polytec Variation",
+                    "specs_or_description": "BLACK - MATT",
+                    "notes": "for Black - Venette",
+                    "tags": ["door_colours"],
+                    "page_no": 1,
+                    "row_order": 1,
+                    "provenance": {
+                        "layout_supplier_text": "Polytec Variation",
+                        "layout_value_text": "BLACK - MATT",
+                        "layout_notes_text": "for Black - Venette",
+                    },
+                },
+                {
+                    "area_or_item": "UPPER CABINETRY COLOUR",
+                    "supplier": "Polytec Variation",
+                    "specs_or_description": "BLACK - MATT",
+                    "notes": "for Black - Venette",
+                    "tags": ["door_colours"],
+                    "page_no": 1,
+                    "row_order": 2,
+                    "provenance": {
+                        "layout_supplier_text": "Polytec Variation",
+                        "layout_value_text": "BLACK - MATT",
+                        "layout_notes_text": "for Black - Venette",
+                    },
+                },
+            ],
+        }
+        flattened = app_main._flatten_imperial_material_rows(room)
+        self.assertEqual(
+            flattened[0]["display_value"],
+            "[Polytec] - BLACK - MATT - (Variation for Black - Venette)",
+        )
+
+        summary = app_main._build_material_summary({"builder_name": "Imperial", "rooms": [room]})
+        self.assertEqual(
+            [entry["text"] for entry in summary["door_colours"]["entries"]],
+            ["Polytec - BLACK - MATT"],
+        )
+
     def test_imperial_material_row_display_lines_remove_duplicate_bullnose_phrase(self) -> None:
         lines = parsing_module._imperial_material_row_display_lines_for_view(
             {
@@ -17955,6 +18200,36 @@ H55784Z03AU
             [entry["text"] for entry in summary["handles"]["entries"]],
             ["HT576 -128 - BKO Darwen Cabinet Pull Handle - Black Olive Colour"],
         )
+
+    def test_imperial_material_summary_rejects_header_polluted_benchtop_rows(self) -> None:
+        import App.main as app_main
+
+        summary = app_main._build_material_summary(
+            {
+                "builder_name": "Imperial",
+                "rooms": [
+                    {
+                        "original_room_label": "KITCHEN & PANTRY",
+                        "room_order": 1,
+                        "material_rows": [
+                            {
+                                "area_or_item": "BENCHTOP",
+                                "supplier": "By Others",
+                                "specs_or_description": "Bulkhead:Colourboard IMAGE Yes Cabinetry Height:2400mm JOINERY SELECTION SHEET",
+                                "notes": "",
+                                "tags": ["bench_tops"],
+                                "page_no": 1,
+                                "row_order": 1,
+                                "provenance": {
+                                    "layout_value_text": "Bulkhead:Colourboard IMAGE Yes Cabinetry Height:2400mm",
+                                },
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+        self.assertEqual(summary["bench_tops"]["entries"], [])
 
     def test_imperial_word_grid_defers_recessed_finger_space_from_handles_to_no_handles_row(self) -> None:
         self.assertTrue(
@@ -22631,7 +22906,7 @@ BASIN (POWDER) Basin Mounting - Semi Inset - Bekken IIon Semi Inset Basin White 
         )
         self.assertEqual(
             processed[0]["specs_or_description"],
-            "Oval wardrobe tube, ribbed, aluminium, 15mm x 30mm x 3.6m -Matt Black - 1400R.36.MBL",
+            "oval wardrobe tube, ribbed, aluminium, 15mm x 30mm x 3.6m -Matt Black - 1400R.36.MBL",
         )
         self.assertEqual(processed[0]["notes"], "")
 
@@ -23132,6 +23407,18 @@ BAR FRIDGE (LAUNDRY) Specs - TBC N / A - By others By others
             ],
         )
 
+    def test_imperial_material_row_display_lines_for_view_preserves_benchtop_wfe_visual_break(self) -> None:
+        row = {
+            "area_or_item": "BENCHTOP",
+            "supplier": "By Others",
+            "specs_or_description": "40mm Stone WFE x 1",
+            "notes": "",
+            "tags": ["bench_tops"],
+            "provenance": {},
+        }
+        lines = parsing_module._imperial_material_row_display_lines_for_view(row)
+        self.assertEqual(lines, ["[By Others] - 40mm Stone | WFE x 1"])
+
     def test_imperial_material_row_display_lines_for_view_strips_trailing_bare_undermount(self) -> None:
         row = {
             "area_or_item": "BENCHTOP",
@@ -23161,6 +23448,140 @@ BAR FRIDGE (LAUNDRY) Specs - TBC N / A - By others By others
                 "[Caesarstone] - Porcelain Mirabel Silk Finish 20mm with double mitred edge to 40mm pencil round edge thickness - (Undermount sink)"
             ],
         )
+
+    def test_imperial_sinkware_blocks_preserve_taphole_behind_sink_or_basin_tail(self) -> None:
+        text = "\n".join(
+            [
+                "SINKWARE & TAPWARE",
+                "AREA / ITEM SPECS / DESCRIPTION IMAGE SUPPLIER NOTES",
+                "Burazzo 650mm Stainless Steel Single Bowl",
+                "Taphole location: In Stone, centered behind",
+                "SINK (PANTRY) Sink (BU654520S)- Sink Mounting - By Others",
+                "sink",
+                "Undermount",
+                "Stella Inset Stainless Steel 45 Litre",
+                "SINK (LAUNDRY) By Others",
+                "Taphole location: In Sink corner LHS",
+                "(YH236C) - Sink Mounting - Topmount -",
+                "Taphole location: In Stone, centered behind",
+                "BASIN (BATHROOM) Sink Mounting - Topmount - Specs TBC By Others",
+                "basin",
+                "Taphole location: In Stone, centered behind",
+                "BASIN (ENSUITE) Sink Mounting - Topmount - Specs TBC By Others",
+                "basin",
+            ]
+        )
+        blocks = dict(parsing_module._imperial_extract_non_joinery_blocks(text, "sinkware"))
+        self.assertIn("Taphole location: In Stone, centered behind sink", blocks["PANTRY"])
+        self.assertIn("Taphole location: In Stone, centered behind basin", blocks["BATHROOM"])
+        self.assertIn("Taphole location: In Stone, centered behind basin", blocks["ENSUITE"])
+
+    def test_imperial_fixture_overlay_prefers_complete_taphole_tail(self) -> None:
+        existing = "Burazzo Sink - Taphole location: In Stone, centered behind"
+        candidate = "Burazzo Sink - By Others - Taphole location: In Stone, centered behind sink"
+        self.assertEqual(
+            parsing_module._imperial_prefer_fixture_overlay_text(existing, candidate, "sink"),
+            candidate,
+        )
+
+    def test_imperial_material_rows_merge_gpo_spillover_back_to_accessories(self) -> None:
+        rows = parsing_module._imperial_normalize_material_rows_after_repair(
+            [
+                {
+                    "area_or_item": "GPO",
+                    "supplier": "",
+                    "specs_or_description": "Double Powerpoint with 2xUSB",
+                    "notes": "",
+                    "tags": ["other_material"],
+                    "page_no": 1,
+                    "row_order": 6,
+                    "provenance": {},
+                },
+                {
+                    "area_or_item": "ACCESSORIES",
+                    "supplier": "",
+                    "specs_or_description": "sockets - Black",
+                    "notes": "Island bench, front of MW cupboard",
+                    "tags": ["other_material"],
+                    "page_no": 1,
+                    "row_order": 7,
+                    "provenance": {},
+                },
+            ]
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["area_or_item"], "ACCESSORIES")
+        self.assertEqual(
+            rows[0]["specs_or_description"],
+            "GPO - Double Powerpoint with 2xUSB sockets - Black",
+        )
+        self.assertEqual(rows[0]["notes"], "Island bench, front of MW cupboard")
+
+    def test_imperial_material_rows_merge_non_adjacent_gpo_spillover_back_to_accessories(self) -> None:
+        rows = parsing_module._imperial_normalize_material_rows_after_repair(
+            [
+                {
+                    "area_or_item": "GPO",
+                    "supplier": "",
+                    "specs_or_description": "Double Powerpoint with 2xUSB",
+                    "notes": "",
+                    "tags": ["other_material"],
+                    "page_no": 1,
+                    "row_order": 6,
+                    "provenance": {},
+                },
+                {
+                    "area_or_item": "BIN",
+                    "supplier": "Furnware",
+                    "specs_or_description": "450mm Short Pull-Out",
+                    "notes": "",
+                    "tags": ["other_material"],
+                    "page_no": 1,
+                    "row_order": 7,
+                    "provenance": {},
+                },
+                {
+                    "area_or_item": "ACCESSORIES",
+                    "supplier": "",
+                    "specs_or_description": "sockets - Black",
+                    "notes": "Island bench, front of MW cupboard",
+                    "tags": ["other_material"],
+                    "page_no": 1,
+                    "row_order": 8,
+                    "provenance": {},
+                },
+            ]
+        )
+        self.assertEqual([row["area_or_item"] for row in rows], ["ACCESSORIES", "BIN"])
+        self.assertEqual(
+            rows[0]["specs_or_description"],
+            "GPO - Double Powerpoint with 2xUSB sockets - Black",
+        )
+
+    def test_imperial_postprocess_material_rows_preserves_merged_gpo_accessories(self) -> None:
+        rows = parsing_module._imperial_postprocess_material_rows(
+            [
+                {
+                    "area_or_item": "ACCESSORIES",
+                    "supplier": "",
+                    "specs_or_description": "GPO - Double Powerpoint with 2xUSB sockets - Black",
+                    "notes": "Island bench, front of MW cupboard",
+                    "tags": ["other_material"],
+                    "page_no": 1,
+                    "row_order": 6,
+                    "provenance": {
+                        "merged_gpo_spillover": True,
+                        "merged_gpo_fragment": {
+                            "area_or_item": "GPO",
+                            "specs_or_description": "Double Powerpoint with 2xUSB",
+                        },
+                        "layout_value_text": "GPO - Double Powerpoint with 2xUSB sockets - Black- (Island bench, front of MW cupboard)",
+                    },
+                }
+            ]
+        )
+        self.assertEqual(rows[0]["specs_or_description"], "GPO - Double Powerpoint with 2xUSB sockets - Black")
+        self.assertEqual(rows[0]["notes"], "Island bench, front of MW cupboard")
 
     def test_build_imperial_material_summary_prefers_clean_benchtop_display_lines(self) -> None:
         import App.main as app_main

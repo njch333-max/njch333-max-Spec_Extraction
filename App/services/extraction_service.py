@@ -1149,23 +1149,18 @@ class ImperialLogicalRow:
     needs_review: bool = False
 
     def to_grid_row(self) -> ImperialGridRow:
-        description = parsing.normalize_brand_casing_text(
-            parsing.normalize_space(" ".join(_dedupe_preserve_order(self.description_parts)))
-        ).strip(" -;,")
-        image = parsing.normalize_brand_casing_text(
-            parsing.normalize_space(" ".join(_dedupe_preserve_order(self.image_parts)))
-        ).strip(" -;,")
-        notes = parsing.normalize_brand_casing_text(
-            parsing.normalize_space(" ".join(_dedupe_preserve_order(self.note_parts)))
-        ).strip(" -;,")
-        supplier = next(
+        description = parsing.normalize_space(" ".join(_dedupe_preserve_order(self.description_parts))).strip(" -;,")
+        image = ""
+        notes = parsing.normalize_space(" ".join(_dedupe_preserve_order(self.note_parts))).strip(" -;,")
+        raw_supplier = next(
             (
-                parsing.normalize_brand_casing_text(parsing.normalize_space(value))
+                parsing.normalize_space(value)
                 for value in self.supplier_parts
                 if parsing.normalize_space(value)
             ),
             "",
         ).strip(" -;,")
+        supplier, notes = _split_imperial_grid_layout_supplier_notes(raw_supplier, notes)
         if supplier and description:
             supplier_pattern = re.escape(supplier)
             description = re.sub(rf"(?i)\b{supplier_pattern}\b", " ", description)
@@ -1248,6 +1243,7 @@ _IMPERIAL_GRID_SUPPLIER_HINTS: tuple[str, ...] = (
     "Titus Tekform",
     "Furnware",
     "Hettich",
+    "By Others",
 )
 
 _IMPERIAL_TABLE_REPAIR_ROW_SPECS: tuple[tuple[str, str, str], ...] = (
@@ -1436,6 +1432,7 @@ def _repair_imperial_joinery_grid_page(
         for index, row in enumerate(canonical_rows)
         if isinstance(row, dict)
     ]
+    candidate_rows = [row for row in candidate_rows if not _imperial_grid_row_has_header_pollution(row)]
     if not text_rows:
         if not candidate_rows:
             return None
@@ -3485,12 +3482,8 @@ def _build_imperial_grid_row_from_word_entry(entry: dict[str, Any], *, room_scop
         if not cleaned:
             continue
         note_parts.append(cleaned)
-    description = parsing.normalize_brand_casing_text(
-        parsing.normalize_space(" ".join(_dedupe_preserve_order(description_parts)))
-    ).strip(" -;,")
-    notes = parsing.normalize_brand_casing_text(
-        parsing.normalize_space(" ".join(_dedupe_preserve_order(note_parts)))
-    ).strip(" -;,")
+    description = parsing.normalize_space(" ".join(_dedupe_preserve_order(description_parts))).strip(" -;,")
+    notes = parsing.normalize_space(" ".join(_dedupe_preserve_order(note_parts))).strip(" -;,")
     if not description and not notes:
         return None
     return ImperialGridRow(
@@ -3506,14 +3499,31 @@ def _build_imperial_grid_row_from_word_entry(entry: dict[str, Any], *, room_scop
     )
 
 
+def _split_imperial_grid_layout_supplier_notes(raw_supplier: str, raw_notes: str) -> tuple[str, str]:
+    supplier_text = parsing.normalize_space(str(raw_supplier or "")).strip(" -;,")
+    notes_text = parsing.normalize_space(str(raw_notes or "")).strip(" -;,")
+    if not supplier_text:
+        return "", notes_text
+    supplier_hint, supplier_tail = _extract_imperial_grid_supplier_fragment(supplier_text)
+    if supplier_hint:
+        if supplier_tail and notes_text and re.match(r"(?i)^(?:for|to|with|and|or|in|on)\b", notes_text):
+            return supplier_hint, parsing.normalize_space(f"{supplier_tail} {notes_text}").strip(" -;,")
+        return supplier_hint, _merge_imperial_grid_notes(supplier_tail, notes_text)
+    return supplier_text, notes_text
+
+
 def _imperial_grid_row_from_layout_row(raw_row: dict[str, Any], *, room_scope: str, row_order: int = 0) -> ImperialGridRow:
+    supplier, notes = _split_imperial_grid_layout_supplier_notes(
+        str(raw_row.get("supplier_region_text", "") or raw_row.get("supplier_text", "") or ""),
+        str(raw_row.get("notes_region_text", "") or raw_row.get("notes_text", "") or ""),
+    )
     return ImperialGridRow(
         room_scope=parsing.normalize_space(str(raw_row.get("room_scope", "") or room_scope)),
         row_label=parsing.normalize_space(str(raw_row.get("row_label", "") or "")),
         description=parsing.normalize_space(str(raw_row.get("value_region_text", "") or "")),
-        image=parsing.normalize_space(str(raw_row.get("image_region_text", "") or "")),
-        supplier=parsing.normalize_space(str(raw_row.get("supplier_region_text", "") or "")),
-        notes=parsing.normalize_space(str(raw_row.get("notes_region_text", "") or "")),
+        image="",
+        supplier=supplier,
+        notes=notes,
         row_kind=str(raw_row.get("row_kind", "other") or "other"),
         page_no=int(raw_row.get("page_no", 0) or 0),
         row_order=int(raw_row.get("row_order", row_order) or row_order),
@@ -3668,12 +3678,8 @@ def _build_imperial_grid_row_from_text_entry(
             note_parts.append(cleaned)
             continue
         description_parts.append(cleaned)
-    description = parsing.normalize_brand_casing_text(
-        parsing.normalize_space(" ".join(_dedupe_preserve_order(description_parts)))
-    ).strip(" -;,")
-    notes = parsing.normalize_brand_casing_text(
-        parsing.normalize_space(" ".join(_dedupe_preserve_order(note_parts)))
-    ).strip(" -;,")
+    description = parsing.normalize_space(" ".join(_dedupe_preserve_order(description_parts))).strip(" -;,")
+    notes = parsing.normalize_space(" ".join(_dedupe_preserve_order(note_parts))).strip(" -;,")
     if not description and not notes:
         return None
     return ImperialGridRow(
@@ -3729,6 +3735,48 @@ def _prefer_imperial_grid_row(text_row: ImperialGridRow, candidate: ImperialGrid
         return text_row
     if _imperial_grid_row_merge_key(candidate) != _imperial_grid_row_merge_key(text_row):
         return text_row
+    text_polluted = _imperial_grid_row_has_header_pollution(text_row)
+    candidate_polluted = _imperial_grid_row_has_header_pollution(candidate)
+    if candidate_polluted and not text_polluted:
+        return text_row
+    if text_row.repair_source == "cell_grid_repair" and not text_polluted:
+        if _imperial_grid_row_has_supplier_tail_pollution(candidate):
+            return text_row
+    label = _normalized_imperial_grid_label(text_row.row_label)
+    text_foreign = _imperial_grid_fragment_has_foreign_row_label(
+        parsing.normalize_space(" ".join(part for part in (text_row.description, text_row.notes) if parsing.normalize_space(part))),
+        row_label=label,
+    )
+    candidate_foreign = _imperial_grid_fragment_has_foreign_row_label(
+        parsing.normalize_space(" ".join(part for part in (candidate.description, candidate.notes) if parsing.normalize_space(part))),
+        row_label=label,
+    )
+    if text_foreign and not candidate_foreign and parsing.normalize_space(candidate.description):
+        text_score = _imperial_grid_row_quality(text_row)
+        candidate_score = _imperial_grid_row_quality(candidate)
+        if candidate_score >= text_score - 80:
+            preferred = candidate
+            secondary = text_row
+            row_label = preferred.row_label or secondary.row_label
+            description = parsing.normalize_space(preferred.description or secondary.description)
+            supplier = preferred.supplier or secondary.supplier
+            notes = _merge_imperial_grid_notes(preferred.notes, secondary.notes)
+            return ImperialGridRow(
+                room_scope=preferred.room_scope or secondary.room_scope,
+                row_label=row_label,
+                description=description,
+                image=preferred.image or secondary.image,
+                supplier=supplier,
+                notes=notes,
+                row_kind=preferred.row_kind or secondary.row_kind,
+                page_no=preferred.page_no or secondary.page_no,
+                row_order=preferred.row_order or secondary.row_order,
+                repair_source=preferred.repair_source or secondary.repair_source or "vision_table_repair",
+                position_scope=preferred.position_scope or secondary.position_scope or _imperial_grid_row_position_scope(row_label, preferred.row_kind or secondary.row_kind),
+                confidence=max(_normalize_confidence_value(preferred.confidence), _normalize_confidence_value(secondary.confidence)),
+                provenance=_coerce_provenance_dict(preferred.provenance or secondary.provenance or {}),
+                needs_review=bool(preferred.needs_review and secondary.needs_review),
+            )
     text_score = _imperial_grid_row_quality(text_row)
     candidate_score = _imperial_grid_row_quality(candidate)
     preferred = text_row
@@ -3737,8 +3785,12 @@ def _prefer_imperial_grid_row(text_row: ImperialGridRow, candidate: ImperialGrid
         preferred = candidate
         secondary = text_row
     elif candidate_score >= text_score and parsing.normalize_space(candidate.description):
-        preferred = candidate
-        secondary = text_row
+        if text_row.repair_source == "cell_grid_repair" and candidate_score <= text_score + 20:
+            preferred = text_row
+            secondary = candidate
+        else:
+            preferred = candidate
+            secondary = text_row
     row_label = preferred.row_label or secondary.row_label
     description = parsing.normalize_space(preferred.description or secondary.description)
     supplier = preferred.supplier or secondary.supplier
@@ -3849,6 +3901,10 @@ def _imperial_grid_row_quality(row: ImperialGridRow) -> int:
         score += 8
     if _imperial_grid_fragment_has_foreign_row_label(combined or row.description, row_label=label):
         score -= 220
+    if _imperial_grid_row_has_header_pollution(row):
+        score -= 1000
+    if _imperial_grid_row_has_supplier_tail_pollution(row):
+        score -= 160
     if field_name == "handles" and "NO HANDLES" in label:
         score -= 80
     if field_name == "handles" and re.search(r"(?i)\b(?:waste\s*bin|avantech|bin\b|spice\s*tray|corner\s*unit|drawer\s*gpo|grommet|lighting|led\s*strip|hinges?|runners?)\b", combined):
@@ -3956,6 +4012,48 @@ def _imperial_grid_fragment_has_foreign_row_label(text: str, *, row_label: str) 
         "BENCHTOP",
     )
     return any(marker in upper and marker != current for marker in forbidden_markers)
+
+
+def _imperial_grid_text_has_header_pollution(text: str) -> bool:
+    cleaned = parsing.normalize_space(str(text or ""))
+    if not cleaned:
+        return False
+    return bool(
+        re.search(
+            r"(?i)\b(?:address|client|date|ceiling\s*height|cabinetry\s*height|bulkhead|shadowline)\s*:",
+            cleaned,
+        )
+        or re.search(r"(?i)\b(?:AREA\s*/\s*ITEM|SPECS\s*/\s*DESCRIPTION|JOINERY\s+SELECTION\s+SHEET)\b", cleaned)
+        or re.search(r"(?i)\b(?:ALL\s+COLOURS\s+SHOWN|PRODUCT\s+AVAILABILITY|DOCUMENT\s+REF|SIGNATURE|DESIGNER)\b", cleaned)
+        or re.search(r"(?i)\bSQUARE\s*SET\s*CEILING\s*HEIGHT\b", cleaned)
+    )
+
+
+def _imperial_grid_row_has_header_pollution(row: ImperialGridRow) -> bool:
+    combined = " ".join(
+        parsing.normalize_space(part)
+        for part in (row.row_label, row.description, row.image, row.supplier, row.notes)
+        if parsing.normalize_space(part)
+    )
+    return _imperial_grid_text_has_header_pollution(combined)
+
+
+def _imperial_grid_row_has_supplier_tail_pollution(row: ImperialGridRow) -> bool:
+    supplier = parsing.normalize_space(row.supplier)
+    if not supplier:
+        return False
+    known = {hint.upper() for hint in _IMPERIAL_GRID_SUPPLIER_HINTS}
+    if supplier.upper() in known:
+        return False
+    supplier_hint, supplier_tail = _extract_imperial_grid_supplier_fragment(supplier)
+    if supplier_hint and supplier_tail:
+        return True
+    return bool(
+        re.search(
+            r"(?i)\b(?:variation|venette|matt|woodmatt|stone|profile|handle|edge|colour|black|white|grey|oak|laminate)\b",
+            supplier,
+        )
+    )
 
 
 def _merge_imperial_grid_notes(primary: str, secondary: str) -> str:

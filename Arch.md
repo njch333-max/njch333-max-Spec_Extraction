@@ -143,6 +143,9 @@
   - use the page-top `... JOINERY SELECTION SHEET` title as the authoritative section start
   - use the currently extractable title body as the authoritative room label, preserving values such as `WALK-BEHIND PANTRY`, `BENCH SEAT`, or `OFFICE` without shorthand aliases
   - treat joinery/material pages as table-first Excel-to-PDF layouts: Vision supplies the grid boundary layer for header rows, data rows, merged cells, and footer/signature isolation before deterministic mapping runs
+  - enforce a hard `content_grid` boundary before `material_rows` persistence: clean cell-grid rows outrank broader layout/vision candidates, and candidates containing page header/meta/table-heading tokens are rejected or heavily down-ranked
+  - keep `IMAGE` cells out of final Imperial content. Image geometry may help infer covered grid edges, but image text/OCR must not contribute to material rows, summaries, sinkware, or appliance values
+  - split `SUPPLIER` and `NOTES` by recovered cell ownership. Recognized supplier prefixes such as `Polytec` or `By Others` may be separated from adjacent note tails, but row assemblers must not infer supplier/notes by whole-line free text
   - use the title to identify the section, but do not discard same-page body text that appears before the title in extracted reading order
   - keep untitled continuation pages attached to the current section until the next top title appears
   - break the current joinery section when the next page switches into non-joinery full-page headings such as `APPLIANCES` or `SINKWARE & TAPWARE`
@@ -236,6 +239,7 @@
   - second line: `Room: A | B | C`
   - room lists are de-duplicated and kept in source spec order
   - rows with failing or unresolved non-handle-specific `revalidation_status` are excluded from summary aggregation; handle-specific provenance fallback is allowed only for tightly scoped summary recovery
+9b. Imperial summary aggregation includes a hard-boundary pollution gate. Rows containing page header/meta/table-heading contamination are excluded before `Door Colours / Handles / Bench Tops` grouping so notes-only fragments such as `Bulkhead:Colourboard` cannot become summary materials.
 10. Render appliance official links as a clickable wrapped `Product` column.
 11. Render non-room joinery sections such as `FEATURE TALL DOORS` in a dedicated `Special Sections` block instead of folding them into nearby rooms.
 12. Show `Generated at`, `Extraction duration`, and the current PDF QA status in Brisbane time / human-readable duration format on the raw Spec List page.
@@ -344,7 +348,7 @@
 - Recommended environment file: `/etc/spec-extraction.env`
 - Production Nginx and FastAPI upload limits should stay aligned at `100 MB`
 - Routine updates are online-first: after local verification, deploy the current repo state to `/opt/spec-extraction`, restart both production services, verify `/api/health`, and then re-run any job whose parsing output should change.
-- The repo now includes `tools/deploy_online.py` and `tools/deploy_online.ps1` to stage selected repo files to the LXtransport host, install them into `/opt/spec-extraction`, restart `spec-extraction-web.service` and `spec-extraction-worker.service`, and validate the live health endpoint.
+- The repo now includes `tools/deploy_online.py` and `tools/deploy_online.ps1` to stage selected repo files to the LXtransport host, install them into `/opt/spec-extraction`, restart `spec-extraction-web.service` and `spec-extraction-worker.service`, and validate the live health endpoint. The deploy include set also ships `IMPERIAL_GRID_TRACKER.md` so production-side parser work has the same durable tracker as the local repo.
 
 ## 6.1 Presentation Timezone
 - SQLite and snapshot timestamps remain stored in UTC.
