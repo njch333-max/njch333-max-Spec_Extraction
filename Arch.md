@@ -145,7 +145,7 @@
   - treat joinery/material pages as table-first Excel-to-PDF layouts: Vision supplies the grid boundary layer for header rows, data rows, merged cells, and footer/signature isolation before deterministic mapping runs
   - enforce a hard `content_grid` boundary before `material_rows` persistence: clean cell-grid rows outrank broader layout/vision candidates, and candidates containing page header/meta/table-heading tokens are rejected or heavily down-ranked
   - keep page-structure and cell-ownership provenance with Imperial material rows: `table_header_bbox`, `content_grid_bbox`, `footer_bbox`, column ownership, and separator segment source/confidence must be inspectable before downstream cleanup
-  - provide dev-only grid debug artifacts under `tmp/imperial_grid_debug/`, using JSON and SVG overlays to show visible/inferred separators, image obstruction boxes, row bands, cell ownership, and content-grid boundaries
+  - provide dev-only grid debug artifacts under `tmp/imperial_grid_debug/`, using JSON and SVG overlays to show visible/inferred separators, image obstruction boxes, row bands, cell ownership, and content-grid boundaries. In those artifacts, `grid_rows` represents the repaired parser view and `unrepaired_grid_rows` preserves pre-repair five-column rows for diagnosis.
   - keep `IMAGE` cells out of final Imperial content. Image geometry may help infer covered grid edges, but image text/OCR must not contribute to material rows, summaries, sinkware, or appliance values
   - split `SUPPLIER` and `NOTES` by recovered cell ownership. Recognized supplier prefixes such as `Polytec` or `By Others` may be separated from adjacent note tails, but row assemblers must not infer supplier/notes by whole-line free text
   - use the title to identify the section, but do not discard same-page body text that appears before the title in extracted reading order
@@ -257,6 +257,7 @@
   - strengthen `ImperialSeparatorModel` and separator provenance in `extraction_service.py`
   - coalesce adjacent row bands before cell extraction only when separator evidence is soft (`none` / `inferred_low`) and row evidence supports same-cell continuation
   - repair weak-boundary leading fragments at the five-column row assembly layer, for example assigning `GPO` accessory text to the following `ACCESSORIES` row when no hard separator proves a separate row
+  - keep debug overlay row semantics aligned with the parser path: repaired rows are shown as `grid_rows`; unrepaired intermediate rows are retained only as `unrepaired_grid_rows`
   - stabilize `AREA / ITEM` anchored row assembly before later parsing stages
   - then tighten semantic subitems and summary inputs in `parsing.py` / `main.py`
 

@@ -3951,7 +3951,7 @@ def build_imperial_grid_debug_page(
         footer_rows=footer_rows,
     )
     cells = _extract_imperial_cells_from_word_rows(content_rows, column_model=column_model)
-    five_column_rows = _build_imperial_five_column_rows_from_cells(
+    unrepaired_five_column_rows = _build_imperial_five_column_rows_from_cells(
         cells,
         room_scope=room_scope,
         page_no=page_no,
@@ -3960,6 +3960,7 @@ def build_imperial_grid_debug_page(
         column_model=column_model,
         row_band_metadata=row_band_metadata,
     )
+    five_column_rows = _repair_imperial_five_column_rows(unrepaired_five_column_rows)
     return {
         "page_no": int(page_no),
         "page_size": {"width": page_width, "height": page_height},
@@ -3996,6 +3997,18 @@ def build_imperial_grid_debug_page(
                 "provenance": _coerce_provenance_dict(row.provenance),
             }
             for row in five_column_rows
+        ],
+        "unrepaired_grid_rows": [
+            {
+                "row_order": int(row.row_order or 0),
+                "area_or_item": parsing.normalize_space(row.area_or_item),
+                "specs_or_description": parsing.normalize_space(row.specs_or_description),
+                "supplier": parsing.normalize_space(row.supplier),
+                "notes": parsing.normalize_space(row.notes),
+                "confidence": float(row.confidence or 0.0),
+                "provenance": _coerce_provenance_dict(row.provenance),
+            }
+            for row in unrepaired_five_column_rows
         ],
     }
 
