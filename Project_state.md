@@ -221,7 +221,7 @@
 
 ## Remaining Work
 - Continue driving Imperial structure work from `IMPERIAL_GRID_TRACKER.md` instead of ad hoc sample-by-sample cleanup
-- Deploy and live-verify Imperial Phase 2A row assembly on `job 64`, confirming `GPO` is no longer a standalone grid row and `ACCESSORIES` owns the full source value
+- Run a targeted fresh live rerun for Imperial `job 64` after Phase 2A overlay/parser verification; the deployed `7c4728e` overlay and parser function now show `ACCESSORIES` owning the full `GPO - Double Powerpoint...` value, but full rerun plus source-PDF QA is still required before closure
 - When reviewing Imperial debug overlays, treat `unrepaired_grid_rows` as evidence of the original row split only; acceptance must use repaired `grid_rows`, live parser output, and source-PDF QA
 - Re-open `job 64` under strict PDF QA. The earlier bulk `pass/na` write-back was invalid because it did not perform field-by-field source-PDF review.
 - Refine OCR fallback for image-heavy PDFs

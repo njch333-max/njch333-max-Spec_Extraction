@@ -103,13 +103,12 @@
 
 ## Next Actions
 - Primary live blocker: none after `job 67 / run 2207` signoff.
-- Current structural target: deploy and live-verify Phase 2A `AREA / ITEM` anchored row assembly. Local implementation now reassigns weak-boundary leading `GPO` fragments into the following `ACCESSORIES` row when the fragment is clearly an accessory value prelude, while preserving visible / `inferred_high` hard boundaries. The debug overlay must be read with `grid_rows` as the post-repair parser view and `unrepaired_grid_rows` as diagnostic evidence only.
+- Current structural target: run a targeted fresh live rerun for `job 64` after Phase 2A overlay/parser verification. The deployed parser now reassigns weak-boundary leading `GPO` fragments into the following `ACCESSORIES` row when the fragment is clearly an accessory value prelude, while preserving visible / `inferred_high` hard boundaries. The debug overlay must be read with `grid_rows` as the post-repair parser view and `unrepaired_grid_rows` as diagnostic evidence only.
 - Target order:
-  1. Deploy Phase 2A and regenerate the `job 64 page 1` grid overlay
-  2. Confirm `GPO` no longer appears as a standalone repaired `grid_rows` entry and `ACCESSORIES` owns the full source value; `GPO` may remain in `unrepaired_grid_rows` as evidence of the original weak-boundary fragment
-  3. If overlay passes, run a targeted live parser rerun for `job 64` before treating the cycle as accepted
-  4. Phase 1C only if future overlays cannot explain a boundary; current live overlays are explainable
-  5. Phase 3 semantic follow-up remains later: handle subitems, sinkware cluster-local assignment, and appliance row-first tightening
+  1. Run a targeted live parser rerun for `job 64` before treating the cycle as accepted
+  2. Source-PDF check the rerun for `ACCESSORIES / GPO`, flooring source case, and existing sink/appliance behavior
+  3. Phase 1C only if future overlays cannot explain a boundary; current live overlays are explainable
+  4. Phase 3 semantic follow-up remains later: handle subitems, sinkware cluster-local assignment, and appliance row-first tightening
 - Standing rule during live analysis:
   - if `AREA / ITEM` and `SPECS / DESCRIPTION` are bleeding together, treat that as a grid/row-assembly blocker first, not a summary or UI bug
   - do not close a cycle by only cleaning the displayed text if the raw row boundary is still wrong
@@ -147,3 +146,4 @@
 - `2026-04-17`: Phase 1B was deployed as build `aad69e3` and live overlays were regenerated under `/opt/spec-extraction/tmp/imperial_grid_debug_live_phase1b/`. Verified live: `job 67 page 1` now emits `BENCHTOP / 40mm Stone WFE x 1` from two coalesced bands (`visible`, `none`); `job 62 page 2` now emits `UPPER CABINETRY COLOUR INCLUDING TALL OPEN SHELVING / Black Wenge - Venette / Polytec` from two coalesced bands; `job 64 page 1` now coalesces `BENCHTOP / WFE's x 2` and keeps the trailing `cupboard)` with `ACCESSORIES`, but still leaves `GPO` as a separate leading row fragment. That remaining case is classified as Phase 2A row-assembler ownership, not Phase 1B separator recovery.
 - `2026-04-17`: Phase 2A local implementation added `ACCESSORIES` / `GPO` canonical row specs and a constrained five-column repair for leading `GPO` fragments before `ACCESSORIES`. The repair only fires across soft boundaries and only when `GPO` carries accessory-value evidence such as `Powerpoint`, `USB`, or `socket`; a visible / `inferred_high` boundary blocks the merge. Local tests now cover both the positive `GPO -> ACCESSORIES` ownership repair and the visible-boundary non-merge case. Verification: `python -m compileall App tests tools` passed and `831` smoke tests passed.
 - `2026-04-17`: Phase 2A debug overlay semantics were corrected so `grid_rows` reflects the same repaired row view used by the parser, while `unrepaired_grid_rows` keeps the pre-repair five-column rows for boundary diagnosis. This prevents false live-analysis failures where the parser output is fixed but the overlay still displays an unrepaired intermediate row split.
+- `2026-04-17`: Phase 2A was deployed as build `7c4728e` and `job 64 page 1` overlay was regenerated under `/opt/spec-extraction/tmp/imperial_grid_debug_live_phase2a/job64/`. Verified live: repaired `grid_rows` now shows `BENCHTOP / 20mm Stone WFE's x 2 / By Others` and one `ACCESSORIES / GPO - Double Powerpoint with 2xUSB sockets - Black- (Island bench, front of MW cupboard)` row with `leading_fragment_repair = gpo_to_accessories`; `GPO` remains only in `unrepaired_grid_rows` as the original weak-boundary fragment. The production parser function returned the same rows with `unresolved 0`. A fresh full `job 64` rerun and source-PDF QA are still required before closing the Phase 2A cycle.
