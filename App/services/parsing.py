@@ -6607,6 +6607,11 @@ def _imperial_hanging_rail_description_from_evidence(
             cleaned_description = normalize_space(f"{dimension_match.group(0)}, {cleaned_description}")
     if re.search(r"(?i)\b1400R\.36\.ALU\b", evidence_for_match) and "1400R.36.ALU" not in cleaned_description.upper():
         cleaned_description = normalize_space(f"{cleaned_description} - 1400R.36.ALU")
+    cleaned_description = re.sub(
+        r"(?i)^(Oval\s+wardrobe\s+tube,\s*ribbed,\s*aluminium),\s*wardrobe\s+tube,\s*ribbed,\s*aluminium,?\s*",
+        r"\1, ",
+        cleaned_description,
+    )
     return _imperial_trim_hanging_rail_row_spillover(cleaned_description)
 
 
@@ -12799,6 +12804,19 @@ def _imperial_postprocess_material_rows(rows: list[dict[str, Any]]) -> list[dict
                 description = rebuilt_description
                 notes = rebuilt_notes
         if primary_tag == "handles":
+            if supplier:
+                supplier_tail_match = re.search(
+                    rf"(?i)\s*,?\s*{re.escape(supplier)}\s*-\s*(?P<note>(?:Horizontal|Vertical|on\s+ALL)\b.*)$",
+                    description,
+                )
+                if supplier_tail_match:
+                    tail_note = _imperial_normalize_handle_note_text(supplier_tail_match.group("note"))
+                    description = normalize_space(description[: supplier_tail_match.start()]).strip(" -|;,")
+                    if tail_note and tail_note.upper() not in notes.upper():
+                        notes = normalize_space(" - ".join(part for part in (notes, tail_note) if part))
+                    provenance["layout_value_text"] = description
+                    provenance["layout_notes_text"] = notes
+                    provenance["layout_supplier_text"] = supplier
             rebuilt_description, rebuilt_supplier = _imperial_rebuild_handle_row_from_visual_subrow(
                 row,
                 description,
@@ -13278,6 +13296,12 @@ def _imperial_clean_material_row_label_text(label: str) -> str:
         return "FEATURE CABINETRY"
     if re.search(r"(?i)\bNO\s+handles?\b", cleaned) and re.search(r"(?i)\b(?:DOORS?|DRAWERS?)\b", cleaned):
         return "HANDLES"
+    if (
+        re.search(r"(?i)\bHANDLES?\b", cleaned)
+        and not re.match(r"(?i)^HANDLES?\b", cleaned)
+        and not _imperial_handle_detail_row_label(cleaned)
+    ):
+        return "HANDLES"
     if _imperial_handle_detail_row_label(cleaned):
         return cleaned
     if re.search(r"(?i)\bCABINETRY\s+COLOUR\b", cleaned):
@@ -13316,6 +13340,15 @@ def _imperial_extract_material_row_label_spillover(label: str, cleaned_label: st
     resolved = normalize_space(cleaned_label).strip(" -|;,")
     if not original or not resolved or original.upper() == resolved.upper():
         return ""
+    if resolved.upper() == "HANDLES":
+        handle_match = re.search(r"(?i)\bHANDLES?\b", original)
+        if handle_match and handle_match.start() > 0:
+            prefix = normalize_space(original[: handle_match.start()]).strip(" -|;,()")
+            if prefix and re.fullmatch(
+                r"(?i)(?:Momo|Kethy|Hafele|Hettich|Furnware|Barchie|Titus\s+Tekform|Lincoln\s+Sentry)",
+                prefix,
+            ):
+                return normalize_brand_casing_text(prefix)
     if not original.upper().startswith(resolved.upper()):
         return ""
     suffix = normalize_space(original[len(resolved) :]).strip(" -|;,()")

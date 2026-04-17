@@ -23075,6 +23075,15 @@ H55784Z03AU
             "Oval wardrobe tube, ribbed, aluminium, 15mm x 30mm x 3.6m - Matt Black - 1400R.36.MBL",
         )
 
+    def test_imperial_hanging_rail_description_dedupes_oval_prefix(self) -> None:
+        self.assertEqual(
+            parsing_module._imperial_hanging_rail_description_from_evidence(
+                "wardrobe tube, ribbed, aluminium, 15mm x 30mm x 3.6m -Matt Black - 1400R.36.MBL",
+                "Oval wardrobe tube, ribbed, aluminium, 15mm x 30mm x 3.6m -Matt Black - 1400R.36.MBL",
+            ),
+            "Oval wardrobe tube, ribbed, aluminium, 15mm x 30mm x 3.6m -Matt Black - 1400R.36.MBL",
+        )
+
     def test_imperial_clean_material_row_handle_text_trims_feature_cabinetry_tail(self) -> None:
         self.assertEqual(
             parsing_module._imperial_clean_material_row_handle_text(
@@ -23116,6 +23125,49 @@ H55784Z03AU
         self.assertEqual(
             parsing_module._imperial_material_row_display_lines_for_view(row),
             ["GPO - Double Powerpoint with 2xUSB sockets - Black - (Island bench, front of MW cupboard)"],
+        )
+
+    def test_imperial_postprocess_material_rows_repairs_handle_label_value_spillover(self) -> None:
+        processed = parsing_module._imperial_postprocess_material_rows(
+            [
+                {
+                    "area_or_item": "Momo HANDLES oval",
+                    "supplier": "Furnware",
+                    "specs_or_description": "flapp pull handle 256mm in brushed black - FPH256.BBL , Furnware - Horizontal on ALL",
+                    "notes": "",
+                    "tags": ["handles"],
+                    "page_no": 3,
+                    "row_order": 5,
+                    "provenance": {
+                        "raw_area_or_item": "Momo HANDLES oval",
+                        "layout_value_text": "flapp pull handle 256mm in brushed black - FPH256.BBL , Furnware - Horizontal on ALL",
+                        "layout_row_label": "Momo HANDLES oval",
+                        "visual_fragments": [
+                            {
+                                "area_or_item": "Momo HANDLES",
+                                "specs_or_description": "flapp pull handle 256mm in brushed black - FPH256.BBL",
+                                "supplier": "Furnware Horizontal",
+                                "notes": "on ALL",
+                            },
+                            {
+                                "area_or_item": "oval",
+                                "specs_or_description": "wardrobe tube, ribbed, aluminium,",
+                                "separator_confidence_from_previous": "visible",
+                            },
+                        ],
+                    },
+                }
+            ]
+        )
+        self.assertEqual(processed[0]["area_or_item"], "HANDLES")
+        self.assertEqual(
+            processed[0]["specs_or_description"],
+            "Momo flapp pull handle 256mm in brushed black - FPH256.BBL",
+        )
+        self.assertEqual(processed[0]["notes"], "Horizontal on ALL")
+        self.assertEqual(
+            parsing_module._imperial_material_row_display_lines_for_view(processed[0]),
+            ["[Furnware] - Momo flapp pull handle 256mm in brushed black - FPH256.BBL - (Horizontal on ALL)"],
         )
 
     def test_imperial_extract_non_joinery_blocks_includes_basin_headings_for_sinkware(self) -> None:
