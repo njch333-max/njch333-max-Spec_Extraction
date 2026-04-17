@@ -23205,6 +23205,31 @@ H55784Z03AU
         )
         self.assertEqual(processed[0]["notes"], "Horizontal on ALL")
 
+    def test_imperial_handle_display_lines_keep_brand_prefix_from_visual_label(self) -> None:
+        row = {
+            "area_or_item": "HANDLES",
+            "supplier": "Furnware",
+            "specs_or_description": "Momo flapp pull handle 256mm in brushed black - FPH256.BBL",
+            "notes": "Horizontal on ALL",
+            "tags": ["handles"],
+            "provenance": {
+                "raw_area_or_item": "Momo HANDLES",
+                "layout_value_text": "flapp pull handle 256mm in brushed black - FPH256.BBL",
+                "visual_fragments": [
+                    {
+                        "area_or_item": "Momo HANDLES",
+                        "specs_or_description": "flapp pull handle 256mm in brushed black - FPH256.BBL",
+                        "supplier": "Furnware Horizontal",
+                        "notes": "on ALL",
+                    }
+                ],
+            },
+        }
+        self.assertEqual(
+            parsing_module._imperial_material_row_display_lines_for_view(row),
+            ["[Furnware] - Momo flapp pull handle 256mm in brushed black - FPH256.BBL - (Horizontal on ALL)"],
+        )
+
     def test_imperial_extract_non_joinery_blocks_includes_basin_headings_for_sinkware(self) -> None:
         text = """
 SINKWARE & TAPWARE

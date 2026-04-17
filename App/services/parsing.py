@@ -7138,6 +7138,13 @@ def _imperial_visual_fragments_to_display_lines(
         raw_notes = notes
         label = normalize_space(str(fragment.get("area_or_item", "") or ""))
         if primary_tag == "handles":
+            supplier, notes = _imperial_split_material_supplier_notes(supplier, notes)
+            label_spillover = _imperial_extract_material_row_label_spillover(
+                label,
+                _imperial_clean_material_row_label_text(label),
+            )
+            if label_spillover and label_spillover.upper() not in description.upper():
+                description = normalize_space(f"{label_spillover} {description}").strip(" -|;,")
             if preserved_handle_supplier and (
                 not supplier
                 or supplier.upper() not in {item.upper() for item in IMPERIAL_HANDLE_SUPPLIER_HINTS}
