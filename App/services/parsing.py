@@ -28273,10 +28273,28 @@ def _clean_room_fixture_text(value: Any, kind: str) -> str:
     if kind == "sink":
         if re.match(r"(?i)^(?:sink mixer|pull-?out mixer|basin mixer|mixer)\b", text):
             return ""
+        text = re.sub(
+            r"(?i)\bSink\s+Mounting\s*-?\s*Undermount\s+sink\b",
+            "Sink Mounting - Undermount",
+            text,
+        )
+        if (
+            re.search(r"(?i)\bSink\s+Mounting\s*-\s*Undermount\b", text)
+            and not re.search(r"(?i)\bBy\s+(?:Others|Imperial|Client|Builder)\b", text)
+        ):
+            text = re.sub(
+                r"(?i)\bSink\s+Mounting\s*-\s*Undermount\b",
+                "Sink Mounting - By Others Undermount",
+                text,
+                count=1,
+            )
+        text = re.sub(r"(?i)\b(Taphole location\s*:[^-|]*?\bbehind)\s*$", r"\1 sink", text)
         text = _trim_fixture_text_at_markers(text, wet_area_tail_markers + (r"\bBath\b", r"\bTapware\b", r"\b(?:Sink\s+)?Mixer\b"))
     elif kind == "basin":
         if re.match(r"(?i)^(?:waste\b|pop up waste\b|bottle trap\b|mixer\b|sink mixer\b|pull-?out mixer\b|tap\b)", text):
             return ""
+        text = re.sub(r"(?i)\bbehind\s+basin\s+sink\b", "behind basin", text)
+        text = re.sub(r"(?i)\b(Taphole location\s*:[^-|]*?\bbehind)\s*$", r"\1 basin", text)
         text = _trim_fixture_text_at_markers(text, wet_area_tail_markers + (r"\bBath\b", r"\b(?:Sink\s+)?Mixer\b"))
         if text.lower().endswith(" basin") and " basin " in text[:-6].lower():
             text = text[:-6].rstrip(" -;,")

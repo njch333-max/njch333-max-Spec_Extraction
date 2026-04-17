@@ -11389,6 +11389,31 @@ H55784Z03AU
             candidate,
         )
 
+    def test_clean_room_fixture_text_repairs_imperial_sinkware_taphole_tails(self) -> None:
+        self.assertEqual(
+            parsing_module._clean_room_fixture_text(
+                "Burazzo 650mm Stainless Steel Single Bowl Sink (BU654520S)- "
+                "Sink Mounting Undermount sink - Taphole location: In Stone, centered behind",
+                "sink",
+            ),
+            "Burazzo 650mm Stainless Steel Single Bowl Sink (BU654520S)- "
+            "Sink Mounting - By Others Undermount - Taphole location: In Stone, centered behind sink",
+        )
+        self.assertEqual(
+            parsing_module._clean_room_fixture_text(
+                "Sink Mounting - Topmount - Specs TBC By Others - Taphole location: In Stone, centered behind basin sink",
+                "basin",
+            ),
+            "Sink Mounting - Topmount - Specs TBC By Others - Taphole location: In Stone, centered behind basin",
+        )
+        self.assertEqual(
+            parsing_module._clean_room_fixture_text(
+                "Sink Mounting - Topmount - Specs TBC By Others - Taphole location: In Stone, centered behind",
+                "basin",
+            ),
+            "Sink Mounting - Topmount - Specs TBC By Others - Taphole location: In Stone, centered behind basin",
+        )
+
     def test_imperial_assign_sinkware_cluster_parts_keeps_room_specific_lines_local(self) -> None:
         assigned = parsing_module._imperial_assign_sinkware_cluster_parts(
             [
