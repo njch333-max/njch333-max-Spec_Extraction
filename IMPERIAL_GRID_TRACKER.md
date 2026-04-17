@@ -76,6 +76,7 @@
 
 ## Open Problems
 - Segment-level separator provenance has a first local implementation and debug overlay output; it still needs repeated live-PDF use to expose weak edge cases.
+- Live overlay verification exposed the next structural blocker: adjacent visual bands with no hard separator, or only `inferred_low`, still reach row assembly as separate bands. This affects `WFE x 1` under `BENCHTOP`, `GPO / ACCESSORIES`, and `UPPER CABINETRY COLOUR INCLUDING / TALL OPEN SHELVING`.
 - Short-value row termination is still too weak on `KICKBOARDS`, `LIGHTING`, and similar rows.
 - Handle cells still need first-class subitem modeling instead of raw-string-first splitting.
 - `sinkware / appliances` remain structurally weaker than `joinery/material`.
@@ -101,9 +102,9 @@
 
 ## Next Actions
 - Primary live blocker: none after `job 67 / run 2207` signoff.
-- Current structural target: use the new Phase 1A debug JSON/SVG overlay to inspect the next grid-boundary failure before adding any row/string cleanup.
+- Current structural target: Phase 1B separator-aware row-band coalescing. Bands separated by no hard boundary, or only `inferred_low`, must stay mergeable for same-cell/subrow continuation before downstream row assembly decides row ownership.
 - Target order:
-  1. Phase 1 grid-truth follow-up: exercise segment-level separator provenance and debug overlay output on live PDFs
+  1. Phase 1B grid-truth follow-up: separator-aware row-band coalescing for no-boundary / `inferred_low` continuation
   2. Phase 2 row-assembly follow-up: handle subitem modeling for pantry/kitchen style cells
   3. Phase 3 semantic follow-up: stronger sinkware cluster-local assignment and appliance row-first capture
   4. If a new live failure is reported, first classify whether it is `content_grid`, `cell ownership`, `row assembly`, or `semantic summary` before adding cleanup rules
@@ -139,3 +140,4 @@
 - `2026-04-17`: `job 67` reached strict source-PDF signoff on `run 2207 / build local-d251ab53`. The cycle fixed `content_grid` hard-boundary leakage, supplier/notes ownership for `Polytec Variation for Black - Venette`, raw spelling preservation for `Mirrorred`, row-first appliance capture for seven rows, `WFE x 1` visual-break preservation, and sinkware taphole tail preservation for `behind sink/basin`. PDF QA was written as `passed` for the latest raw snapshot.
 - `2026-04-17`: Post-`job 67` regression found `job 64 / run 2208` still splitting `GPO` out of `ACCESSORIES`. A generic Imperial repair now merges non-adjacent `GPO` spillover fragments back into `ACCESSORIES` and protects that merged value from later self-repair rollback. `job 64 / run 2212 / build local-7cc74371` passed targeted regression (`ACCESSORIES` restored; flooring source case preserved). `job 62 / run 2209 / build local-d251ab53` completed as the companion regression check for long-label and short-value stability.
 - `2026-04-17`: Phase 1A grid-debug implementation added page-structure bboxes, cell-ownership provenance, word-level bbox propagation, `content_grid`/footer/table-header debug payloads, and `tools/imperial_grid_debug.py` for JSON/SVG overlay generation under `tmp/imperial_grid_debug/`. Local structural tests now cover bbox provenance, content-grid/footer exclusion, `inferred_low` non-hard-split behavior, and debug artifact generation.
+- `2026-04-17`: Phase 1A was deployed and exercised on real source PDFs for `job 67`, `job 64`, and `job 62`. JSON/SVG overlays were generated under `/opt/spec-extraction/tmp/imperial_grid_debug_live/`. The overlays confirmed correct high-level `content_grid`/footer separation and cell bboxes, but also proved the next blocker: no-boundary or `inferred_low` adjacent bands are still being handed to row assembly as separate bands. Evidence: `job 67 page 1` has `WFE x 1` as a second description band under `BENCHTOP` with no hard separator; `job 64 page 1` has `GPO` and `ACCESSORIES` split across adjacent bands with only weak separator evidence; `job 62 page 2` has `UPPER CABINETRY COLOUR INCLUDING` and `TALL OPEN SHELVING` split by `inferred_low` before a later `inferred_high` separator.
