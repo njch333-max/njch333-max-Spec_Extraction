@@ -23186,6 +23186,14 @@ H55784Z03AU
                         "layout_row_label": "Momo HANDLES oval",
                         "area_or_item": {"text": "Momo HANDLES"},
                         "layout_value_text": "flapp pull handle 256mm in brushed black - FPH256.BBL , Furnware - Horizontal on ALL",
+                        "visual_fragments": [
+                            {
+                                "area_or_item": "Momo HANDLES",
+                                "specs_or_description": "flapp pull handle 256mm in brushed black - FPH256.BBL",
+                                "supplier": "Furnware Horizontal",
+                                "notes": "on ALL",
+                            }
+                        ],
                     },
                 }
             ]

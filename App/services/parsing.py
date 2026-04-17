@@ -10617,6 +10617,14 @@ def _imperial_rebuild_handle_row_from_visual_subrow(
     provenance = row.get("provenance", {}) if isinstance(row.get("provenance"), dict) else {}
     raw_area_or_item = normalize_space(str(provenance.get("raw_area_or_item", "") or ""))
     current_description = normalize_space(description)
+    if (
+        current_description
+        and current_description.upper() != cleaned_visual_description.upper()
+        and current_description.upper().endswith(cleaned_visual_description.upper())
+    ):
+        prefix = normalize_space(current_description[: -len(cleaned_visual_description)]).strip(" -|;,")
+        if _imperial_is_handle_brand_prefix(prefix):
+            return current_description, supplier
     should_replace = bool(
         _imperial_handle_text_has_foreign_section_pollution(current_description)
         or (
@@ -13349,10 +13357,7 @@ def _imperial_extract_material_row_label_spillover(label: str, cleaned_label: st
         handle_match = re.search(r"(?i)\bHANDLES?\b", original)
         if handle_match and handle_match.start() > 0:
             prefix = normalize_space(original[: handle_match.start()]).strip(" -|;,()")
-            if prefix and re.fullmatch(
-                r"(?i)(?:Momo|Kethy|Hafele|Hettich|Furnware|Barchie|Titus\s+Tekform|Lincoln\s+Sentry)",
-                prefix,
-            ):
+            if _imperial_is_handle_brand_prefix(prefix):
                 return normalize_brand_casing_text(prefix)
     if not original.upper().startswith(resolved.upper()):
         return ""
@@ -13399,6 +13404,15 @@ def _imperial_extract_material_row_label_spillover_from_provenance(
         if spillover:
             return spillover
     return ""
+
+
+def _imperial_is_handle_brand_prefix(prefix: str) -> bool:
+    return bool(
+        re.fullmatch(
+            r"(?i)(?:Momo|Kethy|Hafele|Hettich|Furnware|Barchie|Titus\s+Tekform|Lincoln\s+Sentry)",
+            normalize_space(prefix).strip(" -|;,()"),
+        )
+    )
 
 
 def _imperial_handle_detail_row_label(text: str) -> bool:
