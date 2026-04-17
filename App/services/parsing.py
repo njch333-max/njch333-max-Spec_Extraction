@@ -12953,6 +12953,8 @@ def _imperial_postprocess_material_rows(rows: list[dict[str, Any]]) -> list[dict
             notes = _imperial_clean_cabinetry_colour_notes(label, notes)
         description = _imperial_strip_supplier_duplication(supplier, description)
         notes = _imperial_strip_supplier_duplication(supplier, notes)
+        if supplier and notes.upper() == supplier.upper():
+            notes = ""
         row["area_or_item"] = label
         row["supplier"] = supplier
         row["specs_or_description"] = description

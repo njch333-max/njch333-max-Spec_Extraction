@@ -23282,7 +23282,7 @@ H55784Z03AU
                     "area_or_item": "FEATURE CABINETRY",
                     "supplier": "",
                     "specs_or_description": "Shaving Cabinet with Mirrorred doors - Open colourboard shelf below and sides. Standard Whiteboard Internals",
-                    "notes": "",
+                    "notes": "By Imperial",
                     "tags": ["door_colours"],
                     "provenance": {
                         "supplier": {"text": "By Imperial"},
@@ -23297,6 +23297,7 @@ H55784Z03AU
             ["[By Imperial] - Bevel Edge Finger Pull"],
         )
         self.assertEqual(processed[1]["supplier"], "By Imperial")
+        self.assertEqual(processed[1]["notes"], "")
         self.assertEqual(
             parsing_module._imperial_material_row_display_lines_for_view(processed[1]),
             [
