@@ -1444,7 +1444,7 @@ def _repair_imperial_joinery_grid_page(
 
 
 @functools.lru_cache(maxsize=512)
-def _load_pdfplumber_page_words(document_path: str, page_no: int) -> tuple[tuple[float, float, str], ...]:
+def _load_pdfplumber_page_words(document_path: str, page_no: int) -> tuple[tuple[float, float, float, float, str], ...]:
     path = str(document_path or "").strip()
     if not path or page_no <= 0:
         return ()
@@ -1465,12 +1465,16 @@ def _load_pdfplumber_page_words(document_path: str, page_no: int) -> tuple[tuple
             ) or []
     except Exception:
         return ()
-    normalized_words: list[tuple[float, float, str]] = []
+    normalized_words: list[tuple[float, float, float, float, str]] = []
     for word in words:
         text = parsing.normalize_space(str(word.get("text", "") or ""))
         if not text:
             continue
-        normalized_words.append((float(word.get("top", 0.0) or 0.0), float(word.get("x0", 0.0) or 0.0), text))
+        x0 = float(word.get("x0", 0.0) or 0.0)
+        x1 = float(word.get("x1", x0) or x0)
+        top = float(word.get("top", 0.0) or 0.0)
+        bottom = float(word.get("bottom", top) or top)
+        normalized_words.append((top, x0, x1, bottom, text))
     return tuple(normalized_words)
 
 
@@ -1776,8 +1780,12 @@ def _enrich_imperial_separator_model_for_row_bands(
             continue
         gap = current_top - previous_top
         current_text = parsing.normalize_space(str(current.get("text", "") or ""))
-        start = min((float(word[1]) for word in list(previous.get("words", []) or []) + list(current.get("words", []) or [])), default=0.0)
-        end = max((float(word[1]) for word in list(previous.get("words", []) or []) + list(current.get("words", []) or [])), default=0.0)
+        combined_words = [
+            _imperial_word_parts(word)
+            for word in list(previous.get("words", []) or []) + list(current.get("words", []) or [])
+        ]
+        start = min((float(word[1]) for word in combined_words), default=0.0)
+        end = max((float(word[2]) for word in combined_words), default=0.0)
         if gap >= 18.0:
             inferred_horizontal_edges.append(midpoint)
             inferred_horizontal_segments.append(
@@ -1982,24 +1990,54 @@ def _infer_imperial_continuation_room_scope(document_path: str, page_no: int, ra
     return ""
 
 
+def _imperial_word_parts(raw_word: Any) -> tuple[float, float, float, float, str]:
+    if isinstance(raw_word, dict):
+        text = parsing.normalize_space(str(raw_word.get("text", "") or ""))
+        x0 = float(raw_word.get("x0", 0.0) or 0.0)
+        x1 = float(raw_word.get("x1", x0) or x0)
+        top = float(raw_word.get("top", 0.0) or 0.0)
+        bottom = float(raw_word.get("bottom", top) or top)
+        return top, x0, x1, bottom, text
+    if isinstance(raw_word, (tuple, list)):
+        if len(raw_word) >= 5:
+            top = float(raw_word[0] or 0.0)
+            x0 = float(raw_word[1] or 0.0)
+            x1 = float(raw_word[2] or x0)
+            bottom = float(raw_word[3] or top)
+            text = parsing.normalize_space(str(raw_word[4] or ""))
+            return top, x0, x1, bottom, text
+        if len(raw_word) >= 3:
+            top = float(raw_word[0] or 0.0)
+            x0 = float(raw_word[1] or 0.0)
+            text = parsing.normalize_space(str(raw_word[2] or ""))
+            estimated_x1 = x0 + max(4.0, len(text) * 4.8)
+            return top, x0, estimated_x1, top + 10.0, text
+    return 0.0, 0.0, 0.0, 0.0, ""
+
+
 def _group_imperial_word_row_bands(
-    page_words: tuple[tuple[float, float, str], ...],
+    page_words: tuple[Any, ...],
     *,
     tolerance: float = 8.0,
 ) -> list[dict[str, Any]]:
     if not page_words:
         return []
-    sorted_words = sorted(page_words, key=lambda item: (item[0], item[1]))
-    grouped_rows: list[list[tuple[float, float, str]]] = []
-    current_row: list[tuple[float, float, str]] = []
+    sorted_words = sorted(
+        (_imperial_word_parts(word) for word in page_words),
+        key=lambda item: (item[0], item[1]),
+    )
+    grouped_rows: list[list[tuple[float, float, float, float, str]]] = []
+    current_row: list[tuple[float, float, float, float, str]] = []
     current_top: float | None = None
-    for top, x0, text in sorted_words:
+    for top, x0, x1, bottom, text in sorted_words:
+        if not text:
+            continue
         if current_top is None or abs(top - current_top) <= tolerance:
-            current_row.append((top, x0, text))
+            current_row.append((top, x0, x1, bottom, text))
             current_top = top if current_top is None else min(current_top, top)
             continue
         grouped_rows.append(sorted(current_row, key=lambda item: item[1]))
-        current_row = [(top, x0, text)]
+        current_row = [(top, x0, x1, bottom, text)]
         current_top = top
     if current_row:
         grouped_rows.append(sorted(current_row, key=lambda item: item[1]))
@@ -2009,8 +2047,11 @@ def _group_imperial_word_row_bands(
             {
                 "row_band": row_band,
                 "words": words,
-                "text": parsing.normalize_space(" ".join(word for _, _, word in words)),
-                "top": min(float(top) for top, _, _ in words) if words else 0.0,
+                "text": parsing.normalize_space(" ".join(word for _, _, _, _, word in words)),
+                "top": min(float(top) for top, _, _, _, _ in words) if words else 0.0,
+                "bottom": max(float(bottom) for _, _, _, bottom, _ in words) if words else 0.0,
+                "x0": min(float(x0) for _, x0, _, _, _ in words) if words else 0.0,
+                "x1": max(float(x1) for _, _, x1, _, _ in words) if words else 0.0,
             }
         )
     return row_bands
@@ -2068,6 +2109,90 @@ def _split_imperial_word_page_regions(
     return header_rows, table_header_index, content_rows, footer_rows
 
 
+def _imperial_bbox_from_row_bands(row_bands: list[dict[str, Any]]) -> dict[str, float]:
+    rows = [row for row in row_bands if isinstance(row, dict)]
+    if not rows:
+        return {}
+    x0_values = [float(row.get("x0", 0.0) or 0.0) for row in rows if float(row.get("x0", 0.0) or 0.0) > 0.0]
+    x1_values = [float(row.get("x1", 0.0) or 0.0) for row in rows if float(row.get("x1", 0.0) or 0.0) > 0.0]
+    top_values = [float(row.get("top", 0.0) or 0.0) for row in rows if float(row.get("top", 0.0) or 0.0) > 0.0]
+    bottom_values = [float(row.get("bottom", 0.0) or 0.0) for row in rows if float(row.get("bottom", 0.0) or 0.0) > 0.0]
+    if not x0_values or not x1_values or not top_values or not bottom_values:
+        return {}
+    return {
+        "x0": round(min(x0_values), 1),
+        "x1": round(max(x1_values), 1),
+        "top": round(min(top_values), 1),
+        "bottom": round(max(bottom_values), 1),
+    }
+
+
+def _imperial_page_structure_from_row_bands(
+    row_bands: list[dict[str, Any]],
+    *,
+    table_header_index: int | None,
+    content_rows: list[dict[str, Any]],
+    footer_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    table_header_rows = (
+        [row_bands[table_header_index]]
+        if table_header_index is not None and 0 <= table_header_index < len(row_bands)
+        else []
+    )
+    header_rows = row_bands[: table_header_index or 0] if table_header_index is not None else []
+    return {
+        "header_bbox": _imperial_bbox_from_row_bands(header_rows),
+        "table_header_bbox": _imperial_bbox_from_row_bands(table_header_rows),
+        "content_grid_bbox": _imperial_bbox_from_row_bands(content_rows),
+        "footer_bbox": _imperial_bbox_from_row_bands(footer_rows),
+        "table_header_index": int(table_header_index) if table_header_index is not None else None,
+        "content_row_count": len(content_rows),
+        "footer_row_count": len(footer_rows),
+    }
+
+
+def _imperial_column_model_to_dict(column_model: ImperialColumnModel | None) -> dict[str, Any]:
+    if column_model is None:
+        return {}
+    return {
+        "label_right": float(column_model.label_right),
+        "description_right": float(column_model.description_right),
+        "image_right": float(column_model.image_right),
+        "supplier_right": float(column_model.supplier_right),
+        "has_image_column": bool(column_model.has_image_column),
+        "roles": {
+            "label": {"x0": 0.0, "x1": float(column_model.label_right)},
+            "description": {"x0": float(column_model.label_right), "x1": float(column_model.description_right)},
+            "image": {"x0": float(column_model.description_right), "x1": float(column_model.image_right)},
+            "supplier": {"x0": float(column_model.image_right if column_model.has_image_column else column_model.description_right), "x1": float(column_model.supplier_right)},
+            "notes": {"x0": float(column_model.supplier_right), "x1": 9999.0},
+        },
+    }
+
+
+def _imperial_cell_ownership_from_cells(cells: list[ImperialCell]) -> list[dict[str, Any]]:
+    ownership: list[dict[str, Any]] = []
+    for cell in cells:
+        text = parsing.normalize_space(cell.text)
+        if not text:
+            continue
+        ownership.append(
+            {
+                "row_band": int(cell.row_band or 0),
+                "role": parsing.normalize_space(cell.col_role),
+                "bbox": {
+                    "x0": round(float(cell.x0 or 0.0), 1),
+                    "x1": round(float(cell.x1 or cell.x0 or 0.0), 1),
+                    "top": round(float(cell.top or 0.0), 1),
+                    "bottom": round(float(cell.bottom or cell.top or 0.0), 1),
+                },
+                "text": text,
+                "source": parsing.normalize_space(cell.source),
+            }
+        )
+    return ownership
+
+
 def _infer_imperial_column_model(
     row_bands: list[dict[str, Any]],
     *,
@@ -2083,7 +2208,8 @@ def _infer_imperial_column_model(
     image_start: float | None = None
     supplier_start: float | None = None
     notes_start: float | None = None
-    for _, x0, text in header_words:
+    for raw_word in header_words:
+        _, x0, _, _, text = _imperial_word_parts(raw_word)
         upper = parsing.normalize_space(text).upper()
         if not upper:
             continue
@@ -2130,7 +2256,8 @@ def _extract_imperial_cells_from_word_rows(
     for row in row_bands:
         row_band = int(row.get("row_band", 0) or 0)
         top = float(row.get("top", 0.0) or 0.0)
-        for _, x0, text in list(row.get("words", []) or []):
+        for raw_word in list(row.get("words", []) or []):
+            top, x0, x1, bottom, text = _imperial_word_parts(raw_word)
             cleaned = parsing.normalize_space(text)
             if not cleaned:
                 continue
@@ -2140,7 +2267,9 @@ def _extract_imperial_cells_from_word_rows(
                     col_role=column_model.role_for_x(float(x0)),
                     row_band=row_band,
                     x0=float(x0),
+                    x1=float(x1),
                     top=top,
+                    bottom=bottom,
                     source="word_grid",
                 )
             )
@@ -2398,6 +2527,8 @@ def _build_imperial_five_column_rows_from_cells(
     room_scope: str,
     page_no: int = 0,
     separator_model: ImperialSeparatorModel | None = None,
+    page_structure: dict[str, Any] | None = None,
+    column_model: ImperialColumnModel | None = None,
 ) -> list[ImperialFiveColumnRow]:
     if not cells:
         return []
@@ -2468,6 +2599,9 @@ def _build_imperial_five_column_rows_from_cells(
             "canonical_label": label,
             "match_source": match_source,
             "raw_area_or_item": original_area_or_item,
+            "page_structure": _coerce_provenance_dict(page_structure or {}),
+            "column_model": _imperial_column_model_to_dict(column_model),
+            "cell_ownership": _imperial_cell_ownership_from_cells(row_cells),
             "separator_model": (separator_model or ImperialSeparatorModel()).to_dict(),
             "visual_subrows": [
                 {
@@ -2875,6 +3009,8 @@ def _build_imperial_logical_rows_from_cells(
     room_scope: str,
     page_no: int = 0,
     separator_model: ImperialSeparatorModel | None = None,
+    page_structure: dict[str, Any] | None = None,
+    column_model: ImperialColumnModel | None = None,
 ) -> list[ImperialLogicalRow]:
     row_items = _repair_imperial_five_column_rows(
         _build_imperial_five_column_rows_from_cells(
@@ -2882,6 +3018,8 @@ def _build_imperial_logical_rows_from_cells(
             room_scope=room_scope,
             page_no=page_no,
             separator_model=separator_model,
+            page_structure=page_structure,
+            column_model=column_model,
         )
     )
     logical_rows: list[ImperialLogicalRow] = []
@@ -3238,7 +3376,7 @@ def _imperial_merge_area_or_item_parts(current_label: str, continuation: str) ->
 
 
 def _extract_imperial_joinery_word_grid_rows(
-    page_words: tuple[tuple[float, float, str], ...],
+    page_words: tuple[Any, ...],
     *,
     room_scope: str,
     page_no: int = 0,
@@ -3247,9 +3385,15 @@ def _extract_imperial_joinery_word_grid_rows(
     if not page_words:
         return [], []
     row_bands = _group_imperial_word_row_bands(page_words)
-    _, table_header_index, content_rows, _ = _split_imperial_word_page_regions(row_bands)
+    _, table_header_index, content_rows, footer_rows = _split_imperial_word_page_regions(row_bands)
     if not content_rows:
         return [], []
+    page_structure = _imperial_page_structure_from_row_bands(
+        row_bands,
+        table_header_index=table_header_index,
+        content_rows=content_rows,
+        footer_rows=footer_rows,
+    )
     separator_model = _enrich_imperial_separator_model_for_row_bands(
         separator_model or ImperialSeparatorModel(),
         content_rows,
@@ -3261,12 +3405,16 @@ def _extract_imperial_joinery_word_grid_rows(
         room_scope=room_scope,
         page_no=page_no,
         separator_model=separator_model,
+        page_structure=page_structure,
+        column_model=column_model,
     )
     logical_rows = _build_imperial_logical_rows_from_cells(
         cells,
         room_scope=room_scope,
         page_no=page_no,
         separator_model=separator_model,
+        page_structure=page_structure,
+        column_model=column_model,
     )
     rows: list[ImperialGridRow] = []
     for logical_row in logical_rows:
@@ -3294,6 +3442,93 @@ def _extract_imperial_joinery_word_grid_rows(
         if row.needs_review
     ]
     return rows, unresolved_rows
+
+
+def build_imperial_grid_debug_page(
+    document_path: str | Path,
+    page_no: int,
+    *,
+    room_scope: str = "",
+) -> dict[str, Any]:
+    """Build a dev-only geometry snapshot for inspecting Imperial grid recovery."""
+    path = str(document_path or "").strip()
+    if not path or page_no <= 0:
+        return {}
+    try:
+        import pdfplumber  # type: ignore
+    except Exception:
+        return {}
+    try:
+        with pdfplumber.open(path) as pdf:
+            if page_no - 1 < 0 or page_no - 1 >= len(pdf.pages):
+                return {}
+            page = pdf.pages[page_no - 1]
+            page_width = float(getattr(page, "width", 0.0) or 0.0)
+            page_height = float(getattr(page, "height", 0.0) or 0.0)
+    except Exception:
+        return {}
+
+    page_words = _load_pdfplumber_page_words(path, page_no)
+    row_bands = _group_imperial_word_row_bands(page_words)
+    _, table_header_index, content_rows, footer_rows = _split_imperial_word_page_regions(row_bands)
+    page_structure = _imperial_page_structure_from_row_bands(
+        row_bands,
+        table_header_index=table_header_index,
+        content_rows=content_rows,
+        footer_rows=footer_rows,
+    )
+    separator_model = _enrich_imperial_separator_model_for_row_bands(
+        _load_pdfplumber_page_separator_model(path, page_no),
+        content_rows,
+    )
+    column_model = _infer_imperial_column_model(row_bands, table_header_index=table_header_index)
+    cells = _extract_imperial_cells_from_word_rows(content_rows, column_model=column_model)
+    five_column_rows = _build_imperial_five_column_rows_from_cells(
+        cells,
+        room_scope=room_scope,
+        page_no=page_no,
+        separator_model=separator_model,
+        page_structure=page_structure,
+        column_model=column_model,
+    )
+    return {
+        "page_no": int(page_no),
+        "page_size": {"width": page_width, "height": page_height},
+        "room_scope": parsing.normalize_space(room_scope),
+        "page_structure": page_structure,
+        "separator_model": separator_model.to_dict(),
+        "column_model": _imperial_column_model_to_dict(column_model),
+        "row_bands": [
+            {
+                "row_band": int(row.get("row_band", 0) or 0),
+                "text": parsing.normalize_space(str(row.get("text", "") or "")),
+                "bbox": _imperial_bbox_from_row_bands([row]),
+                "region": (
+                    "table_header"
+                    if table_header_index is not None and int(row.get("row_band", -1) or -1) == table_header_index
+                    else "content_grid"
+                    if row in content_rows
+                    else "footer"
+                    if row in footer_rows
+                    else "header"
+                ),
+            }
+            for row in row_bands
+        ],
+        "cell_ownership": _imperial_cell_ownership_from_cells(cells),
+        "grid_rows": [
+            {
+                "row_order": int(row.row_order or 0),
+                "area_or_item": parsing.normalize_space(row.area_or_item),
+                "specs_or_description": parsing.normalize_space(row.specs_or_description),
+                "supplier": parsing.normalize_space(row.supplier),
+                "notes": parsing.normalize_space(row.notes),
+                "confidence": float(row.confidence or 0.0),
+                "provenance": _coerce_provenance_dict(row.provenance),
+            }
+            for row in five_column_rows
+        ],
+    }
 
 
 def _imperial_low_confidence_grid_row_should_keep(row: ImperialGridRow, *, raw_area_or_item: str) -> bool:

@@ -144,6 +144,8 @@
   - use the currently extractable title body as the authoritative room label, preserving values such as `WALK-BEHIND PANTRY`, `BENCH SEAT`, or `OFFICE` without shorthand aliases
   - treat joinery/material pages as table-first Excel-to-PDF layouts: Vision supplies the grid boundary layer for header rows, data rows, merged cells, and footer/signature isolation before deterministic mapping runs
   - enforce a hard `content_grid` boundary before `material_rows` persistence: clean cell-grid rows outrank broader layout/vision candidates, and candidates containing page header/meta/table-heading tokens are rejected or heavily down-ranked
+  - keep page-structure and cell-ownership provenance with Imperial material rows: `table_header_bbox`, `content_grid_bbox`, `footer_bbox`, column ownership, and separator segment source/confidence must be inspectable before downstream cleanup
+  - provide dev-only grid debug artifacts under `tmp/imperial_grid_debug/`, using JSON and SVG overlays to show visible/inferred separators, image obstruction boxes, row bands, cell ownership, and content-grid boundaries
   - keep `IMAGE` cells out of final Imperial content. Image geometry may help infer covered grid edges, but image text/OCR must not contribute to material rows, summaries, sinkware, or appliance values
   - split `SUPPLIER` and `NOTES` by recovered cell ownership. Recognized supplier prefixes such as `Polytec` or `By Others` may be separated from adjacent note tails, but row assemblers must not infer supplier/notes by whole-line free text
   - use the title to identify the section, but do not discard same-page body text that appears before the title in extracted reading order

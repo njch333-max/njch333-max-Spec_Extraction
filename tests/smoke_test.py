@@ -17969,6 +17969,114 @@ H55784Z03AU
         self.assertEqual(preferred.description, "40mm Stone | WFE x 1")
         self.assertNotIn("Bulkhead", preferred.description)
 
+    def test_imperial_word_bboxes_flow_to_cell_ownership_provenance(self) -> None:
+        page_words = (
+            (10.0, 10.0, 95.0, 20.0, "AREA / ITEM"),
+            (10.0, 200.0, 345.0, 20.0, "SPECS / DESCRIPTION"),
+            (10.0, 800.0, 860.0, 20.0, "SUPPLIER"),
+            (10.0, 940.0, 990.0, 20.0, "NOTES"),
+            (30.0, 10.0, 80.0, 40.0, "BENCHTOP"),
+            (30.0, 200.0, 285.0, 40.0, "40mm Stone"),
+            (30.0, 800.0, 870.0, 40.0, "By Others"),
+            (30.0, 940.0, 990.0, 40.0, "WFE x 1"),
+        )
+        rows, unresolved = extraction_service._extract_imperial_joinery_word_grid_rows(
+            page_words,
+            room_scope="KITCHEN & PANTRY",
+            page_no=1,
+            separator_model=extraction_service.ImperialSeparatorModel(),
+        )
+        self.assertEqual(unresolved, [])
+        self.assertEqual(len(rows), 1)
+        provenance = rows[0].provenance or {}
+        self.assertEqual(provenance["page_structure"]["content_grid_bbox"]["top"], 30.0)
+        self.assertEqual(provenance["area_or_item"]["x1"], 80.0)
+        self.assertEqual(provenance["area_or_item"]["bottom"], 40.0)
+        ownership = provenance["cell_ownership"]
+        self.assertTrue(any(cell["role"] == "supplier" and cell["text"] == "By Others" for cell in ownership))
+
+    def test_imperial_page_structure_bbox_excludes_header_and_footer(self) -> None:
+        row_bands = extraction_service._group_imperial_word_row_bands(
+            (
+                (5.0, 10.0, 90.0, 15.0, "Address:"),
+                (20.0, 10.0, 95.0, 30.0, "AREA / ITEM"),
+                (20.0, 200.0, 345.0, 30.0, "SPECS / DESCRIPTION"),
+                (20.0, 800.0, 860.0, 30.0, "SUPPLIER"),
+                (40.0, 10.0, 80.0, 50.0, "BENCHTOP"),
+                (40.0, 200.0, 285.0, 50.0, "40mm Stone"),
+                (70.0, 10.0, 90.0, 80.0, "Designer:"),
+            )
+        )
+        _, table_header_index, content_rows, footer_rows = extraction_service._split_imperial_word_page_regions(row_bands)
+        structure = extraction_service._imperial_page_structure_from_row_bands(
+            row_bands,
+            table_header_index=table_header_index,
+            content_rows=content_rows,
+            footer_rows=footer_rows,
+        )
+        self.assertEqual(structure["table_header_bbox"]["top"], 20.0)
+        self.assertEqual(structure["content_grid_bbox"]["top"], 40.0)
+        self.assertEqual(structure["footer_bbox"]["top"], 70.0)
+        self.assertNotIn("Address", json.dumps(structure["content_grid_bbox"]))
+
+    def test_imperial_visual_subrows_do_not_hard_split_inferred_low(self) -> None:
+        subrows = extraction_service._imperial_visual_subrows_from_fragments(
+            [
+                {
+                    "separator_kind_from_previous": "visible",
+                    "top": 10.0,
+                    "bottom": 20.0,
+                    "area_or_item": "HANDLES",
+                    "specs_or_description": "Doors - pull handle",
+                },
+                {
+                    "separator_kind_from_previous": "inferred_low",
+                    "top": 22.0,
+                    "bottom": 32.0,
+                    "specs_or_description": "Drawers - finger pull",
+                },
+            ]
+        )
+        self.assertEqual(len(subrows), 1)
+        self.assertEqual(subrows[0]["specs_or_description"], "Doors - pull handle | Drawers - finger pull")
+
+    def test_imperial_grid_debug_writer_creates_json_and_svg_artifacts(self) -> None:
+        from tools import imperial_grid_debug
+
+        payload = {
+            "page_no": 1,
+            "page_size": {"width": 300.0, "height": 200.0},
+            "page_structure": {
+                "table_header_bbox": {"x0": 10.0, "x1": 290.0, "top": 20.0, "bottom": 35.0},
+                "content_grid_bbox": {"x0": 10.0, "x1": 290.0, "top": 35.0, "bottom": 160.0},
+                "footer_bbox": {"x0": 10.0, "x1": 290.0, "top": 170.0, "bottom": 190.0},
+            },
+            "separator_model": {
+                "visible_horizontal_segments": [
+                    {"orientation": "horizontal", "edge": 35.0, "start": 10.0, "end": 290.0}
+                ],
+                "inferred_horizontal_segments": [
+                    {"orientation": "horizontal", "edge": 80.0, "start": 10.0, "end": 290.0}
+                ],
+                "visible_vertical_segments": [],
+                "inferred_vertical_segments": [],
+                "image_bboxes": [],
+            },
+            "cell_ownership": [
+                {
+                    "role": "label",
+                    "bbox": {"x0": 10.0, "x1": 90.0, "top": 40.0, "bottom": 50.0},
+                    "text": "BENCHTOP",
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            json_path, svg_path = imperial_grid_debug.write_debug_artifacts(payload, Path(temp_dir))
+            self.assertTrue(json_path.exists())
+            self.assertTrue(svg_path.exists())
+            self.assertIn("content_grid_bbox", json_path.read_text(encoding="utf-8"))
+            self.assertIn("<svg", svg_path.read_text(encoding="utf-8"))
+
     def test_imperial_layout_supplier_tail_stays_in_notes_cell(self) -> None:
         row = extraction_service._imperial_grid_row_from_layout_row(
             {

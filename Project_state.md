@@ -355,6 +355,7 @@
 - Imperial parsing coverage added for:
   - page-top section-title detection and continuation-page handling
   - footer/signature exclusion
+  - Phase 1A grid-truth diagnostics: page-structure bboxes, cell-ownership provenance, segment source/confidence, and dev-only JSON/SVG overlays via `tools/imperial_grid_debug.py`
   - row-boundary extraction of kitchen benchtops, splashback, base, overheads, tall, toe kick, handles, and bulkhead values
   - `FEATURE TALL DOORS` export into `special_sections[]` instead of room cards
   - `Tall` rendering on room cards and dedicated Excel export for `special_sections`

@@ -24,7 +24,7 @@
 - One work cycle may have only one primary blocker. Do not spread a cycle across multiple unrelated Imperial failure modes.
 
 ## Current Architecture Baseline
-- `App/services/extraction_service.py` already contains `ImperialSeparatorModel`, `visual_subrows`, and `canonical_row_order`, but they are not yet a full segment-level grid truth layer.
+- `App/services/extraction_service.py` now carries `ImperialSeparatorModel` segment provenance, `visual_subrows`, `canonical_row_order`, page-structure bboxes, and cell-ownership provenance. Phase 1A debug overlay artifacts exist, but the separator solver still needs stronger real-PDF coverage before this can be called a full grid truth layer.
 - `App/services/parsing.py` already contains `material_rows`, constrained self-repair, `FieldIssue`, `RepairCandidate`, `RepairVerdict`, `repair_log`, and `revalidation_status`, but it still depends too much on post-assembly cleanup when upstream structure is weak.
 - `App/main.py` already renders `material_rows` and gates Imperial summary output via `revalidation_status`.
 - Current bottleneck: upstream structure truth is still too soft on merged cells, missing lines, long label continuation, same-cell continuation, and row-cluster ownership. When that layer is weak, `AREA / ITEM` gets polluted by `SPECS / DESCRIPTION`, then room cards and summaries both inherit the error.
@@ -75,11 +75,11 @@
 `tests/fixtures/imperial_37867_gold.json` remains the highest-priority Imperial structural regression fixture.
 
 ## Open Problems
-- Segment-level separator provenance is still incomplete.
+- Segment-level separator provenance has a first local implementation and debug overlay output; it still needs repeated live-PDF use to expose weak edge cases.
 - Short-value row termination is still too weak on `KICKBOARDS`, `LIGHTING`, and similar rows.
 - Handle cells still need first-class subitem modeling instead of raw-string-first splitting.
 - `sinkware / appliances` remain structurally weaker than `joinery/material`.
-- Active live blocker cleared: `job 67 / run 2207` passed strict source-PDF QA after hard-boundary cleanup. Next blocker should move back to Phase 1 grid-truth work instead of more job-specific cleanup unless a new live failure is reported.
+- Active live blocker cleared: `job 67 / run 2207` passed strict source-PDF QA after hard-boundary cleanup. Phase 1A grid-debug work is now the current structural focus unless a new live failure is reported.
 
 ## Last Verified Live Jobs
 - `job 52 / run 1972`: `passed`
@@ -101,8 +101,9 @@
 
 ## Next Actions
 - Primary live blocker: none after `job 67 / run 2207` signoff.
+- Current structural target: use the new Phase 1A debug JSON/SVG overlay to inspect the next grid-boundary failure before adding any row/string cleanup.
 - Target order:
-  1. Phase 1 grid-truth follow-up: segment-level separator provenance and debug overlay output
+  1. Phase 1 grid-truth follow-up: exercise segment-level separator provenance and debug overlay output on live PDFs
   2. Phase 2 row-assembly follow-up: handle subitem modeling for pantry/kitchen style cells
   3. Phase 3 semantic follow-up: stronger sinkware cluster-local assignment and appliance row-first capture
   4. If a new live failure is reported, first classify whether it is `content_grid`, `cell ownership`, `row assembly`, or `semantic summary` before adding cleanup rules
@@ -137,3 +138,4 @@
 - `2026-04-17`: `job 67` was promoted to the active Imperial hard-boundary blocker. Local implementation now rejects header/meta/table-heading polluted layout candidates before they can override clean cell-grid rows, treats `IMAGE` as non-content, splits supplier/note tails by recovered cell ownership, adds a summary pollution gate, and adds row-first Imperial appliance capture for layout rows. Local smoke and compile checks passed; live deploy/rerun/PDF-QA is pending.
 - `2026-04-17`: `job 67` reached strict source-PDF signoff on `run 2207 / build local-d251ab53`. The cycle fixed `content_grid` hard-boundary leakage, supplier/notes ownership for `Polytec Variation for Black - Venette`, raw spelling preservation for `Mirrorred`, row-first appliance capture for seven rows, `WFE x 1` visual-break preservation, and sinkware taphole tail preservation for `behind sink/basin`. PDF QA was written as `passed` for the latest raw snapshot.
 - `2026-04-17`: Post-`job 67` regression found `job 64 / run 2208` still splitting `GPO` out of `ACCESSORIES`. A generic Imperial repair now merges non-adjacent `GPO` spillover fragments back into `ACCESSORIES` and protects that merged value from later self-repair rollback. `job 64 / run 2212 / build local-7cc74371` passed targeted regression (`ACCESSORIES` restored; flooring source case preserved). `job 62 / run 2209 / build local-d251ab53` completed as the companion regression check for long-label and short-value stability.
+- `2026-04-17`: Phase 1A grid-debug implementation added page-structure bboxes, cell-ownership provenance, word-level bbox propagation, `content_grid`/footer/table-header debug payloads, and `tools/imperial_grid_debug.py` for JSON/SVG overlay generation under `tmp/imperial_grid_debug/`. Local structural tests now cover bbox provenance, content-grid/footer exclusion, `inferred_low` non-hard-split behavior, and debug artifact generation.
