@@ -18040,6 +18040,105 @@ H55784Z03AU
         self.assertEqual(len(subrows), 1)
         self.assertEqual(subrows[0]["specs_or_description"], "Doors - pull handle | Drawers - finger pull")
 
+    def test_imperial_soft_row_band_coalescing_keeps_benchtop_wfe_with_owner_row(self) -> None:
+        page_words = (
+            (10.0, 10.0, 95.0, 20.0, "AREA / ITEM"),
+            (10.0, 200.0, 345.0, 20.0, "SPECS / DESCRIPTION"),
+            (10.0, 800.0, 860.0, 20.0, "SUPPLIER"),
+            (30.0, 120.0, 180.0, 42.0, "BENCHTOP"),
+            (25.0, 330.0, 390.0, 36.0, "40mm Stone"),
+            (32.0, 803.0, 850.0, 43.0, "By Others"),
+            (40.0, 343.0, 380.0, 51.0, "WFE x 1"),
+        )
+        rows, unresolved = extraction_service._extract_imperial_joinery_word_grid_rows(
+            page_words,
+            room_scope="KITCHEN & PANTRY",
+            page_no=1,
+            separator_model=extraction_service.ImperialSeparatorModel(),
+        )
+        self.assertEqual(unresolved, [])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].row_label, "BENCHTOP")
+        self.assertEqual(rows[0].description, "40mm Stone WFE x 1")
+        self.assertEqual(rows[0].supplier, "By Others")
+        provenance = rows[0].provenance or {}
+        self.assertEqual(len(provenance.get("coalesced_from_bands", [])), 2)
+
+    def test_imperial_soft_row_band_coalescing_keeps_label_continuation_with_upper_colour(self) -> None:
+        page_words = (
+            (10.0, 10.0, 95.0, 20.0, "AREA / ITEM"),
+            (10.0, 200.0, 345.0, 20.0, "SPECS / DESCRIPTION"),
+            (10.0, 800.0, 860.0, 20.0, "SUPPLIER"),
+            (424.7, 56.5, 253.2, 436.7, "UPPER CABINETRY COLOUR INCLUDING"),
+            (440.3, 101.3, 208.5, 452.3, "TALL OPEN SHELVING"),
+            (432.8, 309.2, 413.3, 443.8, "Black Wenge - Venette"),
+            (432.8, 808.8, 842.6, 443.8, "Polytec"),
+        )
+        separator_model = extraction_service.ImperialSeparatorModel(
+            inferred_horizontal_edges=[428.7, 454.4],
+            inferred_horizontal_segments=[
+                {
+                    "orientation": "horizontal",
+                    "edge": 428.7,
+                    "start": 56.5,
+                    "end": 842.6,
+                    "source": "row_gap",
+                    "confidence": "inferred_low",
+                },
+                {
+                    "orientation": "horizontal",
+                    "edge": 454.4,
+                    "start": 101.3,
+                    "end": 842.6,
+                    "source": "row_gap",
+                    "confidence": "inferred_high",
+                },
+            ],
+        )
+        rows, unresolved = extraction_service._extract_imperial_joinery_word_grid_rows(
+            page_words,
+            room_scope="PANTRY",
+            page_no=2,
+            separator_model=separator_model,
+        )
+        self.assertEqual(unresolved, [])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].row_label, "UPPER CABINETRY COLOUR INCLUDING TALL OPEN SHELVING")
+        self.assertEqual(rows[0].description, "Black Wenge - Venette")
+        self.assertEqual(rows[0].supplier, "Polytec")
+
+    def test_imperial_soft_row_band_coalescing_does_not_cross_visible_separator(self) -> None:
+        page_words = (
+            (10.0, 10.0, 95.0, 20.0, "AREA / ITEM"),
+            (10.0, 200.0, 345.0, 20.0, "SPECS / DESCRIPTION"),
+            (10.0, 800.0, 860.0, 20.0, "SUPPLIER"),
+            (30.0, 120.0, 180.0, 42.0, "KICKBOARDS"),
+            (30.0, 340.0, 380.0, 42.0, "As Doors"),
+            (58.0, 130.0, 180.0, 70.0, "LIGHTING"),
+            (58.0, 300.0, 420.0, 70.0, "LED Strip Lighting provision"),
+        )
+        separator_model = extraction_service.ImperialSeparatorModel(
+            visible_horizontal_edges=[50.0],
+            visible_horizontal_segments=[
+                {
+                    "orientation": "horizontal",
+                    "edge": 50.0,
+                    "start": 50.0,
+                    "end": 500.0,
+                    "source": "visible_line",
+                    "confidence": "visible",
+                }
+            ],
+        )
+        rows, unresolved = extraction_service._extract_imperial_joinery_word_grid_rows(
+            page_words,
+            room_scope="KITCHEN",
+            page_no=1,
+            separator_model=separator_model,
+        )
+        self.assertEqual(unresolved, [])
+        self.assertEqual([row.row_label for row in rows], ["KICKBOARDS", "LIGHTING"])
+
     def test_imperial_grid_debug_writer_creates_json_and_svg_artifacts(self) -> None:
         from tools import imperial_grid_debug
 

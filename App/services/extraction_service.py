@@ -1875,11 +1875,28 @@ def _imperial_separator_confidence_for_boundary(
         for edge in separator_model.visible_horizontal_edges
     ):
         return "visible"
-    if any(
-        abs(edge - midpoint) <= 6.0 or boundary_min <= edge <= boundary_max
-        for edge in separator_model.inferred_horizontal_edges
-    ):
-        return "inferred_high"
+    matched_inferred_confidence = ""
+    for segment in separator_model.inferred_horizontal_segments:
+        if not isinstance(segment, dict):
+            continue
+        edge = float(segment.get("edge", 0.0) or 0.0)
+        if not edge:
+            continue
+        if not (abs(edge - midpoint) <= 6.0 or boundary_min <= edge <= boundary_max):
+            continue
+        confidence = parsing.normalize_space(str(segment.get("confidence", "") or "")).lower()
+        if confidence == "inferred_high":
+            return "inferred_high"
+        if confidence == "inferred_low":
+            matched_inferred_confidence = "inferred_low"
+    if matched_inferred_confidence:
+        return matched_inferred_confidence
+    if separator_model.inferred_horizontal_edges and not separator_model.inferred_horizontal_segments:
+        if any(
+            abs(edge - midpoint) <= 6.0 or boundary_min <= edge <= boundary_max
+            for edge in separator_model.inferred_horizontal_edges
+        ):
+            return "inferred_high"
     if current_top - previous_bottom >= 14.0:
         return "inferred_low"
     return "none"
@@ -2172,7 +2189,7 @@ def _imperial_column_model_to_dict(column_model: ImperialColumnModel | None) -> 
 
 def _imperial_cell_ownership_from_cells(cells: list[ImperialCell]) -> list[dict[str, Any]]:
     ownership: list[dict[str, Any]] = []
-    for cell in cells:
+    for cell in sorted(cells, key=lambda item: (int(item.row_band or 0), float(item.top or 0.0), float(item.x0 or 0.0), item.text)):
         text = parsing.normalize_space(cell.text)
         if not text:
             continue
@@ -2191,6 +2208,215 @@ def _imperial_cell_ownership_from_cells(cells: list[ImperialCell]) -> list[dict[
             }
         )
     return ownership
+
+
+def _imperial_row_band_words(row_band: dict[str, Any]) -> list[dict[str, Any]]:
+    band_id = int(row_band.get("row_band", 0) or 0)
+    words: list[dict[str, Any]] = []
+    for raw_word in list(row_band.get("words", []) or []):
+        top, x0, x1, bottom, text = _imperial_word_parts(raw_word)
+        if not text:
+            continue
+        original_band = band_id
+        if isinstance(raw_word, dict):
+            original_band = int(raw_word.get("original_row_band", raw_word.get("row_band", band_id)) or band_id)
+        words.append(
+            {
+                "top": float(top),
+                "x0": float(x0),
+                "x1": float(x1),
+                "bottom": float(bottom),
+                "text": text,
+                "original_row_band": int(original_band),
+            }
+        )
+    return sorted(words, key=lambda item: (float(item["top"]), float(item["x0"]), str(item["text"])))
+
+
+def _imperial_row_band_from_words(
+    words: list[dict[str, Any]],
+    *,
+    row_band: int,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if not words:
+        return {"row_band": int(row_band), "words": [], "text": "", "top": 0.0, "bottom": 0.0, "x0": 0.0, "x1": 0.0}
+    normalized_words = sorted(words, key=lambda item: (float(item.get("top", 0.0) or 0.0), float(item.get("x0", 0.0) or 0.0), str(item.get("text", "") or "")))
+    row = {
+        "row_band": int(row_band),
+        "words": normalized_words,
+        "text": parsing.normalize_space(" ".join(str(word.get("text", "") or "") for word in normalized_words)),
+        "top": min(float(word.get("top", 0.0) or 0.0) for word in normalized_words),
+        "bottom": max(float(word.get("bottom", 0.0) or 0.0) for word in normalized_words),
+        "x0": min(float(word.get("x0", 0.0) or 0.0) for word in normalized_words),
+        "x1": max(float(word.get("x1", 0.0) or 0.0) for word in normalized_words),
+    }
+    if metadata:
+        row["coalesced_metadata"] = metadata
+    return row
+
+
+def _imperial_row_band_role_texts(
+    row_band: dict[str, Any],
+    *,
+    column_model: ImperialColumnModel,
+) -> dict[str, str]:
+    roles: dict[str, list[str]] = {"label": [], "description": [], "image": [], "supplier": [], "notes": []}
+    for raw_word in _imperial_row_band_words(row_band):
+        role = column_model.role_for_x(float(raw_word.get("x0", 0.0) or 0.0))
+        roles.setdefault(role, []).append(str(raw_word.get("text", "") or ""))
+    return {role: parsing.normalize_space(" ".join(parts)) for role, parts in roles.items()}
+
+
+def _imperial_row_band_boundary_details(
+    separator_model: ImperialSeparatorModel,
+    previous: dict[str, Any],
+    current: dict[str, Any],
+) -> dict[str, Any]:
+    previous_bottom = float(previous.get("bottom", 0.0) or 0.0)
+    current_top = float(current.get("top", 0.0) or 0.0)
+    confidence = _imperial_separator_confidence_for_boundary(
+        separator_model,
+        previous_bottom=previous_bottom,
+        current_top=current_top,
+    )
+    segment = _imperial_separator_segment_for_boundary(
+        separator_model,
+        previous_bottom=previous_bottom,
+        current_top=current_top,
+    )
+    return {
+        "separator_confidence_from_previous": confidence,
+        "separator_segment_from_previous": segment,
+        "previous_row_band": int(previous.get("row_band", 0) or 0),
+        "row_band": int(current.get("row_band", 0) or 0),
+    }
+
+
+def _imperial_row_band_is_soft_continuation(
+    previous: dict[str, Any],
+    current: dict[str, Any],
+    *,
+    separator_model: ImperialSeparatorModel,
+    column_model: ImperialColumnModel,
+) -> bool:
+    boundary = _imperial_row_band_boundary_details(separator_model, previous, current)
+    if str(boundary.get("separator_confidence_from_previous", "") or "").lower() in {"visible", "inferred_high"}:
+        return False
+    previous_roles = _imperial_row_band_role_texts(previous, column_model=column_model)
+    current_roles = _imperial_row_band_role_texts(current, column_model=column_model)
+    previous_label = parsing.normalize_space(previous_roles.get("label", ""))
+    current_label = parsing.normalize_space(current_roles.get("label", ""))
+    current_body = parsing.normalize_space(
+        " ".join(
+            current_roles.get(role, "")
+            for role in ("description", "supplier", "notes")
+            if parsing.normalize_space(current_roles.get(role, ""))
+        )
+    )
+    if current_body and not current_label:
+        previous_body = parsing.normalize_space(
+            " ".join(
+                previous_roles.get(role, "")
+                for role in ("description", "supplier", "notes")
+                if parsing.normalize_space(previous_roles.get(role, ""))
+            )
+        )
+        if previous_label and previous_body and _looks_like_supplier_only_line(current_body):
+            return False
+        return True
+    if current_label and _imperial_five_column_item_is_label_continuation(current_label):
+        return True
+    if previous_label and current_label:
+        return False
+    return False
+
+
+def _coalesce_imperial_soft_row_bands(
+    row_bands: list[dict[str, Any]],
+    *,
+    separator_model: ImperialSeparatorModel,
+    column_model: ImperialColumnModel,
+) -> list[dict[str, Any]]:
+    if not row_bands:
+        return []
+    coalesced: list[dict[str, Any]] = []
+    current = dict(row_bands[0])
+    current_words = _imperial_row_band_words(current)
+    current_metadata = {
+        "coalesced_from_bands": [
+            {
+                "row_band": int(current.get("row_band", 0) or 0),
+                "text": parsing.normalize_space(str(current.get("text", "") or "")),
+                "bbox": _imperial_bbox_from_row_bands([current]),
+                "separator_confidence_from_previous": "visible",
+            }
+        ],
+        "coalescing_policy": "visible_or_inferred_high_are_hard_boundaries",
+    }
+    for upcoming in row_bands[1:]:
+        upcoming = dict(upcoming)
+        boundary = _imperial_row_band_boundary_details(separator_model, current, upcoming)
+        if _imperial_row_band_is_soft_continuation(
+            current,
+            upcoming,
+            separator_model=separator_model,
+            column_model=column_model,
+        ):
+            current_words.extend(_imperial_row_band_words(upcoming))
+            current_metadata.setdefault("coalesced_from_bands", []).append(
+                {
+                    "row_band": int(upcoming.get("row_band", 0) or 0),
+                    "text": parsing.normalize_space(str(upcoming.get("text", "") or "")),
+                    "bbox": _imperial_bbox_from_row_bands([upcoming]),
+                    **boundary,
+                }
+            )
+            current = _imperial_row_band_from_words(
+                current_words,
+                row_band=int(current.get("row_band", 0) or 0),
+                metadata=current_metadata,
+            )
+            continue
+        coalesced.append(
+            _imperial_row_band_from_words(
+                current_words,
+                row_band=int(current.get("row_band", 0) or 0),
+                metadata=current_metadata if len(current_metadata.get("coalesced_from_bands", [])) > 1 else None,
+            )
+        )
+        current = upcoming
+        current_words = _imperial_row_band_words(current)
+        current_metadata = {
+            "coalesced_from_bands": [
+                {
+                    "row_band": int(current.get("row_band", 0) or 0),
+                    "text": parsing.normalize_space(str(current.get("text", "") or "")),
+                    "bbox": _imperial_bbox_from_row_bands([current]),
+                    **boundary,
+                }
+            ],
+            "coalescing_policy": "visible_or_inferred_high_are_hard_boundaries",
+        }
+    coalesced.append(
+        _imperial_row_band_from_words(
+            current_words,
+            row_band=int(current.get("row_band", 0) or 0),
+            metadata=current_metadata if len(current_metadata.get("coalesced_from_bands", [])) > 1 else None,
+        )
+    )
+    return coalesced
+
+
+def _imperial_row_band_metadata_map(row_bands: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
+    metadata: dict[int, dict[str, Any]] = {}
+    for row in row_bands:
+        if not isinstance(row, dict):
+            continue
+        band_metadata = _coerce_provenance_dict(row.get("coalesced_metadata", {}))
+        if band_metadata:
+            metadata[int(row.get("row_band", 0) or 0)] = band_metadata
+    return metadata
 
 
 def _infer_imperial_column_model(
@@ -2255,12 +2481,16 @@ def _extract_imperial_cells_from_word_rows(
     cells: list[ImperialCell] = []
     for row in row_bands:
         row_band = int(row.get("row_band", 0) or 0)
-        top = float(row.get("top", 0.0) or 0.0)
         for raw_word in list(row.get("words", []) or []):
             top, x0, x1, bottom, text = _imperial_word_parts(raw_word)
             cleaned = parsing.normalize_space(text)
             if not cleaned:
                 continue
+            source = "word_grid"
+            if isinstance(raw_word, dict):
+                original_band = int(raw_word.get("original_row_band", row_band) or row_band)
+                if original_band != row_band:
+                    source = f"word_grid:coalesced_band_{original_band}"
             cells.append(
                 ImperialCell(
                     text=cleaned,
@@ -2270,7 +2500,7 @@ def _extract_imperial_cells_from_word_rows(
                     x1=float(x1),
                     top=top,
                     bottom=bottom,
-                    source="word_grid",
+                    source=source,
                 )
             )
     return cells
@@ -2304,11 +2534,18 @@ def _match_imperial_row_from_cell_text(
 
 
 def _imperial_row_role_text(row_cells: list[ImperialCell], role: str) -> str:
-    return parsing.normalize_space(" ".join(cell.text for cell in row_cells if cell.col_role == role))
+    role_cells = sorted(
+        (cell for cell in row_cells if cell.col_role == role),
+        key=lambda item: (float(item.top or 0.0), float(item.x0 or 0.0), item.text),
+    )
+    return parsing.normalize_space(" ".join(cell.text for cell in role_cells))
 
 
 def _imperial_row_role_provenance(row_cells: list[ImperialCell], role: str) -> dict[str, Any]:
-    role_cells = [cell for cell in row_cells if cell.col_role == role]
+    role_cells = sorted(
+        [cell for cell in row_cells if cell.col_role == role],
+        key=lambda item: (float(item.top or 0.0), float(item.x0 or 0.0), item.text),
+    )
     if not role_cells:
         return {}
     return {
@@ -2432,6 +2669,11 @@ def _imperial_split_area_or_item_overflow(area_or_item: str, canonical_label: st
                         return cleaned, overflow
         if cleaned_upper.startswith(canonical_upper):
             suffix = parsing.normalize_space(cleaned[len(canonical) :]).strip(" -;,")
+            if suffix and re.match(
+                r"(?i)^(?:INCLUDING|TALL\s+OPEN\s+SHELVING|OPEN\s+SHELVING|GLASS\s+DOORS\s+ONLY|DOORS\s+ONLY|DRAWERS\s+AND\s+OPEN\s+SHELVING)\b",
+                suffix,
+            ):
+                return cleaned, ""
             if suffix and _imperial_area_or_item_overflow_looks_value(suffix):
                 return canonical, suffix
         if canonical_upper == "VERTICAL UPPER PARTITIONS CABINETRY COLOUR (REFER TO DRAWINGS)":
@@ -2489,6 +2731,19 @@ def _imperial_split_area_or_item_overflow(area_or_item: str, canonical_label: st
     return cleaned, ""
 
 
+def _imperial_preferred_row_label(canonical_label: str, area_or_item: str) -> str:
+    canonical = parsing.normalize_space(canonical_label)
+    raw_label = parsing.normalize_space(area_or_item)
+    if canonical and raw_label.upper().startswith(canonical.upper()):
+        suffix = parsing.normalize_space(raw_label[len(canonical) :]).strip(" -;,")
+        if suffix and re.match(
+            r"(?i)^(?:INCLUDING|TALL\s+OPEN\s+SHELVING|OPEN\s+SHELVING|GLASS\s+DOORS\s+ONLY|DOORS\s+ONLY|DRAWERS\s+AND\s+OPEN\s+SHELVING)\b",
+            suffix,
+        ):
+            return raw_label
+    return canonical or raw_label
+
+
 def _imperial_merge_area_overflow_into_description(
     overflow: str,
     description: str,
@@ -2529,6 +2784,7 @@ def _build_imperial_five_column_rows_from_cells(
     separator_model: ImperialSeparatorModel | None = None,
     page_structure: dict[str, Any] | None = None,
     column_model: ImperialColumnModel | None = None,
+    row_band_metadata: dict[int, dict[str, Any]] | None = None,
 ) -> list[ImperialFiveColumnRow]:
     if not cells:
         return []
@@ -2556,6 +2812,17 @@ def _build_imperial_five_column_rows_from_cells(
             notes,
         )
         area_or_item, area_or_item_overflow = _imperial_split_area_or_item_overflow(area_or_item, label)
+        if (
+            remainder
+            and area_or_item
+            and parsing.normalize_space(remainder).upper() in area_or_item.upper()
+            and _imperial_preferred_row_label(label, area_or_item).upper() == area_or_item.upper()
+            and re.match(
+                r"(?i)^(?:INCLUDING|TALL\s+OPEN\s+SHELVING|OPEN\s+SHELVING|GLASS\s+DOORS\s+ONLY|DOORS\s+ONLY|DRAWERS\s+AND\s+OPEN\s+SHELVING)\b",
+                parsing.normalize_space(remainder),
+            )
+        ):
+            remainder = ""
         if area_or_item_overflow:
             specs_or_description = _imperial_merge_area_overflow_into_description(
                 area_or_item_overflow,
@@ -2615,6 +2882,11 @@ def _build_imperial_five_column_rows_from_cells(
                 }
             ],
         }
+        band_metadata = _coerce_provenance_dict((row_band_metadata or {}).get(int(row_band), {}))
+        if band_metadata:
+            provenance["row_band_metadata"] = band_metadata
+            if band_metadata.get("coalesced_from_bands"):
+                provenance["coalesced_from_bands"] = band_metadata.get("coalesced_from_bands")
         if recovered_area_or_item:
             provenance["recovered_area_or_item"] = recovered_area_or_item
         if area_or_item_overflow:
@@ -3011,6 +3283,7 @@ def _build_imperial_logical_rows_from_cells(
     separator_model: ImperialSeparatorModel | None = None,
     page_structure: dict[str, Any] | None = None,
     column_model: ImperialColumnModel | None = None,
+    row_band_metadata: dict[int, dict[str, Any]] | None = None,
 ) -> list[ImperialLogicalRow]:
     row_items = _repair_imperial_five_column_rows(
         _build_imperial_five_column_rows_from_cells(
@@ -3020,6 +3293,7 @@ def _build_imperial_logical_rows_from_cells(
             separator_model=separator_model,
             page_structure=page_structure,
             column_model=column_model,
+            row_band_metadata=row_band_metadata,
         )
     )
     logical_rows: list[ImperialLogicalRow] = []
@@ -3106,7 +3380,7 @@ def _build_imperial_logical_rows_from_cells(
         ):
             if current is not None:
                 logical_rows.append(current)
-            current_label = label or raw_area_or_item
+            current_label = _imperial_preferred_row_label(label, raw_area_or_item)
             current_kind = str(item.row_kind or _imperial_row_kind_from_area_or_item(raw_area_or_item) or "other")
             current = ImperialLogicalRow(
                 room_scope=room_scope,
@@ -3138,7 +3412,7 @@ def _build_imperial_logical_rows_from_cells(
                 logical_rows.append(current)
             current = ImperialLogicalRow(
                 room_scope=room_scope,
-                row_label=label,
+                row_label=_imperial_preferred_row_label(label, raw_area_or_item),
                 raw_area_or_item=raw_area_or_item or label,
                 description_parts=[],
                 image_parts=[],
@@ -3399,6 +3673,18 @@ def _extract_imperial_joinery_word_grid_rows(
         content_rows,
     )
     column_model = _infer_imperial_column_model(row_bands, table_header_index=table_header_index)
+    content_rows = _coalesce_imperial_soft_row_bands(
+        content_rows,
+        separator_model=separator_model,
+        column_model=column_model,
+    )
+    row_band_metadata = _imperial_row_band_metadata_map(content_rows)
+    page_structure = _imperial_page_structure_from_row_bands(
+        row_bands,
+        table_header_index=table_header_index,
+        content_rows=content_rows,
+        footer_rows=footer_rows,
+    )
     cells = _extract_imperial_cells_from_word_rows(content_rows, column_model=column_model)
     five_column_rows = _build_imperial_five_column_rows_from_cells(
         cells,
@@ -3407,6 +3693,7 @@ def _extract_imperial_joinery_word_grid_rows(
         separator_model=separator_model,
         page_structure=page_structure,
         column_model=column_model,
+        row_band_metadata=row_band_metadata,
     )
     logical_rows = _build_imperial_logical_rows_from_cells(
         cells,
@@ -3415,6 +3702,7 @@ def _extract_imperial_joinery_word_grid_rows(
         separator_model=separator_model,
         page_structure=page_structure,
         column_model=column_model,
+        row_band_metadata=row_band_metadata,
     )
     rows: list[ImperialGridRow] = []
     for logical_row in logical_rows:
@@ -3482,6 +3770,18 @@ def build_imperial_grid_debug_page(
         content_rows,
     )
     column_model = _infer_imperial_column_model(row_bands, table_header_index=table_header_index)
+    content_rows = _coalesce_imperial_soft_row_bands(
+        content_rows,
+        separator_model=separator_model,
+        column_model=column_model,
+    )
+    row_band_metadata = _imperial_row_band_metadata_map(content_rows)
+    page_structure = _imperial_page_structure_from_row_bands(
+        row_bands,
+        table_header_index=table_header_index,
+        content_rows=content_rows,
+        footer_rows=footer_rows,
+    )
     cells = _extract_imperial_cells_from_word_rows(content_rows, column_model=column_model)
     five_column_rows = _build_imperial_five_column_rows_from_cells(
         cells,
@@ -3490,6 +3790,7 @@ def build_imperial_grid_debug_page(
         separator_model=separator_model,
         page_structure=page_structure,
         column_model=column_model,
+        row_band_metadata=row_band_metadata,
     )
     return {
         "page_no": int(page_no),

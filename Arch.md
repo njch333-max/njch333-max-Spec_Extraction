@@ -255,6 +255,7 @@
 20. Imperial debug metadata such as issue types, repair verdicts, order hints, and revalidation hints remain available in backend snapshot payloads, but the default frontend rendering suppresses them unless a debug-oriented UI is introduced later.
 21. Ongoing Imperial structural work is tracked outside the rendered UI in `IMPERIAL_GRID_TRACKER.md`. The intended implementation order is:
   - strengthen `ImperialSeparatorModel` and separator provenance in `extraction_service.py`
+  - coalesce adjacent row bands before cell extraction only when separator evidence is soft (`none` / `inferred_low`) and row evidence supports same-cell continuation
   - stabilize `AREA / ITEM` anchored row assembly before later parsing stages
   - then tighten semantic subitems and summary inputs in `parsing.py` / `main.py`
 

@@ -24,7 +24,7 @@
 - One work cycle may have only one primary blocker. Do not spread a cycle across multiple unrelated Imperial failure modes.
 
 ## Current Architecture Baseline
-- `App/services/extraction_service.py` now carries `ImperialSeparatorModel` segment provenance, `visual_subrows`, `canonical_row_order`, page-structure bboxes, and cell-ownership provenance. Phase 1A debug overlay artifacts exist, but the separator solver still needs stronger real-PDF coverage before this can be called a full grid truth layer.
+- `App/services/extraction_service.py` now carries `ImperialSeparatorModel` segment provenance, `visual_subrows`, `canonical_row_order`, page-structure bboxes, and cell-ownership provenance. Phase 1A debug overlay artifacts exist, and Phase 1B now coalesces adjacent row bands when the boundary is `none` or `inferred_low` and the evidence fits same-cell continuation.
 - `App/services/parsing.py` already contains `material_rows`, constrained self-repair, `FieldIssue`, `RepairCandidate`, `RepairVerdict`, `repair_log`, and `revalidation_status`, but it still depends too much on post-assembly cleanup when upstream structure is weak.
 - `App/main.py` already renders `material_rows` and gates Imperial summary output via `revalidation_status`.
 - Current bottleneck: upstream structure truth is still too soft on merged cells, missing lines, long label continuation, same-cell continuation, and row-cluster ownership. When that layer is weak, `AREA / ITEM` gets polluted by `SPECS / DESCRIPTION`, then room cards and summaries both inherit the error.
@@ -76,7 +76,8 @@
 
 ## Open Problems
 - Segment-level separator provenance has a first local implementation and debug overlay output; it still needs repeated live-PDF use to expose weak edge cases.
-- Live overlay verification exposed the next structural blocker: adjacent visual bands with no hard separator, or only `inferred_low`, still reach row assembly as separate bands. This affects `WFE x 1` under `BENCHTOP`, `GPO / ACCESSORIES`, and `UPPER CABINETRY COLOUR INCLUDING / TALL OPEN SHELVING`.
+- Phase 1B local implementation now handles the first class of adjacent-band failures: no-boundary / `inferred_low` same-cell continuation can merge before cell extraction, while `visible` and `inferred_high` remain hard row boundaries.
+- Remaining risk in this area: coalescing must stay conservative. Supplier-only prelude bands such as `Polytec` before a later cabinetry-colour row must not merge into the previous complete row.
 - Short-value row termination is still too weak on `KICKBOARDS`, `LIGHTING`, and similar rows.
 - Handle cells still need first-class subitem modeling instead of raw-string-first splitting.
 - `sinkware / appliances` remain structurally weaker than `joinery/material`.
@@ -102,12 +103,13 @@
 
 ## Next Actions
 - Primary live blocker: none after `job 67 / run 2207` signoff.
-- Current structural target: Phase 1B separator-aware row-band coalescing. Bands separated by no hard boundary, or only `inferred_low`, must stay mergeable for same-cell/subrow continuation before downstream row assembly decides row ownership.
+- Current structural target: deploy and live-verify Phase 1B separator-aware row-band coalescing on the representative PDFs from Phase 1A (`job 67`, `job 64`, `job 62`).
 - Target order:
-  1. Phase 1B grid-truth follow-up: separator-aware row-band coalescing for no-boundary / `inferred_low` continuation
-  2. Phase 2 row-assembly follow-up: handle subitem modeling for pantry/kitchen style cells
-  3. Phase 3 semantic follow-up: stronger sinkware cluster-local assignment and appliance row-first capture
-  4. If a new live failure is reported, first classify whether it is `content_grid`, `cell ownership`, `row assembly`, or `semantic summary` before adding cleanup rules
+  1. Deploy Phase 1B and regenerate overlays for `job 67`, `job 64`, and `job 62`
+  2. Confirm `BENCHTOP / WFE x 1`, long-label continuation, and visible hard row breaks behave as expected
+  3. If live overlay is correct but output still fails, move to Phase 2A `AREA / ITEM` anchored row assembly
+  4. If overlay still cannot explain the boundary, continue Phase 1C separator solver work
+  5. Phase 3 semantic follow-up remains later: handle subitems, sinkware cluster-local assignment, and appliance row-first tightening
 - Standing rule during live analysis:
   - if `AREA / ITEM` and `SPECS / DESCRIPTION` are bleeding together, treat that as a grid/row-assembly blocker first, not a summary or UI bug
   - do not close a cycle by only cleaning the displayed text if the raw row boundary is still wrong
@@ -141,3 +143,4 @@
 - `2026-04-17`: Post-`job 67` regression found `job 64 / run 2208` still splitting `GPO` out of `ACCESSORIES`. A generic Imperial repair now merges non-adjacent `GPO` spillover fragments back into `ACCESSORIES` and protects that merged value from later self-repair rollback. `job 64 / run 2212 / build local-7cc74371` passed targeted regression (`ACCESSORIES` restored; flooring source case preserved). `job 62 / run 2209 / build local-d251ab53` completed as the companion regression check for long-label and short-value stability.
 - `2026-04-17`: Phase 1A grid-debug implementation added page-structure bboxes, cell-ownership provenance, word-level bbox propagation, `content_grid`/footer/table-header debug payloads, and `tools/imperial_grid_debug.py` for JSON/SVG overlay generation under `tmp/imperial_grid_debug/`. Local structural tests now cover bbox provenance, content-grid/footer exclusion, `inferred_low` non-hard-split behavior, and debug artifact generation.
 - `2026-04-17`: Phase 1A was deployed and exercised on real source PDFs for `job 67`, `job 64`, and `job 62`. JSON/SVG overlays were generated under `/opt/spec-extraction/tmp/imperial_grid_debug_live/`. The overlays confirmed correct high-level `content_grid`/footer separation and cell bboxes, but also proved the next blocker: no-boundary or `inferred_low` adjacent bands are still being handed to row assembly as separate bands. Evidence: `job 67 page 1` has `WFE x 1` as a second description band under `BENCHTOP` with no hard separator; `job 64 page 1` has `GPO` and `ACCESSORIES` split across adjacent bands with only weak separator evidence; `job 62 page 2` has `UPPER CABINETRY COLOUR INCLUDING` and `TALL OPEN SHELVING` split by `inferred_low` before a later `inferred_high` separator.
+- `2026-04-17`: Phase 1B local implementation added separator-aware row-band coalescing before cell extraction. `visible` and `inferred_high` separators remain hard boundaries; `none` and `inferred_low` can merge only when the current band is a same-cell continuation or label continuation. Local tests cover `BENCHTOP + WFE x 1`, `UPPER CABINETRY COLOUR INCLUDING + TALL OPEN SHELVING`, visible separator non-merge, `inferred_low` non-hard visual subrows, and a regression that prevents supplier-only `Polytec` preludes from merging into `SPLASHBACK`. Verification: `python -m compileall App tests tools` passed and `829` smoke tests passed.
