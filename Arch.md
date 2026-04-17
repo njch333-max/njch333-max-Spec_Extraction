@@ -242,6 +242,7 @@
   - room lists are de-duplicated and kept in source spec order
   - rows with failing or unresolved non-handle-specific `revalidation_status` are excluded from summary aggregation; handle-specific provenance fallback is allowed only for tightly scoped summary recovery
 9b. Imperial summary aggregation includes a hard-boundary pollution gate. Rows containing page header/meta/table-heading contamination are excluded before `Door Colours / Handles / Bench Tops` grouping so notes-only fragments such as `Bulkhead:Colourboard` cannot become summary materials.
+9c. Imperial summary gating distinguishes true internals/robe noise from tagged feature-cabinetry rows. A `FEATURE CABINETRY` row with shaving-cabinet, mirrored-door, or colourboard-shelf evidence can still contribute to `Door Colours` even when the same source row mentions `Standard Whiteboard Internals`; bench-top summary normalization also strips dangling separators after WFE/cutout tails are removed.
 10. Render appliance official links as a clickable wrapped `Product` column.
 11. Render non-room joinery sections such as `FEATURE TALL DOORS` in a dedicated `Special Sections` block instead of folding them into nearby rooms.
 12. Show `Generated at`, `Extraction duration`, and the current PDF QA status in Brisbane time / human-readable duration format on the raw Spec List page.
@@ -259,6 +260,7 @@
   - repair weak-boundary leading fragments at the five-column row assembly layer, for example assigning `GPO` accessory text to the following `ACCESSORIES` row when no hard separator proves a separate row
   - correct boundary-straddling size prefixes during Imperial postprocess and display/checklist rendering, for example moving `450mm` from `AREA / ITEM` back into the `BIN` value when visible grid evidence places it on the description side
   - backfill empty Imperial supplier fields from clean cell-aware provenance, including `By Imperial`, so raw rows and PDF-QA checklist values preserve the supplier cell even when summary later performs supplier-free grouping; exact duplicate notes equal to the supplier are removed during final row assignment
+  - keep valid tagged `FEATURE CABINETRY` rows in `Door Colours` summary even when they include `Standard Whiteboard Internals`, and clean trailing bench-top separators after WFE/cutout tail stripping
   - keep debug overlay row semantics aligned with the parser path: repaired rows are shown as `grid_rows`; unrepaired intermediate rows are retained only as `unrepaired_grid_rows`
   - protect accepted leading-fragment repairs during material-row postprocess, so later accessory cleanup cannot remove the recovered `GPO` prefix before persistence
   - repair handle label/value spillover during material-row postprocess and display/checklist rendering, so contaminated labels such as `Momo HANDLES oval` become `HANDLES` before visual fragments and summary aggregation run, recover valid same-cell brand prefixes from provenance when the final label was already normalized, and prevent visual-subrow cleanup from trimming those accepted prefixes back out

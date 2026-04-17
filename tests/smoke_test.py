@@ -8412,6 +8412,101 @@ H55784Z03AU
         self.assertEqual(summary["handles"]["entries"][0]["display_text"], "Darwen Cabinet Pull Handle - Vertical")
         self.assertEqual(summary["handles"]["entries"][0]["rooms_display"], "KITCHEN")
 
+    def test_material_summary_keeps_imperial_feature_cabinetry_with_standard_internals(self) -> None:
+        summary = _build_material_summary(
+            {
+                "builder_name": "Imperial",
+                "rooms": [
+                    {
+                        "room_key": "bathroom",
+                        "original_room_label": "BATHROOM",
+                        "room_order": 1,
+                        "material_rows": [
+                            {
+                                "area_or_item": "FEATURE CABINETRY",
+                                "supplier": "By Imperial",
+                                "specs_or_description": (
+                                    "Shaving Cabinet with Mirrorred doors - Open colourboard shelf below and sides. "
+                                    "Standard Whiteboard Internals"
+                                ),
+                                "notes": "",
+                                "tags": ["door_colours"],
+                                "page_no": 4,
+                                "row_order": 1,
+                                "display_value": (
+                                    "[By Imperial] - Shaving Cabinet with Mirrorred doors - "
+                                    "Open colourboard shelf below and sides. Standard Whiteboard Internals"
+                                ),
+                            }
+                        ],
+                    },
+                    {
+                        "room_key": "master_ensuite",
+                        "original_room_label": "MASTER ENSUITE",
+                        "room_order": 2,
+                        "material_rows": [
+                            {
+                                "area_or_item": "FEATURE CABINETRY",
+                                "supplier": "By Imperial",
+                                "specs_or_description": (
+                                    "Shaving Cabinet with Mirrorred doors - Open colourboard shelf below and sides. "
+                                    "Standard Whiteboard Internals"
+                                ),
+                                "notes": "",
+                                "tags": ["door_colours"],
+                                "page_no": 5,
+                                "row_order": 1,
+                                "display_value": (
+                                    "[By Imperial] - Shaving Cabinet with Mirrorred doors - "
+                                    "Open colourboard shelf below and sides. Standard Whiteboard Internals"
+                                ),
+                            }
+                        ],
+                    },
+                ],
+            }
+        )
+        door_entries = summary["door_colours"]["entries"]
+        feature_entry = next(
+            entry
+            for entry in door_entries
+            if "Shaving Cabinet with Mirrorred doors" in entry["text"]
+        )
+        self.assertEqual(feature_entry["rooms"], ["BATHROOM", "MASTER ENSUITE"])
+
+    def test_material_summary_cleans_imperial_benchtop_wfe_tail_separator(self) -> None:
+        snapshot = {
+            "builder_name": "Imperial",
+            "rooms": [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "room_order": 1,
+                    "material_rows": [
+                        {
+                            "area_or_item": "BENCHTOP",
+                            "supplier": "By Others",
+                            "specs_or_description": "20mm Stone | WFE's x 2",
+                            "notes": "",
+                            "tags": ["bench_tops"],
+                            "page_no": 1,
+                            "row_order": 1,
+                            "display_value": "[By Others] - 20mm Stone | WFE's x 2",
+                        }
+                    ],
+                }
+            ],
+        }
+        summary = _build_material_summary(snapshot)
+        self.assertEqual(summary["bench_tops"]["entries"][0]["text"], "[By Others] - 20mm Stone")
+        checklist = store._build_snapshot_verification_checklist(snapshot)
+        bench_summary = next(
+            item["extracted_value"]
+            for item in checklist
+            if item.get("section_type") == "summary" and item.get("field_name") == "Bench Tops"
+        )
+        self.assertNotIn("| (Room:", bench_summary)
+
     def test_material_summary_includes_absorbed_inline_imperial_handle_fragments(self) -> None:
         summary = _build_material_summary(
             {

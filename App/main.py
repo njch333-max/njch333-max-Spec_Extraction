@@ -1519,15 +1519,24 @@ def _imperial_material_row_is_summary_worthy(item: dict[str, Any], bucket_key: s
         )
     if bucket_key == "door_colours":
         if not re.search(r"(?i)\b(?:colour|frame|bar back|panel)\b", title):
-            if not (
-                "door_colours" in {str(tag).strip().lower() for tag in item.get("tags", []) if str(tag).strip()}
+            tagged_door_colour = "door_colours" in {
+                str(tag).strip().lower() for tag in item.get("tags", []) if str(tag).strip()
+            }
+            valid_tagged_door_row = (
+                tagged_door_colour
                 and re.search(r"(?i)\bdoors?\b", title)
                 and material_candidates
                 and not re.search(
                     r"(?i)\b(?:handle|fingerpull|bevel edge|kethy|allegra|momo|bronte|knob|touch catch|no handles?)\b",
                     display_value,
                 )
-            ):
+            )
+            valid_feature_cabinetry = (
+                tagged_door_colour
+                and re.search(r"(?i)\bfeature\s+cabinetry\b", title)
+                and _imperial_door_colour_text_is_valid_feature_cabinetry(display_value or value)
+            )
+            if not (valid_tagged_door_row or valid_feature_cabinetry):
                 return False
         if re.search(r"(?i)\b(?:internals?|kickboards?|open shelving)\b", title):
             return False
@@ -3356,7 +3365,17 @@ def _normalize_benchtop_summary_value(value: str) -> str:
     )
     text = re.sub(r"\s{2,}", " ", text)
     text = re.sub(r"\s*-\s*\($", "", text)
-    return text.strip(" -;,/")
+    text = re.sub(r"\s*\|\s*$", "", text)
+    return text.strip(" -;,/|")
+
+
+def _imperial_door_colour_text_is_valid_feature_cabinetry(raw_value: str) -> bool:
+    text = parsing.normalize_space(raw_value)
+    if not text:
+        return False
+    return bool(
+        re.search(r"(?i)\b(?:feature\s+cabinetry|shaving\s+cabinet|mirro(?:r)?red\s+doors?|colourboard\s+shelf)\b", text)
+    )
 
 
 def _imperial_summary_material_supplier(
@@ -3559,6 +3578,9 @@ def _imperial_summary_values_for_bucket(
         elif re.search(
             r"(?i)\b(?:raw\s+gyprock|sliding\s+robe\s+doors|standard\s+whiteboard\s+internals|robe\s+hatshelf|single\s+hanging|adjustable\s+shelves)\b",
             raw_value,
+        ) and not (
+            bucket_key == "door_colours"
+            and _imperial_door_colour_text_is_valid_feature_cabinetry(raw_value)
         ):
             candidates = []
         elif bucket_key == "bench_tops" and re.search(r"(?i)\b(?:cut-?outs?|GPO'?S?)\b", raw_value):
