@@ -1336,6 +1336,14 @@ def _prefer_imperial_raw_area_or_item_title(raw_title: str, normalized_title: st
     raw = parsing.normalize_space(re.sub(r"(?i)\(([^)]+)\)\s*\(\1\)", r"(\1)", raw))
     if raw == title:
         return raw
+    if re.search(
+        r"(?i)\b(?:thermo(?:laminated)?|polytec|laminex|classic\s+white|woodmatt|ultramatt|matt|gloss)\b",
+        raw,
+    ) and not re.search(
+        r"(?i)\b(?:thermo(?:laminated)?|polytec|laminex|classic\s+white|woodmatt|ultramatt|matt|gloss)\b",
+        title,
+    ):
+        return ""
     raw_upper = raw.upper()
     title_upper = title.upper()
     if raw_upper.startswith(title_upper):

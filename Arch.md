@@ -337,6 +337,7 @@
 - One row per appliance
 - Each row carries source metadata and confidence
 - Sink, basin, tap, and tub fixture rows are excluded from the appliance presentation/export layer because they are surfaced on the corresponding room row.
+- Imperial sinkware/basin overlays are resolved before room display using row-first fixture text, normalized fixture-base signatures, and source-equivalent supplier/note ordering. Cross-room taphole or note backfill is allowed only when the fixture base matches; utility-room pseudo-`basin_info` is cleared.
 - `product_url` is the primary visible link field; `website_url` remains a compatibility alias.
 - `overall_size` is only populated from official model resources, not from raw spec text heuristics, and supports both compact `W x D x H` text and labeled `51 mm (H) / 900 mm (W) / 520 mm (D)` product-page patterns.
 - Official size extraction also supports structured product metadata such as embedded `height / width / depth` JSON blocks on brand product pages.

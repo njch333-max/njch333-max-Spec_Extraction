@@ -2708,6 +2708,62 @@ SINKWARE (LAUNDRY) N/A BY OTHERS BY OTHERS
         self.assertIn("BU654520S", overlays["pantry"]["sink_info"])
         self.assertEqual(overlays["pantry"]["basin_info"], "")
 
+    def test_imperial_overlay_preserves_explicit_basin_taphole_notes_for_wet_rooms(self) -> None:
+        overlays = {
+            "bathroom": {
+                "sink_info": "",
+                "basin_info": "Basin Mounting - Semi Inset - Bekken IIon Semi Inset Basin White - CPS252070 By Others - Taphole location: In Sink - Note: Urbane Brass Taps",
+            },
+            "master_ensuite": {
+                "sink_info": "",
+                "basin_info": "Basin Mounting - Semi Inset - Bekken IIon Semi Inset Basin White - CPS252070 By Others - Taphole location: In Sink - Note: Urbane Brass Taps",
+            },
+        }
+        parsing_module._imperial_backfill_shared_sink_tapholes(overlays)
+        self.assertIn("Taphole location: In Sink", overlays["bathroom"]["basin_info"])
+        self.assertIn("Note: Urbane Brass Taps", overlays["bathroom"]["basin_info"])
+        self.assertIn("Taphole location: In Sink", overlays["master_ensuite"]["basin_info"])
+        self.assertIn("Note: Urbane Brass Taps", overlays["master_ensuite"]["basin_info"])
+
+    def test_imperial_overlay_backfills_fixture_note_by_matching_basin_signature(self) -> None:
+        overlays = {
+            "powder": {
+                "sink_info": "Basin Mounting - Semi Inset - Bekken IIon Semi Inset Basin White - CPS252070 By Others - Note: Urbane Brass Taps - Taphole location: In Sink",
+                "basin_info": "",
+            },
+            "bathroom": {
+                "sink_info": "",
+                "basin_info": "Basin Mounting - Semi Inset - Bekken IIon Semi Inset Basin White - CPS252070 By Others - Taphole location: In Sink",
+            },
+            "master_ensuite": {
+                "sink_info": "",
+                "basin_info": "Basin Mounting - Semi Inset - Bekken IIon Semi Inset Basin White - CPS252070 By Others - Taphole location: In Sink",
+            },
+        }
+        parsing_module._imperial_backfill_shared_sink_tapholes(overlays)
+        self.assertIn("Note: Urbane Brass Taps", overlays["bathroom"]["basin_info"])
+        self.assertIn("Note: Urbane Brass Taps", overlays["master_ensuite"]["basin_info"])
+
+    def test_imperial_clean_fixture_moves_by_others_after_basin_mounting(self) -> None:
+        cleaned = parsing_module._clean_room_fixture_text(
+            "By Others Basin Mounting - Semi Inset - Bekken IIon Semi Inset Basin White - CPS252070 - Taphole location: In Sink - Note: Urbane Brass Taps",
+            "basin",
+        )
+        self.assertEqual(
+            cleaned,
+            "Basin Mounting - Semi Inset - Bekken IIon Semi Inset Basin White - CPS252070 By Others - Taphole location: In Sink - Note: Urbane Brass Taps",
+        )
+
+    def test_imperial_clean_fixture_orders_taphole_before_note(self) -> None:
+        cleaned = parsing_module._clean_room_fixture_text(
+            "Basin Mounting - Semi Inset - Bekken IIon Semi Inset Basin White - CPS252070 By Others - Note: Urbane Brass Taps - Taphole location: In Sink",
+            "basin",
+        )
+        self.assertEqual(
+            cleaned,
+            "Basin Mounting - Semi Inset - Bekken IIon Semi Inset Basin White - CPS252070 By Others - Taphole location: In Sink - Note: Urbane Brass Taps",
+        )
+
     def test_imperial_extract_non_joinery_blocks_keeps_zip_tap_product_line(self) -> None:
         text = """
 SINKWARE & TAPWARE
@@ -3119,6 +3175,88 @@ H55784Z03AU
         joined_evidence = " ".join(row.evidence_snippet for row in rows)
         self.assertNotIn("IMAGE NOISE", joined_evidence)
         self.assertNotIn("By othersFisher", joined_evidence)
+
+    def test_finalize_imperial_appliances_recovers_missing_raw_placeholder_rows(self) -> None:
+        appliances = [
+            {
+                "appliance_type": "Rangehood",
+                "make": "Bosch",
+                "model_no": "DFS097A50A",
+                "source_file": "imperial-appliances.pdf",
+                "page_refs": "7",
+                "evidence_snippet": "Rangehood Model DFS097A50A",
+                "confidence": 0.78,
+            }
+        ]
+        page_text = """
+APPLIANCES
+FREESTANDING COOKER  (KITCHEN) N / A - By others By others
+Bosch Series 6 90cm Dual Fuel Range Cooker - freestanding
+Model HSB738357A - Dimensions 900-950x898x600 mm
+RANGEHOOD (KITCHEN) N / A - By others By others
+Bosch Series 4 90cm Slideout Rangehood Model DFS097A50A
+WASHING MACHINE (LAUNDRY) N / A - By others
+Front Loader - standard 700mm size - LG Tower
+DRYER (LAUNDRY) N / A - By others By others
+Front Loader - standard 700mm size - LG Tower
+"""
+        documents = [
+            {
+                "file_name": "imperial-appliances.pdf",
+                "pages": [{"page_no": 7, "raw_text": page_text, "text": page_text}],
+            }
+        ]
+        parsing_module._finalize_imperial_appliances(appliances, documents)
+        by_type = {row["appliance_type"]: row for row in appliances}
+        self.assertIn("Dryer", by_type)
+        self.assertIn("Washing Machine", by_type)
+        self.assertEqual(by_type["Dryer"]["model_no"], "N / A - By others")
+        self.assertEqual(by_type["Washing Machine"]["model_no"], "N / A - By others")
+
+    def test_imperial_raw_crosscheck_merges_missing_placeholder_appliance_rows(self) -> None:
+        layout_snapshot = {
+            "builder_name": "Imperial",
+            "rooms": [],
+            "appliances": [
+                {
+                    "appliance_type": "Rangehood",
+                    "make": "Bosch",
+                    "model_no": "DFS097A50A",
+                    "source_file": "imperial.pdf",
+                    "page_refs": "7",
+                    "evidence_snippet": "Rangehood Model DFS097A50A",
+                    "confidence": 0.78,
+                }
+            ],
+        }
+        raw_snapshot = {
+            "rooms": [],
+            "appliances": [
+                {
+                    "appliance_type": "Dryer",
+                    "make": "",
+                    "model_no": "N / A - By others",
+                    "source_file": "imperial.pdf",
+                    "page_refs": "7",
+                    "evidence_snippet": "DRYER (LAUNDRY) N / A - By others Front Loader - standard 700mm size - LG Tower",
+                    "confidence": 0.72,
+                },
+                {
+                    "appliance_type": "Washing Machine",
+                    "make": "",
+                    "model_no": "N / A - By others",
+                    "source_file": "imperial.pdf",
+                    "page_refs": "7",
+                    "evidence_snippet": "WASHING MACHINE (LAUNDRY) N / A - By others",
+                    "confidence": 0.72,
+                },
+            ],
+        }
+        merged = extraction_service._crosscheck_imperial_snapshot_with_raw(layout_snapshot, raw_snapshot)
+        by_type = {row["appliance_type"]: row for row in merged["appliances"]}
+        self.assertIn("Rangehood", by_type)
+        self.assertEqual(by_type["Dryer"]["model_no"], "N / A - By others")
+        self.assertEqual(by_type["Washing Machine"]["model_no"], "N / A - By others")
 
     def test_enrich_imperial_placeholder_appliance_row_merges_layout_specs_tbc(self) -> None:
         row = parsing_module.ApplianceRow(
@@ -23922,6 +24060,103 @@ H55784Z03AU
         self.assertFalse(any("BASE - BEVEL EDGE FINGERPULL TALL" in text for text in subitem_texts))
         self.assertFalse(any(item.get("source") == "layout_value_text" for item in processed[0].get("handle_subitems", [])))
 
+    def test_imperial_handle_subitems_ignore_polluted_fallback_when_rendered_lines_are_clean(self) -> None:
+        row = {
+            "area_or_item": "HANDLES",
+            "supplier": "",
+            "specs_or_description": "TCM3622.WHBRN.FG",
+            "notes": "",
+            "tags": ["handles"],
+            "display_lines": [
+                "[Momo] - DOORS - Lugo Knob 38mm In Brushed Nickel - Part no: 3238.BRN.FG",
+                "[Momo] - DRAWERS - Trianon D Handle 128mm In White & Brushed Nickel - Part no: TCM3622.WHBRN.FG",
+            ],
+            "provenance": {
+                "layout_value_text": (
+                    "DOORS - Momo Lugo Knob 38mm In Brushed Nickel - Part no: 3238.BRN.FG | "
+                    "DRAWERS - Polytec - As Doors Momo Trianon D DOORS Brushed TCM3622.WHBRN.FG"
+                )
+            },
+        }
+        subitems = parsing_module._imperial_handle_subitems_for_row(row)
+        self.assertEqual({item["family"] for item in subitems}, {"doors", "drawers"})
+        self.assertFalse(any("Polytec" in item["text"] or "As Doors" in item["text"] for item in subitems))
+
+    def test_imperial_fragment_handles_keep_pretitle_door_knob_without_supplier_column(self) -> None:
+        lines = [
+            "DOORS - Momo Lugo Knob 38mm In Brushed Nickel - Part no: 3238.BRN.FG Momo",
+            "ALL COLOURS SHOWN ARE APPROXIMATE REPRESENTATIONS ONLY",
+            "KITCHEN JOINERY SELECTION SHEET",
+            "BASE CABINETRY COLOUR",
+            "HANDLES",
+            "DRAWERS -Momo Trianon D Handle 128mm",
+        ]
+        entries = parsing_module._imperial_extract_fragment_handle_entries(lines)
+        self.assertTrue(any("3238.BRN.FG" in entry for entry in entries))
+
+    def test_imperial_reconcile_adds_missing_legacy_handle_family_when_handle_row_exists(self) -> None:
+        row = {
+            "room_key": "kitchen",
+            "source_file": "imperial.pdf",
+            "page_refs": "1",
+            "confidence": 0.72,
+            "handles": [
+                "DOORS - Momo Lugo Knob 38mm In Brushed Nickel - Part no: 3238.BRN.FG",
+                "DRAWERS - Momo Trianon D Handle 128mm In White & Brushed Nickel - Part no: TCM3622.WHBRN.FG",
+            ],
+            "material_rows": [
+                {
+                    "area_or_item": "HANDLES",
+                    "supplier": "Momo",
+                    "specs_or_description": "DRAWERS - Momo Trianon D Handle 128mm In White & Brushed Nickel - Part no: TCM3622.WHBRN.FG",
+                    "notes": "",
+                    "tags": ["handles"],
+                    "page_no": 1,
+                    "row_order": 6,
+                    "provenance": {"layout_value_text": "DRAWERS - Momo Trianon D Handle 128mm In White & Brushed Nickel - Part no: TCM3622.WHBRN.FG"},
+                }
+            ],
+        }
+        parsing_module._imperial_reconcile_material_rows_with_room_fields(row)
+        handle_values = " | ".join(
+            material_row.get("specs_or_description", "")
+            for material_row in row["material_rows"]
+            if "handles" in (material_row.get("tags") or [])
+        )
+        self.assertIn("3238.BRN.FG", handle_values)
+        self.assertEqual(handle_values.count("TCM3622.WHBRN.FG"), 1)
+
+    def test_imperial_glass_door_colour_title_and_description_drop_value_contamination(self) -> None:
+        item = {
+            "area_or_item": "UPPER CABINETRY COLOUR (GLASS DOORS ONLY)",
+            "tags": ["door_colours"],
+            "provenance": {"raw_area_or_item": "UPPER CABINETRY COLOUR (GLASS Thermo DOORS ONLY)"},
+        }
+        self.assertEqual(
+            _flatten_imperial_material_rows(
+                {
+                    "material_rows": [
+                        {
+                            **item,
+                            "supplier": "Polytec",
+                            "specs_or_description": "Thermo DOORS ONLY) - Classic White - Matt - Door Frame 4 - Type I - Four Rebate - Clear Glass",
+                            "notes": "",
+                            "page_no": 1,
+                            "row_order": 1,
+                        }
+                    ]
+                }
+            )[0]["title"],
+            "UPPER CABINETRY COLOUR (GLASS DOORS ONLY)",
+        )
+        _, description, _ = parsing_module._imperial_normalize_cabinetry_colour_fields(
+            "UPPER CABINETRY COLOUR (GLASS DOORS ONLY)",
+            "Polytec",
+            "Thermo DOORS ONLY) - Classic White - Matt - Door Frame 4 - Type I - Four Rebate - Clear Glass",
+            "",
+        )
+        self.assertEqual(description, "Thermo - Classic White - Matt - Door Frame 4 - Type I - Four Rebate - Clear Glass")
+
     def test_imperial_handle_summary_keeps_overhead_finger_space_and_touch_catch(self) -> None:
         snapshot = {
             "builder_name": "Imperial",
@@ -24486,6 +24721,54 @@ basin
         self.assertIn("Specs TBC", by_room["ENSUITE"])
         self.assertIn("Taphole location: In Stone, centered behind", by_room["BATHROOM"])
         self.assertIn("Taphole location: In Stone, centered behind", by_room["ENSUITE"])
+
+    def test_imperial_sinkware_text_blocks_use_heading_tail_and_reject_tapware_spillover(self) -> None:
+        page = {
+            "raw_text": "SINKWARE & TAPWARE\nSINKWARE (KITCHEN)\nTAPWARE (KITCHEN)",
+            "text_blocks": [
+                {"text": "SINKWARE & TAPWARE", "x0": 410.0, "y0": 167.0},
+                {"text": "AREA / ITEM SPECS / DESCRIPTION IMAGE SUPPLIER NOTES", "x0": 118.0, "y0": 229.0},
+                {"text": "Sink Mounting - Undermount - Boston", "x0": 274.0, "y0": 286.0},
+                {"text": "Note: Chrome Tapware", "x0": 978.0, "y0": 294.0},
+                {
+                    "text": "SINKWARE (KITCHEN) 853x461x255 Butler Sink Double Bowl By Others",
+                    "x0": 101.0,
+                    "y0": 301.0,
+                },
+                {"text": "#MC84455 - Farmhouse Type Sink", "x0": 284.0, "y0": 316.0},
+                {"text": "Mounting Position - In Stone, Centered", "x0": 272.0, "y0": 410.0},
+                {
+                    "text": "TAPWARE (KITCHEN) By Others Note for builder: May require a second hole in the stone behind the sink for a water filtration tap",
+                    "x0": 103.0,
+                    "y0": 417.0,
+                },
+            ],
+        }
+        blocks = dict(parsing_module._imperial_extract_non_joinery_blocks_from_text_blocks(page, "sinkware"))
+        self.assertIn("KITCHEN", blocks)
+        self.assertIn("853x461x255 Butler Sink Double Bowl", blocks["KITCHEN"])
+        self.assertIn("Sink Mounting - Undermount - Boston", blocks["KITCHEN"])
+        self.assertIn("#MC84455 - Farmhouse Type Sink", blocks["KITCHEN"])
+        self.assertIn("Note: Chrome Tapware", blocks["KITCHEN"])
+        self.assertNotIn("Mounting Position", blocks["KITCHEN"])
+        existing = blocks["KITCHEN"]
+        polluted = (
+            "Mounting Position - In Stone, Centered behind the Sink By Others "
+            "Note for builder: May require a second hole in the stone behind the sink for a water filtration tap "
+            "Sink Mounting - Undermount - Boston 853x461x255 Butler Sink Double Bowl #MC84455 - Farmhouse Type Sink"
+        )
+        self.assertEqual(parsing_module._imperial_prefer_fixture_overlay_text(existing, polluted, "sink"), existing)
+
+    def test_imperial_sinkware_keeps_model_before_supplier_and_note(self) -> None:
+        value = (
+            "Sink Mounting - Undermount - Boston 853x461x255 Butler Sink Double Bowl "
+            "By Others - Note: Chrome Tapware #MC84455 - Farmhouse Type Sink"
+        )
+        cleaned = parsing_module._clean_room_fixture_text(value, "sink")
+        self.assertEqual(
+            cleaned,
+            "Sink Mounting - Undermount - Boston 853x461x255 Butler Sink Double Bowl #MC84455 - Farmhouse Type Sink By Others - Note: Chrome Tapware",
+        )
 
     def test_preprocess_appliance_text_keeps_bar_fridge_on_single_line(self) -> None:
         text = "DRYER (LAUNDRY) Specs - TBC N / A - By others By others BAR FRIDGE (LAUNDRY) Specs - TBC N / A - By others By others"

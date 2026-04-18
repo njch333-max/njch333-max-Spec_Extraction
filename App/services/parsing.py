@@ -4518,10 +4518,7 @@ def _imperial_extract_fragment_handle_entries(lines: list[str]) -> list[str]:
         if _is_handle_description_like(line)
         and not re.search(r"(?i)\b(?:450mm\s+pull-out|bin\s+hettich)\b", line)
     ]
-    if (len(description_clusters) != 1 or posttitle_descriptions) and not has_base_handle_label:
-        return []
-
-    supplier = next(
+    posttitle_supplier = next(
         (
             normalize_brand_casing_text(line)
             for line in posttitle_lines
@@ -4529,7 +4526,27 @@ def _imperial_extract_fragment_handle_entries(lines: list[str]) -> list[str]:
         ),
         "",
     )
+    if not posttitle_supplier and description_clusters and not has_base_handle_label:
+        coded_pretitle_entries = [
+            normalize_brand_casing_text(cluster)
+            for cluster in description_clusters
+            if _imperial_handle_entry_is_valid(cluster)
+            and re.search(r"(?i)\b(?:part\s+no\s*:|product\s+code\s*:|SO-[A-Z0-9-]+|[A-Z]{2,}[A-Z0-9]*\d[A-Z0-9./-]*|\d{3,4}\.[A-Z0-9.]+)\b", cluster)
+        ]
+        if coded_pretitle_entries:
+            return _clean_handle_entries(coded_pretitle_entries)
+    if (len(description_clusters) != 1 or posttitle_descriptions) and not has_base_handle_label:
+        return []
+
+    supplier = posttitle_supplier
     if not supplier:
+        entries = [
+            normalize_brand_casing_text(cluster)
+            for cluster in description_clusters
+            if _imperial_handle_entry_is_valid(cluster)
+        ]
+        if entries:
+            return _clean_handle_entries(entries)
         return []
 
     note_parts: list[str] = []
@@ -6787,10 +6804,11 @@ def _imperial_handle_subitems_for_row(row: dict[str, Any]) -> list[dict[str, Any
             value = normalize_space(str(provenance.get(key, "") or ""))
             if value:
                 fallback_sources.append((key, value))
-    subitems: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
-    seen_identities: set[str] = set()
-    for sources in (primary_sources, fallback_sources):
+
+    def _collect_subitems(sources: list[tuple[str, str]]) -> list[dict[str, Any]]:
+        subitems: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+        seen_identities: set[str] = set()
         for source, text in sources:
             for segment in _imperial_handle_subitem_segments_from_text(text):
                 family = _imperial_handle_subitem_family(segment)
@@ -6813,7 +6831,15 @@ def _imperial_handle_subitems_for_row(row: dict[str, Any]) -> list[dict[str, Any
                         "source": source,
                     }
                 )
-    return subitems
+        return subitems
+
+    primary_subitems = _collect_subitems(primary_sources)
+    if primary_subitems:
+        # Rendered/display lines are already the constrained raw-row view. Do not
+        # let noisy layout/page-text fallback sources reintroduce crossed-row text
+        # into summary itemization.
+        return primary_subitems
+    return _collect_subitems(fallback_sources)
 
 
 def _imperial_attach_handle_subitems(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -11299,6 +11325,11 @@ def _imperial_clean_cabinetry_colour_description(
             cleaned,
         ).strip(" -|;,")
     if re.search(r"(?i)\bGLASS\s+DOORS?\s+ONLY\b", label):
+        cleaned = re.sub(
+            r"(?i)^(Thermo(?:laminated)?)\s+DOORS?\s+ONLY\)\s*-\s*",
+            r"\1 - ",
+            cleaned,
+        ).strip(" -|;,")
         cleaned = re.sub(r"(?i)^\(?GLASS\s+", "", cleaned).strip(" -|;,")
     cleaned = re.sub(r"(?i)^Door and Drawer\s+", "", cleaned).strip(" -|;,")
     contamination_patterns = [
@@ -13493,6 +13524,36 @@ def _imperial_room_overheads_handle_description(row: dict[str, Any]) -> str:
     return no_handles_entry or touch_catch_entry
 
 
+def _imperial_handle_reconcile_identity(value: Any) -> str:
+    text = normalize_space(str(value or ""))
+    if not text:
+        return ""
+    code_match = re.search(
+        r"(?i)\b(?:part\s+no\s*:\s*)?([A-Z]{2,}[A-Z0-9]*\d[A-Z0-9./-]*|SO-[A-Z0-9-]+|HANDLE[A-Z0-9]+|\d{3,4}\.[A-Z0-9.]+)\b",
+        text,
+    )
+    if code_match:
+        return code_match.group(1).lower()
+    family = _imperial_handle_subitem_family(text)
+    identity = _imperial_handle_subitem_identity(text)
+    return normalize_space(f"{family} {identity}").lower()
+
+
+def _imperial_material_handle_row_probe(row: dict[str, Any]) -> str:
+    provenance = row.get("provenance", {}) if isinstance(row.get("provenance", {}), dict) else {}
+    parts: list[str] = [
+        normalize_space(str(row.get("area_or_item", "") or "")),
+        normalize_space(str(row.get("supplier", "") or "")),
+        normalize_space(str(row.get("specs_or_description", "") or "")),
+        normalize_space(str(row.get("notes", "") or "")),
+    ]
+    for key in ("layout_value_text", "page_text_handle_block", "layout_supplier_text", "layout_notes_text"):
+        value = normalize_space(str(provenance.get(key, "") or ""))
+        if value:
+            parts.append(value)
+    return normalize_space(" | ".join(part for part in parts if part))
+
+
 def _imperial_reconcile_material_rows_with_room_fields(row: dict[str, Any]) -> None:
     material_rows = row.get("material_rows", [])
     if not isinstance(material_rows, list) or not material_rows:
@@ -13560,12 +13621,37 @@ def _imperial_reconcile_material_rows_with_room_fields(row: dict[str, Any]) -> N
                 item["notes"] = ""
         item["provenance"] = provenance
         reconciled.append(item)
-    has_handle_rows = any(
-        isinstance(item, dict) and _imperial_material_row_primary_tag(item.get("tags", [])) == "handles"
+    handle_rows = [
+        item
         for item in reconciled
-    )
+        if isinstance(item, dict) and _imperial_material_row_primary_tag(item.get("tags", [])) == "handles"
+    ]
+    has_handle_rows = bool(handle_rows)
+    existing_handle_identities = {
+        identity
+        for item in handle_rows
+        for identity in [_imperial_handle_reconcile_identity(_imperial_material_handle_row_probe(item))]
+        if identity
+    }
+    existing_handle_probe = normalize_space(" | ".join(_imperial_material_handle_row_probe(item) for item in handle_rows)).lower()
     legacy_handles = _coerce_string_list(row.get("handles", []))
-    if legacy_handles and not has_handle_rows:
+    missing_legacy_handles = [
+        handle_text
+        for handle_text in legacy_handles
+        if normalize_space(handle_text)
+        and (
+            not (identity := _imperial_handle_reconcile_identity(handle_text))
+            or (
+                identity not in existing_handle_identities
+                and identity not in existing_handle_probe
+            )
+        )
+    ]
+    should_synthesize_handle_rows = bool(missing_legacy_handles) and (
+        not has_handle_rows
+        or any(_imperial_handle_reconcile_identity(handle_text) for handle_text in missing_legacy_handles)
+    )
+    if should_synthesize_handle_rows:
         declared_pages = [int(match) for match in re.findall(r"\d+", normalize_space(str(row.get("page_refs", "") or "")))]
         existing_pages = sorted(
             {
@@ -13613,7 +13699,7 @@ def _imperial_reconcile_material_rows_with_room_fields(row: dict[str, Any]) -> N
             if isinstance(item, dict) and int(item.get("page_no", 0) or 0) == synthesized_page
         ]
         next_row_order = (max(existing_row_orders) if existing_row_orders else 0) + 1
-        for handle_text in legacy_handles:
+        for handle_text in missing_legacy_handles:
             supplier, remainder = _normalize_entry_supplier_text(handle_text)
             synthesized_description = remainder or normalize_space(handle_text)
             synthesized_notes = ""
@@ -16468,6 +16554,7 @@ def _imperial_room_from_section(section: dict[str, Any]) -> RoomRow:
             if cleaned_raw_toe_kick and not _is_placeholder_material_value(cleaned_raw_toe_kick):
                 raw_toe_kick_fallbacks = _merge_lists(raw_toe_kick_fallbacks, [cleaned_raw_toe_kick])
         if has_structured_layout:
+            delayed_handles = _merge_lists(delayed_handles, overrides.get("delayed_handles", []))
             soft_close_candidate = overrides.get("soft_close_text", "")
             if soft_close_candidate and not soft_close_text:
                 soft_close_text = soft_close_candidate
@@ -20334,6 +20421,28 @@ def _finalize_clarendon_appliances(appliances: list[dict[str, Any]], documents: 
 
 
 def _finalize_imperial_appliances(appliances: list[dict[str, Any]], documents: list[dict[str, object]]) -> None:
+    existing_types = {
+        normalize_space(str(row.get("appliance_type", "") or "")).lower()
+        for row in appliances
+        if isinstance(row, dict) and normalize_space(str(row.get("appliance_type", "") or ""))
+    }
+    recovered_rows: list[ApplianceRow] = []
+    for document in documents or []:
+        if not isinstance(document, dict):
+            continue
+        pages = [page for page in document.get("pages", []) if isinstance(page, dict)]
+        if not pages:
+            continue
+        file_name = normalize_space(str(document.get("file_name", "") or "")) or "source.pdf"
+        for row in _extract_appliances_from_pages(file_name, pages, builder_name="Imperial"):
+            appliance_type = normalize_space(str(row.appliance_type or "")).lower()
+            if not appliance_type or appliance_type in existing_types:
+                continue
+            recovered_rows.append(row)
+            existing_types.add(appliance_type)
+    if recovered_rows:
+        appliances.extend(row.model_dump() for row in recovered_rows)
+
     freestanding_sources = {
         normalize_space(str(row.get("source_file", "") or "")).lower()
         for row in appliances
@@ -26123,6 +26232,21 @@ def _imperial_extract_taphole_notes(text: str) -> list[str]:
     return _unique(notes)
 
 
+def _imperial_extract_fixture_notes(text: str) -> list[str]:
+    normalized = normalize_space(text)
+    if not normalized:
+        return []
+    notes: list[str] = []
+    for match in re.finditer(r"(?i)\bNote\s*:", normalized):
+        start = match.start()
+        next_match = re.search(r"(?i)\s+-\s*(?:Taphole location\s*:|Note\s*:)", normalized[start + 1 :])
+        end = start + 1 + next_match.start() if next_match else len(normalized)
+        note = normalize_space(normalized[start:end]).strip(" -;,")
+        if note:
+            notes.append(note)
+    return _unique(notes)
+
+
 def _imperial_is_sink_oriented_taphole(note: str) -> bool:
     normalized = normalize_space(note)
     return bool(
@@ -26132,6 +26256,18 @@ def _imperial_is_sink_oriented_taphole(note: str) -> bool:
 
 
 def _imperial_append_taphole_note(text: str, note: str) -> str:
+    base = normalize_space(text)
+    normalized_note = normalize_space(note)
+    if not normalized_note:
+        return base
+    if normalized_note in base:
+        return base
+    if not base:
+        return normalized_note
+    return normalize_space(f"{base} - {normalized_note}").strip(" -;,")
+
+
+def _imperial_append_fixture_note(text: str, note: str) -> str:
     base = normalize_space(text)
     normalized_note = normalize_space(note)
     if not normalized_note:
@@ -26161,6 +26297,7 @@ def _imperial_sinkware_taphole_share_signature(text: str) -> str:
     cleaned = re.sub(r"(?i)\bN\s*/?\s*A\b(?:\s*-\s*By others?)?", " ", cleaned)
     cleaned = re.sub(r"(?i)\bBy others?\b", " ", cleaned)
     cleaned = re.sub(r"(?i)\bSpecs\s*-?\s*TBC\b", " ", cleaned)
+    cleaned = re.sub(r"(?i)\bNote\s*:.*$", " ", cleaned)
     cleaned = re.sub(r"(?i)\b(?:sink|basin)\b$", " ", cleaned)
     cleaned = normalize_space(cleaned)
     return re.sub(r"[^a-z0-9]+", "", cleaned.lower())
@@ -26198,6 +26335,7 @@ def _imperial_backfill_shared_sink_tapholes(overlays: dict[str, dict[str, str]])
     sink_rooms_missing_note: list[str] = []
     shared_sink_notes: list[str] = []
     source_signatures_by_note: dict[str, set[str]] = {}
+    fixture_notes_by_signature: dict[str, list[str]] = {}
     for room_key, overlay in overlays.items():
         room_label = normalize_space(room_key.replace("_", " "))
         sink_info = normalize_space(str(overlay.get("sink_info", "") or ""))
@@ -26206,6 +26344,13 @@ def _imperial_backfill_shared_sink_tapholes(overlays: dict[str, dict[str, str]])
         basin_notes = _imperial_extract_taphole_notes(basin_info)
         sink_signature = _imperial_sinkware_taphole_share_signature(sink_info)
         basin_signature = _imperial_sinkware_taphole_share_signature(basin_info)
+        for signature, fixture_text in ((sink_signature, sink_info), (basin_signature, basin_info)):
+            if not signature:
+                continue
+            for note in _imperial_extract_fixture_notes(fixture_text):
+                fixture_notes_by_signature[signature] = _unique(
+                    [*fixture_notes_by_signature.get(signature, []), note]
+                )
         for note in sink_notes:
             if not _imperial_is_sink_oriented_taphole(note):
                 continue
@@ -26222,6 +26367,16 @@ def _imperial_backfill_shared_sink_tapholes(overlays: dict[str, dict[str, str]])
             sink_rooms_missing_note.append(room_key)
     shared_sink_notes = _unique(shared_sink_notes)
     _imperial_clear_sink_derived_basin_overlays(overlays)
+    for overlay in overlays.values():
+        for field_name in ("sink_info", "basin_info"):
+            fixture_text = normalize_space(str(overlay.get(field_name, "") or ""))
+            if not fixture_text or _imperial_extract_fixture_notes(fixture_text):
+                continue
+            signature = _imperial_sinkware_taphole_share_signature(fixture_text)
+            notes = fixture_notes_by_signature.get(signature, [])
+            if not notes:
+                continue
+            overlay[field_name] = _imperial_append_fixture_note(fixture_text, notes[0])
     if not shared_sink_notes or not sink_rooms_missing_note:
         return
     def _shared_note_sort_key(note: str) -> tuple[int, int]:
@@ -26251,15 +26406,6 @@ def _imperial_backfill_shared_sink_tapholes(overlays: dict[str, dict[str, str]])
         if source_signatures and target_signature not in source_signatures and not allow_generic_same_base_share:
             continue
         overlay["sink_info"] = _imperial_append_taphole_note(str(overlay.get("sink_info", "") or ""), shared_note)
-    for room_key, overlay in overlays.items():
-        room_label = normalize_space(room_key.replace("_", " "))
-        if _imperial_room_supports_sinkware_role(room_label, "sink"):
-            continue
-        basin_info = normalize_space(str(overlay.get("basin_info", "") or ""))
-        for note in shared_sink_notes:
-            if note in basin_info:
-                basin_info = _imperial_remove_taphole_note(basin_info, note)
-        overlay["basin_info"] = basin_info
     _imperial_clear_sink_derived_basin_overlays(overlays)
 
 
@@ -27209,7 +27355,8 @@ def _imperial_clean_non_joinery_body(body: str, kind: str) -> str:
     raw_lines = [normalize_space(line) for line in body.replace("\r", "\n").split("\n") if normalize_space(line)]
     lines: list[str] = []
     for line in raw_lines:
-        line = normalize_space(re.sub(r"(?i)^by others\s*", "", line))
+        if not (kind == "sinkware" and re.fullmatch(r"(?i)by\s+others?", line)):
+            line = normalize_space(re.sub(r"(?i)^by others\s*", "", line))
         if not line:
             continue
         if lines and not _is_imperial_page_noise_line(line) and not re.match(r"(?i)^(?:SINKWARE|TAPWARE|SINK ACCESSORIES|NOTES)\b", line):
@@ -27225,11 +27372,16 @@ def _imperial_clean_non_joinery_body(body: str, kind: str) -> str:
         upper = line.upper()
         if _is_imperial_page_noise_line(line):
             continue
+        if kind == "sinkware" and re.fullmatch(r"(?i)by\s+others?", line):
+            values.append("By Others")
+            continue
         if _looks_like_person_name_line(line):
             continue
         if upper.startswith("SINKWARE") or upper.startswith("TAPWARE") or upper.startswith("SINK ACCESSORIES") or upper.startswith("NOTES"):
             continue
         if _imperial_is_supplier_only_line(line):
+            if kind == "sinkware" and re.search(r"(?i)\bBy\s+Others\b", line):
+                values.append("By Others")
             continue
         if re.match(r"(?i)^taphole location\s*:", line):
             location = normalize_space(re.sub(r"(?i)^taphole location\s*:\s*", "", line))
@@ -27543,6 +27695,17 @@ def _imperial_prefer_fixture_overlay_text(existing: str, candidate: str, fixture
         return candidate_text
     if fixture_kind in {"sink", "basin"}:
         role = "basin" if fixture_kind == "basin" else "sink"
+        candidate_has_tapware_contamination = bool(
+            re.search(r"(?i)\b(?:Mounting Position\s*-\s*In Stone|water\s+filtration\s+tap|TAPWARE\s*\(|\btapware\b)", candidate_text)
+            and not re.search(r"(?i)\b(?:Note:\s*[^-]*Tapware|Taphole location\s*:)", candidate_text)
+        ) or bool(
+            re.search(r"(?i)\b(?:Mounting Position\s*-\s*In Stone|water\s+filtration\s+tap|TAPWARE\s*\()", candidate_text)
+        )
+        existing_has_fixture_mounting = bool(
+            re.search(r"(?i)\b(?:Sink|Basin)\s+Mounting\s*-", existing_text)
+        )
+        if candidate_has_tapware_contamination and existing_has_fixture_mounting:
+            return existing_text
         candidate_has_complete_taphole = bool(
             re.search(rf"(?i)\bTaphole location\s*:\s*.*\b{role}\b", candidate_text)
         )
@@ -27635,7 +27798,7 @@ def _imperial_extract_non_joinery_blocks_from_text_blocks(page: dict[str, Any], 
         heading_match = candidate["heading_match"]
         if kind == "sinkware":
             prefix = normalize_space(base_text[: int(heading_match.get("start", 0) or 0)])
-            suffix = normalize_space(base_text[int(heading_match.get("end", 0) or 0) :])
+            suffix = normalize_space(str(heading_match.get("tail", "") or ""))
         else:
             prefix = normalize_space(base_text[: heading_match.start()])
             suffix = normalize_space(base_text[heading_match.end() :])
@@ -27646,12 +27809,12 @@ def _imperial_extract_non_joinery_blocks_from_text_blocks(page: dict[str, Any], 
             if abs(float(block.get("y0", 0.0) or 0.0) - row_y) <= 18.0
         ]
         band_blocks = sorted(band_blocks, key=lambda block: (float(block.get("y0", 0.0) or 0.0), float(block.get("x0", 0.0) or 0.0)))
-        description_parts: list[str] = []
-        note_parts: list[str] = []
+        description_entries: list[tuple[float, float, str]] = []
+        note_entries: list[tuple[float, float, str]] = []
         if prefix:
-            note_parts.append(prefix)
+            note_entries.append((row_y, float(base_block.get("x0", 0.0) or 0.0), prefix))
         if suffix:
-            description_parts.append(suffix)
+            description_entries.append((row_y, float(base_block.get("x0", 0.0) or 0.0), suffix))
         for block in band_blocks:
             if block is base_block:
                 continue
@@ -27664,18 +27827,29 @@ def _imperial_extract_non_joinery_blocks_from_text_blocks(page: dict[str, Any], 
             if not block_text:
                 continue
             x0 = float(block.get("x0", 0.0) or 0.0)
+            if kind == "sinkware" and re.search(r"(?i)\bTaphole location\s*:", block_text) and x0 < 930:
+                prefix_text = normalize_space(re.sub(r"(?i)\bTaphole location\s*:.*$", "", block_text)).strip(" -;,")
+                note_match = re.search(r"(?i)\bTaphole location\s*:.*$", block_text)
+                note_text = normalize_space(note_match.group(0) if note_match else "").strip(" -;,")
+                if prefix_text:
+                    description_entries.append((float(block.get("y0", 0.0) or 0.0), x0, prefix_text))
+                if note_text:
+                    note_entries.append((float(block.get("y0", 0.0) or 0.0), max(x0, 930.0), note_text))
+                continue
             if x0 >= 930:
-                note_parts.append(block_text)
+                note_entries.append((float(block.get("y0", 0.0) or 0.0), x0, block_text))
                 continue
             if x0 >= 220:
-                description_parts.append(block_text)
+                description_entries.append((float(block.get("y0", 0.0) or 0.0), x0, block_text))
                 continue
         if kind == "tapware":
-            description_parts = [
-                part
-                for part in description_parts
-                if not re.search(r"(?i)\b(?:sinkware|taphole location)\b", part)
+            description_entries = [
+                entry
+                for entry in description_entries
+                if not re.search(r"(?i)\b(?:sinkware|taphole location)\b", entry[2])
             ]
+        description_parts = [entry[2] for entry in sorted(description_entries, key=lambda entry: (entry[0], entry[1]))]
+        note_parts = [entry[2] for entry in sorted(note_entries, key=lambda entry: (entry[0], entry[1]))]
         body_parts = [part for part in [*description_parts, *note_parts] if part]
         cleaned = _imperial_clean_non_joinery_body("\n".join(body_parts), kind)
         if room_label and cleaned:
@@ -28790,7 +28964,7 @@ def _strip_grouped_fixture_property_noise(text: str) -> str:
         probe = re.sub(r"(?i)\bColour\s*&\s*Finish\b\s+", "", probe)
         probe = re.sub(r"(?i)^(?:Model|Type|Range|Profile)\b\s+", "", probe)
         probe = re.sub(r"(?i)\bLocation\b\s+", "", probe)
-        probe = re.sub(r"(?i)\bType\b.*$", "", probe)
+        probe = re.sub(r"(?i)\bType\b(?!\s+Sink\b).*$", "", probe)
         probe = re.sub(r"(?i)\b(?:Model|Type|Range|Profile)\b(?:\s*#)?\s*$", "", probe)
         probe = normalize_space(probe).strip(" -;,#")
         if not probe:
@@ -28804,6 +28978,26 @@ def _normalize_imperial_fixture_supplier_mounting_order(text: str) -> str:
     if not cleaned:
         return ""
     cleaned = re.sub(
+        r"(?i)\bBy\s+Others\s*-\s*(?P<note>Note\s*:\s*.*?)(?P<tail>#MC[0-9A-Z-]+(?:\s*-\s*.*?Type\s+Sink|\s*-\s*[^-]+))(?=\s|$)",
+        lambda match: f"{normalize_space(match.group('tail'))} By Others - {normalize_space(match.group('note')).rstrip(' -;,')}",
+        cleaned,
+    )
+    cleaned = re.sub(
+        r"(?i)\bBy\s+Others\s+(?P<tail>#MC[0-9A-Z-]+(?:\s*-\s*.*?Type\s+Sink|\s*-\s*[^-]+))(?=\s+(?:Note:|Taphole location:)|$)",
+        lambda match: f"{normalize_space(match.group('tail'))} By Others",
+        cleaned,
+    )
+    cleaned = re.sub(
+        r"(?i)\bBy\s+Others\s+(?P<tail>(?:Semi\s+Inset\s+Basin\s+White|Tub\s+Only)\s*-\s*CPS[0-9A-Z-]+)\b",
+        lambda match: f"{normalize_space(match.group('tail'))} By Others",
+        cleaned,
+    )
+    cleaned = re.sub(
+        r"(?i)\bBy\s+Others\s+(?P<tail>(?:Sink|Basin)\s+Moun\w*ng\s*-\s*.*?)(?=\s*-?\s*(?:Note:|Taphole location:)|$)",
+        lambda match: f"{normalize_space(match.group('tail'))} By Others",
+        cleaned,
+    )
+    cleaned = re.sub(
         r"(?i)\b((?:Sink|Basin)\s+Moun\w*ng\s*-\s*)By\s+Others\s+(Undermount(?:ed)?|Topmount)\b",
         lambda match: f"{match.group(1)}{match.group(2)} - By Others",
         cleaned,
@@ -28813,7 +29007,26 @@ def _normalize_imperial_fixture_supplier_mounting_order(text: str) -> str:
         lambda match: f"{match.group(1)} - By Others",
         cleaned,
     )
+    cleaned = re.sub(r"(?i)\bBy\s+Others\s+(?=(?:Note:|Taphole location:))", "By Others - ", cleaned)
     return normalize_space(cleaned)
+
+
+def _normalize_imperial_fixture_note_order(text: str) -> str:
+    cleaned = normalize_space(text)
+    if not cleaned or not re.search(r"(?i)\bNote\s*:", cleaned) or not re.search(r"(?i)\bTaphole location\s*:", cleaned):
+        return cleaned
+    match = re.search(
+        r"(?i)(?P<note>Note\s*:\s*.*?)(?:\s+-\s+)(?P<taphole>Taphole location\s*:[^-|]+)",
+        cleaned,
+    )
+    if not match:
+        return cleaned
+    prefix = normalize_space(cleaned[: match.start()]).strip(" -;,")
+    suffix = normalize_space(cleaned[match.end() :]).strip(" -;,")
+    parts = [prefix, normalize_space(match.group("taphole")).strip(" -;,"), normalize_space(match.group("note")).strip(" -;,")]
+    if suffix:
+        parts.append(suffix)
+    return normalize_space(" - ".join(part for part in parts if part)).strip(" -;,")
 
 
 def _clean_room_fixture_text(value: Any, kind: str) -> str:
@@ -28891,7 +29104,7 @@ def _clean_room_fixture_text(value: Any, kind: str) -> str:
                 count=1,
             )
         text = re.sub(r"(?i)\b(Taphole location\s*:[^-|]*?\bbehind)\s*$", r"\1 sink", text)
-        text = _trim_fixture_text_at_markers(text, wet_area_tail_markers + (r"\bBath\b", r"\bTapware\b", r"\b(?:Sink\s+)?Mixer\b"))
+        text = _trim_fixture_text_at_markers(text, wet_area_tail_markers + (r"\bBath\b", r"\b(?:Sink\s+)?Mixer\b"))
     elif kind == "basin":
         if re.match(r"(?i)^(?:waste\b|pop up waste\b|bottle trap\b|mixer\b|sink mixer\b|pull-?out mixer\b|tap\b)", text):
             return ""
@@ -28941,6 +29154,7 @@ def _clean_room_fixture_text(value: Any, kind: str) -> str:
         )
     if kind in {"sink", "basin"}:
         text = _normalize_imperial_fixture_supplier_mounting_order(text)
+        text = _normalize_imperial_fixture_note_order(text)
     return text.strip(" -;,")
 
 

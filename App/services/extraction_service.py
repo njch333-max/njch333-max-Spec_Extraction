@@ -8574,6 +8574,15 @@ def _crosscheck_imperial_snapshot_with_raw(layout_snapshot: dict[str, Any], raw_
         merged_row["door_panel_colours"] = parsing._rebuild_door_panel_colours(merged_row)
         merged_rooms.append(merged_row)
     merged["rooms"] = merged_rooms
+    raw_appliances = [row for row in raw_snapshot.get("appliances", []) if isinstance(row, dict)]
+    if raw_appliances:
+        # Layout/vision extraction can miss low-page placeholder appliance rows when
+        # the footer/signature region interrupts text flow. Raw PDF text is a safer
+        # fallback for row presence; later Imperial finalizers still remove fixtures.
+        merged["appliances"] = _merge_appliances(
+            [row for row in merged.get("appliances", []) if isinstance(row, dict)],
+            raw_appliances,
+        )
     return merged
 
 
