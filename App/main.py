@@ -1507,7 +1507,9 @@ def _imperial_material_row_is_summary_worthy(item: dict[str, Any], bucket_key: s
             return False
         return "BENCHTOP" in title_upper
     if bucket_key == "handles":
-        if re.search(r"(?i)\b(?:gpo|spice tray|drawer gpo|lighting|led strip|bin\b|casters?)\b", value):
+        if re.search(r"(?i)\b(?:gpo|spice tray|drawer gpo|lighting|led strip|bin\b)\b", value):
+            return False
+        if re.search(r"(?i)\bcasters?\b", value) and not _imperial_handle_summary_has_handle_identity(value):
             return False
         if re.search(r"(?i)\b(?:handles?|knob)\b", title):
             return True
@@ -1676,6 +1678,11 @@ def _imperial_handle_summary_identity_tokens(text: str) -> set[str]:
         tokens.add("KNOB")
     if re.search(r"(?i)\b(?:2163\s+Voda|Voda\s+Profile\s+Handle)\b", normalized):
         tokens.add("VODA_2163")
+        voda_finish_match = re.search(r"(?i)\b(Brushed\s+Nickel|Matt\s+Black|Brushed\s+Anthracite|Anthracite)\b", normalized)
+        voda_size_match = re.search(r"(?i)\b(\d{2,3})\s*mm\b", normalized)
+        if voda_finish_match and voda_size_match:
+            finish_token = re.sub(r"\s+", "_", parsing.normalize_space(voda_finish_match.group(1)).upper())
+            tokens.add(f"VODA_2163_{finish_token}_{voda_size_match.group(1)}MM")
     if re.search(r"(?i)\bvoda\s+profile\s+handle\b", normalized):
         tokens.add("VODA")
     if re.search(r"(?i)\b7202\s+Square\s+D\s+Handle\b", normalized):
@@ -1691,6 +1698,40 @@ def _imperial_handle_summary_identity_tokens(text: str) -> set[str]:
     if re.search(r"(?i)\bpush\s+to\s+open\b|\bPTO\b", normalized):
         tokens.add("PTO")
     return tokens
+
+
+def _imperial_voda_handle_summary_signature(text: str) -> str:
+    normalized = _display_value(text)
+    if not re.search(r"(?i)\b(?:2163\s+Voda|Voda\s+Profile\s+Handle)\b", normalized):
+        return ""
+    finish_match = re.search(r"(?i)\b(Brushed\s+Nickel|Matt\s+Black|Brushed\s+Anthracite|Anthracite)\b", normalized)
+    size_match = re.search(r"(?i)\b(\d{2,3})\s*mm\b", normalized)
+    if not finish_match or not size_match:
+        return ""
+    finish_token = re.sub(r"\s+", "_", parsing.normalize_space(finish_match.group(1)).upper())
+    return f"VODA_2163_{finish_token}_{size_match.group(1)}MM"
+
+
+def _imperial_handle_summary_has_handle_identity(text: str) -> bool:
+    normalized = _display_value(text)
+    if not normalized:
+        return False
+    if re.fullmatch(r"(?i)casters?", normalized):
+        return False
+    if _imperial_handle_summary_identity_tokens(normalized):
+        return True
+    return bool(
+        re.search(
+            r"(?i)\b(?:"
+            r"handles?|knobs?|cabinet\s+knob|pull|finger\s*pull|fingerpull|finger\s+space|recessed\s+finger|"
+            r"push\s+to\s+open|pto|no\s+handles?|touch\s+catch|ht\d+|pm\d+|s225\.|so-\d+|"
+            r"product\s+code|part\s*no|voda|trianon|lugo|hampton|hin0682|woodgate|darwen|"
+            r"bevel\s+edge|benchseat\s+drawers|square\s+d|"
+            r"\d{3,5}\s+\d{2,3}\s+[A-Z]{2}\s+OA"
+            r")\b",
+            normalized,
+        )
+    )
 
 
 def _imperial_summary_value_quality(bucket_key: str, text: str) -> float:
@@ -1753,6 +1794,10 @@ def _imperial_summary_values_equivalent(bucket_key: str, left: str, right: str) 
                 return True
         left_identity = _imperial_handle_summary_identity_tokens(left_text)
         right_identity = _imperial_handle_summary_identity_tokens(right_text)
+        left_voda_signature = _imperial_voda_handle_summary_signature(left_text)
+        right_voda_signature = _imperial_voda_handle_summary_signature(right_text)
+        if left_voda_signature and left_voda_signature == right_voda_signature:
+            return True
         if left_identity and right_identity and left_identity != right_identity:
             return False
         if left_identity and right_identity and left_identity == right_identity:
@@ -2755,6 +2800,18 @@ def _normalize_imperial_handle_summary_value(value: str) -> str:
     text = re.sub(r"(?i)\b(?:Furnware|Titus Tekform|Polytec|Laminex|Kethy|Allegra|Barchie|Lincoln Sentry|ABI Interiors)\b\s*-\s*", "", text)
     text = re.sub(r"(?i)\b(?:Furnware|Titus Tekform|Polytec|Laminex|Kethy|Allegra|Barchie|Lincoln Sentry|ABI Interiors)\b$", "", text).strip(" -|;,")
     text = re.sub(r"(?i)^on\s+Upper\s+cabinetry\s*-\s*Finger\s+pull\s+only\b", "No handles on Upper cabinetry - Finger pull only", text)
+    text = re.sub(
+        r"(?i)\b(DRAWERS?|DOORS?)\s*\|\s*",
+        lambda match: f"{match.group(1).upper()} - ",
+        text,
+        count=1,
+    )
+    text = re.sub(
+        r"(?i)\b(DRAWERS?|DOORS?)\s+(?=(?:Momo|HT\d+|PM\d+|Voda|S225|Woodgate|Hampton|Trianon|Lugo)\b)",
+        lambda match: f"{match.group(1).upper()} - ",
+        text,
+        count=1,
+    )
     text = re.sub(r"(?i)\b(?:Horizontal|Vertical)\s+Install\b.*$", "", text).strip(" -|;,")
     text = re.sub(r"(?i)\bKnobs?\s+on\s+Doors?,?\s*", "", text).strip(" -|;,")
     text = re.sub(r"(?i)\bKnobs?\s+on\s+Doors?,?\s+Handles?\s+on\s+Drawers?(?:\s*\([^)]*\))?\b.*$", "", text).strip(" -|;,")
@@ -2813,13 +2870,20 @@ def _normalize_imperial_handle_summary_value(value: str) -> str:
         text,
     )
     if pm_match:
-        return parsing.normalize_space(f"{pm_match.group(1)} {pm_match.group(2)}").strip(" -|;,")
+        pm_tail = parsing.normalize_space(pm_match.group(2))
+        pm_tail = re.sub(r"(?i)\bPM2817\b.*$", "", pm_tail).strip(" -|;,")
+        pm_tail = re.sub(r"(?i)\b(?:Polytec|Kethy)\b.*$", "", pm_tail).strip(" -|;,")
+        pm_tail = re.sub(r"(?i)\s*-\s*\(?\s*(?:Horizontal|Vertical)\s+Install\)?\s*$", "", pm_tail).strip(" -|;,")
+        pm_tail = re.sub(r"\s*-\s*\(?\s*$", "", pm_tail).strip(" -|;,")
+        return parsing.normalize_space(f"{pm_match.group(1)} {pm_tail}").strip(" -|;,")
     ht576_canonical_match = re.search(
         r"(?i)\b(HT576\s*-\s*(?:128|192)\s*-\s*BKO)\b([^|]*?\bDarwen\s+Cabinet\s+Pull\s+Handle\b(?:[^|]*?\bBlack\s+Olive\s+Colour\b)?)",
         text,
     )
     if ht576_canonical_match:
-        return parsing.normalize_space(f"{ht576_canonical_match.group(1)} {ht576_canonical_match.group(2)}").strip(" -|;,")
+        ht_tail = parsing.normalize_space(ht576_canonical_match.group(2))
+        ht_tail = re.sub(r"(?i)\bHT576\b.*$", "", ht_tail).strip(" -|;,")
+        return parsing.normalize_space(f"{ht576_canonical_match.group(1)} {ht_tail}").strip(" -|;,")
     tall_hinoki_match = re.search(
         r"(?i)\bTall Door Handles?\s*-\s*Momo\s+Hinoki\s+Wood\s+Big\s+D\s*832mm\s+Handle\s+Oak-?\s*(HIN0682\.832\.OAK)\b",
         text,
@@ -2852,12 +2916,14 @@ def _normalize_imperial_handle_summary_value(value: str) -> str:
         knob_text = re.sub(r"(?i)\s*\|\s*Casters\b.*$", "", knob_text).strip(" -|;,")
         return knob_text
     desk_handle_match = re.search(
-        r"(?i)\b(?:(?P<prefix>DESK)\s*-\s*)?(?P<body>(?:\d+\s+)?Voda\s+Profile\s+Handle\s+(?:Brushed\s+Nickel|Matt\s+Black)\s+\d+\s*mm\s*-\s*SO-2163-[A-Z0-9-]+)\b",
+        r"(?i)\b(?:(?P<prefix>DESK)\s*-\s*)?(?P<body>(?:\d+\s+)?Voda\s+Profile\s+Handle\s+(?:Brushed\s+Nickel|Matt\s+Black)\s+\d+\s*mm\s*(?:-\s*)?SO-2163-[A-Z0-9-]+)\b",
         text,
     )
     if desk_handle_match:
         desk_prefix = "DESK - " if desk_handle_match.group("prefix") else ""
-        desk_text = f"{desk_prefix}{parsing.normalize_space(desk_handle_match.group('body'))}"
+        desk_body = parsing.normalize_space(desk_handle_match.group("body"))
+        desk_body = re.sub(r"(?i)\s*-?\s*(SO-2163-[A-Z0-9-]+)\b", r" - \1", desk_body)
+        desk_text = f"{desk_prefix}{desk_body}"
         desk_text = re.sub(r"(?i)\b(?:Furnware|Titus Tekform)\b\s*$", "", desk_text).strip(" -|;,")
         return desk_text
     ht576_match = re.search(
@@ -2881,6 +2947,26 @@ def _normalize_imperial_handle_summary_value(value: str) -> str:
         return "No handles on Upper cabinetry - Finger pull only"
     if re.search(r"(?i)\bno\s+handles?\s+on\s+(?:upper\s+cabinetry|uppers?)\b", text) and re.search(r"(?i)\bPTO(?:\s+where\s+required)?\b", text):
         return "No handles on Upper cabinetry - PTO where required"
+    overhead_no_handles_match = re.search(
+        r"(?i)\bno\s+handles?\s+(?:to\s+)?overheads?\b(?:\s*-\s*)?(?P<body>[^|;]*)",
+        text,
+    )
+    if overhead_no_handles_match:
+        body = parsing.normalize_space(overhead_no_handles_match.group("body") or "")
+        body = re.sub(r"(?i)\btouch\s+catch\b.*$", "", body).strip(" -|;,")
+        body = re.sub(r"(?i)\b(?:horizontal|vertical)(?:/horizontal|/vertical)?\b.*$", "", body).strip(" -|;,")
+        body = re.sub(r"(?i)\band\s*$", "", body).strip(" -|;,")
+        if re.search(r"(?i)\b(?:finger\s+space|recessed\s+finger)\b", body):
+            return parsing.normalize_space(f"No handles to overheads - {body}")
+        return "No handles to overheads"
+    if re.search(r"(?i)\b(?:recessed\s+finger\s+space|finger\s+space\s+above)\b", text) and not re.search(
+        r"(?i)\btouch\s+catch\b",
+        text,
+    ):
+        finger_text = re.sub(r"(?i)^overheads?\s*:\s*", "", text).strip(" -|;,")
+        finger_text = re.sub(r"(?i)\b(?:horizontal|vertical)(?:/horizontal|/vertical)?\b.*$", "", finger_text).strip(" -|;,")
+        finger_text = re.sub(r"(?i)\band\s*$", "", finger_text).strip(" -|;,")
+        return parsing.normalize_space(finger_text)
     if re.search(r"(?i)\bRecessed\s+finger\s+space\b", text) and re.search(
         r"(?i)\bTouch\s+catch\s+above\s+Fridge\s+and\s+bar\s+back\b",
         text,
@@ -3011,7 +3097,9 @@ def _imperial_split_handle_semantic_segments(value: str) -> list[str]:
         r"(?i)\bDOORS?\s*-\s*(?=[^|]*(?:handle|pull|knob|PM\d+|HT\d+|Momo|Hampton|Lugo|Trianon))",
         r"(?i)\bDESK\s*-\s*\d+\s+Voda\s+Profile\s+Handle\b",
         r"(?i)\bBENCHSEAT DRAWERS?\s*-\s*PTO\b",
-        r"(?i)\bNo handles?(?:\s+on\s+[A-Za-z ]+)?\b",
+        r"(?i)\bNo handles?(?:\s+(?:on|to)\s+[A-Za-z ]+)?\b",
+        r"(?i)\bRecessed finger space(?:\s+[^|;]+)?\b",
+        r"(?i)\bfinger space above(?:\s+[^|;]+)?\b",
         r"(?i)\bTouch catch(?:\s*-\s*Overheads above)?\b",
         r"(?i)\bPush to open\b",
         r"(?i)\bHampton Handle,\s*Urban Brass\b",
@@ -3144,21 +3232,21 @@ def _imperial_semantic_handle_summary_candidates(value: str) -> list[str]:
                 continue
             if re.search(r"(?i)\b(?:floating shelves?|shelf support|coffe/?appliance area)\b", normalized_candidate):
                 continue
-            if re.search(r"(?i)\b(?:finger space\b|recessed findger space|recessed finger space)\b", normalized_candidate) and not re.search(r"(?i)\b(?:no handles?|touch catch)\b", normalized_candidate):
+            if re.search(r"(?i)\b(?:finger space\b|recessed findger space|recessed finger space)\b", normalized_candidate) and not re.search(r"(?i)\b(?:no handles?|touch catch|finger\s+space\s+above|recessed\s+finger\s+space)\b", normalized_candidate):
                 continue
             if re.search(r"(?i)^(?:vertical|horizontal)\s+on\s+(?:doors?|drawers?)", normalized_candidate):
                 continue
             if re.search(r"(?i)\bHANDLES?\s+BASE\s+DOORS\b", normalized_candidate):
                 continue
             if re.search(r"(?i)\b(?:polytec|laminex)\b", normalized_candidate) and not re.search(
-                r"(?i)\b(?:handle|knob|pull|finger\s+pull|fingerpull|push\s+to\s+open|pto|no\s+handles?|touch\s+catch|ht\d+|pm\d+|s225\.|so-\d+|product code|part no|voda|trianon|lugo|hampton)\b",
+                r"(?i)\b(?:handle|knob|pull|finger\s+pull|fingerpull|finger\s+space|recessed\s+finger|push\s+to\s+open|pto|no\s+handles?|touch\s+catch|ht\d+|pm\d+|s225\.|so-\d+|product code|part no|voda|trianon|lugo|hampton)\b",
                 normalized_candidate,
             ):
                 continue
             if re.search(r"(?i)\bon\s+tall\s+doors\b", normalized_candidate) and not re.search(r"(?i)\b(?:s225\.|hin0682\.|handle|knob|pull)\b", normalized_candidate):
                 continue
             if not re.search(
-                r"(?i)\b(?:handle|knob|pull|finger\s+pull|fingerpull|push\s+to\s+open|pto|no\s+handles?|touch\s+catch|ht\d+|pm\d+|s225\.|so-\d+|product code|part no|voda|trianon|lugo|hampton)\b",
+                r"(?i)\b(?:handle|knob|pull|finger\s+pull|fingerpull|finger\s+space|recessed\s+finger|push\s+to\s+open|pto|no\s+handles?|touch\s+catch|ht\d+|pm\d+|s225\.|so-\d+|product code|part no|voda|trianon|lugo|hampton)\b",
                 normalized_candidate,
             ):
                 continue
@@ -3253,8 +3341,6 @@ def _imperial_semantic_handle_summary_candidates(value: str) -> list[str]:
         if normalized and not re.match(r"(?i)^Product Code:\s*", normalized)
     ]
     if split_candidates:
-        if any(re.search(r"(?i)\bno\s+handles?\b", candidate) for candidate in split_candidates):
-            split_candidates = [candidate for candidate in split_candidates if not re.search(r"(?i)\btouch\s+catch\b", candidate)] or split_candidates
         seen_split: set[str] = set()
         unique_split: list[str] = []
         for candidate in split_candidates:
@@ -3293,7 +3379,9 @@ def _imperial_semantic_handle_summary_candidates(value: str) -> list[str]:
         r"(?i)\bDESK\s*-\s*\d+\s+Voda\s+Profile\s+Handle\s+(?:Brushed\s+Nickel|Matt\s+Black)\s+\d+\s*mm\s*-\s*SO-2163-[A-Z0-9-]+\b",
         r"(?i)\bBENCHSEAT DRAWERS?\s*-\s*PTO\b",
         r"(?i)\bPush to open\b",
-        r"(?i)\bNo handles?(?:\s+on\s+[A-Za-z ]+)?\b",
+        r"(?i)\bNo handles?(?:\s+(?:on|to)\s+[A-Za-z ]+)?\b",
+        r"(?i)\bRecessed finger space(?:\s+[^|;]+)?\b",
+        r"(?i)\bfinger space above(?:\s+[^|;]+)?\b",
     )
     for pattern in patterns:
         for match in re.finditer(pattern, text):
@@ -3612,8 +3700,10 @@ def _imperial_summary_values_for_bucket(
             normalized,
         ):
             continue
+        if bucket_key == "handles" and not _imperial_handle_summary_has_handle_identity(normalized):
+            continue
         if bucket_key == "handles" and re.search(r"(?i)\b(?:polytec|laminex)\b", normalized) and not re.search(
-            r"(?i)\b(?:handle|knob|pull|finger\s+pull|fingerpull|push\s+to\s+open|pto|no\s+handles?|touch\s+catch|ht\d+|pm\d+|s225\.|so-\d+|product code|part no|voda|trianon|lugo|hampton)\b",
+            r"(?i)\b(?:handle|knob|pull|finger\s+pull|fingerpull|finger\s+space|recessed\s+finger|push\s+to\s+open|pto|no\s+handles?|touch\s+catch|ht\d+|pm\d+|s225\.|so-\d+|product code|part no|voda|trianon|lugo|hampton)\b",
             normalized,
         ):
             continue
@@ -3627,6 +3717,17 @@ def _imperial_summary_values_for_bucket(
         values = [value for value in values if value not in {"No handles", "Push to open"}] or values
         if any(re.search(r"(?i)\bknob\s*-|\bcabinet\s+knob\b", value) for value in values):
             values = [value for value in values if value.lower() != "knob"] or values
+        if any(re.search(r"(?i)^No handles to overheads\s+-\s+", value) for value in values):
+            values = [value for value in values if value != "No handles to overheads"] or values
+        if any(
+            re.search(r"(?i)^No handles(?:\s+to)?\s+overheads?\s+-\s+.*\btouch\s+catch\b", value)
+            for value in values
+        ):
+            values = [
+                value
+                for value in values
+                if value not in {"No handles to overheads", "Touch catch"}
+            ] or values
     return values
 
 
@@ -3653,8 +3754,23 @@ def _imperial_material_row_handle_subitem_summary_candidates(item: dict[str, Any
                 _normalize_imperial_handle_summary_value,
                 supplier=supplier,
             ):
-                if summary_text and not any(_imperial_summary_values_equivalent("handles", summary_text, existing) for existing in candidates):
+                if not summary_text:
+                    continue
+                existing_index = next(
+                    (
+                        index
+                        for index, existing in enumerate(candidates)
+                        if _imperial_summary_values_equivalent("handles", summary_text, existing)
+                    ),
+                    None,
+                )
+                if existing_index is None:
                     candidates.append(summary_text)
+                elif _imperial_summary_value_quality("handles", summary_text) > _imperial_summary_value_quality(
+                    "handles",
+                    candidates[existing_index],
+                ):
+                    candidates[existing_index] = summary_text
     return candidates
 
 

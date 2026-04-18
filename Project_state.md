@@ -374,6 +374,7 @@
   - Phase 2A grid-debug overlay semantics where repaired `grid_rows` match the parser path and `unrepaired_grid_rows` remain available for diagnosis
   - Phase 2A accessory postprocess protection so accepted leading-fragment repairs survive final material-row cleanup
   - Phase 2A handle label/value spillover repair for contaminated labels such as `Momo HANDLES oval`
+  - Phase 3A handle semantic subitem summary coverage for `55 / 56 / 59 / 60 / 62`, including independent `No handles` / `Touch catch` / `finger space` families, PM2817 / HT576 / Voda identity dedupe, and rejection of non-handle absorbed material such as timber finish text or `Casters`
   - row-boundary extraction of kitchen benchtops, splashback, base, overheads, tall, toe kick, handles, and bulkhead values
   - `FEATURE TALL DOORS` export into `special_sections[]` instead of room cards
   - `Tall` rendering on room cards and dedicated Excel export for `special_sections`

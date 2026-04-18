@@ -6535,6 +6535,8 @@ def _imperial_handle_subitem_family(text: str) -> str:
         return ""
     if re.search(r"(?i)\bno\s+handles?\b", cleaned) or re.search(r"(?i)\bfinger\s+pull\s+only\b", cleaned):
         return "no_handles"
+    if re.search(r"(?i)\b(?:recessed\s+finger\s+space|finger\s+space\s+above)\b", cleaned):
+        return "finger_space"
     if re.search(r"(?i)\bTouch\s+catch\b", cleaned):
         return "touch_catch"
     if re.search(r"(?i)\bPush\s+to\s+open\b|\bPTO\b", cleaned):
@@ -6588,6 +6590,12 @@ def _imperial_handle_subitem_identity(text: str) -> str:
         return "tall_s225_280_mbk"
     if re.search(r"\bCHUTE\s+DOOR\s*-\s*S225\.160\.MBK\.?", cleaned):
         return "chute_s225_160_mbk"
+    pm_match = re.search(r"\bPM2817\s*/\s*(192|288)\s*/\s*MSIL\b", cleaned)
+    if pm_match:
+        return f"pm2817_{pm_match.group(1)}_msil"
+    ht_match = re.search(r"\bHT576\s*-\s*(128|192)\s*-\s*BKO\b", cleaned)
+    if ht_match:
+        return f"ht576_{ht_match.group(1)}_bko"
     return ""
 
 
@@ -6620,6 +6628,26 @@ def _imperial_normalize_handle_subitem_text(text: str) -> str:
     cleaned = re.sub(r"(?i)\|\s*(SO-2163-[A-Z0-9-]+)\b", r" - \1", cleaned)
     cleaned = re.sub(r"(?i)\|\s*(Product Code:\s*[A-Z0-9]+)\b", r" - \1", cleaned)
     cleaned = re.sub(r"(?i)\bSKU:Part No:\s*([A-Z0-9.]+)\b", r"SKU:Part No: \1", cleaned)
+    pm_match = re.search(
+        r"(?i)\b(PM2817\s*/\s*(?:192|288)\s*/\s*MSIL)\b(?P<tail>[^|]*?\b(?:Hole\s+centres|OA\s+SIZE)\b[^|]*)",
+        cleaned,
+    )
+    if pm_match:
+        pm_tail = normalize_space(pm_match.group("tail"))
+        pm_tail = re.sub(r"(?i)\bPM2817\b.*$", "", pm_tail).strip(" -|;,")
+        pm_tail = re.sub(r"(?i)\b(?:Polytec|Kethy)\b.*$", "", pm_tail).strip(" -|;,")
+        orientation = re.search(r"(?i)\b(?:Horizontal|Vertical)\s+Install\b", cleaned)
+        cleaned = normalize_space(f"{pm_match.group(1)} {pm_tail}").strip(" -|;,")
+        if orientation:
+            cleaned = normalize_space(f"{cleaned} - ({orientation.group(0)})")
+    ht_match = re.search(
+        r"(?i)\b(HT576\s*-\s*(?:128|192)\s*-\s*BKO)\b(?P<tail>[^|]*?\bDarwen\s+Cabinet\s+Pull\s+Handle\b(?:[^|]*?\bBlack\s+Olive\s+Colour\b)?)",
+        cleaned,
+    )
+    if ht_match:
+        ht_tail = normalize_space(ht_match.group("tail"))
+        ht_tail = re.sub(r"(?i)\bHT576\b.*$", "", ht_tail).strip(" -|;,")
+        cleaned = normalize_space(f"{ht_match.group(1)} {ht_tail}").strip(" -|;,")
     cleaned = re.sub(
         r"(?i)\b((?:BASE\s*-\s*)?BEVEL\s+EDGE\s+FINGERPULL)\s+TALL\s*$",
         r"\1",
@@ -6668,6 +6696,8 @@ def _imperial_handle_subitem_segments_from_text(text: str) -> list[str]:
         r"(?i)\bDESK\s*-\s*\d*\s*Voda\s+Profile\s+Handle\b",
         r"(?i)\bBENCHSEAT\s+DRAWERS?\s*-\s*PTO\b",
         r"(?i)\bNo\s+handles?(?:\s+(?:on|to)\s+[A-Za-z ]+)?(?:\s*-\s*[^|]+)?",
+        r"(?i)\bRecessed\s+finger\s+space(?:\s+[^|]+)?",
+        r"(?i)\bfinger\s+space\s+above(?:\s+[^|]+)?",
         r"(?i)\bTouch\s+catch(?:\s*-\s*Overheads above)?(?:\s+[^|]+)?",
         r"(?i)\bPush\s+to\s+open\b",
         r"(?i)\bHampton\s+Handle,\s*Urban\s+Brass\b",

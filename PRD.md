@@ -432,6 +432,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Imperial Phase 2A debug overlays now show the post-repair parser view in `grid_rows` and keep pre-repair rows only in `unrepaired_grid_rows`, so live debugging does not mistake intermediate row fragments for final parser output.
 - Imperial Phase 2A postprocess now protects accepted `GPO -> ACCESSORIES` repairs from older accessory trimming rules, so a fixed grid/row assembler cannot be silently rolled back before persistence.
 - Imperial Phase 2A postprocess now also repairs handle labels polluted by adjacent value fragments, preventing `Momo HANDLES oval` style labels from creating false handle summary families or absorbing hanging-rail text; the same repair can recover valid brand prefixes from provenance even when the visible row label was already cleaned to `HANDLES`.
+- Imperial Phase 3A handle summary is semantic-subitem-first. It must preserve distinct `No handles`, `Touch catch`, `finger space`, PM2817, HT576, Voda, knob, and PTO handle families, canonicalize short/full identity variants, and reject non-handle absorbed-inline material such as timber finish text or `Casters`.
 - The completion workflow for confirmed changes includes deployment to `spec.lxtransport.online`, successful service restarts, and live verification on the affected page or job.
 - SQLite persists Builders, Jobs, files, run history, raw results, and reviewed results.
 - Worker can process queued spec and drawing runs separately from the web process.

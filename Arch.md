@@ -243,6 +243,7 @@
   - rows with failing or unresolved non-handle-specific `revalidation_status` are excluded from summary aggregation; handle-specific provenance fallback is allowed only for tightly scoped summary recovery
 9b. Imperial summary aggregation includes a hard-boundary pollution gate. Rows containing page header/meta/table-heading contamination are excluded before `Door Colours / Handles / Bench Tops` grouping so notes-only fragments such as `Bulkhead:Colourboard` cannot become summary materials.
 9c. Imperial summary gating distinguishes true internals/robe noise from tagged feature-cabinetry rows. A `FEATURE CABINETRY` row with shaving-cabinet, mirrored-door, or colourboard-shelf evidence can still contribute to `Door Colours` even when the same source row mentions `Standard Whiteboard Internals`; bench-top summary normalization also strips dangling separators after WFE/cutout tails are removed.
+9d. Imperial handle summary aggregation is subitem-first and identity-gated. `handle_subitems` provide the preferred source; summary canonicalization dedupes short/full PM2817, HT576, and Voda variants while keeping `No handles`, `Touch catch`, `finger space`, `PTO`, knobs, and pull handles as independent families. Absorbed inline provenance can recover true handle text, but non-handle material or accessory fragments such as timber finish text and `Casters` are rejected before grouping.
 10. Render appliance official links as a clickable wrapped `Product` column.
 11. Render non-room joinery sections such as `FEATURE TALL DOORS` in a dedicated `Special Sections` block instead of folding them into nearby rooms.
 12. Show `Generated at`, `Extraction duration`, and the current PDF QA status in Brisbane time / human-readable duration format on the raw Spec List page.
@@ -268,7 +269,7 @@
   - repair handle label/value spillover during material-row postprocess and display/checklist rendering, so contaminated labels such as `Momo HANDLES oval` become `HANDLES` before visual fragments and summary aggregation run, recover valid same-cell brand prefixes from provenance when the final label was already normalized, and prevent visual-subrow cleanup from trimming those accepted prefixes back out
   - stabilize `AREA / ITEM` anchored row assembly before later parsing stages
   - then tighten semantic subitems and summary inputs in `parsing.py` / `main.py`
-  - Phase 3A now attaches internal `handle_subitems` during Imperial material-row postprocess. `main.py` flattens those subitems into the summary layer, and PDF-QA checklist generation uses the same subitem `summary_text` / `text` source values. Provenance fields such as subitem `raw_text` remain evidence only and are not summary input.
+  - Phase 3A now attaches internal `handle_subitems` during Imperial material-row postprocess. `main.py` flattens those subitems into the summary layer, and PDF-QA checklist generation uses the same subitem `summary_text` / `text` source values. Provenance fields such as subitem `raw_text` remain evidence only and are not summary input. The summary layer also applies a handle-identity gate and identity dedupe so PM2817 / HT576 / Voda short and coded variants merge correctly without admitting non-handle absorbed material.
 
 ### 3.7 Upload Interaction
 1. Job detail uses the existing upload POST route.

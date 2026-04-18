@@ -23490,6 +23490,140 @@ H55784Z03AU
         self.assertFalse(any("BASE - BEVEL EDGE FINGERPULL TALL" in text for text in subitem_texts))
         self.assertFalse(any(item.get("source") == "layout_value_text" for item in processed[0].get("handle_subitems", [])))
 
+    def test_imperial_handle_summary_keeps_overhead_finger_space_and_touch_catch(self) -> None:
+        snapshot = {
+            "builder_name": "Imperial",
+            "rooms": [
+                {
+                    "original_room_label": "KITCHEN",
+                    "room_order": 1,
+                    "material_rows": [
+                        {
+                            "area_or_item": "HANDLES to OVERHEADS",
+                            "supplier": "",
+                            "specs_or_description": "no handles to overheads - finger space above cooktop and touch catch above fridge.",
+                            "notes": "",
+                            "tags": ["handles"],
+                            "handle_subitems": [
+                                {
+                                    "family": "no_handles",
+                                    "text": "no handles to overheads - finger space above cooktop and",
+                                },
+                                {"family": "touch_catch", "text": "touch catch above fridge."},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+        summary = _build_material_summary(snapshot)
+        handle_texts = [entry["text"] for entry in summary["handles"]["entries"]]
+        self.assertIn("No handles to overheads - finger space above cooktop", handle_texts)
+        self.assertIn("touch catch", handle_texts)
+
+    def test_imperial_handle_summary_strips_pm2817_install_tail_cleanly(self) -> None:
+        import App.main as app_main
+
+        values = app_main._imperial_summary_values_for_bucket(
+            "handles",
+            "PM2817 / 288 / MSIL Matt Silver 288 Hole centres - 312 OA SIZE - (Horizontal Install)",
+            app_main._normalize_imperial_handle_summary_value,
+        )
+        self.assertEqual(values, ["PM2817 / 288 / MSIL Matt Silver 288 Hole centres - 312 OA SIZE"])
+
+    def test_imperial_handle_subitems_dedupe_pm2817_identity_variants(self) -> None:
+        processed = parsing_module._imperial_postprocess_material_rows(
+            [
+                {
+                    "area_or_item": "HANDLES - BASE DRAWERS",
+                    "supplier": "Polytec",
+                    "specs_or_description": (
+                        "Kethy - PM2817 / 288 / MSIL Matt Silver 288 Hole centres - 312 OA SIZE "
+                        "PM2817 / 288 / MSIL Matt Silver 288 Hole centres - 312 OA SIZE Polytec Horizontal Install"
+                    ),
+                    "notes": "",
+                    "tags": ["handles"],
+                    "page_no": 1,
+                    "row_order": 1,
+                    "provenance": {
+                        "layout_value_text": (
+                            "PM2817 / 288 / MSIL Matt Silver 288 Hole centres - 312 OA SIZE "
+                            "PM2817 / 288 / MSIL Matt Silver 288 Hole centres - 312 OA SIZE Polytec Horizontal Install"
+                        )
+                    },
+                }
+            ]
+        )
+        subitems = processed[0].get("handle_subitems", [])
+        pm_subitems = [item for item in subitems if item.get("family") == "pm2817"]
+        self.assertEqual(len(pm_subitems), 1)
+        self.assertNotIn("PM2817 / 288 / MSIL Matt Silver 288 Hole centres - 312 OA SIZE PM2817", pm_subitems[0].get("text", ""))
+
+    def test_imperial_handle_summary_rejects_absorbed_non_handle_material(self) -> None:
+        snapshot = {
+            "builder_name": "Imperial",
+            "rooms": [
+                {
+                    "original_room_label": "LWR STUDY DESK (ASTRID)",
+                    "room_order": 1,
+                    "material_rows": [
+                        {
+                            "area_or_item": "Handles PEDESTAL DRAWERS X 2 CABINETRY FINISHES",
+                            "supplier": "Barchie",
+                            "specs_or_description": "Boston Oak - Woodmatt - Thermolaminated curved end panels",
+                            "notes": "Vertical Grain",
+                            "tags": ["other_material"],
+                            "provenance": {
+                                "absorbed_inline_handle_texts": [
+                                    "Boston Oak - Woodmatt (Flat fronts, not curved) - Thermolaminated curved end panels",
+                                    "Casters",
+                                ]
+                            },
+                        },
+                        {
+                            "area_or_item": "HANDLES",
+                            "supplier": "Barchie",
+                            "specs_or_description": "Woodgate Round Cabinet Knob | SKU:Part No: 422.33.030 Casters Barchie",
+                            "notes": "",
+                            "tags": ["handles"],
+                        },
+                    ],
+                }
+            ],
+        }
+        summary = _build_material_summary(snapshot)
+        handle_texts = [entry["text"] for entry in summary["handles"]["entries"]]
+        self.assertIn("Woodgate Round Cabinet Knob", handle_texts)
+        self.assertFalse(any("Boston Oak" in text for text in handle_texts))
+        self.assertFalse(any(text.lower() == "casters" for text in handle_texts))
+
+    def test_imperial_handle_summary_dedupes_voda_short_and_coded_variants(self) -> None:
+        snapshot = {
+            "builder_name": "Imperial",
+            "rooms": [
+                {
+                    "original_room_label": "LWR STUDY DESK (EVYN)",
+                    "room_order": 1,
+                    "material_rows": [
+                        {
+                            "area_or_item": "HANDLES",
+                            "supplier": "Titus Tekform",
+                            "specs_or_description": "2163 Voda Profile Handle Matt Black 40mm SO-2163-40-MB Size shown varies",
+                            "notes": "",
+                            "tags": ["handles"],
+                            "handle_subitems": [
+                                {"family": "desk", "text": "2163 Voda Profile Handle Matt Black 40mm"},
+                                {"family": "desk", "text": "2163 Voda Profile Handle Matt Black 40mm SO-2163-40-MB"},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+        summary = _build_material_summary(snapshot)
+        handle_texts = [entry["text"] for entry in summary["handles"]["entries"]]
+        self.assertEqual(handle_texts, ["2163 Voda Profile Handle Matt Black 40mm - SO-2163-40-MB"])
+
     def test_imperial_postprocess_material_rows_moves_bin_size_prefix_back_to_description(self) -> None:
         processed = parsing_module._imperial_postprocess_material_rows(
             [
