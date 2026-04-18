@@ -1284,6 +1284,19 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(row.make, "Schweigen")
         self.assertEqual(row.model_no, "GG-6C")
 
+    def test_build_appliance_row_keeps_single_page_ref_when_cleaned_evidence_no_longer_matches_text(self) -> None:
+        row = parsing_module._build_appliance_row(
+            appliance_type="Freestanding Stove",
+            details="Electrolux EFEP956DSE\n90cm freestanding oven & induction cooktop",
+            evidence="COOKTOP COMBO (KITCHEN) Electrolux EFEP956DSE 90cm freestanding oven & induction",
+            file_name="imperial-appliances.pdf",
+            pages=[{"page_no": 9, "text": "APPLIANCES PAGE WITH VISUAL TABLE ONLY"}],
+            confidence=0.78,
+        )
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual(row.page_refs, "9")
+
     def test_build_appliance_row_prefers_placeholder_over_noisy_dishwasher_guess(self) -> None:
         row = parsing_module._build_appliance_row(
             appliance_type="Dishwasher",
@@ -11541,6 +11554,20 @@ H55784Z03AU
             ),
             "Stella Inset Stainless Steel 45 Litre (YH236C)- Sink Mounting - Topmount - By Others",
         )
+        self.assertEqual(
+            parsing_module._clean_room_fixture_text(
+                "Memo Hugo Single bowl sink 425W x 445H x 220D - Sink Mounting - TBC By Others - Taphole location: TBC",
+                "sink",
+            ),
+            "Memo Hugo Single bowl sink 425W x 445H x 220D - Sink Mounting - TBC - By Others - Taphole location: TBC",
+        )
+        self.assertEqual(
+            parsing_module._clean_room_fixture_text(
+                "Bench top is to remain Existing Sink and Tap to be used - Sink Mounting - TBC - Taphole location: No hole cut out required",
+                "sink",
+            ),
+            "Bench top is to remain Existing Sink and Tap to be used - Sink Mounting - TBC - By Others - Taphole location: No hole cut out required",
+        )
 
     def test_imperial_assign_sinkware_cluster_parts_keeps_room_specific_lines_local(self) -> None:
         assigned = parsing_module._imperial_assign_sinkware_cluster_parts(
@@ -15369,6 +15396,10 @@ H55784Z03AU
             pantry_handle_item["extracted_value"],
         )
         self.assertIn(
+            "[Titus Tekform] - Doors - Momo Graf Knurled D Handle 160mm In Dull Brushed Nickel - Part no: G0430.160.DBR - (Handle located at the top of front drawer front)",
+            pantry_handle_item["extracted_value"],
+        )
+        self.assertIn(
             "[Titus Tekform] - Drawers - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel - Part no: G0430.256.DBR - (Horizontal on Drawers)",
             pantry_handle_item["extracted_value"],
         )
@@ -18126,6 +18157,25 @@ H55784Z03AU
                 "[Titus Tekform] - Doors - Momo Graf Knurled D Handle 160mm In Dull Brushed Nickel - Part no: G0430.160.DBR - (Handle located at the top of front drawer front)",
                 "[Titus Tekform] - Drawers - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel - Part no: G0430.256.DBR - (Horizontal on Drawers)",
             ],
+        )
+
+    def test_imperial_extract_known_handle_display_lines_from_text_recovers_interrupted_front_drawer_note(self) -> None:
+        lines = parsing_module._imperial_extract_known_handle_display_lines_from_text(
+            "NO handles on Upper cabinetry - Finger pull only "
+            "Doors - Momo Graf Knurled D Handle Horizontal on Drawers "
+            "160mm In Dull Brushed Nickel HANDLES Titus Tekform "
+            "Part no: G0430.160.DBR Handle located at the top of front drawer "
+            "Drawers - Momo Graf Knurled D Handle front "
+            "256m In Dull Brushed Nickel Part no: G0430.256.DBR",
+            default_supplier="Titus Tekform",
+        )
+        self.assertIn(
+            "[Titus Tekform] - Doors - Momo Graf Knurled D Handle 160mm In Dull Brushed Nickel - Part no: G0430.160.DBR - (Handle located at the top of front drawer front)",
+            lines,
+        )
+        self.assertIn(
+            "[Titus Tekform] - Drawers - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel - Part no: G0430.256.DBR - (Horizontal on Drawers)",
+            lines,
         )
 
     def test_imperial_material_row_can_merge_upper_cabinetry_colour_including_continuation(self) -> None:
@@ -22241,6 +22291,16 @@ H55784Z03AU
         self.assertEqual(soft_close, "Soft Close")
         self.assertEqual(flooring, "Tiled")
 
+    def test_imperial_extract_soft_close_and_flooring_treats_std_not_softclose_continuation_as_not_soft_close(self) -> None:
+        page_text = (
+            "Hinges & Drawer Runners: Floor Type & Kick refacing required:\n"
+            "BASE CABINETRY COLOUR hanging - Black Wenge - Ravine (STD not Polytec\n"
+            "Softclose\n"
+        )
+        soft_close, flooring = parsing_module._imperial_extract_soft_close_and_flooring(page_text, page_text.splitlines())
+        self.assertEqual(soft_close, "Not Soft Close")
+        self.assertEqual(flooring, "")
+
     def test_imperial_clean_cabinetry_colour_description_strips_island_front_prefix(self) -> None:
         cleaned = parsing_module._imperial_clean_cabinetry_colour_description(
             "ISLAND CABINETRY COLOUR - FRONT, BACK AND SIDES",
@@ -22682,6 +22742,209 @@ H55784Z03AU
             "Robe hatshelf on support rails, single hanging - Black Wenge - Ravine (STD not Softclose",
         )
         self.assertEqual(cleaned, "Robe hatshelf on support rails, single hanging - Black Wenge - Ravine")
+
+    def test_imperial_cabinetry_colour_cleaning_moves_gpo_quantity_to_notes(self) -> None:
+        cleaned_description = parsing_module._imperial_clean_cabinetry_colour_description(
+            "BASE CABINETRY COLOUR",
+            "Black Wenge - Venette 2 x",
+        )
+        cleaned_notes = parsing_module._imperial_clean_cabinetry_colour_notes(
+            "BASE CABINETRY COLOUR",
+            "inside the cabinetry - 2 x GPO's installed inside the cabinetry",
+        )
+        self.assertEqual(cleaned_description, "Black Wenge - Venette")
+        self.assertEqual(cleaned_notes, "2 x GPO's installed inside the cabinetry")
+
+    def test_imperial_clean_material_row_label_text_strips_value_prefix_before_cabinetry_label(self) -> None:
+        self.assertEqual(
+            parsing_module._imperial_clean_material_row_label_text("Black UPPER CABINETRY COLOUR"),
+            "UPPER CABINETRY COLOUR",
+        )
+        self.assertEqual(
+            parsing_module._imperial_clean_material_row_label_text("Standard BASE CABINETRY COLOUR"),
+            "BASE CABINETRY COLOUR",
+        )
+
+    def test_imperial_material_row_label_spillover_recovers_value_prefix_before_cabinetry_label(self) -> None:
+        cleaned_label = parsing_module._imperial_clean_material_row_label_text("Black UPPER CABINETRY COLOUR")
+        self.assertEqual(cleaned_label, "UPPER CABINETRY COLOUR")
+        self.assertEqual(
+            parsing_module._imperial_extract_material_row_label_spillover(
+                "Black UPPER CABINETRY COLOUR",
+                cleaned_label,
+            ),
+            "Black",
+        )
+
+    def test_imperial_postprocess_kickboards_trims_following_doors_row_spillover(self) -> None:
+        rows = parsing_module._imperial_postprocess_material_rows(
+            [
+                {
+                    "area_or_item": "KICKBOARDS",
+                    "supplier": "",
+                    "specs_or_description": (
+                        "NO KICKBOARD OR BASE; DOORS 2 X Sliding Robe doors - Black Wenge- Matt Polytec; "
+                        "DOORS 2 X Sliding Robe doors - Black Wenge- Matt Polytec"
+                    ),
+                    "notes": "",
+                    "tags": ["other_material"],
+                    "provenance": {},
+                },
+                {
+                    "area_or_item": "DOORS",
+                    "supplier": "Polytec",
+                    "specs_or_description": "Robe doors - Black Wenge- Matt",
+                    "notes": "",
+                    "tags": ["door_colours"],
+                    "provenance": {},
+                },
+            ]
+        )
+        by_label = {row["area_or_item"]: row for row in rows}
+        self.assertEqual(by_label["KICKBOARDS"]["specs_or_description"], "NO KICKBOARD OR BASE")
+        self.assertEqual(by_label["DOORS"]["specs_or_description"], "Robe doors - Black Wenge- Matt")
+
+    def test_imperial_postprocess_kickboards_uses_visual_subrow_when_shelves_spill_into_value(self) -> None:
+        rows = parsing_module._imperial_postprocess_material_rows(
+            [
+                {
+                    "area_or_item": "KICKBOARDS",
+                    "supplier": "Polytec",
+                    "specs_or_description": "As Doors 50MM",
+                    "notes": "",
+                    "tags": ["other_material"],
+                    "provenance": {
+                        "layout_value_text": "As Doors 50MM SHELVES Floating Shelves with internal steel support",
+                        "layout_supplier_text": "Polytec",
+                        "visual_subrows": [
+                            {
+                                "area_or_item": "KICKBOARDS",
+                                "specs_or_description": "As Doors",
+                                "supplier": "",
+                                "notes": "",
+                            }
+                        ],
+                    },
+                }
+            ]
+        )
+        self.assertEqual(rows[0]["supplier"], "")
+        self.assertEqual(rows[0]["specs_or_description"], "As Doors")
+        self.assertEqual(rows[0]["notes"], "")
+
+    def test_imperial_postprocess_kickboards_clears_supplier_from_shelf_spillover_after_description_cleaned(self) -> None:
+        rows = parsing_module._imperial_postprocess_material_rows(
+            [
+                {
+                    "area_or_item": "KICKBOARDS",
+                    "supplier": "Polytec",
+                    "specs_or_description": "As Doors",
+                    "notes": "",
+                    "tags": ["other_material"],
+                    "provenance": {
+                        "layout_value_text": "As Doors 50MM SHELVES Floating Shelves with internal steel support",
+                        "layout_supplier_text": "Polytec",
+                        "visual_subrows": [
+                            {
+                                "area_or_item": "KICKBOARDS",
+                                "specs_or_description": "As Doors",
+                                "supplier": "",
+                                "notes": "",
+                            }
+                        ],
+                    },
+                }
+            ]
+        )
+        self.assertEqual(rows[0]["supplier"], "")
+        self.assertEqual(rows[0]["specs_or_description"], "As Doors")
+
+    def test_imperial_display_kickboards_does_not_restore_spillover_supplier_from_layout(self) -> None:
+        lines = parsing_module._imperial_material_row_display_lines_for_view(
+            {
+                "area_or_item": "KICKBOARDS",
+                "supplier": "",
+                "specs_or_description": "As Doors",
+                "notes": "",
+                "tags": ["other_material"],
+                "provenance": {
+                    "layout_value_text": "As Doors 50MM SHELVES Floating Shelves with internal steel support",
+                    "layout_supplier_text": "Polytec",
+                    "visual_subrows": [
+                        {
+                            "area_or_item": "KICKBOARDS",
+                            "specs_or_description": "As Doors",
+                            "supplier": "",
+                            "notes": "",
+                        }
+                    ],
+                },
+            }
+        )
+        self.assertEqual(lines, ["As Doors"])
+
+    def test_imperial_postprocess_lighting_drops_handle_position_note_spillover(self) -> None:
+        rows = parsing_module._imperial_postprocess_material_rows(
+            [
+                {
+                    "area_or_item": "LIGHTING",
+                    "supplier": "",
+                    "specs_or_description": "LED Strip Lighting provision",
+                    "notes": "at the top of front drawer",
+                    "tags": ["other_material"],
+                    "provenance": {},
+                }
+            ]
+        )
+        self.assertEqual(rows[0]["specs_or_description"], "LED Strip Lighting provision")
+        self.assertEqual(rows[0]["notes"], "")
+
+    def test_imperial_material_row_display_lines_preserve_lighting_provision_as_description(self) -> None:
+        lines = parsing_module._imperial_material_row_display_lines_for_view(
+            {
+                "area_or_item": "LIGHTING",
+                "supplier": "",
+                "specs_or_description": "LED Strip Lighting provision",
+                "notes": "",
+                "tags": ["other_material"],
+                "provenance": {
+                    "layout_value_text": "LED Strip Lighting provision",
+                    "visual_subrows": [
+                        {
+                            "area_or_item": "LIGHTING",
+                            "supplier": "",
+                            "specs_or_description": "LED Strip Lighting provision",
+                            "notes": "",
+                        }
+                    ],
+                },
+            }
+        )
+        self.assertEqual(lines, ["LED Strip Lighting provision"])
+
+    def test_imperial_material_row_display_lines_preserve_lighting_supplier_from_visual_cell(self) -> None:
+        lines = parsing_module._imperial_material_row_display_lines_for_view(
+            {
+                "area_or_item": "LIGHTING",
+                "supplier": "Polytec",
+                "specs_or_description": "LED Strip Lighting provision",
+                "notes": "",
+                "tags": ["other_material"],
+                "provenance": {
+                    "layout_value_text": "LED Strip Lighting provision",
+                    "layout_supplier_text": "Polytec",
+                    "visual_subrows": [
+                        {
+                            "area_or_item": "LIGHTING",
+                            "supplier": "Polytec",
+                            "specs_or_description": "LED Strip Lighting provision",
+                            "notes": "",
+                        }
+                    ],
+                },
+            }
+        )
+        self.assertEqual(lines, ["[Polytec] - LED Strip Lighting provision"])
 
     def test_imperial_clean_cabinetry_colour_description_trims_trailing_door_and_drawer_tail(self) -> None:
         cleaned = parsing_module._imperial_clean_cabinetry_colour_description(

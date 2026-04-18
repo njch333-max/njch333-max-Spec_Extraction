@@ -5395,8 +5395,22 @@ def _imperial_extract_soft_close_and_flooring(page_text: str, lines: list[str]) 
                 if _looks_like_soft_close_candidate(tail):
                     soft_close_candidates.append(tail)
                     direct_soft_close_candidates.append(tail)
+    std_not_softclose_standalone_lines: set[str] = set()
+    for index, source_line in enumerate(raw_lines):
+        if not re.search(r"(?i)\bSTD\s+not\b", source_line):
+            continue
+        continuation_lines = raw_lines[index : index + 3]
+        continuation_text = normalize_space(" ".join(continuation_lines))
+        if re.search(r"(?i)\bSoft\s*close\b|\bSoftclose\b", continuation_text):
+            soft_close_candidates.append("Not Soft Close")
+            direct_soft_close_candidates.append("Not Soft Close")
+            for continuation in continuation_lines[1:]:
+                if re.fullmatch(r"(?i)Soft\s*close|Softclose", normalize_space(continuation)):
+                    std_not_softclose_standalone_lines.add(normalize_space(continuation).upper())
     standalone_soft_close_sources = raw_lines + [normalize_space(line) for line in lines if normalize_space(line)]
     for source_line in standalone_soft_close_sources:
+        if normalize_space(source_line).upper() in std_not_softclose_standalone_lines:
+            continue
         standalone_soft_close = _imperial_parse_standalone_soft_close_value(source_line)
         if standalone_soft_close:
             soft_close_candidates.append(standalone_soft_close)
@@ -7806,17 +7820,30 @@ def _imperial_normalize_lighting_display_fields(
     description_text = normalize_space(description).strip(" -|;,")
     notes_text = normalize_space(notes).strip(" -|;,")
     merged_note = _merge_led_note(row.get("led_note", ""), notes_text)
+    lighting_location_context = " | ".join(
+        part for part in (description_text, notes_text, merged_note) if normalize_space(part)
+    ).upper()
+    explicit_bottom_rear_note = (
+        "Bottom rear of Overhead Cabinetry"
+        if "BOTTOM REAR" in lighting_location_context and "OVERHEAD CABINETRY" in lighting_location_context
+        else ""
+    )
     if re.search(r"(?i)\bLED\s+STRIP\s+LIGHTING\b", description_text):
         tail = normalize_space(
             re.sub(r"(?i)^LED\s+STRIP\s+LIGHTING\b", "", description_text)
         ).strip(" -|;,")
-        merged_note = _merge_led_note(tail, merged_note)
+        if explicit_bottom_rear_note:
+            return "LED Strip Lighting", explicit_bottom_rear_note
+        if tail:
+            # In Imperial raw rows, words like "provision" are part of the source
+            # description unless they are clearly a placement note.
+            return description_text, "" if merged_note.upper() in description_text.upper() else merged_note
         description_text = "LED Strip Lighting"
     elif not description_text and re.search(r"(?i)\bLED\s+STRIP\s+LIGHTING\b", merged_note):
-        merged_note = normalize_space(
-            re.sub(r"(?i)^LED\s+STRIP\s+LIGHTING\b\s*-?\s*", "", merged_note)
-        ).strip(" -|;,")
-        description_text = "LED Strip Lighting"
+        if explicit_bottom_rear_note:
+            return "LED Strip Lighting", explicit_bottom_rear_note
+        description_text = normalize_space(merged_note).strip(" -|;,")
+        merged_note = ""
     combined_context = " | ".join(
         part for part in (description_text, notes_text, merged_note) if normalize_space(part)
     ).upper()
@@ -8261,12 +8288,16 @@ def _imperial_material_row_display_lines_for_view(row: dict[str, Any]) -> list[s
                         body_part = _imperial_trim_accessory_row_spillover(body_part)
                         note_part = _imperial_trim_accessory_row_spillover(note_part)
                     if re.fullmatch(r"(?i)LIGHTING", row_label):
+                        lighting_supplier = supplier_part if _imperial_is_supplier_only_line(supplier_part) else ""
+                        lighting_description = body_part
+                        if supplier_part and not lighting_supplier:
+                            lighting_description = normalize_space(" ".join(part for part in (body_part, supplier_part) if part))
                         body_part, note_part = _imperial_normalize_lighting_display_fields(
                             row,
-                            normalize_space(" ".join(part for part in (body_part, supplier_part) if part)),
+                            lighting_description,
                             note_part,
                         )
-                        supplier_part = ""
+                        supplier_part = lighting_supplier
                     body_part, note_part = _imperial_normalize_row_gpo_cutout_display(
                         row_label,
                         body_part,
@@ -8384,6 +8415,22 @@ def _imperial_material_row_display_lines_for_view(row: dict[str, Any]) -> list[s
     description_display = _imperial_preferred_display_text(description, layout_description)
     notes_display = _imperial_preferred_display_text(notes, layout_notes)
     label_text = normalize_space(str(row.get("area_or_item", "") or ""))
+    if re.fullmatch(r"(?i)KICKBOARDS?", label_text):
+        visual_supplier, visual_description, visual_notes = _imperial_kickboards_visual_subrow_value(row)
+        if (
+            visual_description
+            and (
+                description_display.upper().startswith(visual_description.upper())
+                or layout_description.upper().startswith(visual_description.upper())
+            )
+            and _imperial_kickboards_has_shelf_spillover(row, description_display or layout_description)
+        ):
+            supplier_display = visual_supplier
+            description_display = visual_description
+            notes_display = visual_notes
+            layout_supplier = visual_supplier
+            layout_description = visual_description
+            layout_notes = visual_notes
     supplier_display, notes_display = _imperial_split_material_supplier_spillover(
         label_text,
         supplier_display,
@@ -11288,6 +11335,7 @@ def _imperial_clean_cabinetry_colour_description(
     cleaned = re.sub(r"(?i)\bDoor and Drawer\b$", "", cleaned).strip(" -|;,")
     cleaned = re.sub(r"(?i)\bDrawer\s+Handle\b$", "", cleaned).strip(" -|;,")
     cleaned = re.sub(r"(?i)\bProfiles?\b$", "", cleaned).strip(" -|;,")
+    cleaned = re.sub(r"(?i)\b\d+\s*x\b\s*$", "", cleaned).strip(" -|;,")
     cleaned = re.sub(r"\s*-\s*\(?\s*$", "", cleaned).strip(" -|;,")
     if cleaned.endswith("("):
         cleaned = cleaned[:-1].strip(" -|;,")
@@ -11322,6 +11370,8 @@ def _imperial_clean_cabinetry_colour_notes(
     cleaned = normalize_space(text)
     if not cleaned:
         return ""
+    if re.search(r"(?i)\bGPO'?S?\b", cleaned) and re.search(r"(?i)\binside\s+the\s+cabinetry\b", cleaned):
+        return _imperial_normalize_gpo_cutout_note(cleaned)
     cleaned = re.sub(
         r"(?i)\b(?:Door and Drawer Profile|Drawer Profile|Drawer Handle Position)\b.*$",
         "",
@@ -11378,6 +11428,41 @@ def _imperial_best_visual_subrow_for_row(row: dict[str, Any]) -> dict[str, Any]:
             best_score = score
             best_fragment = fragment
     return dict(best_fragment) if isinstance(best_fragment, dict) else {}
+
+
+def _imperial_kickboards_visual_subrow_value(row: dict[str, Any]) -> tuple[str, str, str]:
+    label = normalize_space(str(row.get("area_or_item", "") or ""))
+    if not re.fullmatch(r"(?i)KICKBOARDS?", label):
+        return "", "", ""
+    visual_subrow = _imperial_best_visual_subrow_for_row(row)
+    visual_description = normalize_space(str(visual_subrow.get("specs_or_description", "") or ""))
+    if not visual_description:
+        return "", "", ""
+    visual_supplier = normalize_space(str(visual_subrow.get("supplier", "") or ""))
+    visual_notes = normalize_space(str(visual_subrow.get("notes", "") or ""))
+    return visual_supplier, visual_description, visual_notes
+
+
+def _imperial_kickboards_has_shelf_spillover(row: dict[str, Any], description: str) -> bool:
+    label = normalize_space(str(row.get("area_or_item", "") or ""))
+    if not re.fullmatch(r"(?i)KICKBOARDS?", label):
+        return False
+    provenance = row.get("provenance", {}) if isinstance(row.get("provenance"), dict) else {}
+    evidence_parts = [
+        description,
+        normalize_space(str(provenance.get("layout_value_text", "") or "")),
+        normalize_space(str(provenance.get("layout_supplier_text", "") or "")),
+        normalize_space(str(provenance.get("layout_notes_text", "") or "")),
+    ]
+    for key in ("page_text_following_lines", "page_text_prefix_lines"):
+        raw_lines = provenance.get(key, [])
+        if isinstance(raw_lines, list):
+            evidence_parts.append(normalize_space(" ".join(str(line or "") for line in raw_lines)))
+    evidence = normalize_space(" ".join(part for part in evidence_parts if part))
+    return bool(
+        re.search(r"(?i)\b(?:SHELVES?|FLOATING\s+SHELVES?)\b", evidence)
+        or re.search(r"(?i)\bAs\s+Doors\s+50\s*MM\b", description)
+    )
 
 
 def _imperial_clean_imperial_supplier_text(text: str) -> str:
@@ -11525,6 +11610,15 @@ def _imperial_extract_known_handle_display_lines_from_text(
         if rendered and rendered not in lines:
             lines.append(rendered)
 
+    def _has_front_drawer_location_note(*values: Any) -> bool:
+        return any(
+            re.search(
+                r"(?i)\bHandle\s+located\s+at\s+the\s+top\s+of\s+front\s+drawer(?:\s+front)?\b",
+                normalize_space(str(value or "")),
+            )
+            for value in values
+        )
+
     shared_drawer_note = ""
     if re.search(r"(?i)\bKnobs?\s+on\s+Doors?\b", cleaned) and re.search(
         r"(?i)\bHandles?\s+on\s+Drawers?\s*\(Horizontal\)",
@@ -11643,13 +11737,7 @@ def _imperial_extract_known_handle_display_lines_from_text(
     )
     if graf_doors_match:
         graf_notes = ""
-        if re.search(
-            r"(?i)\bHandle\s+located\s+at\s+the\s+top\s+of\s+front\s+drawer\s+front\b",
-            graf_doors_match.group("tail") or cleaned,
-        ) or re.search(
-            r"(?i)\bHandle\s+located\s+at\s+the\s+top\s+of\s+front\s+drawer\s+front\b",
-            default_notes,
-        ):
+        if _has_front_drawer_location_note(graf_doors_match.group("tail") or cleaned, default_notes):
             graf_notes = "Handle located at the top of front drawer front"
         _append_line(
             default_supplier or "Titus Tekform",
@@ -11681,13 +11769,7 @@ def _imperial_extract_known_handle_display_lines_from_text(
         if graf_pair_match and re.search(r"(?i)\bGraf\s+Knurled\s+D\s+Handle\b", cleaned):
             if "doors" not in existing_graf_families:
                 door_notes = ""
-                if re.search(
-                    r"(?i)\bHandle\s+located\s+at\s+the\s+top\s+of\s+front\s+drawer\s+front\b",
-                    cleaned,
-                ) or re.search(
-                    r"(?i)\bHandle\s+located\s+at\s+the\s+top\s+of\s+front\s+drawer\s+front\b",
-                    default_notes,
-                ):
+                if _has_front_drawer_location_note(cleaned, default_notes):
                     door_notes = "Handle located at the top of front drawer front"
                 _append_line(
                     default_supplier or "Titus Tekform",
@@ -11704,6 +11786,23 @@ def _imperial_extract_known_handle_display_lines_from_text(
                     "Drawers - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel - Part no: G0430.256.DBR",
                     drawer_notes,
                 )
+
+    if _has_front_drawer_location_note(cleaned, default_notes):
+        updated_lines: list[str] = []
+        for line in lines:
+            match = re.match(
+                r"^\[(?P<supplier>[^\]]+)\]\s*-\s*(?P<description>Doors\s*-\s*Momo\s+Graf\s+Knurled\s+D\s+Handle\s+160m{1,2}\s+In\s+Dull\s+Brushed\s+Nickel\s*-\s*Part\s*no:\s*G0430\.160\.DBR)(?:\s*-\s*\([^)]*\))?$",
+                line,
+                flags=re.IGNORECASE,
+            )
+            if match and "HANDLE LOCATED AT THE TOP OF FRONT DRAWER FRONT" not in line.upper():
+                line = _imperial_material_row_display_line(
+                    supplier=match.group("supplier"),
+                    description=match.group("description"),
+                    notes="Handle located at the top of front drawer front",
+                )
+            updated_lines.append(line)
+        lines = _unique(updated_lines)
 
     style_2103_match = re.search(
         r"(?is)\bCabinet\s+Handle(?:\s+\S+)?\s+Style\s+2103\b.*?\bSKU:\s*2103\b.*?\b40mm\s*-\s*Brushed\s+Grey\b",
@@ -13139,6 +13238,70 @@ def _imperial_postprocess_material_rows(rows: list[dict[str, Any]]) -> list[dict
                 supplier = rebuilt_supplier
                 description = rebuilt_description
                 notes = rebuilt_notes
+            if re.fullmatch(r"(?i)KICKBOARDS?", label):
+                cleaned_description = re.split(
+                    r"(?i)\s*(?:[;|]\s*)?\bDOORS?\s+\d+\s*X\b",
+                    description,
+                    maxsplit=1,
+                )[0].strip(" -|;,")
+                cleaned_notes = re.split(
+                    r"(?i)\s*(?:[;|]\s*)?\bDOORS?\s+\d+\s*X\b",
+                    notes,
+                    maxsplit=1,
+                )[0].strip(" -|;,")
+                if cleaned_description and cleaned_description.upper() != description.upper():
+                    _imperial_record_repair_event(
+                        row,
+                        "cross_row_spillover",
+                        action="replace",
+                        target_field="specs_or_description",
+                        before=description,
+                        after=cleaned_description,
+                        reason="Trimmed following DOORS row text from KICKBOARDS value across a weak row boundary.",
+                        confidence=0.91,
+                    )
+                    description = cleaned_description
+                if cleaned_notes.upper() != notes.upper():
+                    notes = cleaned_notes
+                visual_supplier, visual_description, visual_notes = _imperial_kickboards_visual_subrow_value(row)
+                if (
+                    visual_description
+                    and description.upper().startswith(visual_description.upper())
+                    and _imperial_kickboards_has_shelf_spillover(row, description)
+                    and (
+                        visual_description.upper() != description.upper()
+                        or visual_supplier.upper() != supplier.upper()
+                        or visual_notes.upper() != notes.upper()
+                    )
+                ):
+                    _imperial_record_repair_event(
+                        row,
+                        "cross_row_spillover",
+                        action="replace",
+                        target_field="specs_or_description",
+                        before=description,
+                        after=visual_description,
+                        reason="Replaced KICKBOARDS text polluted by following SHELVES row with the separator-aware visual subrow value.",
+                        confidence=0.93,
+                    )
+                    supplier = visual_supplier
+                    description = visual_description
+                    notes = visual_notes
+        if label.upper() == "LIGHTING" and notes and re.search(
+            r"(?i)\b(?:handle\s+located|front\s+drawer|horizontal\s+on|vertical\s+on|drawers?)\b",
+            notes,
+        ) and not re.search(r"(?i)\b(?:lighting|led|provision)\b", notes):
+            _imperial_record_repair_event(
+                row,
+                "supplier_notes_misassignment",
+                action="replace",
+                target_field="notes",
+                before=notes,
+                after="",
+                reason="Removed handle-position note that spilled into a LIGHTING row across a weak row boundary.",
+                confidence=0.9,
+            )
+            notes = ""
         if primary_tag == "handles":
             if supplier:
                 supplier_tail_match = re.search(
@@ -13626,6 +13789,18 @@ def _imperial_clean_material_row_label_text(label: str) -> str:
     cleaned = normalize_space(label).strip(" -|;,")
     if not cleaned:
         return ""
+    embedded_cabinetry_label = re.match(
+        r"(?i)^(?P<prefix>.+?)\s+(?P<label>(?:BASE|UPPER|OVERHEAD|TALL|ISLAND|FEATURE)\s+CABINETRY\s+COLOUR\b.*)$",
+        cleaned,
+    )
+    if embedded_cabinetry_label:
+        prefix = normalize_space(embedded_cabinetry_label.group("prefix")).strip(" -|;,")
+        resolved_label = normalize_space(embedded_cabinetry_label.group("label")).strip(" -|;,")
+        if prefix and resolved_label and not _imperial_match_field_label(prefix)[0] and re.search(
+            r"(?i)\b(?:standard|black|white|grey|gray|oak|walnut|wenge|venette|ravine|matt|woodmatt|laminate|thermolaminated)\b",
+            prefix,
+        ):
+            return resolved_label
     if re.match(r"(?i)^\d+\s*mm\s+BIN\b", cleaned):
         return "BIN"
     cleaned = re.sub(r"(?i)^(DOORS?)\s+\d+\s*X\b.*$", lambda match: normalize_space(match.group(1)), cleaned)
@@ -13680,6 +13855,15 @@ def _imperial_extract_material_row_label_spillover(label: str, cleaned_label: st
     resolved = normalize_space(cleaned_label).strip(" -|;,")
     if not original or not resolved or original.upper() == resolved.upper():
         return ""
+    if resolved.upper() in original.upper() and not original.upper().startswith(resolved.upper()):
+        label_match = re.search(re.escape(resolved), original, flags=re.IGNORECASE)
+        if label_match:
+            prefix = normalize_space(original[: label_match.start()]).strip(" -|;,()")
+            if prefix and re.fullmatch(
+                r"(?i)(?:standard|black|white|grey|gray|oak|walnut|wenge|venette|ravine|matt|woodmatt|laminate|thermolaminated)(?:\s+[-A-Za-z]+){0,3}",
+                prefix,
+            ):
+                return normalize_brand_casing_text(prefix)
     if resolved.upper() == "HANDLES":
         handle_match = re.search(r"(?i)\bHANDLES?\b", original)
         if handle_match and handle_match.start() > 0:
@@ -18937,6 +19121,8 @@ def _guess_page_refs(snippet: str, pages: list[dict[str, object]]) -> str:
         page_text = normalize_space(str(page["text"]))
         if probe_head and probe_head in page_text:
             return str(page["page_no"])
+    if len(pages) == 1 and pages[0].get("page_no"):
+        return str(pages[0]["page_no"])
     return ""
 
 
@@ -28623,7 +28809,7 @@ def _normalize_imperial_fixture_supplier_mounting_order(text: str) -> str:
         cleaned,
     )
     cleaned = re.sub(
-        r"(?i)\b((?:Sink|Basin)\s+Moun\w*ng\s*-\s*.*?\bSpecs\s*-?\s*TBC)\s+By\s+Others\b",
+        r"(?i)\b((?:Sink|Basin)\s+Moun\w*ng\s*-\s*.*?\b(?:Specs\s*-?\s*)?TBC)\s+By\s+Others\b",
         lambda match: f"{match.group(1)} - By Others",
         cleaned,
     )
@@ -28694,11 +28880,31 @@ def _clean_room_fixture_text(value: Any, kind: str) -> str:
                 text,
                 count=1,
             )
+        if (
+            re.search(r"(?i)\bSink\s+Mounting\s*-\s*TBC\b", text)
+            and not re.search(r"(?i)\bBy\s+(?:Others|Imperial|Client|Builder)\b", text)
+        ):
+            text = re.sub(
+                r"(?i)\bSink\s+Mounting\s*-\s*TBC\b",
+                "Sink Mounting - TBC - By Others",
+                text,
+                count=1,
+            )
         text = re.sub(r"(?i)\b(Taphole location\s*:[^-|]*?\bbehind)\s*$", r"\1 sink", text)
         text = _trim_fixture_text_at_markers(text, wet_area_tail_markers + (r"\bBath\b", r"\bTapware\b", r"\b(?:Sink\s+)?Mixer\b"))
     elif kind == "basin":
         if re.match(r"(?i)^(?:waste\b|pop up waste\b|bottle trap\b|mixer\b|sink mixer\b|pull-?out mixer\b|tap\b)", text):
             return ""
+        if (
+            re.search(r"(?i)\bBasin\s+Mounting\s*-\s*TBC\b", text)
+            and not re.search(r"(?i)\bBy\s+(?:Others|Imperial|Client|Builder)\b", text)
+        ):
+            text = re.sub(
+                r"(?i)\bBasin\s+Mounting\s*-\s*TBC\b",
+                "Basin Mounting - TBC - By Others",
+                text,
+                count=1,
+            )
         text = re.sub(r"(?i)\bbehind\s+basin\s+sink\b", "behind basin", text)
         text = re.sub(r"(?i)\b(Taphole location\s*:[^-|]*?\bbehind)\s*$", r"\1 basin", text)
         text = _trim_fixture_text_at_markers(text, wet_area_tail_markers + (r"\bBath\b", r"\b(?:Sink\s+)?Mixer\b"))
