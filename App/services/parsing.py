@@ -17404,8 +17404,10 @@ def _extract_imperial_layout_appliance_text(page: dict[str, object]) -> str:
     lines: list[str] = ["APPLIANCES"]
     for row in _page_layout_rows(layout):
         label = normalize_space(str(row.get("row_label", "") or ""))
-        value = normalize_space(str(row.get("value_text", row.get("value_region_text", "")) or ""))
-        supplier = normalize_brand_casing_text(normalize_space(str(row.get("supplier_text", row.get("supplier_region_text", "")) or ""))).strip(" -;,")
+        value = _clean_imperial_appliance_layout_cell_text(row.get("value_text", row.get("value_region_text", "")))
+        supplier = normalize_brand_casing_text(
+            _clean_imperial_appliance_layout_cell_text(row.get("supplier_text", row.get("supplier_region_text", "")))
+        ).strip(" -;,")
         notes = normalize_space(str(row.get("notes_text", row.get("notes_region_text", "")) or ""))
         tail = normalize_space(" ".join(part for part in (value, supplier, notes) if part))
         rendered = normalize_space(f"{label} {tail}".strip()) if label or tail else ""
@@ -17413,6 +17415,25 @@ def _extract_imperial_layout_appliance_text(page: dict[str, object]) -> str:
             lines.append(rendered)
     text = "\n".join(lines)
     return normalize_space(text) if len(lines) > 1 else ""
+
+
+def _clean_imperial_appliance_layout_cell_text(text: Any) -> str:
+    cleaned = normalize_space(str(text or ""))
+    if not cleaned:
+        return ""
+    cleaned = re.sub(r"(?i)\bBy\s+others(?=Specs\b)", "By others Specs - TBC", cleaned)
+    cleaned = re.sub(r"(?i)\bBy\s+others(?=[A-Z])", "By others ", cleaned)
+    cleaned = re.sub(r"(?i)\bothers([A-Z])", r"others \1", cleaned)
+    cleaned = re.sub(r"(?i)\b(N\s*/\s*A\s*-\s*By others)\b(?:\s+\1\b)+", r"\1", cleaned)
+    cleaned = re.sub(r"(?i)\b(By others)\b(?:\s+\1\b)+", r"\1", cleaned)
+    cleaned = normalize_space(cleaned).strip(" -;,")
+    if re.fullmatch(r"(?i)(?:n\s*/\s*a\s*-\s*)?by\s+others?", cleaned):
+        return ""
+    stripped = re.sub(r"(?i)^(?:n\s*/\s*a\s*-\s*)?by\s+others?\b\s*", "", cleaned, count=1)
+    stripped = normalize_space(stripped).strip(" -;,")
+    if stripped and stripped != cleaned:
+        return stripped
+    return cleaned
 
 
 def _extract_imperial_layout_appliance_rows(file_name: str, page: dict[str, object]) -> list[ApplianceRow]:
@@ -17436,8 +17457,8 @@ def _extract_imperial_layout_appliance_rows(file_name: str, page: dict[str, obje
             appliance_type = _match_loose_appliance_type(re.sub(r"\s*\([^)]*\)", " ", label).lower())
         if not appliance_type:
             continue
-        value = normalize_space(str(layout_row.get("value_text", layout_row.get("value_region_text", "")) or ""))
-        supplier = normalize_space(str(layout_row.get("supplier_text", layout_row.get("supplier_region_text", "")) or "")).strip(" -;,")
+        value = _clean_imperial_appliance_layout_cell_text(layout_row.get("value_text", layout_row.get("value_region_text", "")))
+        supplier = _clean_imperial_appliance_layout_cell_text(layout_row.get("supplier_text", layout_row.get("supplier_region_text", "")))
         notes = normalize_space(str(layout_row.get("notes_text", layout_row.get("notes_region_text", "")) or "")).strip(" -;,")
         details_parts = [value]
         if supplier and not re.fullmatch(r"(?i)(?:by\s+others?|by\s+client|n\s*/\s*a\s*-\s*by\s+others?)", supplier):
@@ -25876,11 +25897,20 @@ def _imperial_postprocess_sinkware_blocks(blocks: list[tuple[str, str]]) -> list
     )
     if len(sink_like_tapholes) == 1:
         shared_sink_taphole = sink_like_tapholes[0]
+        source_signatures = {
+            _imperial_sinkware_taphole_share_signature(str(entry.get("base", "")))
+            for entry in processed
+            if shared_sink_taphole in entry.get("tapholes", [])
+        }
+        source_signatures.discard("")
         for entry in processed:
             room_label = normalize_space(str(entry.get("room", "")))
             if not _imperial_room_supports_sinkware_role(room_label, "sink"):
                 continue
             if entry["tapholes"]:
+                continue
+            target_signature = _imperial_sinkware_taphole_share_signature(str(entry.get("base", "")))
+            if source_signatures and target_signature not in source_signatures:
                 continue
             entry["tapholes"] = [shared_sink_taphole]
     normalized_blocks: list[tuple[str, str]] = []
@@ -25937,22 +25967,75 @@ def _imperial_remove_taphole_note(text: str, note: str) -> str:
     return normalized
 
 
+def _imperial_sinkware_taphole_share_signature(text: str) -> str:
+    base, _notes = _imperial_split_sinkware_tapholes(text)
+    cleaned = normalize_space(base)
+    if not cleaned:
+        return ""
+    cleaned = re.sub(r"(?i)\bN\s*/?\s*A\b(?:\s*-\s*By others?)?", " ", cleaned)
+    cleaned = re.sub(r"(?i)\bBy others?\b", " ", cleaned)
+    cleaned = re.sub(r"(?i)\bSpecs\s*-?\s*TBC\b", " ", cleaned)
+    cleaned = re.sub(r"(?i)\b(?:sink|basin)\b$", " ", cleaned)
+    cleaned = normalize_space(cleaned)
+    return re.sub(r"[^a-z0-9]+", "", cleaned.lower())
+
+
+def _imperial_clear_sink_derived_basin_overlays(overlays: dict[str, dict[str, str]]) -> None:
+    for room_key, overlay in overlays.items():
+        room_label = normalize_space(room_key.replace("_", " "))
+        if not (
+            _imperial_room_supports_sinkware_role(room_label, "sink")
+            and not _imperial_room_supports_sinkware_role(room_label, "basin")
+        ):
+            continue
+        sink_info = normalize_space(str(overlay.get("sink_info", "") or ""))
+        basin_info = normalize_space(str(overlay.get("basin_info", "") or ""))
+        if not basin_info:
+            continue
+        sink_signature = _imperial_sinkware_taphole_share_signature(sink_info)
+        basin_signature = _imperial_sinkware_taphole_share_signature(basin_info)
+        basin_is_sink_fixture = bool(
+            _imperial_sinkware_line_role(basin_info) == "sink"
+            or re.search(r"(?i)\b(?:sink mounting|single bowl|double bowl|laundry trough|utility sink)\b", basin_info)
+            or (sink_signature and basin_signature and sink_signature == basin_signature)
+        )
+        if not basin_is_sink_fixture:
+            continue
+        if not sink_info:
+            overlay["sink_info"] = _clean_room_fixture_text(basin_info, "sink")
+        overlay["basin_info"] = ""
+
+
 def _imperial_backfill_shared_sink_tapholes(overlays: dict[str, dict[str, str]]) -> None:
     if not overlays:
         return
     sink_rooms_missing_note: list[str] = []
     shared_sink_notes: list[str] = []
+    source_signatures_by_note: dict[str, set[str]] = {}
     for room_key, overlay in overlays.items():
         room_label = normalize_space(room_key.replace("_", " "))
         sink_info = normalize_space(str(overlay.get("sink_info", "") or ""))
         basin_info = normalize_space(str(overlay.get("basin_info", "") or ""))
         sink_notes = _imperial_extract_taphole_notes(sink_info)
         basin_notes = _imperial_extract_taphole_notes(basin_info)
-        shared_sink_notes.extend(note for note in sink_notes if _imperial_is_sink_oriented_taphole(note))
-        shared_sink_notes.extend(note for note in basin_notes if _imperial_is_sink_oriented_taphole(note))
+        sink_signature = _imperial_sinkware_taphole_share_signature(sink_info)
+        basin_signature = _imperial_sinkware_taphole_share_signature(basin_info)
+        for note in sink_notes:
+            if not _imperial_is_sink_oriented_taphole(note):
+                continue
+            shared_sink_notes.append(note)
+            if sink_signature:
+                source_signatures_by_note.setdefault(note, set()).add(sink_signature)
+        for note in basin_notes:
+            if not _imperial_is_sink_oriented_taphole(note):
+                continue
+            shared_sink_notes.append(note)
+            if basin_signature:
+                source_signatures_by_note.setdefault(note, set()).add(basin_signature)
         if _imperial_room_supports_sinkware_role(room_label, "sink") and sink_info and not sink_notes:
             sink_rooms_missing_note.append(room_key)
     shared_sink_notes = _unique(shared_sink_notes)
+    _imperial_clear_sink_derived_basin_overlays(overlays)
     if not shared_sink_notes or not sink_rooms_missing_note:
         return
     def _shared_note_sort_key(note: str) -> tuple[int, int]:
@@ -25960,9 +26043,26 @@ def _imperial_backfill_shared_sink_tapholes(overlays: dict[str, dict[str, str]])
         return (contamination, len(note))
 
     shared_note = sorted(shared_sink_notes, key=_shared_note_sort_key)[0]
+    missing_signature_counts: dict[str, int] = {}
     for room_key in sink_rooms_missing_note:
         overlay = overlays.get(room_key)
         if not overlay:
+            continue
+        signature = _imperial_sinkware_taphole_share_signature(str(overlay.get("sink_info", "") or ""))
+        if signature:
+            missing_signature_counts[signature] = missing_signature_counts.get(signature, 0) + 1
+    for room_key in sink_rooms_missing_note:
+        overlay = overlays.get(room_key)
+        if not overlay:
+            continue
+        target_signature = _imperial_sinkware_taphole_share_signature(str(overlay.get("sink_info", "") or ""))
+        source_signatures = source_signatures_by_note.get(shared_note, set())
+        allow_generic_same_base_share = bool(
+            target_signature
+            and missing_signature_counts.get(target_signature, 0) > 1
+            and _imperial_is_sink_oriented_taphole(shared_note)
+        )
+        if source_signatures and target_signature not in source_signatures and not allow_generic_same_base_share:
             continue
         overlay["sink_info"] = _imperial_append_taphole_note(str(overlay.get("sink_info", "") or ""), shared_note)
     for room_key, overlay in overlays.items():
@@ -25974,6 +26074,7 @@ def _imperial_backfill_shared_sink_tapholes(overlays: dict[str, dict[str, str]])
             if note in basin_info:
                 basin_info = _imperial_remove_taphole_note(basin_info, note)
         overlay["basin_info"] = basin_info
+    _imperial_clear_sink_derived_basin_overlays(overlays)
 
 
 def _imperial_looks_like_sinkware_room_label(room_label: str) -> bool:

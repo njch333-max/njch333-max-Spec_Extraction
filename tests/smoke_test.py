@@ -2654,6 +2654,47 @@ SINKWARE (LAUNDRY) N/A BY OTHERS BY OTHERS
             ],
         )
 
+    def test_imperial_sinkware_taphole_backfill_requires_same_fixture_base(self) -> None:
+        blocks = parsing_module._imperial_postprocess_sinkware_blocks(
+            [
+                ("KITCHEN", "UNDERMOUNT - FRANKE MARIS MRG110-52 MB - Taphole location: in bench centre behind sink"),
+                ("LAUNDRY", "TOPMOUNT - STELLA INSET STAINLESS STEEL 45 LITRE"),
+            ]
+        )
+        by_room = dict(blocks)
+        self.assertIn("Taphole location: in bench centre behind sink", by_room["KITCHEN"])
+        self.assertNotIn("Taphole location", by_room["LAUNDRY"])
+
+    def test_imperial_overlay_taphole_backfill_requires_same_fixture_base(self) -> None:
+        overlays = {
+            "kitchen": {
+                "sink_info": "UNDERMOUNT - FRANKE MARIS MRG110-52 MB - Taphole location: in bench centre behind sink",
+                "basin_info": "",
+            },
+            "pantry": {
+                "sink_info": "UNDERMOUNT - FRANKE MARIS MRG110-52 MB",
+                "basin_info": "",
+            },
+            "laundry": {
+                "sink_info": "TOPMOUNT - STELLA INSET STAINLESS STEEL 45 LITRE",
+                "basin_info": "",
+            },
+        }
+        parsing_module._imperial_backfill_shared_sink_tapholes(overlays)
+        self.assertIn("Taphole location: in bench centre behind sink", overlays["pantry"]["sink_info"])
+        self.assertNotIn("Taphole location", overlays["laundry"]["sink_info"])
+
+    def test_imperial_overlay_clears_sink_derived_basin_on_utility_room(self) -> None:
+        overlays = {
+            "pantry": {
+                "sink_info": "Burazzo 650mm Stainless Steel Single Bowl Sink (BU654520S)- Sink Mounting - By Others Undermount - Taphole location: In Stone, centered behind sink",
+                "basin_info": "Burazzo 650mm Stainless Steel Single Bowl Sink (BU654520S)- Sink Mounting Undermount - Taphole location: In Stone, centered behind basin",
+            }
+        }
+        parsing_module._imperial_backfill_shared_sink_tapholes(overlays)
+        self.assertIn("BU654520S", overlays["pantry"]["sink_info"])
+        self.assertEqual(overlays["pantry"]["basin_info"], "")
+
     def test_imperial_extract_non_joinery_blocks_keeps_zip_tap_product_line(self) -> None:
         text = """
 SINKWARE & TAPWARE
@@ -2985,6 +3026,86 @@ H55784Z03AU
         self.assertEqual(by_type["Washing Machine"].model_no, "Specs - TBC")
         self.assertIn("5", by_type["Washing Machine"].page_refs)
         self.assertNotIn("By othersFisher", " ".join(row.evidence_snippet for row in rows))
+
+    def test_extract_appliances_from_imperial_layout_rows_keeps_job67_style_seven_rows(self) -> None:
+        page = {
+            "page_no": 5,
+            "raw_text": "APPLIANCES",
+            "text": "",
+            "page_layout": {
+                "page_type": "appliance",
+                "rows": [
+                    {
+                        "row_label": "OVEN (KITCHEN)",
+                        "value_region_text": "N / A - By othersFisher & Paykel 900mm Oven OB90S9LEX2 (Electric)",
+                        "image_region_text": "IMAGE NOISE",
+                        "supplier_region_text": "By others",
+                        "notes_region_text": "",
+                        "row_kind": "other",
+                    },
+                    {
+                        "row_label": "COOKTOP (KITCHEN)",
+                        "value_region_text": "Specs - TBC",
+                        "image_region_text": "N / A - By others",
+                        "supplier_region_text": "By others",
+                        "notes_region_text": "",
+                        "row_kind": "other",
+                    },
+                    {
+                        "row_label": "RANGEHOOD (KITCHEN)",
+                        "value_region_text": "Fisher & Paykel HP90ICSX4 Integrated Rangehood",
+                        "image_region_text": "N / A - By others",
+                        "supplier_region_text": "By others",
+                        "notes_region_text": "",
+                        "row_kind": "other",
+                    },
+                    {
+                        "row_label": "DISHWASHER (KITCHEN)",
+                        "value_region_text": "Fisher & Paykel DW60FC1X2 Dishwasher",
+                        "image_region_text": "N / A - By others",
+                        "supplier_region_text": "By others",
+                        "notes_region_text": "",
+                        "row_kind": "other",
+                    },
+                    {
+                        "row_label": "FRIDGE (KITCHEN)",
+                        "value_region_text": "Specs - TBC",
+                        "image_region_text": "N / A - By others",
+                        "supplier_region_text": "By others",
+                        "notes_region_text": "",
+                        "row_kind": "other",
+                    },
+                    {
+                        "row_label": "WASHING MACHINE (LAUNDRY)",
+                        "value_region_text": "Specs - TBC",
+                        "image_region_text": "N / A - By others",
+                        "supplier_region_text": "By others",
+                        "notes_region_text": "",
+                        "row_kind": "other",
+                    },
+                    {
+                        "row_label": "DRYER (LAUNDRY)",
+                        "value_region_text": "Specs - TBC",
+                        "image_region_text": "N / A - By others",
+                        "supplier_region_text": "By others",
+                        "notes_region_text": "",
+                        "row_kind": "other",
+                    },
+                ],
+            },
+        }
+        rows = parsing_module._extract_appliances_from_pages("imperial-appliances.pdf", [page], builder_name="Imperial")
+        by_type = {row.appliance_type: row for row in rows}
+        self.assertEqual(set(by_type), {"Oven", "Cooktop", "Rangehood", "Dishwasher", "Fridge", "Washing Machine", "Dryer"})
+        self.assertEqual(by_type["Oven"].make, "Fisher & Paykel")
+        self.assertEqual(by_type["Oven"].model_no, "OB90S9LEX2")
+        self.assertEqual(by_type["Cooktop"].model_no, "Specs - TBC")
+        self.assertEqual(by_type["Fridge"].model_no, "Specs - TBC")
+        self.assertEqual(by_type["Washing Machine"].model_no, "Specs - TBC")
+        self.assertEqual(by_type["Dryer"].model_no, "Specs - TBC")
+        joined_evidence = " ".join(row.evidence_snippet for row in rows)
+        self.assertNotIn("IMAGE NOISE", joined_evidence)
+        self.assertNotIn("By othersFisher", joined_evidence)
 
     def test_enrich_imperial_placeholder_appliance_row_merges_layout_specs_tbc(self) -> None:
         row = parsing_module.ApplianceRow(
