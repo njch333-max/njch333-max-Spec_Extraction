@@ -23383,6 +23383,113 @@ H55784Z03AU
             ["[Furnware] - Momo flapp pull handle 256mm in brushed black - FPH256.BBL - (Horizontal on ALL)"],
         )
 
+    def test_imperial_postprocess_material_rows_attaches_handle_subitems_for_multifamily_block(self) -> None:
+        processed = parsing_module._imperial_postprocess_material_rows(
+            [
+                {
+                    "area_or_item": "HANDLES",
+                    "supplier": "Furnware",
+                    "specs_or_description": (
+                        "[Furnware] - Tall Door Handles - Momo Hinoki Wood Big D832mm Handle Oak-HIN0682.832.OAK | "
+                        "High Split Handle - Momo hinoki wood big d416mm handle oak-HIN0682.416.OAK - "
+                        "(Investigating pricing from Auburn Woodturning for original selection)\n"
+                        "[Titus Tekform] - Drawers - Bevel Edge finger pull - DESK - 2163 Voda Profile Handle "
+                        "Brushed Nickel 300mm - SO-2163-300-BN | BENCHSEAT DRAWERS - PTO - DESK - 2163 Voda "
+                        "Profile Handle Brushed Nickel 300mm - SO-2163-300-BN"
+                    ),
+                    "notes": "",
+                    "tags": ["handles"],
+                    "page_no": 3,
+                    "row_order": 5,
+                    "provenance": {},
+                }
+            ]
+        )
+        subitems = processed[0].get("handle_subitems", [])
+        families = {item.get("family") for item in subitems}
+        self.assertTrue({"tall", "split", "drawers", "desk", "benchseat_pto"} <= families)
+        texts = " | ".join(item.get("text", "") for item in subitems)
+        self.assertIn("Tall Door Handles", texts)
+        self.assertIn("High Split Handle", texts)
+        self.assertIn("DESK - 2163 Voda Profile Handle", texts)
+        self.assertIn("BENCHSEAT DRAWERS - PTO", texts)
+
+    def test_imperial_material_summary_prefers_handle_subitems_over_polluted_raw_text(self) -> None:
+        snapshot = {
+            "builder_name": "Imperial",
+            "rooms": [
+                {
+                    "original_room_label": "KITCHEN",
+                    "room_order": 1,
+                    "material_rows": [
+                        {
+                            "area_or_item": "HANDLES",
+                            "supplier": "Kethy",
+                            "specs_or_description": (
+                                "No handles on Upper cabinetry - Finger pull only "
+                                "DOORS - HT576 -128 - BKO Darwen Cabinet Pull Handle - Black Olive Colour "
+                                "DRAWERS - HT576 -192 - BKO Darwen Cabinet Pull Handle - Black Olive Colour "
+                                "KICKBOARDS As Doors Polytec"
+                            ),
+                            "notes": "",
+                            "tags": ["handles"],
+                            "page_no": 1,
+                            "row_order": 1,
+                            "handle_subitems": [
+                                {
+                                    "family": "no_handles",
+                                    "text": "No handles on Upper cabinetry - Finger pull only",
+                                    "raw_text": "No handles on Upper cabinetry - Finger pull only KICKBOARDS As Doors Polytec",
+                                },
+                                {
+                                    "family": "doors",
+                                    "text": "DOORS - HT576 -128 - BKO Darwen Cabinet Pull Handle - Black Olive Colour",
+                                    "raw_text": "DOORS - HT576 -128 - BKO Darwen Cabinet Pull Handle - Black Olive Colour Vauth-Sagel bin text",
+                                },
+                                {
+                                    "family": "drawers",
+                                    "text": "DRAWERS - HT576 -192 - BKO Darwen Cabinet Pull Handle - Black Olive Colour",
+                                },
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+        flattened_rows = _flatten_imperial_material_rows(snapshot["rooms"][0])
+        self.assertTrue(flattened_rows[0].get("handle_subitems"))
+        summary = _build_material_summary(snapshot)
+        handle_texts = [entry["text"] for entry in summary["handles"]["entries"]]
+        self.assertIn("No handles on Upper cabinetry - Finger pull only", handle_texts)
+        self.assertIn("HT576 -128 - BKO Darwen Cabinet Pull Handle - Black Olive Colour", handle_texts)
+        self.assertIn("HT576 -192 - BKO Darwen Cabinet Pull Handle - Black Olive Colour", handle_texts)
+        self.assertFalse(any("KICKBOARDS" in text.upper() for text in handle_texts))
+        self.assertFalse(any("VAUTH" in text.upper() for text in handle_texts))
+
+    def test_imperial_handle_subitems_keep_job59_tall_s225_family(self) -> None:
+        processed = parsing_module._imperial_postprocess_material_rows(
+            [
+                {
+                    "area_or_item": "HANDLES",
+                    "supplier": "Kethy",
+                    "specs_or_description": "UPPER - FINGERPULL | BASE - BEVEL EDGE FINGERPULL | TALL - S225.280.MBK.",
+                    "notes": "vertical on tall doors",
+                    "tags": ["handles"],
+                    "page_no": 1,
+                    "row_order": 1,
+                    "provenance": {
+                        "layout_value_text": "UPPER - FINGERPULL BASE - BEVEL EDGE FINGERPULL TALL - S225.280.MBK."
+                    },
+                }
+            ]
+        )
+        subitem_texts = [item.get("text", "") for item in processed[0].get("handle_subitems", [])]
+        self.assertIn("UPPER - FINGERPULL", subitem_texts)
+        self.assertIn("BASE - BEVEL EDGE FINGERPULL", subitem_texts)
+        self.assertTrue(any(text.startswith("TALL - S225.280.MBK.") for text in subitem_texts))
+        self.assertFalse(any("BASE - BEVEL EDGE FINGERPULL TALL" in text for text in subitem_texts))
+        self.assertFalse(any(item.get("source") == "layout_value_text" for item in processed[0].get("handle_subitems", [])))
+
     def test_imperial_postprocess_material_rows_moves_bin_size_prefix_back_to_description(self) -> None:
         processed = parsing_module._imperial_postprocess_material_rows(
             [

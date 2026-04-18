@@ -947,17 +947,29 @@ def _build_imperial_snapshot_verification_checklist(snapshot: dict[str, Any]) ->
                 ):
                     continue
                 summary_source_values: list[str] = []
-                for source_text in display_lines:
-                    if source_text and source_text not in summary_source_values:
-                        summary_source_values.append(source_text)
-                for source_text in (extracted_value, raw_summary_value):
-                    if source_text and source_text not in summary_source_values:
-                        summary_source_values.append(source_text)
+                handle_subitem_sources = (
+                    _verification_handle_subitem_source_values(item)
+                    if primary_tag == "handles"
+                    else []
+                )
+                if handle_subitem_sources:
+                    summary_source_values = handle_subitem_sources
+                else:
+                    for source_text in display_lines:
+                        if source_text and source_text not in summary_source_values:
+                            summary_source_values.append(source_text)
+                    for source_text in (extracted_value, raw_summary_value):
+                        if source_text and source_text not in summary_source_values:
+                            summary_source_values.append(source_text)
                 if primary_tag == "handles" and extracted_value:
                     used_handle_fallback = not bool(display_lines) and not bool(
                         _verification_text(parsing._imperial_material_row_display_value_for_view(item))
                     )
-                    if used_handle_fallback and _imperial_verification_row_is_handle_summary_review_fallback(item):
+                    if (
+                        not handle_subitem_sources
+                        and used_handle_fallback
+                        and _imperial_verification_row_is_handle_summary_review_fallback(item)
+                    ):
                         for fallback_source in _verification_handle_summary_fallback_sources(item):
                             if fallback_source and fallback_source not in summary_source_values:
                                 summary_source_values.append(fallback_source)
@@ -1081,6 +1093,23 @@ def _verification_live_imperial_material_summary(snapshot: dict[str, Any]) -> di
     except Exception:
         return {}
     return {}
+
+
+def _verification_handle_subitem_source_values(item: dict[str, Any]) -> list[str]:
+    if not isinstance(item, dict):
+        return []
+    subitems = item.get("handle_subitems", [])
+    if not isinstance(subitems, list):
+        return []
+    values: list[str] = []
+    for subitem in subitems:
+        if not isinstance(subitem, dict):
+            continue
+        for key in ("summary_text", "text"):
+            value = _verification_text(subitem.get(key, ""))
+            if value and value not in values:
+                values.append(value)
+    return values
 
 
 def _verification_appliance_evidence_text(appliance: dict[str, Any]) -> str:

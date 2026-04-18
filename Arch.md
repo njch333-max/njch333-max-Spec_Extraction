@@ -268,6 +268,7 @@
   - repair handle label/value spillover during material-row postprocess and display/checklist rendering, so contaminated labels such as `Momo HANDLES oval` become `HANDLES` before visual fragments and summary aggregation run, recover valid same-cell brand prefixes from provenance when the final label was already normalized, and prevent visual-subrow cleanup from trimming those accepted prefixes back out
   - stabilize `AREA / ITEM` anchored row assembly before later parsing stages
   - then tighten semantic subitems and summary inputs in `parsing.py` / `main.py`
+  - Phase 3A now attaches internal `handle_subitems` during Imperial material-row postprocess. `main.py` flattens those subitems into the summary layer, and PDF-QA checklist generation uses the same subitem `summary_text` / `text` source values. Provenance fields such as subitem `raw_text` remain evidence only and are not summary input.
 
 ### 3.7 Upload Interaction
 1. Job detail uses the existing upload POST route.

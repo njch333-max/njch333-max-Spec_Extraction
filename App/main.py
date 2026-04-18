@@ -1029,6 +1029,7 @@ def _flatten_imperial_material_rows(room: dict[str, Any]) -> list[dict[str, Any]
                 "revalidation_issue_types": revalidation_issue_types,
                 "repair_log_count": len([entry for entry in (item.get("repair_log", []) or []) if isinstance(entry, dict)]),
                 "provenance": item.get("provenance", {}) if isinstance(item.get("provenance", {}), dict) else {},
+                "handle_subitems": item.get("handle_subitems", []) if isinstance(item.get("handle_subitems", []), list) else [],
             }
         )
     return rows
@@ -3629,9 +3630,40 @@ def _imperial_summary_values_for_bucket(
     return values
 
 
+def _imperial_material_row_handle_subitem_summary_candidates(item: dict[str, Any]) -> list[str]:
+    if not isinstance(item, dict):
+        return []
+    subitems = item.get("handle_subitems", [])
+    if not isinstance(subitems, list):
+        return []
+    supplier = _display_value(item.get("supplier", ""))
+    candidates: list[str] = []
+    for subitem in subitems:
+        if not isinstance(subitem, dict):
+            continue
+        source_texts: list[str] = []
+        for key in ("summary_text", "text"):
+            source_text = _display_value(subitem.get(key, ""))
+            if source_text and source_text not in source_texts:
+                source_texts.append(source_text)
+        for source_text in source_texts:
+            for summary_text in _imperial_summary_values_for_bucket(
+                "handles",
+                source_text,
+                _normalize_imperial_handle_summary_value,
+                supplier=supplier,
+            ):
+                if summary_text and not any(_imperial_summary_values_equivalent("handles", summary_text, existing) for existing in candidates):
+                    candidates.append(summary_text)
+    return candidates
+
+
 def _imperial_material_row_handle_summary_candidates(item: dict[str, Any]) -> list[str]:
     if not isinstance(item, dict):
         return []
+    subitem_candidates = _imperial_material_row_handle_subitem_summary_candidates(item)
+    if subitem_candidates:
+        return subitem_candidates
     supplier = _display_value(item.get("supplier", ""))
     display_lines = [
         _display_value(line)
