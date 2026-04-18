@@ -862,7 +862,7 @@ def _build_imperial_snapshot_verification_checklist(snapshot: dict[str, Any]) ->
                     source_row_index = int(provenance.get("source_row_index", 0) or 0)
                 return (
                     int(item.get("page_no", 0) or 0),
-                    source_row_index or int(item.get("row_order", 0) or 0),
+                    int(item.get("row_order", 0) or 0) or source_row_index,
                     _verification_text(item.get("area_or_item", "")),
                 )
             ordered_rows = sorted(

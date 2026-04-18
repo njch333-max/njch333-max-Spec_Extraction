@@ -187,6 +187,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Imperial sinkware semantic parsing must ignore unrelated pre-heading basin/tub noise, keep mounting suffixes such as `UNDERMOUNT` attached to the correct sink row, and apply generic taphole notes to the correct sink cluster without cross-room leakage.
 - Orientation-only notes such as `Vertical on Tall doors only` or `Horizontal on all` must not be treated as room-material values.
 - Imperial fixture overlay pages should be preferred over AI guesses for sink, basin, and tap text whenever the builder-specific overlay parser can read a cleaner local value.
+- Imperial fixture cleanup must preserve source-equivalent cell order for sink/basin rows: mounting text stays with the description, supplier stays after that (`Sink Mounting - Undermount - By Others`), and taphole notes stay in notes. Deterministic PDF text-layer encoding glitches may be normalized when the visual source is unambiguous, such as `MounƟng` to `Mounting`.
 - Imperial room-card order must follow source spec order, and each room's `material_rows` must also render strictly in source row order. No later finalize/UI stage may re-sort Imperial rows by tag, label, or inferred semantic priority.
 - Imperial `material_rows` must obey a hard content-grid boundary: row values may only come from the current row's recovered `AREA / ITEM`, `SPECS / DESCRIPTION`, `SUPPLIER`, and `NOTES` cells. Header/meta/footer/table-heading tokens such as address/client/date, ceiling/cabinetry height, bulkhead/shadowline labels, sheet titles, and table headers are pollution candidates and must not override clean cell-grid rows.
 - Imperial `IMAGE` cells are geometry-only for row/edge recovery. They must not be OCRed, displayed, or used as appliance/material/summary text.
@@ -232,6 +233,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Formal spec exports are blocked until the latest raw spec PDF QA status is `passed`.
 - PDF QA signoff is strict source-PDF signoff: each checklist item must be reviewed against the source PDF field-by-field.
 - A non-empty extracted value is not sufficient for `pass`. Bulk `pass/na` signoff based only on value presence is invalid.
+- Imperial PDF QA checklist row ordering must follow canonical `material_rows.row_order`; stale provenance order hints must not reorder checklist rows away from the source table order.
 - The PDF QA workflow must support:
   - saving checklist progress,
   - marking a snapshot `passed` only when all checklist items are `pass` or `na`,

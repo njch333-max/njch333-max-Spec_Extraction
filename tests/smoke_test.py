@@ -2687,7 +2687,7 @@ SINKWARE (LAUNDRY) N/A BY OTHERS BY OTHERS
     def test_imperial_overlay_clears_sink_derived_basin_on_utility_room(self) -> None:
         overlays = {
             "pantry": {
-                "sink_info": "Burazzo 650mm Stainless Steel Single Bowl Sink (BU654520S)- Sink Mounting - By Others Undermount - Taphole location: In Stone, centered behind sink",
+                "sink_info": "Burazzo 650mm Stainless Steel Single Bowl Sink (BU654520S)- Sink Mounting - Undermount - By Others - Taphole location: In Stone, centered behind sink",
                 "basin_info": "Burazzo 650mm Stainless Steel Single Bowl Sink (BU654520S)- Sink Mounting Undermount - Taphole location: In Stone, centered behind basin",
             }
         }
@@ -11518,21 +11518,28 @@ H55784Z03AU
                 "sink",
             ),
             "Burazzo 650mm Stainless Steel Single Bowl Sink (BU654520S)- "
-            "Sink Mounting - By Others Undermount - Taphole location: In Stone, centered behind sink",
+            "Sink Mounting - Undermount - By Others - Taphole location: In Stone, centered behind sink",
         )
         self.assertEqual(
             parsing_module._clean_room_fixture_text(
                 "Sink Mounting - Topmount - Specs TBC By Others - Taphole location: In Stone, centered behind basin sink",
                 "basin",
             ),
-            "Sink Mounting - Topmount - Specs TBC By Others - Taphole location: In Stone, centered behind basin",
+            "Sink Mounting - Topmount - Specs TBC - By Others - Taphole location: In Stone, centered behind basin",
         )
         self.assertEqual(
             parsing_module._clean_room_fixture_text(
                 "Sink Mounting - Topmount - Specs TBC By Others - Taphole location: In Stone, centered behind",
                 "basin",
             ),
-            "Sink Mounting - Topmount - Specs TBC By Others - Taphole location: In Stone, centered behind basin",
+            "Sink Mounting - Topmount - Specs TBC - By Others - Taphole location: In Stone, centered behind basin",
+        )
+        self.assertEqual(
+            parsing_module._clean_room_fixture_text(
+                "Stella Inset Stainless Steel 45 Litre (YH236C)- Sink Moun\u019fng - Topmount - By Others",
+                "sink",
+            ),
+            "Stella Inset Stainless Steel 45 Litre (YH236C)- Sink Mounting - Topmount - By Others",
         )
 
     def test_imperial_assign_sinkware_cluster_parts_keeps_room_specific_lines_local(self) -> None:
@@ -15255,6 +15262,47 @@ H55784Z03AU
         self.assertNotIn("fields", fields)
         appliance_item = next(item for item in checklist if item["section_type"] == "appliance")
         self.assertEqual(appliance_item["extracted_value"], "DISHWASHER (KITCHEN) Bosch SMV6HCX01A - By others")
+
+    def test_imperial_snapshot_verification_checklist_prefers_row_order_over_stale_source_row_index(self) -> None:
+        checklist = store._build_snapshot_verification_checklist(
+            {
+                "builder_name": "Imperial",
+                "rooms": [
+                    {
+                        "room_key": "kitchen",
+                        "original_room_label": "KITCHEN",
+                        "room_order": 1,
+                        "page_refs": "1",
+                        "material_rows": [
+                            {
+                                "area_or_item": "BENCHTOP",
+                                "supplier": "By Others",
+                                "specs_or_description": "40mm Stone",
+                                "tags": ["bench_tops"],
+                                "page_no": 1,
+                                "row_order": 1,
+                                "provenance": {"source_row_index": 3},
+                            },
+                            {
+                                "area_or_item": "HANDLES",
+                                "supplier": "Furnware",
+                                "specs_or_description": "Pull handle",
+                                "tags": ["handles"],
+                                "page_no": 1,
+                                "row_order": 5,
+                                "provenance": {"source_row_index": 1},
+                            },
+                        ],
+                    }
+                ],
+            }
+        )
+        room_fields = [
+            item["field_name"]
+            for item in checklist
+            if item["section_type"] == "room" and item["field_name"] not in {"room_title", "drawers", "hinges", "flooring", "sink"}
+        ]
+        self.assertEqual(room_fields[:2], ["bench_tops: BENCHTOP", "handles: HANDLES"])
 
     def test_imperial_snapshot_verification_checklist_prefers_display_lines_for_handle_rows_and_omits_none_summary(self) -> None:
         pantry_handle_description = (

@@ -213,6 +213,7 @@
   - `checklist_json`
 3. `checklist_json` stores field-level items such as room title, benchtops, cabinetry colour splits, toe kick, bulkheads, floating shelf, shelf, handles, accessories/others, sink/basin/tap, drawers/hinges/flooring, and appliance rows.
 3a. Imperial joinery/material QA is now an explicit exception: the primary checklist focus is `material_rows` correctness, tag correctness, summary correctness, and the retained bottom fields (`Drawers`, `Hinges`, `Flooring`, `Sink`). `Tap` is intentionally excluded from Imperial primary QA.
+3b. Imperial QA item order follows canonical `material_rows.row_order` before stale provenance row-index hints, so the checklist mirrors source table order even when older layout provenance has drifted.
 4. The PDF QA page edits those checklist items directly and can save, mark pass, or mark fail.
 4a. Final PDF QA signoff is source-PDF, field-by-field signoff. A checklist item is not `pass` merely because `extracted_value` is non-empty.
 4b. Automated bulk `pass/na` writes based only on non-empty extracted values are invalid as final signoff and must not be recorded as accepted QA.
@@ -234,6 +235,7 @@
   - prefer the most complete accepted raw-row/layout continuation text over truncated visual-subrow fragments when building the displayed value for desk / shelf / robe / study style rows
   - only retain `Drawers`, `Hinges`, `Flooring`, and `Sink` beneath the raw rows
   - omit `Tap` from Imperial room cards
+7b. Imperial sink/basin fixture cleanup runs after row-local overlay parsing. It preserves source-equivalent supplier/mounting order (`Sink Mounting - Undermount - By Others`) and may normalize deterministic PDF text-layer encoding artifacts such as `MounƟng` to the visual-source word `Mounting`.
 8. Filter plumbing fixtures out of the `Appliances` table and export.
 9. Render a `Material Summary` section that smart-deduplicates room-level door colours, handle models, and bench tops, using the split wall-run/island bench-top values when available, preserving distinct thickness/edge variants, and including floating-shelf materials in the bench-top summary bucket.
 9a. Imperial summary entries are built directly from tagged `material_rows` and rendered as:

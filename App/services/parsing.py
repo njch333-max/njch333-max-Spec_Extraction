@@ -28551,7 +28551,7 @@ def _clean_fixture_text(value: Any) -> str:
         return " | ".join(part for part in _unique(flattened) if part)
     if isinstance(value, dict):
         return _format_fixture_mapping(value)
-    text = normalize_space(str(value))
+    text = normalize_space(str(value)).replace("\u019f", "ti").replace("\u024f", "ti")
     if "|" in text:
         parts = [_clean_fixture_text(part) for part in re.split(r"\s*\|\s*", text) if normalize_space(part)]
         return " | ".join(part for part in _unique(parts) if part)
@@ -28611,6 +28611,23 @@ def _strip_grouped_fixture_property_noise(text: str) -> str:
             continue
         cleaned_parts.append(probe)
     return _collapse_pipe_text_variants(" | ".join(cleaned_parts))
+
+
+def _normalize_imperial_fixture_supplier_mounting_order(text: str) -> str:
+    cleaned = normalize_space(text)
+    if not cleaned:
+        return ""
+    cleaned = re.sub(
+        r"(?i)\b((?:Sink|Basin)\s+Moun\w*ng\s*-\s*)By\s+Others\s+(Undermount(?:ed)?|Topmount)\b",
+        lambda match: f"{match.group(1)}{match.group(2)} - By Others",
+        cleaned,
+    )
+    cleaned = re.sub(
+        r"(?i)\b((?:Sink|Basin)\s+Moun\w*ng\s*-\s*.*?\bSpecs\s*-?\s*TBC)\s+By\s+Others\b",
+        lambda match: f"{match.group(1)} - By Others",
+        cleaned,
+    )
+    return normalize_space(cleaned)
 
 
 def _clean_room_fixture_text(value: Any, kind: str) -> str:
@@ -28673,7 +28690,7 @@ def _clean_room_fixture_text(value: Any, kind: str) -> str:
         ):
             text = re.sub(
                 r"(?i)\bSink\s+Mounting\s*-\s*Undermount\b",
-                "Sink Mounting - By Others Undermount",
+                "Sink Mounting - Undermount - By Others",
                 text,
                 count=1,
             )
@@ -28716,6 +28733,8 @@ def _clean_room_fixture_text(value: Any, kind: str) -> str:
             text,
             tuple(tap_markers),
         )
+    if kind in {"sink", "basin"}:
+        text = _normalize_imperial_fixture_supplier_mounting_order(text)
     return text.strip(" -;,")
 
 
