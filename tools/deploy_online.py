@@ -22,6 +22,7 @@ DEFAULT_INCLUDE_PATHS = (
     "Project_state.md",
     "AGENTS.md",
     "IMPERIAL_GRID_TRACKER.md",
+    "dump_raw_snapshot.py",
 )
 
 SKIP_DIR_NAMES = {
