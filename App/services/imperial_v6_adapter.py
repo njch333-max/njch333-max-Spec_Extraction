@@ -59,12 +59,12 @@ def build_material_rows_from_v6_section(v6_section: dict, source_pdf: str) -> li
     return rows
 
 
-def build_room_from_v6_section(v6_section: dict, source_pdf: str) -> RoomRow:
+def build_room_from_v6_section(v6_section: dict, source_pdf: str, all_v6_sections=None) -> RoomRow:
     """v6 section -> complete RoomRow (material_rows + basic RoomRow fields)."""
     section_title = str(v6_section.get("section_title") or "")
     label = section_title.replace(" JOINERY SELECTION SHEET", "").strip()
     pages = v6_section.get("pages") or []
-    return RoomRow(
+    room = RoomRow(
         room_key=_derive_room_key(section_title),
         original_room_label=label,
         room_order=0,
@@ -74,6 +74,10 @@ def build_room_from_v6_section(v6_section: dict, source_pdf: str) -> RoomRow:
         evidence_snippet="",
         confidence=0.85,
     )
+    from App.services.imperial_v6_room_fields import populate_room_fields_from_v6
+
+    populate_room_fields_from_v6(room, v6_section, all_v6_sections or [])
+    return room
 
 
 def _merge_adjacent_subrow_items(items: list[dict]) -> list[dict]:

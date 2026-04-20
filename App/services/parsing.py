@@ -17006,7 +17006,7 @@ def _process_v6_imperial_document(
     for section in v6_json.get("sections", []):
         if not isinstance(section, dict):
             continue
-        row = imperial_v6_adapter.build_room_from_v6_section(section, pdf_path)
+        row = imperial_v6_adapter.build_room_from_v6_section(section, pdf_path, all_v6_sections=v6_json.get("sections", []))
         row.material_rows = _imperial_finalize_material_rows(row.material_rows)
         row.material_rows = _imperial_attach_handle_subitems(row.material_rows)
         section_order_counter += 1
