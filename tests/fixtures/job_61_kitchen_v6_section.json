@@ -1,0 +1,66 @@
+{
+  "section_title": "KITCHEN JOINERY SELECTION SHEET",
+  "metadata": {
+    "address": "Lot 338 Paradise Parade, Jacobs Well",
+    "client": "Silkwood Homes",
+    "date": "29.08.2024",
+    "ceiling_height": "2700mm",
+    "cabinetry_height": "2700mm",
+    "bulkhead": "no",
+    "shadowline": "16mm shadowline",
+    "hinges": "soft close",
+    "floor_type": "14MM ENGINEERED TIMBER - TO BE INSTALLED AFTER CABINETRY",
+    "designer": "CHLOE PARKER"
+  },
+  "items": [
+    {
+      "area": "ISLAND BENCHTOP",
+      "specs": "20MM NATURAL STONE",
+      "image": "",
+      "supplier": "CDK Stone",
+      "notes": "2X WFE",
+      "_source": {"page": 1, "row_index": 2, "method": "grid"}
+    },
+    {
+      "area": "COOKTOP RUN BENCHTOP",
+      "specs": "20MM STONE\nRAW CONCRETE - ARIS",
+      "image": "",
+      "supplier": "Caesarstone",
+      "notes": "",
+      "_source": {"page": 1, "row_index": 3, "method": "grid"}
+    },
+    {
+      "area": "BASE, UPPER & TALL CABINETRY\nCOLOUR",
+      "specs": "Black - PureGrain",
+      "image": "",
+      "supplier": "Laminex",
+      "notes": "COLOURED BOTTOMS TO OVERHEADS\nBLUM AVENTOS HK DOORS",
+      "_source": {"page": 1, "row_index": 4, "method": "grid"}
+    },
+    {
+      "area": "FEATURE CABINETRY COLOUR",
+      "specs": "Perugian Walnut - Woodmatt",
+      "image": "",
+      "supplier": "Polytec",
+      "notes": "REFER TO DRAWINGS FOR ALLOCATIONS",
+      "_source": {"page": 1, "row_index": 5, "method": "grid"}
+    },
+    {
+      "area": "KICKBOARDS",
+      "specs": "as doors above it - refer to layouts for\nallocations",
+      "image": "",
+      "supplier": "Polytec",
+      "notes": "",
+      "_source": {"page": 1, "row_index": 6, "method": "grid"}
+    },
+    {
+      "area": "HANDLES",
+      "specs": "UPPER - FINGERPULL (PTO WHERE\nREQUIRED)\nBASE - BEVEL EDGE FINGERPULL",
+      "image": "",
+      "supplier": "",
+      "notes": "",
+      "_source": {"page": 1, "row_index": 7, "method": "grid"}
+    }
+  ],
+  "pages": [1]
+}

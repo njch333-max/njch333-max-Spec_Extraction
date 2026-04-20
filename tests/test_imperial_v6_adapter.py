@@ -1,0 +1,143 @@
+from __future__ import annotations
+
+import json
+from collections import defaultdict
+from pathlib import Path
+
+from App.services.imperial_v6_adapter import (
+    _merge_adjacent_subrow_items,
+    build_material_rows_from_v6_section,
+    build_room_from_v6_section,
+)
+
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+
+
+def load_fixture(name: str) -> dict:
+    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+
+def test_adapter_produces_rows():
+    v6_section = load_fixture("job_61_kitchen_v6_section.json")
+    rows = build_material_rows_from_v6_section(v6_section, "dummy.pdf")
+    assert len(rows) > 0
+    for row in rows:
+        assert "area_or_item" in row
+        assert "supplier" in row
+        assert "specs_or_description" in row
+        assert "notes" in row
+        assert row["provenance"]["source_provider"] == "v6"
+
+
+def test_row_order_is_sequential():
+    v6_section = load_fixture("job_61_kitchen_v6_section.json")
+    rows = build_material_rows_from_v6_section(v6_section, "dummy.pdf")
+    by_page = defaultdict(list)
+    for row in rows:
+        by_page[row["page_no"]].append(row["row_order"])
+    for page, orders in by_page.items():
+        assert orders == list(range(1, len(orders) + 1)), f"page {page}: {orders}"
+
+
+def test_merge_basic():
+    items = [
+        {
+            "area": "HANDLES",
+            "specs": "DRAWERS -Momo Trianon D Handle 128mm",
+            "supplier": "Momo",
+            "notes": "Knobs on Doors",
+            "_source": {"page": 3, "row_index": 2, "method": "grid"},
+        },
+        {
+            "area": "",
+            "specs": "DOORS - Momo Lugo Knob 38mm",
+            "supplier": "",
+            "notes": "",
+            "_source": {"page": 3, "row_index": 3, "method": "grid"},
+        },
+    ]
+    merged = _merge_adjacent_subrow_items(items)
+    assert len(merged) == 1
+    assert "DRAWERS" in merged[0]["specs"]
+    assert "DOORS" in merged[0]["specs"]
+    assert merged[0]["supplier"] == "Momo"
+    assert merged[0]["_source"]["row_index"] == 2
+
+
+def test_merge_multi_level():
+    items = [
+        {"area": "HANDLES", "specs": "UPPER cabinetry - No Handles", "supplier": "Titus", "notes": "", "_source": {"page": 1, "row_index": 1}},
+        {"area": "", "specs": "Doors - Knurled D Handle", "supplier": "", "notes": "", "_source": {"page": 1, "row_index": 2}},
+        {"area": "", "specs": "Drawers - Knurled D Handle 256m", "supplier": "", "notes": "", "_source": {"page": 1, "row_index": 3}},
+    ]
+    merged = _merge_adjacent_subrow_items(items)
+    assert len(merged) == 1
+    assert "UPPER" in merged[0]["specs"]
+    assert "Doors" in merged[0]["specs"]
+    assert "Drawers" in merged[0]["specs"]
+
+
+def test_merge_leading_empty_area():
+    items = [
+        {"area": "", "specs": "orphan content", "supplier": "", "notes": "", "_source": {"page": 1, "row_index": 1}},
+        {"area": "HANDLES", "specs": "DRAWERS", "supplier": "Momo", "notes": "", "_source": {"page": 1, "row_index": 2}},
+    ]
+    merged = _merge_adjacent_subrow_items(items)
+    assert len(merged) == 2
+    assert merged[0]["area"] == ""
+
+
+def test_merge_no_changes():
+    items = [
+        {"area": "BENCHTOP", "specs": "20mm Stone", "supplier": "Caesarstone", "notes": "", "_source": {"page": 1, "row_index": 1}},
+        {"area": "BASE CABINETRY COLOUR", "specs": "Thermolaminated - Matt", "supplier": "Polytec", "notes": "", "_source": {"page": 1, "row_index": 2}},
+    ]
+    merged = _merge_adjacent_subrow_items(items)
+    assert len(merged) == 2
+    assert merged[0]["area"] == "BENCHTOP"
+    assert merged[1]["area"] == "BASE CABINETRY COLOUR"
+
+
+def test_rows_survive_finalize():
+    import App.services.parsing as parsing
+
+    v6_section = load_fixture("job_61_kitchen_v6_section.json")
+    rows = build_material_rows_from_v6_section(v6_section, "dummy.pdf")
+    finalized = parsing._imperial_finalize_material_rows(rows)
+    assert len(finalized) > 0
+
+
+def test_tags_correct():
+    import App.services.parsing as parsing
+
+    v6_section = load_fixture("job_61_kitchen_v6_section.json")
+    rows = build_material_rows_from_v6_section(v6_section, "dummy.pdf")
+    finalized = parsing._imperial_finalize_material_rows(rows)
+    tags_seen = {row["tags"][0] for row in finalized if row.get("tags")}
+    assert "bench_tops" in tags_seen
+    assert "door_colours" in tags_seen
+    assert "handles" in tags_seen
+
+
+def test_handle_subitems_generated():
+    import App.services.parsing as parsing
+
+    v6_section = load_fixture("job_61_kitchen_v6_section.json")
+    rows = build_material_rows_from_v6_section(v6_section, "dummy.pdf")
+    finalized = parsing._imperial_finalize_material_rows(rows)
+    with_subitems = parsing._imperial_attach_handle_subitems(finalized)
+    handles_rows = [row for row in with_subitems if row.get("tags") == ["handles"]]
+    assert len(handles_rows) > 0
+    assert any(row.get("handle_subitems") for row in handles_rows)
+
+
+def test_build_room():
+    from App.models import RoomRow
+
+    v6_section = load_fixture("job_61_kitchen_v6_section.json")
+    room = build_room_from_v6_section(v6_section, "dummy.pdf")
+    assert isinstance(room, RoomRow)
+    assert room.room_key == "kitchen"
+    assert room.original_room_label
+    assert len(room.material_rows) > 0
