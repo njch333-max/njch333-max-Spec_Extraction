@@ -3,11 +3,15 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
 from App.models import RoomRow
 
+
+PDF_EXTRACTOR_PATH = str(Path(__file__).parent / "pdf_to_structured_json.py")
 
 REMAP = {
     "KITCHEN": "kitchen",
@@ -24,12 +28,11 @@ REMAP = {
 
 def run_v6_extraction(pdf_path: str) -> dict:
     """Run pdf_to_structured_json.py as subprocess, return parsed JSON."""
-    out_dir = Path("tmp")
-    out_dir.mkdir(exist_ok=True)
-    out_path = out_dir / f"{Path(pdf_path).stem}.v6_adapter.json"
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as handle:
+        out_path = Path(handle.name)
     try:
         result = subprocess.run(
-            ["python3", "pdf_to_structured_json.py", pdf_path, str(out_path)],
+            [sys.executable, PDF_EXTRACTOR_PATH, pdf_path, str(out_path)],
             capture_output=True,
             text=True,
             timeout=120,

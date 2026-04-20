@@ -1,66 +1,115 @@
 {
   "section_title": "KITCHEN JOINERY SELECTION SHEET",
   "metadata": {
-    "address": "Lot 338 Paradise Parade, Jacobs Well",
-    "client": "Silkwood Homes",
-    "date": "29.08.2024",
-    "ceiling_height": "2700mm",
-    "cabinetry_height": "2700mm",
-    "bulkhead": "no",
-    "shadowline": "16mm shadowline",
-    "hinges": "soft close",
-    "floor_type": "14MM ENGINEERED TIMBER - TO BE INSTALLED AFTER CABINETRY",
-    "designer": "CHLOE PARKER"
+    "address": "Lot 34, #8 Luca Court, Aratula",
+    "client": "Callaway",
+    "date": "26/03/2025",
+    "ceiling_height": "2750mm",
+    "cabinetry_height": "2400mm",
+    "bulkhead": "MDF BH by Imperial (Builder to paint)",
+    "hinges": "Soft Close",
+    "floor_type": "Vinyl",
+    "designer": "SARAH ROSCOW"
   },
   "items": [
     {
-      "area": "ISLAND BENCHTOP",
-      "specs": "20MM NATURAL STONE",
-      "image": "",
-      "supplier": "CDK Stone",
-      "notes": "2X WFE",
-      "_source": {"page": 1, "row_index": 2, "method": "grid"}
-    },
-    {
-      "area": "COOKTOP RUN BENCHTOP",
-      "specs": "20MM STONE\nRAW CONCRETE - ARIS",
-      "image": "",
-      "supplier": "Caesarstone",
-      "notes": "",
-      "_source": {"page": 1, "row_index": 3, "method": "grid"}
-    },
-    {
-      "area": "BASE, UPPER & TALL CABINETRY\nCOLOUR",
-      "specs": "Black - PureGrain",
-      "image": "",
-      "supplier": "Laminex",
-      "notes": "COLOURED BOTTOMS TO OVERHEADS\nBLUM AVENTOS HK DOORS",
-      "_source": {"page": 1, "row_index": 4, "method": "grid"}
-    },
-    {
-      "area": "FEATURE CABINETRY COLOUR",
-      "specs": "Perugian Walnut - Woodmatt",
+      "area": "BASE CABINETRY COLOUR",
+      "specs": "Thermolaminated - Classic White - Matt",
       "image": "",
       "supplier": "Polytec",
-      "notes": "REFER TO DRAWINGS FOR ALLOCATIONS",
-      "_source": {"page": 1, "row_index": 5, "method": "grid"}
+      "notes": "Door and Drawer Profile - Lismore Style 4 -\nHalf Rail\nDrawer Profile = Type 3\nDrawer Handle Position = Handle B",
+      "_source": {
+        "page": 1,
+        "row_index": 2,
+        "method": "grid"
+      }
+    },
+    {
+      "area": "BACK AND SIDES OF ISLAND PANELLING",
+      "specs": "Thermolaminated - Classic White - Matt -\nProfiles 4 X (BACK) + 1 X (EACH SIDE) with\nMoulding at the skirt)",
+      "image": "",
+      "supplier": "Polytec",
+      "notes": "BACK OF ISLAND - GPO cut out required -\nrefer drawings\nRHS OF ISLAND - GPO cut out required -\nrefer drawings",
+      "_source": {
+        "page": 1,
+        "row_index": 3,
+        "method": "grid"
+      }
+    },
+    {
+      "area": "UPPER CABINETRY COLOUR",
+      "specs": "Thermolaminated - Classic White - Matt",
+      "image": "",
+      "supplier": "Polytec",
+      "notes": "Door and Drawer Profile - Lismore Style 4",
+      "_source": {
+        "page": 1,
+        "row_index": 4,
+        "method": "grid"
+      }
+    },
+    {
+      "area": "UPPER CABINETRY COLOUR (GLASS\nDOORS ONLY)",
+      "specs": "Thermo - Classic White - Matt - Door Frame 4 -\nType I - Four Rebate - Clear Glass",
+      "image": "",
+      "supplier": "Polytec",
+      "notes": "Door and Drawer Profile - Lismore Style 4",
+      "_source": {
+        "page": 1,
+        "row_index": 5,
+        "method": "grid"
+      }
+    },
+    {
+      "area": "DECORATIVE FLUTES (FRONT&REAR OF\nISLAND COLUMNS)",
+      "specs": "Thermolaminated - Classic White - Matt -\nTuscan Decorative Flute x 4",
+      "image": "",
+      "supplier": "Polytec",
+      "notes": "",
+      "_source": {
+        "page": 1,
+        "row_index": 6,
+        "method": "grid"
+      }
     },
     {
       "area": "KICKBOARDS",
-      "specs": "as doors above it - refer to layouts for\nallocations",
+      "specs": "As Doors",
       "image": "",
       "supplier": "Polytec",
       "notes": "",
-      "_source": {"page": 1, "row_index": 6, "method": "grid"}
+      "_source": {
+        "page": 1,
+        "row_index": 7,
+        "method": "grid"
+      }
     },
     {
-      "area": "HANDLES",
-      "specs": "UPPER - FINGERPULL (PTO WHERE\nREQUIRED)\nBASE - BEVEL EDGE FINGERPULL",
+      "area": "MOULDING (ISLAND BACK AND SIDES\nINCL. COLUMNS)",
+      "specs": "Traditional Profile - Classic White Matt",
       "image": "",
-      "supplier": "",
+      "supplier": "Polytec",
       "notes": "",
-      "_source": {"page": 1, "row_index": 7, "method": "grid"}
+      "_source": {
+        "page": 1,
+        "row_index": 8,
+        "method": "grid"
+      }
+    },
+    {
+      "area": "HANDLES\nBIN",
+      "specs": "DRAWERS -Momo Trianon D Handle 128mm\nIn White & Brushed Nickel - Part no:\nTCM3622.WHBRN.FG\nDOORS - Momo Lugo Knob 38mm In Brushed\nNickel - Part no: 3238.BRN.FG\n2 x 29Ltr - Pull-out Bin",
+      "image": "",
+      "supplier": "Momo\nMomo\nHettich",
+      "notes": "Knobs on Doors, Handles on Drawers\n(Horizontal)",
+      "_source": {
+        "page": 1,
+        "row_index": 9,
+        "method": "grid"
+      }
     }
   ],
-  "pages": [1]
+  "pages": [
+    1
+  ]
 }

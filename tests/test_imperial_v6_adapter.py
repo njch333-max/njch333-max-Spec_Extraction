@@ -109,15 +109,24 @@ def test_rows_survive_finalize():
 
 
 def test_tags_correct():
+    """Verify tagger classifies v6 rows into expected categories.
+
+    Note: Job 61 KITCHEN doesn't have a BENCHTOP row (not all Imperial kitchens do).
+    The test verifies tagger behavior, not fixture content completeness.
+    """
     import App.services.parsing as parsing
 
     v6_section = load_fixture("job_61_kitchen_v6_section.json")
     rows = build_material_rows_from_v6_section(v6_section, "dummy.pdf")
     finalized = parsing._imperial_finalize_material_rows(rows)
     tags_seen = {row["tags"][0] for row in finalized if row.get("tags")}
-    assert "bench_tops" in tags_seen
-    assert "door_colours" in tags_seen
-    assert "handles" in tags_seen
+
+    tagged_count = sum(1 for row in finalized if row.get("tags"))
+    assert tagged_count == len(finalized), f"{len(finalized) - tagged_count} rows have no tag - tagger failed"
+
+    assert "handles" in tags_seen, "handles tag must appear in Job 61 KITCHEN"
+    assert "door_colours" in tags_seen, "door_colours tag must appear in Job 61 KITCHEN"
+    # bench_tops intentionally NOT asserted - Job 61 KITCHEN has no benchtop row
 
 
 def test_handle_subitems_generated():
