@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import os
 import zipfile
 from ast import literal_eval
 from copy import deepcopy
@@ -14,6 +15,9 @@ from pypdf import PdfReader
 from App.models import AnalysisMeta, ApplianceRow, RoomRow, SnapshotPayload, SpecialSectionRow
 from App.services import cleaning_rules
 from App.services.runtime import utc_now_iso
+
+
+USE_V6_IMPERIAL_EXTRACTOR = os.environ.get("USE_V6_IMPERIAL", "0") == "1"
 
 
 ROOM_ALIASES: dict[str, list[str]] = {
@@ -16977,6 +16981,46 @@ def _collect_spec_sections_for_document(builder_name: str, document: dict[str, o
     return _collect_room_sections_for_document(document, builder_name_override=builder_name)
 
 
+def _process_v6_imperial_document(
+    *,
+    document: dict[str, object],
+    rooms: dict[str, "RoomRow"],
+    room_master_keys: set[str],
+    section_order_counter: int,
+    file_name: str,
+    is_room_master: bool,
+    warnings: list[str],
+) -> int:
+    """Run v6 extractor on an Imperial room_master PDF and populate `rooms` dict."""
+    from App.services import imperial_v6_adapter
+
+    pdf_path = str(document.get("path") or "")
+    if not pdf_path:
+        warnings.append(f"V6 path skipped for {file_name}: no document path available.")
+        return section_order_counter
+    try:
+        v6_json = imperial_v6_adapter.run_v6_extraction(pdf_path)
+    except Exception as exc:
+        warnings.append(f"V6 extraction failed for {file_name}: {exc}. Falling back to skipping this document.")
+        return section_order_counter
+    for section in v6_json.get("sections", []):
+        if not isinstance(section, dict):
+            continue
+        row = imperial_v6_adapter.build_room_from_v6_section(section, pdf_path)
+        row.material_rows = _imperial_finalize_material_rows(row.material_rows)
+        row.material_rows = _imperial_attach_handle_subitems(row.material_rows)
+        section_order_counter += 1
+        row.room_order = section_order_counter
+        target_room_key = row.room_key
+        if target_room_key in rooms:
+            row.room_order = rooms[target_room_key].room_order
+        if is_room_master:
+            row.source_file = file_name
+            room_master_keys.add(target_room_key)
+        rooms[target_room_key] = row
+    return section_order_counter
+
+
 def _parse_spec_documents_structure_first(
     job_no: str,
     builder_name: str,
@@ -17039,82 +17083,99 @@ def _parse_spec_documents_structure_first(
             if page.get("needs_ocr"):
                 warnings.append(f"Low-text page detected in {file_name} page {page['page_no']}.")
 
-        for section in _collect_spec_sections_for_document(builder_name, document):
-            section_kind = str(section.get("section_kind", "room") or "room")
-            if section_kind == "special":
-                if imperial_builder and is_room_master:
-                    special_sections.append(_imperial_special_section_from_section(section))
-                continue
+        _use_v6_for_this_document = (
+            USE_V6_IMPERIAL_EXTRACTOR
+            and imperial_builder
+            and is_room_master
+            and document.get("path")
+        )
+        if _use_v6_for_this_document:
+            section_order_counter = _process_v6_imperial_document(
+                document=document,
+                rooms=rooms,
+                room_master_keys=room_master_keys,
+                section_order_counter=section_order_counter,
+                file_name=file_name,
+                is_room_master=is_room_master,
+                warnings=warnings,
+            )
+        else:
+            for section in _collect_spec_sections_for_document(builder_name, document):
+                section_kind = str(section.get("section_kind", "room") or "room")
+                if section_kind == "special":
+                    if imperial_builder and is_room_master:
+                        special_sections.append(_imperial_special_section_from_section(section))
+                    continue
 
-            if imperial_builder and not is_room_master:
-                continue
-            if not imperial_builder and str(section.get("page_type", "") or "") != "joinery":
-                continue
+                if imperial_builder and not is_room_master:
+                    continue
+                if not imperial_builder and str(section.get("page_type", "") or "") != "joinery":
+                    continue
 
-            original_room_label = source_room_label(
-                str(section.get("original_section_label", "")),
-                fallback_key=str(section.get("section_key", "")),
-            )[:80]
-            if not imperial_builder and _looks_like_spec_room_label_noise(original_room_label):
-                ignored_room_like_lines_count += 1
-                warnings.append(f"Ignored room-like section '{original_room_label}' from {file_name}: room-label metadata noise.")
-                continue
-            chunk = str(section.get("text", "") or "")
-            room_key = source_room_key(original_room_label, fallback_key=str(section.get("section_key", "")))
-            target_room_key, ignore_reason = _resolve_room_target(room_key, original_room_label, room_master_keys, is_room_master)
-            if ignore_reason:
-                ignored_room_like_lines_count += 1
-                warnings.append(f"Ignored room-like section '{original_room_label}' from {file_name}: {ignore_reason}.")
-                continue
-            if is_room_master:
-                room_master_keys.add(target_room_key)
-
-            if imperial_builder:
-                section_with_order = dict(section)
-                section_order_counter += 1
-                section_with_order["section_order"] = section_order_counter
-                row = _imperial_room_from_section(section_with_order)
-                row.room_key = target_room_key
-                row.original_room_label = original_room_label or row.original_room_label
-                if target_room_key in rooms:
-                    row.room_order = rooms[target_room_key].room_order
+                original_room_label = source_room_label(
+                    str(section.get("original_section_label", "")),
+                    fallback_key=str(section.get("section_key", "")),
+                )[:80]
+                if not imperial_builder and _looks_like_spec_room_label_noise(original_room_label):
+                    ignored_room_like_lines_count += 1
+                    warnings.append(f"Ignored room-like section '{original_room_label}' from {file_name}: room-label metadata noise.")
+                    continue
+                chunk = str(section.get("text", "") or "")
+                room_key = source_room_key(original_room_label, fallback_key=str(section.get("section_key", "")))
+                target_room_key, ignore_reason = _resolve_room_target(room_key, original_room_label, room_master_keys, is_room_master)
+                if ignore_reason:
+                    ignored_room_like_lines_count += 1
+                    warnings.append(f"Ignored room-like section '{original_room_label}' from {file_name}: {ignore_reason}.")
+                    continue
                 if is_room_master:
-                    row.source_file = file_name
-                rooms[target_room_key] = row
-                continue
+                    room_master_keys.add(target_room_key)
 
-            lines = _preprocess_chunk(chunk) if _is_yellowwood_builder(builder_name) else _section_lines(section)
-            row = rooms.get(target_room_key) or RoomRow(
-                room_key=target_room_key,
-                original_room_label=original_room_label,
-                source_file=file_name,
-            )
-            if is_room_master:
-                row.original_room_label = (
-                    _prefer_more_specific_room_label(row.original_room_label, original_room_label)
-                    if _is_yellowwood_builder(builder_name)
-                    else original_room_label
+                if imperial_builder:
+                    section_with_order = dict(section)
+                    section_order_counter += 1
+                    section_with_order["section_order"] = section_order_counter
+                    row = _imperial_room_from_section(section_with_order)
+                    row.room_key = target_room_key
+                    row.original_room_label = original_room_label or row.original_room_label
+                    if target_room_key in rooms:
+                        row.room_order = rooms[target_room_key].room_order
+                    if is_room_master:
+                        row.source_file = file_name
+                    rooms[target_room_key] = row
+                    continue
+
+                lines = _preprocess_chunk(chunk) if _is_yellowwood_builder(builder_name) else _section_lines(section)
+                row = rooms.get(target_room_key) or RoomRow(
+                    room_key=target_room_key,
+                    original_room_label=original_room_label,
+                    source_file=file_name,
                 )
-                row.source_file = file_name
-            section_pages = [
-                {"page_no": page_no, "text": text}
-                for page_no, text in [
-                    (int(page_entry.get("page_no", 0) or 0), str(page_entry.get("text", "") or ""))
-                    for page_entry in section.get("page_texts", [])
-                    if isinstance(page_entry, dict)
+                if is_room_master:
+                    row.original_room_label = (
+                        _prefer_more_specific_room_label(row.original_room_label, original_room_label)
+                        if _is_yellowwood_builder(builder_name)
+                        else original_room_label
+                    )
+                    row.source_file = file_name
+                section_pages = [
+                    {"page_no": page_no, "text": text}
+                    for page_no, text in [
+                        (int(page_entry.get("page_no", 0) or 0), str(page_entry.get("text", "") or ""))
+                        for page_entry in section.get("page_texts", [])
+                        if isinstance(page_entry, dict)
+                    ]
+                    if page_no
                 ]
-                if page_no
-            ]
-            _merge_room_section_into_row(
-                row,
-                lines,
-                chunk,
-                file_name,
-                section_pages or pages,
-                allow_material_fields=is_room_master,
-                authoritative_room_section=is_room_master,
-            )
-            rooms[target_room_key] = row
+                _merge_room_section_into_row(
+                    row,
+                    lines,
+                    chunk,
+                    file_name,
+                    section_pages or pages,
+                    allow_material_fields=is_room_master,
+                    authoritative_room_section=is_room_master,
+                )
+                rooms[target_room_key] = row
 
         page_appliances = _extract_appliances_from_pages(file_name, pages, builder_name=builder_name)
         if imperial_builder:
