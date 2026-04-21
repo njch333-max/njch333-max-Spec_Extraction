@@ -205,6 +205,38 @@
   - Imperial `job 49 / 50` now pass PDF QA on the latest build after Vision-grid-first joinery parsing, sink/tap recovery, appliance row cleanup, and the backend correction that classifies `job 50` as `Imperial`
   - Simonds grouped-row recovery now restores clean benchtop/shelf/sink/tap/handle values for `Study`, `Butlers/WIP`, `Laundry`, `Bathroom`, `Powder`, and `Rumpus`
 
+## Imperial V6 Replacement Phase
+A multi-step replacement of the legacy Imperial Docling + Heavy Vision extraction pipeline with a deterministic cell-aware extractor (`App/services/pdf_to_structured_json.py`) is underway. This phase is Imperial-only; other builders are not affected.
+
+### Completed Steps
+- **Step 2** (`step-2-complete`): introduced the v6 adapter surface in `App/services/imperial_v6_adapter.py` with `run_v6_extraction`, `build_material_rows_from_v6_section`, and `build_room_from_v6_section`. Added 10 unit tests (`tests/test_imperial_v6_adapter.py`).
+- **Step 2.5** (`step-2-5-complete`): fixed Windows compatibility for the v6 extractor subprocess call, introduced the `PDF_EXTRACTOR_PATH` constant, and added a real Haldham Crescent Imperial PDF fixture.
+- **Step 4a** (`step-4a-complete`): introduced the `USE_V6_IMPERIAL` feature flag as `parsing.USE_V6_IMPERIAL_EXTRACTOR`, added `_process_v6_imperial_document` in `parsing.py`, and connected Imperial documents through to v6 when the flag is enabled. Dispatch condition: flag on, builder is Imperial, document is room-master, document has a resolvable path.
+- **Step 4b / 4b.5** (`step-4b-complete`): added `App/services/imperial_v6_room_fields.py` (268 lines) to populate 16 room-level fields from v6 section metadata and items. Coverage observed on baseline jobs 61/62/64/67: Tier 1 fields 100%, Tier 2 fields 82.4%, Tier 3 fields 50%. Includes cross-section `(ROOM)` marker lookup for sinkware/tapware, with acceptable markers covering `MASTER ENSUITE` ↔ `(ENSUITE)` and `KITCHEN & PANTRY` ↔ `(KITCHEN)` label variants. Full pytest: 905 passed.
+- **Step 4c** (`step-4c-complete`): moved v6 dispatch from inside `parsing.parse_documents` to the top of `extraction_service.build_spec_snapshot` as a fast-path bypass (`_build_imperial_v6_fast_snapshot`). The fast path skips the legacy `_apply_layout_pipeline`, `_try_openai`, `_merge_ai_result`, `_stabilize_snapshot_layout`, `_apply_builder_specific_polish`, `_apply_imperial_row_polish`, `_build_raw_spec_crosscheck_snapshot`, and `_crosscheck_imperial_snapshot_with_raw`. Added `parser_strategy = "imperial_v6"` to `cleaning_rules.PARSER_STRATEGIES` and reconciled `runs.parser_strategy` after snapshot build in `worker.process_run`. The fix addresses a root cause identified in `STEP4C_DIAGNOSIS_REPORT.md`: v6 material rows were previously overwritten by the legacy Imperial row polish. Added 4 new dispatch tests in `tests/test_imperial_v6_path_dispatch.py`. Full pytest: 909 passed.
+
+### Production Validation
+- Step 4c was deployed to `spec.lxtransport.online` using `tools/deploy_online.py`. Flag-off Job 61 re-verification produced the same legacy output; flag-on runs produced `parser_strategy = imperial_v6`.
+- The v6 fast path was validated on four Imperial source PDFs in production:
+  - Job 71 (Haldham Crescent, 3 rooms, run duration 2s)
+  - Job 72 (9 Greenland Court / 38211-2, 3 rooms, run duration 2s)
+  - Job 73 (Lot 532 Sandpiper Terrace / 37558-2, 12 rooms, run duration 6s)
+  - Kelvin Grove (17 Park Street, 12+ rooms, run duration ~5s)
+- Observed performance improvement vs legacy Imperial pipeline: approximately 2s vs 57s on single-room/small PDFs.
+- Snapshot diagnostics on v6 runs correctly report `layout_attempted = No`, `docling_attempted = No`, `vision_attempted = No`, and `layout_provider = pdf_to_structured_json_v6`.
+
+### Known Limitations (Deferred Backlog)
+Confirmed against the 4 production test PDFs. Tracked as non-blocking:
+1. `HANDLES` rows can repeat multiple times on Kitchen room cards when the source table expresses multiple handle rows (observed on Sandpiper).
+2. `Handles` material summary entries can end with a dangling ` - and -` fragment when concatenating multi-line supplier notes (observed on Greenland, Sandpiper WIR).
+3. `FLOORING` can occasionally populate with the column-header text `AREA / ITEM SPECS / DESCRIPTION IMAGE SUPPLIER NOTES` when the source row is missing (observed on Kelvin Grove UPPER-BED 3 Astrid, LWR STUDY DESK Evyn). Intended meaning is "no flooring specified."
+4. The v6 extractor can merge visually adjacent `area` cells into a single `area_or_item` label (observed on Sandpiper: `BENCHTOP ISLAND CABINETRY COLOUR`, `BIN ACCESSORIES LED'S`, `LED'S HANDLES`). Underlying supplier/description/notes cells remain correctly associated with the merged row. This is a cell-grid recovery limit inside the v6 extractor itself; a targeted fix would require changes to the v6 merge algorithm and is not planned for the current 1-week window. Users should cross-reference the source PDF when the `area_or_item` label visually combines multiple row labels.
+5. Duplicate `notes` wording on selected rows (observed on TV UPPER cabinetry on Kelvin Grove).
+
+### Remaining Work
+- **Step 4d (candidate)**: patch bugs 1, 2, 3, and 5 above (all localized to `imperial_v6_room_fields.py` or text assembly). Bug 4 is deferred pending a longer-term v6 extractor revision.
+- **Step 6**: delete the legacy Imperial pipeline code, specifically `_imperial_collect_page_fields` and the associated helper functions, the Imperial branch of `_apply_layout_pipeline`, `_apply_imperial_row_polish`, and `_crosscheck_imperial_snapshot_with_raw`. The `USE_V6_IMPERIAL` flag and `_build_imperial_v6_fast_snapshot` fallback branch are removed together in this step because flag-off behavior no longer has a target. Scope is limited to Imperial; non-Imperial builder code paths remain unchanged.
+
 ## Current Goals
 1. Keep Builder and Job flows stable while iterating extraction quality
 2. Improve extraction accuracy with better appliance parsing, smart material normalization, and bench-top splitting

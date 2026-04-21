@@ -305,6 +305,21 @@
   - Clarendon now treats `Drawings and Colours` as the deterministic room-name master when present, and final room names are whitelisted to titles from that file
   - Yellowwood keeps only rooms with joinery/material evidence and prefers specific joinery/spec titles over generalized parent labels
 
+### 3.11 Imperial V6 Fast Path
+1. Imperial builders now have an alternative cell-aware extraction path that bypasses the legacy Docling/Heavy Vision pipeline. The new path is gated by the `USE_V6_IMPERIAL` feature flag and is the primary Imperial extractor when enabled.
+2. The v6 path is a temporary transition tool. When Step 6 removes the Imperial legacy route, the flag and the legacy branch are removed together. Until then, turning the flag off reverts the Imperial runtime to the Phase 3B legacy pipeline with no other behavior change.
+3. The v6 path applies to Imperial jobs only. Yellowwood, Simonds, Evoca, and Clarendon remain on their existing extraction pipelines and are not affected by this flag.
+4. New source files:
+   - `App/services/pdf_to_structured_json.py`: cell-aware raw PDF extractor that emits per-section item dicts with `area`, `specs`, `supplier`, `notes`, `_source`, and section metadata.
+   - `App/services/imperial_v6_adapter.py`: maps v6 JSON sections into `RoomRow` and `material_rows` objects while preserving v6 provenance (`source_provider = "v6"`, `source_extractor = "pdf_to_structured_json_v6"`).
+   - `App/services/imperial_v6_room_fields.py`: populates Imperial room-level fields from v6 section metadata and items, including cross-section `(ROOM)` marker lookup for sinkware/tapware.
+5. New entrypoint: `extraction_service._build_imperial_v6_fast_snapshot` runs before `_apply_layout_pipeline` inside `build_spec_snapshot`. When the flag is on, the builder is Imperial, and at least one document has a non-empty `path`, the fast path is attempted.
+6. Preserved inside the v6 fast path: `_load_documents`, `parsing.parse_documents`, `_process_v6_imperial_document`, `imperial_v6_adapter.run_v6_extraction`, `imperial_v6_adapter.build_room_from_v6_section`, `parsing._imperial_finalize_material_rows`, `parsing._imperial_attach_handle_subitems`, `parsing.enrich_snapshot_rooms`, `_enrich_snapshot_appliances`, and `parsing.apply_snapshot_cleaning_rules` (through `parse_documents`).
+7. Bypassed inside the v6 fast path: `_apply_layout_pipeline`, `_try_openai`, `_merge_ai_result`, `_stabilize_snapshot_layout`, `_apply_builder_specific_polish`, `_apply_imperial_row_polish`, `_build_raw_spec_crosscheck_snapshot`, `_crosscheck_imperial_snapshot_with_raw`, the Docling layout branch, and the Heavy Vision branch.
+8. Fallback behavior: if `parse_documents` raises during the v6 fast path, or if the resulting snapshot contains no material rows with v6 provenance, `_build_imperial_v6_fast_snapshot` emits an `imperial_v6_fallback` progress warning, returns `None`, and lets the legacy Imperial pipeline run normally. The run does not fail just because v6 failed.
+9. New parser strategy `imperial_v6` is added to `cleaning_rules.PARSER_STRATEGIES`. Snapshot analysis fields `parser_strategy`, `mode`, `layout_provider`, `layout_mode`, `layout_attempted`, `docling_attempted`, and `vision_attempted` are set explicitly in the v6 path to reflect that no layout/docling/vision work was run. The worker reconciles `runs.parser_strategy` against the snapshot's `analysis.parser_strategy` after the run so the DB reflects actual dispatch.
+10. Observed production performance for the v6 fast path on Imperial spec PDFs is typically 2-6 seconds per job, compared with 40-60 seconds on the legacy Docling/Heavy Vision path.
+
 ## 4. Canonical Schema
 
 ### Rooms
