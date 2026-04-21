@@ -57,6 +57,9 @@ def process_run(run: dict[str, Any]) -> None:
                 template_files=template_files,
                 progress_callback=lambda stage, message: store.update_run_progress(run_id, stage, message, worker_token=WORKER_TOKEN),
             )
+            snapshot_strategy = str((snapshot.get("analysis") or {}).get("parser_strategy") or parser_strategy)
+            if snapshot_strategy != parser_strategy:
+                store.update_run_runtime_metadata(run_id, snapshot_strategy, WORKER_PID, APP_BUILD_ID)
             store.upsert_snapshot(int(job["id"]), "raw_spec", snapshot)
         else:
             drawing_files = _attach_paths(job_dirs["drawing_dir"], store.list_job_files(int(job["id"]), "drawing"))

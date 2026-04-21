@@ -21,6 +21,7 @@ from App.services import cleaning_rules, parsing, runtime
 
 
 ProgressCallback = Callable[[str, str], None] | None
+IMPERIAL_V6_PARSER_STRATEGY = "imperial_v6"
 
 _DOCLING_CONVERTER: Any = None
 _DOCLING_CONVERTER_CLASS: Any = None
@@ -301,6 +302,10 @@ def build_spec_snapshot(
     rule_flags = cleaning_rules.global_rule_flags()
     parser_strategy = cleaning_rules.global_parser_strategy()
     raw_documents = _load_documents(files, role="spec")
+    if parsing.USE_V6_IMPERIAL_EXTRACTOR and _is_imperial_builder_name(str(builder.get("name", "") or "")) and any(str(document.get("path") or "").strip() for document in raw_documents):
+        v6_snapshot = _build_imperial_v6_fast_snapshot(job, builder, raw_documents, rule_flags, progress_callback)
+        if v6_snapshot is not None:
+            return v6_snapshot
     documents = [
         {
             **document,
@@ -435,6 +440,48 @@ def build_spec_snapshot(
         )
     heuristic["analysis"] = analysis
     return heuristic
+
+
+def _build_imperial_v6_fast_snapshot(
+    job: dict[str, Any], builder: dict[str, Any], documents: list[dict[str, object]], rule_flags: Any, progress_callback: ProgressCallback = None
+) -> dict[str, Any] | None:
+    _report_progress(progress_callback, "imperial_v6", "Running Imperial v6 extractor")
+    try:
+        snapshot = parsing.parse_documents(job_no=str(job.get("job_no", "")), builder_name=str(builder.get("name", "") or ""), source_kind="spec", documents=documents, rule_flags=rule_flags)
+    except Exception as exc:
+        _report_progress(progress_callback, "imperial_v6_fallback", f"Imperial v6 failed: {exc}; falling back to legacy Imperial pipeline")
+        return None
+    snapshot = parsing.enrich_snapshot_rooms(snapshot, documents, rule_flags=rule_flags)
+    if not _snapshot_has_v6_material_rows(snapshot):
+        _report_progress(progress_callback, "imperial_v6_fallback", "Imperial v6 produced no source rows; falling back to legacy Imperial pipeline")
+        return None
+    snapshot = _enrich_snapshot_appliances(snapshot, progress_callback, rule_flags=rule_flags)
+    analysis = dict(snapshot.get("analysis") or {})
+    analysis.update(
+        {
+            "mode": IMPERIAL_V6_PARSER_STRATEGY, "parser_strategy": IMPERIAL_V6_PARSER_STRATEGY,
+            "layout_attempted": False, "layout_succeeded": False,
+            "layout_mode": IMPERIAL_V6_PARSER_STRATEGY, "layout_provider": "pdf_to_structured_json_v6",
+            "layout_pages": [], "heavy_vision_pages": [],
+            "layout_note": "Imperial v6 fast path skipped legacy layout, Docling, heavy vision, polish, and raw crosscheck.",
+            "docling_attempted": False, "docling_succeeded": False, "docling_pages": [],
+            "docling_note": "Skipped by Imperial v6 fast path.",
+            "vision_attempted": False, "vision_succeeded": False, "vision_pages": [], "vision_page_count": 0,
+            "vision_note": "Skipped by Imperial v6 fast path.",
+            "rule_flags": rule_flags, "worker_pid": os.getpid(), "app_build_id": runtime.APP_BUILD_ID,
+        }
+    )
+    snapshot["analysis"] = analysis
+    return snapshot
+
+
+def _snapshot_has_v6_material_rows(snapshot: dict[str, Any]) -> bool:
+    return any(
+        (provenance := row.get("provenance") if isinstance(row.get("provenance"), dict) else {}).get("source_provider") == "v6"
+        or provenance.get("source_extractor") == "pdf_to_structured_json_v6"
+        for room in snapshot.get("rooms", []) or []
+        for row in room.get("material_rows", []) or []
+    )
 
 
 def build_drawing_snapshot(

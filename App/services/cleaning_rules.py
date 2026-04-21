@@ -78,6 +78,11 @@ PARSER_STRATEGIES = [
         "description": "Use the fixed 37016-style conservative merge profile for all builders.",
     },
     {
+        "key": "imperial_v6",
+        "label": "Imperial v6",
+        "description": "Use the v6 cell-aware extractor for Imperial spec PDFs.",
+    },
+    {
         "key": "stable_hybrid",
         "label": "Stable Hybrid",
         "description": "Keep heuristic room structure and cleaning primary; let AI fill missing fields only.",
