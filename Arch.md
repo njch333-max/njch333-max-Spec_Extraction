@@ -320,6 +320,31 @@
 9. New parser strategy `imperial_v6` is added to `cleaning_rules.PARSER_STRATEGIES`. Snapshot analysis fields `parser_strategy`, `mode`, `layout_provider`, `layout_mode`, `layout_attempted`, `docling_attempted`, and `vision_attempted` are set explicitly in the v6 path to reflect that no layout/docling/vision work was run. The worker reconciles `runs.parser_strategy` against the snapshot's `analysis.parser_strategy` after the run so the DB reflects actual dispatch.
 10. Observed production performance for the v6 fast path on Imperial spec PDFs is typically 2-6 seconds per job, compared with 40-60 seconds on the legacy Docling/Heavy Vision path.
 
+### 3.12 Actual v6 Architecture (2026-04-22 Update)
+The v6 fast path is a two-layer process, not a single-layer extractor:
+
+**(a) Extractor layer**: `pdf_to_structured_json.py` (758 lines)
+- Input: PDF
+- Output: section-based JSON
+- Schema: `{source_pdf, pages, sections[].{section_title, metadata, items, pages}}`
+- Item fields: `area`, `specs`, `image`, `supplier`, `notes`, `_source.{page,row_index,method}`, with optional `_review_hint`
+- Known bugs 1-5 all live in this layer.
+
+**(b) Post-processing layer**: spans two files
+- `extraction_service.py` (~11700 lines): `_build_imperial_v6_fast_snapshot`, area canonical label mapping (lines 1011-1326), label merge/conversion relationships (lines 4124-4173, etc.), and many area-processing regexes
+- `imperial_v6_room_fields.py` (268 lines): room-level field population
+- Output: room-based model, which feeds the website display and factory reference data
+- Transformations: sections -> rooms + appliances + sinkware; add confidence/evidence; add room-specific attributes (`drawers` / `hinges` / `flooring` / `sink`); deduplicate Material Summary
+- Layer (b) shares `extraction_service.py` area-processing logic with the legacy Docling + Heavy Vision path.
+- Bug 6 has been observed in this layer.
+
+Bug reports must first identify which layer owns the defect. Compare the raw JSON emitted by `pdf_to_structured_json.py` with the website display:
+- Raw JSON has the item but the website does not -> layer (b) bug, such as Bug 6
+- Raw JSON is wrong -> layer (a) bug, such as Bugs 1-5
+- Both are wrong in the same shape -> layer (a) bug passed through layer (b)
+
+Auxiliary tool: `render_v6_review.py` (local tool, not in mainline) renders layer (a) raw JSON to Excel, providing a baseline for comparison against the layer (b) website display.
+
 ## 4. Canonical Schema
 
 ### Rooms

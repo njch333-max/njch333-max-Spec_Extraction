@@ -227,14 +227,61 @@ A multi-step replacement of the legacy Imperial Docling + Heavy Vision extractio
 
 ### Known Limitations (Deferred Backlog)
 Confirmed against the 4 production test PDFs. Tracked as non-blocking:
-1. `HANDLES` rows can repeat multiple times on Kitchen room cards when the source table expresses multiple handle rows (observed on Sandpiper).
-2. `Handles` material summary entries can end with a dangling ` - and -` fragment when concatenating multi-line supplier notes (observed on Greenland, Sandpiper WIR).
-3. `FLOORING` can occasionally populate with the column-header text `AREA / ITEM SPECS / DESCRIPTION IMAGE SUPPLIER NOTES` when the source row is missing (observed on Kelvin Grove UPPER-BED 3 Astrid, LWR STUDY DESK Evyn). Intended meaning is "no flooring specified."
-4. The v6 extractor can merge visually adjacent `area` cells into a single `area_or_item` label (observed on Sandpiper: `BENCHTOP ISLAND CABINETRY COLOUR`, `BIN ACCESSORIES LED'S`, `LED'S HANDLES`). Underlying supplier/description/notes cells remain correctly associated with the merged row. This is a cell-grid recovery limit inside the v6 extractor itself; a targeted fix would require changes to the v6 merge algorithm and is not planned for the current 1-week window. Users should cross-reference the source PDF when the `area_or_item` label visually combines multiple row labels.
-5. Duplicate `notes` wording on selected rows (observed on TV UPPER cabinetry on Kelvin Grove).
+
+| Bug | Limitation | Severity | Current owner / fix | Notes |
+| --- | --- | --- | --- | --- |
+| 1 | `HANDLES` rows can repeat multiple times on Kitchen room cards when the source table expresses multiple handle rows | TBD | Step 4d candidate | Observed on Sandpiper |
+| 2 | `Handles` material summary entries can end with a dangling ` - and -` fragment when concatenating multi-line supplier notes | TBD | Step 4d candidate | Observed on Greenland, Sandpiper WIR |
+| 3 | `FLOORING` can occasionally populate with the column-header text `AREA / ITEM SPECS / DESCRIPTION IMAGE SUPPLIER NOTES` when the source row is missing | TBD | Step 4d candidate | Observed on Kelvin Grove UPPER-BED 3 Astrid, LWR STUDY DESK Evyn. Intended meaning is "no flooring specified." |
+| 4 | The v6 extractor can merge visually adjacent `area` cells into a single `area_or_item` label | TBD | Deferred pending longer-term v6 extractor revision | Observed on Sandpiper: `BENCHTOP ISLAND CABINETRY COLOUR`, `BIN ACCESSORIES LED'S`, `LED'S HANDLES`. Underlying supplier/description/notes cells remain correctly associated with the merged row. This is a cell-grid recovery limit inside the v6 extractor itself; users should cross-reference the source PDF when the `area_or_item` label visually combines multiple row labels. 同型现象在 37330 (Job 61) KITCHEN 也出现：HANDLES + BIN 合并为 "HANDLES BIN"。但 v6 的 `_review_hint` 启发式没标记 37330 的合并（Sandpiper 的同型合并被标记了），说明 flag 启发式有覆盖盲区。 |
+| 5 | Duplicate `notes` wording on selected rows | TBD | Step 4d candidate | Observed on TV UPPER cabinetry on Kelvin Grove |
+| 6 | Room model layer (b) in 37330 KITCHEN drops area "UPPER CABINETRY COLOUR" | 🔴 High | Dedicated investigation after Step 4d (candidate layers below) | Data loss, not a merge |
+
+**Bug 6 detailed observation** (2026-04-22):
+
+- Source: 37330 (Lot 34 #8 Luca Court) Colour Selection PDF
+- PDF KITCHEN page 1 has 9 actual areas
+- Extractor layer (a) raw JSON KITCHEN has 8 items (`HANDLES` + `BIN` have already merged into 1 item, same pattern as Bug 1)
+- Room model layer (b) website display shows only 7 KITCHEN areas
+- **Layer (b) has one fewer area than layer (a): "UPPER CABINETRY COLOUR"**
+  - Note: this is distinct from "UPPER CABINETRY COLOUR (GLASS DOORS ONLY)"
+  - The latter is preserved; the former disappears
+- Hypothesis: layer (b) dedupe/merge logic incorrectly folds these two similarly named areas into one
+
+**Not done** (during Path C):
+
+- Did not scan other jobs for the same loss pattern
+- Did not open layer (b) code to locate the root cause
+- Did not produce a fix plan
+
+**Candidate layer locations** (grep observation, not deeply verified):
+
+1. CABINETRY COLOUR matching logic around `imperial_v6_room_fields.py:91, 100`
+   - line 91 explicitly matches "UPPER CABINETRY COLOUR"
+   - line 100 uses loose matching with `"CABINETRY COLOUR" in area`, which may let
+     "UPPER CABINETRY COLOUR" and "UPPER CABINETRY COLOUR (GLASS DOORS ONLY)"
+     overwrite each other
+2. Area canonical label mapping table in `extraction_service.py:1011-1326`
+   - line 1011 maps "UPPER CABINETRY|OVERHEADS" -> "UPPER CABINETRY COLOUR"
+   - the two areas may collide on the same key after canonicalization
+
+The real location may be (1), (2), or the interaction between both. This requires dedicated investigation after Step 4d.
+
+**Risk positioning**:
+
+- Factory uses this output as reference data only, not for direct cutting/production
+- Area data loss still affects factory cross-check efficiency, and this loss is hidden (unlike Bug 4 merge, which is visually obvious)
+- Severity is in the same class as Bug 4, possibly higher (data loss > data merge)
+
+After the factory feedback window ends, Bug 6 should be investigated before Bug 4.
 
 ### Remaining Work
 - **Step 4d (candidate)**: patch bugs 1, 2, 3, and 5 above (all localized to `imperial_v6_room_fields.py` or text assembly). Bug 4 is deferred pending a longer-term v6 extractor revision.
+- **After Step 4d**: investigate Bug 6 (room model layer area loss) separately.
+  Investigation complexity may be higher than Bug 4: it spans `extraction_service.py` (~11700 lines) and
+  `imperial_v6_room_fields.py` (268 lines), and the area-processing logic in `extraction_service.py`
+  is shared with the legacy path. **Not in Step 4d scope**, to avoid mixing it with the
+  small-patch nature of Step 4d.
 - **Step 6**: delete the legacy Imperial pipeline code, specifically `_imperial_collect_page_fields` and the associated helper functions, the Imperial branch of `_apply_layout_pipeline`, `_apply_imperial_row_polish`, and `_crosscheck_imperial_snapshot_with_raw`. The `USE_V6_IMPERIAL` flag and `_build_imperial_v6_fast_snapshot` fallback branch are removed together in this step because flag-off behavior no longer has a target. Scope is limited to Imperial; non-Imperial builder code paths remain unchanged.
 
 ## Current Goals
