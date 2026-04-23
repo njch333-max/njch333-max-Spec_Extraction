@@ -48,7 +48,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - View a job detail page with files, runs, results, and exports.
 - The Jobs list `Open` action must render as a button-styled control and open each job in a new browser tab so the list page remains available.
 - The Job Workspace run history must show actual parse `Duration`, separate `Worker / Build` metadata, and an `Open Result` action for succeeded spec runs with stored result JSON.
-- The app must provide a read-only historical spec-result page for succeeded spec runs, using stored run payloads instead of the latest snapshot, without enabling export or PDF QA from that historical view.
+- The app must provide a read-only historical spec-result page for succeeded spec runs, using stored run payloads instead of the latest snapshot, without enabling export from that historical view.
 
 ### 4.3 File Support
 - Spec files: `PDF`, `DOCX`
@@ -102,9 +102,9 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Imperial row-band assembly must respect separator confidence before cell extraction. `visible` and `inferred_high` separators are hard row boundaries; `none` and `inferred_low` may keep adjacent bands mergeable only for same-cell continuation or label continuation, not for supplier-only preludes that belong to a later row.
 - Imperial `AREA / ITEM` anchored row assembly must handle weak-boundary leading fragments that visually precede their owning label. Example: a `GPO` fragment with power-point/socket wording immediately before `ACCESSORIES` belongs to the `ACCESSORIES` raw row unless a visible or high-confidence separator proves it is a separate source row.
 - Imperial postprocess and display/checklist rendering must correct boundary-straddling size prefixes that the column model placed into `AREA / ITEM` when visible grid evidence shows they belong to `SPECS / DESCRIPTION`; for example `450mm BIN` should render the original label as `BIN` and move `450mm` back into the value.
-- Imperial supplier-cell ownership must preserve clean supplier cells such as `By Imperial` in room-card raw rows and PDF-QA checklist values. Handle summary may drop suppliers for semantic grouping, but raw rows must still display the supplier cell when it exists in the PDF. If the same supplier text also appears in `notes`, remove the duplicate notes value rather than rendering `[By Imperial] ... (By Imperial)`.
+- Imperial supplier-cell ownership must preserve clean supplier cells such as `By Imperial` in room-card raw rows and raw export values. Handle summary may drop suppliers for semantic grouping, but raw rows must still display the supplier cell when it exists in the PDF. If the same supplier text also appears in `notes`, remove the duplicate notes value rather than rendering `[By Imperial] ... (By Imperial)`.
 - Imperial postprocess must preserve accepted leading-fragment repairs. Once provenance records `leading_fragment_repair = gpo_to_accessories` or equivalent accepted `GPO` spillover evidence, later accessory cleanup must not trim the recovered `GPO` prefix out of the final `material_rows` value.
-- Imperial postprocess and display/checklist rendering must repair handle label/value spillover before summary. If value text such as `Momo` or `oval wardrobe tube` leaks into `AREA / ITEM` around a `HANDLES` label, the displayed row label should return to the source label `HANDLES`, valid handle-brand prefix text should move into the value, and visible-separated non-handle text must not enter handle summary. If the final label has already been normalized to `HANDLES`, the repair must still inspect row/cell provenance such as `raw_area_or_item`, `layout_row_label`, and label-cell text to recover valid same-cell brand prefixes. Later visual-subrow cleanup and PDF-QA checklist generation must not trim a provenance-backed valid handle brand prefix back out.
+- Imperial postprocess and display/export rendering must repair handle label/value spillover before summary. If value text such as `Momo` or `oval wardrobe tube` leaks into `AREA / ITEM` around a `HANDLES` label, the displayed row label should return to the source label `HANDLES`, valid handle-brand prefix text should move into the value, and visible-separated non-handle text must not enter handle summary. If the final label has already been normalized to `HANDLES`, the repair must still inspect row/cell provenance such as `raw_area_or_item`, `layout_row_label`, and label-cell text to recover valid same-cell brand prefixes. Later visual-subrow cleanup and export rendering must not trim a provenance-backed valid handle brand prefix back out.
 - Imperial continuation handling must prefer complete same-cell / same-band continuation over truncated fragment display. Legitimate continuation fragments such as `Colour Code:`, `Vertical Grain`, `steel support`, `Bullnose edge`, `Square edge`, `anthracite`, `Part Number`, `SKU`, `Std Whiteboard internal`, and `Flat fronts, not curved` must stay with the owning row unless a stronger new-row anchor exists.
 - Imperial sinkware cleanup must preserve same-room supplier, mounting, and taphole evidence after overlay selection. If source-backed parsing leaves tails such as `Sink Mounting Undermount sink`, `behind`, or `behind basin sink`, cleanup may normalize them to the same source meaning (`Sink Mounting - By Others Undermount`, `behind sink`, `behind basin`) but must not invent a sink/basin row that is absent from the source page.
 - For all non-drawing table/grid-first page families, values must be read from the recovered table/grid rows first and only lightly normalized afterward. Field ordering and UI presentation must happen after extraction, not before it.
@@ -156,7 +156,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Imperial structural-parser work must follow the dedicated tracker flow:
   - read `IMPERIAL_GRID_TRACKER.md` before starting work,
   - pick one primary blocker per cycle,
-  - complete local checks -> deploy -> fresh rerun -> source-PDF QA,
+- complete local checks -> deploy -> fresh rerun -> source-PDF review,
   - then update `IMPERIAL_GRID_TRACKER.md` before closing the cycle.
 - Default collaboration flow should be:
   - stable default branch
@@ -165,7 +165,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
   - Codex review against the PR diff
 - PR descriptions should explicitly capture affected builders/jobs, key sample PDFs, rerun requirements, and whether the four root docs changed.
 - The repository should include a PR template and CODEOWNERS file so parser and UI changes can be reviewed consistently.
-- Day-to-day parser work should default to `fix this bug` when a live issue is already specific and PDF-grounded; `review this PR` is reserved for shared parser/finalizer/PDF-QA changes that carry cross-builder regression risk.
+- Day-to-day parser work should default to `fix this bug` when a live issue is already specific and PDF-grounded; `review this PR` is reserved for shared parser, finalizer, workflow, or export changes that carry cross-builder regression risk.
 - For Yellowwood, final room names must preserve the more specific spec-title form, such as `BED 1 ENSUITE VANITY`, `BATHROOM VANITY`, `BED 1 WALK IN ROBE`, and `BED 2/3/4 ROBE`.
 - For Yellowwood, builder-specific finalization must also preserve more detailed titles where the source provides them, including `PANTRY`, `BED 1 MASTER ENSUITE VANITY`, `GROUND FLOOR POWDER ROOM`, `UPPER-LEVEL POWDER ROOM`, `BED 2/3/4/5 ROBE FIT OUT`, and `BED 1 MASTER WALK IN ROBE FIT OUT`.
 - For Yellowwood, rooms are kept only when they have real joinery/material evidence. Pure plumbing, tiling, accessory, or flooring-only rooms must be dropped, while `robe` or `media` rooms may stay only when they contain material evidence such as `Polytec` or `Laminex`.
@@ -225,21 +225,12 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Preserve reviewed data separately from raw machine extraction.
 - The Job page should temporarily hide the Review cards until a later redesign is ready; the underlying review data model and save/export behavior may remain in the backend.
 
-### 4.5A PDF QA
-- Every new `spec` parse run must automatically create a field-level PDF QA checklist for the latest `raw_spec` snapshot.
-- PDF QA is separate from `review`; it must not reuse or overwrite the review data model.
-- The PDF QA checklist must cover room titles, room material fields, fixtures, soft-close states, flooring, accessories/others, and appliance rows.
-- The latest raw spec snapshot remains visible before QA, but must be clearly marked as `Pending PDF QA` until signed off.
-- Formal spec exports are blocked until the latest raw spec PDF QA status is `passed`.
-- PDF QA signoff is strict source-PDF signoff: each checklist item must be reviewed against the source PDF field-by-field.
-- A non-empty extracted value is not sufficient for `pass`. Bulk `pass/na` signoff based only on value presence is invalid.
-- Imperial PDF QA checklist row ordering must follow canonical `material_rows.row_order`; stale provenance order hints must not reorder checklist rows away from the source table order.
-- The PDF QA workflow must support:
-  - saving checklist progress,
-  - marking a snapshot `passed` only when all checklist items are `pass` or `na`,
-  - marking a snapshot `failed`,
-  - recording `checked_by`, `checked_at`, `notes`, and per-field `pdf_page_ref` / `qa_note`.
-- Parser-accuracy changes are only complete after the affected live rerun passes PDF QA against the source PDF.
+### 4.5A PDF QA User Flow Retirement
+- The user-visible PDF QA workflow is removed from Job Workspace and Raw Snapshot pages.
+- New `spec` parse runs no longer create a `snapshot_verifications` row automatically.
+- The `snapshot_verifications` table and internal checklist builder helpers may remain for compatibility and historical data, but they are not part of the active user workflow.
+- Raw snapshots remain visible immediately after parsing and do not display `Pending PDF QA`, export locks, PDF QA links, or signoff status.
+- Parser-accuracy changes must still be checked against the source PDF itself, but acceptance is no longer represented by the retired in-app PDF QA flow.
 - The active cross-builder parser regression matrix currently includes:
   - `Clarendon`: `job 1`, `job 23`, `job 25`
   - `Yellowwood`: `job 37`
@@ -252,10 +243,22 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
   - one Excel workbook with multiple sheets
   - one CSV file
 - Include source file and page references in the exported data.
-- Export the raw spec snapshot from a dedicated Spec List page as a standalone Excel workbook.
+- Export the latest raw spec snapshot directly from the Spec List page as a standalone Excel workbook whenever a latest `raw_spec` snapshot exists.
+- The raw Spec List Excel workbook must use the Claude-style review shape:
+  - `Summary`
+  - `By Section`
+  - optional `Flagged` when parser warnings, row issues, review hints, or `needs_review` rows exist
+  - `Material Summary` when Bench Tops, Door Colours, or Handles rows exist
+- `By Section` columns are `Section / Area`, `Specs / Description`, `Supplier`, `Notes`, `Page`, and `Flag`.
+- `By Section` must follow the Claude visual format: blue Arial 11 header row, green Arial 11 section header rows, Arial 10 wrapped item rows, yellow-highlighted flagged rows, frozen header row, and item rows that keep `Section` in the section header instead of flattening it into each area label.
+- `Summary` must use the Claude report format with Arial 14 title, Arial 10 source line, metric labels with the light-blue fill, and row counts for Bench Tops, Door Colours, and Handles.
+- `Material Summary` must use the Claude filtered-review format for Bench Tops, Door Colours, and Handles only, with columns `Category`, `Section`, `Area`, `Supplier`, `Specs / Description`, and `Notes`.
+- Imperial raw Spec List Excel export must prefer `rooms[].material_rows` and preserve source room order and row order.
+- When Imperial v6 snapshots carry `rooms[].v6_review_rows`, the raw Spec List Excel export must use those rows for the Claude workbook so original v6 item boundaries, row wording, notes, and metadata survive parser finalization. `material_rows` remain the parser/UI row model and the fallback for older snapshots.
+- Non-Imperial raw Spec List Excel export must flatten the Raw Snapshot room fields into section rows, with appliances, special sections, others, and warnings included in `By Section`.
 - Preserve Unicode content, including Chinese and special characters, in Excel and CSV outputs.
 - Export official `Product`, `Spec`, and `Manual` appliance links as dedicated columns and keep them clickable in Excel.
-- Formal export actions, including raw spec Excel export and generated job exports, must stay locked until the latest raw spec PDF QA passes.
+- Formal export generation and export downloads are not blocked by PDF QA state.
 
 ### 4.7 Raw Spec List Page
 - Provide a separate login-protected page for a single job that displays the raw spec snapshot as read-only lists/tables.
@@ -269,8 +272,9 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - The page must use `raw_spec` only and must not switch to reviewed data.
 - The page title must show `Spec List for job no - site address` when the latest parsed snapshot provides a `site_address`; if no address exists, omit the separator and address text.
 - The page must provide a left-side navigation hide/show control and should load with the navigation rail hidden by default on every visit.
-- The page must show the latest PDF QA state for the current raw snapshot.
-- If the latest raw snapshot has not passed PDF QA, the page must render a prominent `Pending PDF QA` warning and keep raw data visible for checking.
+- The latest Raw Snapshot page must provide a clickable `Export Excel` action whenever the latest `raw_spec` snapshot exists.
+- Historical run result pages must stay read-only and must not provide Excel export, so users do not accidentally export an older run instead of the latest snapshot.
+- The page must not render user-visible PDF QA cards, `Pending PDF QA` warnings, PDF QA links, export disabled states, or export-lock copy.
 - In 1080p half-screen windows, the Raw Spec List page must remain readable without a horizontal scroll bar; dense tables should switch to stacked cards and room fields should wrap vertically instead of forcing sideways dragging.
 - In 1080p half-screen windows, the responsive layout must also remove fixed content minima and suppress page-level horizontal overflow so wrapped room cards do not still trigger a horizontal scrollbar.
 - The `Rooms` section should use one wide horizontal block per room on desktop, stacked vertically one below the next, so each field can be read without cramped narrow cards.
@@ -279,7 +283,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - Non-Imperial room cards should continue to show a `Tall` row when the source provides tall-cabinet material.
 - Imperial room cards now render a `material_rows` block instead of the older split field stack. Each line uses `AREA / ITEM` as the title and displays `SUPPLIER - SPECS / DESCRIPTION - NOTES` with only light whitespace/noise cleanup.
 - Imperial room-card display must prefer the most complete accepted raw-row/layout continuation text over truncated visual-subrow snippets. Truncated fragment-only display must not hide valid same-row continuation on desk/shelf/robe/study style pages.
-- Imperial room cards only retain `Drawers`, `Hinges`, `Flooring`, and `Sink` beneath the raw material rows. `Tap` is intentionally omitted from Imperial room cards, Imperial material summary, and Imperial primary PDF QA.
+- Imperial room cards only retain `Drawers`, `Hinges`, `Flooring`, and `Sink` beneath the raw material rows. `Tap` is intentionally omitted from Imperial room cards, Imperial material summary, and Imperial primary raw export/display.
 - Each room card must support optional `Floating Shelf`, `Shelf`, `LED`, `LED Note`, `Accessories 1..n`, and curated `Others` accessory rows, and only render `Shelf` or the LED block when those values are non-empty / `LED = Yes`.
 - Non-kitchen room cards must never render `Island` or `Bar Back`, and non-kitchen `Overheads` should only render when the authoritative room section explicitly provides that split.
 - Each room card should prefer separate `Wall Run Bench Top` and `Island Bench Top` rows when the source text supports that split.
@@ -350,7 +354,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
   - production web and worker services restart successfully,
   - the affected live page or job is verified.
 - Parsing changes must be validated through a fresh online parse run for the affected job, not by inspecting an older snapshot.
-- Parser-accuracy changes must also be checked against the source PDF itself through field-level PDF QA; older webpages or older snapshots are reference material only and are not acceptance criteria.
+- Parser-accuracy changes must also be checked against the source PDF itself; older webpages or older snapshots are reference material only and are not acceptance criteria.
 - The repo should provide a repeatable local deployment helper so production updates do not rely on ad hoc terminal commands.
 
 ### 4.15 Imperial V6 Parser Path
@@ -362,8 +366,8 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
 - The v6 path records `parser_strategy = "imperial_v6"` on the run and on the snapshot `analysis` block. Snapshot diagnostics (`layout_attempted`, `docling_attempted`, `vision_attempted`, `layout_provider`, `layout_mode`, `layout_note`, `docling_note`, `vision_note`) are set to reflect that no legacy layout/Docling/Heavy Vision work was performed on that run.
 - Fallback behavior: if the v6 extractor or `parse_documents` raises, or if the produced snapshot contains no material rows with v6 provenance (`source_provider = "v6"` or `source_extractor = "pdf_to_structured_json_v6"`), the fast path emits an `imperial_v6_fallback` progress warning and returns to the legacy Imperial pipeline. The run must not fail solely because v6 failed.
 - The v6 path preserves Imperial source-row truth: material rows surfaced to room cards and `Material Summary` keep v6 provenance (`source_provider = "v6"`, `source_extractor = "pdf_to_structured_json_v6"`, original `_source` page and row hints), so downstream regression coverage can verify Imperial rows actually came from v6 and not from the legacy path.
-- The v6 path is designed to preserve the existing Imperial Raw Spec List page rendering rules: `material_rows` remain the primary truth layer, retained footer fields are `Drawers`, `Hinges`, `Flooring`, and `Sink`, `Tap` is intentionally still excluded from Imperial room cards and Imperial primary PDF QA, and `Material Summary` continues to aggregate from tagged `material_rows`.
-- Imperial PDF QA behavior is unchanged by the v6 path. Formal exports remain blocked until the latest raw spec snapshot's PDF QA status is `passed`, regardless of whether the snapshot was produced through the v6 fast path or the legacy pipeline.
+- The v6 path is designed to preserve the existing Imperial Raw Spec List page rendering rules: `material_rows` remain the primary truth layer, retained footer fields are `Drawers`, `Hinges`, `Flooring`, and `Sink`, `Tap` is intentionally still excluded from Imperial room cards and Imperial primary raw export/display, and `Material Summary` continues to aggregate from tagged `material_rows`.
+- Imperial v6 raw snapshots use the same direct Raw Snapshot Excel export path as other snapshots. Formal exports and Raw Snapshot Excel downloads are not blocked by PDF QA state.
 
 ### 4.16 Imperial V6 Known Limitations
 These limitations have been observed during v6 production validation. They are listed here to set reader expectations and are tracked as a deferred backlog rather than release blockers.
@@ -447,7 +451,7 @@ These limitations have been observed during v6 production validation. They are l
 - Imperial jobs now use cell-aware raw material rows as the primary joinery/material output, constrained self-repair to catch row-order and column-spill bugs before persistence, and a dedicated `37867` source-PDF gold fixture as the highest-priority regression gate for room order, row order, handle preservation, and summary accuracy.
 - Imperial jobs now also rely on explicit second-pass issue detection and revalidation to decide whether repaired rows may participate in `Material Summary`, while frontend diagnostics remain hidden by default and live acceptance is anchored by `job 60 / run 2037` for the continuation-heavy desk/shelf family.
 - Imperial structural parser work now uses `IMPERIAL_GRID_TRACKER.md` as the durable execution tracker. That file is the authoritative place for locked decisions, staged grid/row/semantic phases, the live Imperial regression matrix, open blockers, and the next acceptance target.
-- Imperial structural work now treats `grid boundary recovery` as the first truth layer. If `AREA / ITEM` and `SPECS / DESCRIPTION` bleed together, that is a structure-layer defect and must be fixed before relying on downstream cleanup, summary normalization, or PDF QA signoff.
+- Imperial structural work now treats `grid boundary recovery` as the first truth layer. If `AREA / ITEM` and `SPECS / DESCRIPTION` bleed together, that is a structure-layer defect and must be fixed before relying on downstream cleanup, summary normalization, or source-PDF acceptance review.
 - For Imperial room cards, `AREA / ITEM` must prefer the original table label text from the source cell. Internal normalization may still support tags and constrained repair, but the UI must not synthesize a different title unless the original label is actually missing.
 - Imperial hard-boundary work now rejects header/meta/table-heading contamination before summary generation and treats `IMAGE` column text as non-content. `job 67` is the current acceptance target for first-row header bleed, supplier/notes split, row-first appliances, and sinkware/appliance overlay tightening.
 - Imperial Phase 1B now adds separator-aware row-band coalescing before cell extraction so `BENCHTOP / WFE x 1` and long labels such as `UPPER CABINETRY COLOUR INCLUDING TALL OPEN SHELVING` can stay in one raw row when the separator evidence is soft.

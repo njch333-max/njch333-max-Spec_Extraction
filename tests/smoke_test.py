@@ -9873,37 +9873,66 @@ Front Loader - standard 700mm size - LG Tower
         self.assertNotIn("Reviewed value should not appear", page.text)
         self.assertNotIn("<td>Sink</td>", page.text)
         self.assertIn("Not Soft Close", page.text)
+        self.assertIn("Export Excel", page.text)
+        self.assertNotIn("Pending PDF QA", page.text)
+        self.assertNotIn("Open PDF QA", page.text)
 
-        self._mark_raw_spec_qa_passed(job_id)
         export_response = client.get(f"/jobs/{job_id}/spec-list.xlsx")
         self.assertEqual(export_response.status_code, 200)
         workbook = load_workbook(io.BytesIO(export_response.content))
-        rooms_sheet = workbook["Rooms"]
-        appliances_sheet = workbook["Appliances"]
-        warnings_sheet = workbook["Warnings"]
-        meta_sheet = workbook["Meta"]
-        room_headers = {cell.value: index + 1 for index, cell in enumerate(next(rooms_sheet.iter_rows(min_row=1, max_row=1))[0:])}
-        self.assertEqual(rooms_sheet["B2"].value, "Kitchen \u4e2d\u6587")
-        self.assertEqual(rooms_sheet.cell(row=2, column=room_headers["bench_tops_wall_run"]).value, "Quantum Zero Midnight Black 20mm pencil round edge")
-        self.assertEqual(rooms_sheet.cell(row=2, column=room_headers["bench_tops_island"]).value, "Quantum Zero Venatino Statuario 40mm mitred apron edge")
-        self.assertEqual(rooms_sheet.cell(row=2, column=room_headers["door_colours_overheads"]).value, "Polytec Blossom White Matt Finish - overhead cabinetry")
-        self.assertEqual(rooms_sheet.cell(row=2, column=room_headers["sink_info"]).value, "PARISI Quadro Double Bowl (PK8644)")
-        self.assertEqual(rooms_sheet.cell(row=2, column=room_headers["tap_info"]).value, "PHOENIX Nostalgia Sink Mixer NS714-62")
-        self.assertEqual(rooms_sheet.cell(row=2, column=room_headers["drawers_soft_close"]).value, "Soft Close")
-        self.assertEqual(rooms_sheet.cell(row=2, column=room_headers["hinges_soft_close"]).value, "Not Soft Close")
-        self.assertEqual(appliances_sheet["A2"].value, "Cooktop")
-        self.assertEqual(appliances_sheet["D2"].value, "https://official.example/product/WHC943BD")
-        self.assertEqual(appliances_sheet["F2"].value, "900 x 510 x 60 mm")
-        self.assertIsNotNone(appliances_sheet["D2"].hyperlink)
-        self.assertIsNone(appliances_sheet["A3"].value)
-        self.assertEqual(warnings_sheet["A2"].value, "Low-text page detected in template.pdf page 8.")
-        meta_rows = [row[0] for row in meta_sheet.iter_rows(min_row=2, values_only=True)]
-        self.assertIn("analysis_mode", meta_rows)
-        self.assertIn("analysis_rule_flags", meta_rows)
+        self.assertIn("Summary", workbook.sheetnames)
+        self.assertIn("By Section", workbook.sheetnames)
+        self.assertIn("Flagged", workbook.sheetnames)
+        self.assertIn("Material Summary", workbook.sheetnames)
+        summary_sheet = workbook["Summary"]
+        self.assertEqual(summary_sheet["A1"].value, "Job 37529 - extraction report")
+        self.assertEqual(summary_sheet["A1"].font.name, "Arial")
+        self.assertEqual(summary_sheet["A1"].font.sz, 14)
+        self.assertTrue(summary_sheet["A1"].font.bold)
+        summary = {row[0]: row[1] for row in summary_sheet.iter_rows(min_row=4, max_row=12, values_only=True) if row[0]}
+        self.assertGreater(summary["Total items"], 0)
+        self.assertGreater(summary["Bench Tops rows"], 0)
+        self.assertGreater(summary["Door Colours rows"], 0)
+        self.assertGreater(summary["Handles rows"], 0)
+        by_section = workbook["By Section"]
+        self.assertEqual(by_section["A1"].font.name, "Arial")
+        self.assertEqual(by_section["A1"].font.sz, 11)
+        self.assertTrue(by_section["A1"].font.bold)
+        self.assertTrue(str(by_section["A1"].fill.fgColor.rgb).endswith("2F5597"))
+        self.assertEqual(by_section.freeze_panes, "A2")
+        self.assertEqual(by_section["A2"].value, "Kitchen \u4e2d\u6587")
+        self.assertEqual(by_section["A2"].font.name, "Arial")
+        self.assertEqual(by_section["A2"].font.sz, 11)
+        self.assertTrue(str(by_section["A2"].fill.fgColor.rgb).endswith("70AD47"))
+        self.assertEqual(by_section["A3"].font.name, "Arial")
+        self.assertEqual(by_section["A3"].font.sz, 10)
+        self.assertTrue(by_section["A3"].font.bold)
 
-    def test_raw_spec_snapshot_creates_pending_pdf_qa_and_blocks_exports(self) -> None:
+        current_section = ""
+        values = set()
+        for row in by_section.iter_rows(min_row=2, values_only=True):
+            if row[0] and not row[1] and not row[2] and not row[3]:
+                current_section = row[0]
+                continue
+            if row[0]:
+                values.add((current_section, row[0], row[1], row[4]))
+        self.assertIn(("Kitchen \u4e2d\u6587", "Wall Run Bench Top", "Quantum Zero Midnight Black 20mm pencil round edge", 12), values)
+        self.assertIn(("Kitchen \u4e2d\u6587", "Island Bench Top", "Quantum Zero Venatino Statuario 40mm mitred apron edge", 12), values)
+        self.assertIn(("Kitchen \u4e2d\u6587", "Overhead Door Colours", "Polytec Blossom White Matt Finish - overhead cabinetry", 12), values)
+        self.assertIn(("Kitchen \u4e2d\u6587", "Sink", "PARISI Quadro Double Bowl (PK8644)", 12), values)
+        self.assertIn(("Kitchen \u4e2d\u6587", "Tap", "PHOENIX Nostalgia Sink Mixer NS714-62", 12), values)
+        self.assertIn(("Kitchen \u4e2d\u6587", "Hinges", "Not Soft Close", 12), values)
+        self.assertIn(("APPLIANCES", "Cooktop", "Westinghouse | WHC943BD | 900 x 510 x 60 mm | https://official.example/product/WHC943BD", 13), values)
+        flagged_rows = list(workbook["Flagged"].iter_rows(min_row=2, values_only=True))
+        self.assertTrue(any(row[0] == "WARNINGS" and row[1] == "Warning" and row[5] == "Warning" for row in flagged_rows))
+        material_rows = list(workbook["Material Summary"].iter_rows(min_row=3, values_only=True))
+        self.assertTrue(any(row[0] == "Bench Tops" and row[2] == "Wall Run Bench Top" for row in material_rows))
+        self.assertTrue(any(row[0] == "Door Colours" and row[2] == "Overhead Door Colours" for row in material_rows))
+        self.assertTrue(any(row[0] == "Handles" and row[2] == "Handles" for row in material_rows))
+
+    def test_raw_spec_snapshot_allows_direct_excel_export_without_pdf_qa(self) -> None:
         builder_id = store.create_builder("Imperial", "imperial", "")
-        job_id = store.create_job("38251", builder_id, "Pending QA", "")
+        job_id = store.create_job("38251", builder_id, "Direct Export", "")
         store.upsert_snapshot(
             job_id,
             "raw_spec",
@@ -9917,7 +9946,46 @@ Front Loader - standard 700mm size - LG Tower
                     {
                         "room_key": "kitchen",
                         "original_room_label": "KITCHEN",
-                        "bench_tops_wall_run": "20mm Caesarstone - Fresh Concrete",
+                        "material_rows": [
+                            {
+                                "area_or_item": "COOKTOP RUN BENCHTOP",
+                                "supplier": "Caesarstone",
+                                "specs_or_description": "Fresh Concrete - 20mm",
+                                "notes": "",
+                                "tags": ["bench_tops"],
+                                "page_no": 1,
+                                "row_order": 1,
+                            },
+                            {
+                                "area_or_item": "HANDLES",
+                                "supplier": "Hettich",
+                                "specs_or_description": "Cipri 9070585",
+                                "notes": "Gloss chrome",
+                                "tags": ["handles"],
+                                "page_no": 1,
+                                "row_order": 2,
+                                "needs_review": True,
+                            },
+                        ],
+                        "v6_review_rows": [
+                            {
+                                "area_or_item": "COOKTOP RUN BENCHTOP",
+                                "supplier": "Caesarstone",
+                                "specs_or_description": "Fresh Concrete - 20mm",
+                                "notes": "Claude raw note",
+                                "page_no": 1,
+                                "row_order": 1,
+                            },
+                            {
+                                "area_or_item": "HANDLES",
+                                "supplier": "Hettich",
+                                "specs_or_description": "Cipri 9070585",
+                                "notes": "Gloss chrome",
+                                "page_no": 1,
+                                "row_order": 2,
+                                "needs_review": True,
+                            },
+                        ],
                         "page_refs": "1-3",
                     }
                 ],
@@ -9929,24 +9997,42 @@ Front Loader - standard 700mm size - LG Tower
             },
         )
         verification = store.get_job_snapshot_verification(job_id, "raw_spec")
-        self.assertIsNotNone(verification)
-        self.assertEqual(verification["status"], "pending")
-        self.assertGreater(len(verification["checklist"]), 0)
+        self.assertIsNone(verification)
 
         client = TestClient(app)
         self._login(client)
 
         spec_page = client.get(f"/jobs/{job_id}/spec-list")
         self.assertEqual(spec_page.status_code, 200)
-        self.assertIn("Pending PDF QA", spec_page.text)
+        self.assertIn("Export Excel", spec_page.text)
+        self.assertNotIn("Pending PDF QA", spec_page.text)
+        self.assertNotIn("Open PDF QA", spec_page.text)
+        self.assertNotIn("Export Disabled", spec_page.text)
 
         export_response = client.get(f"/jobs/{job_id}/spec-list.xlsx", follow_redirects=False)
-        self.assertEqual(export_response.status_code, 303)
-        self.assertEqual(export_response.headers["location"], f"/jobs/{job_id}/pdf-qa")
+        self.assertEqual(export_response.status_code, 200)
+        workbook = load_workbook(io.BytesIO(export_response.content))
+        self.assertEqual(workbook.sheetnames, ["Summary", "By Section", "Flagged", "Material Summary"])
+        by_section = workbook["By Section"]
+        self.assertEqual(by_section["A2"].value, "KITCHEN JOINERY SELECTION SHEET")
+        self.assertEqual(by_section["A3"].value, "COOKTOP RUN BENCHTOP")
+        self.assertEqual(by_section["B3"].value, "Fresh Concrete - 20mm")
+        self.assertEqual(by_section["C3"].value, "Caesarstone")
+        self.assertEqual(by_section["D3"].value, "Claude raw note")
+        self.assertEqual(by_section["A4"].value, "HANDLES")
+        self.assertEqual(by_section["C4"].value, "Hettich")
+        self.assertEqual(by_section["F4"].value, "Y")
+        flagged_rows = list(workbook["Flagged"].iter_rows(min_row=2, values_only=True))
+        self.assertTrue(any(row[0] == "KITCHEN JOINERY SELECTION SHEET" and row[1] == "HANDLES" and row[5] == "Needs review" for row in flagged_rows))
+        material_rows = list(workbook["Material Summary"].iter_rows(min_row=3, values_only=True))
+        self.assertTrue(any(row[0] == "Bench Tops" and row[2] == "COOKTOP RUN BENCHTOP" for row in material_rows))
+        self.assertTrue(any(row[0] == "Handles" and row[2] == "HANDLES" for row in material_rows))
+        qa_response = client.get(f"/jobs/{job_id}/pdf-qa", follow_redirects=False)
+        self.assertEqual(qa_response.status_code, 404)
 
-    def test_pdf_qa_page_can_mark_snapshot_passed_and_unlock_exports(self) -> None:
+    def test_job_exports_generate_and_download_without_pdf_qa(self) -> None:
         builder_id = store.create_builder("Clarendon", "clarendon", "")
-        job_id = store.create_job("37796", builder_id, "QA Pass", "")
+        job_id = store.create_job("37796", builder_id, "Direct Formal Exports", "")
         store.upsert_snapshot(
             job_id,
             "raw_spec",
@@ -9975,19 +10061,25 @@ Front Loader - standard 700mm size - LG Tower
 
         client = TestClient(app)
         self._login(client)
-        qa_page = client.get(f"/jobs/{job_id}/pdf-qa")
-        self.assertEqual(qa_page.status_code, 200)
-        csrf = qa_page.text.split('name="csrf_token" value="', 1)[1].split('"', 1)[0]
-        verification = store.get_job_snapshot_verification(job_id, "raw_spec")
-        self.assertIsNotNone(verification)
-        payload = self._qa_form_payload(verification, csrf, item_status="pass")
-        response = client.post(f"/jobs/{job_id}/pdf-qa/mark-pass", data=payload, follow_redirects=False)
+        job_page = client.get(f"/jobs/{job_id}")
+        self.assertEqual(job_page.status_code, 200)
+        self.assertIn("Generate Exports", job_page.text)
+        self.assertNotIn("PDF QA", job_page.text)
+        self.assertNotIn("Locked", job_page.text)
+        self.assertNotIn("Formal exports are locked", job_page.text)
+        csrf = job_page.text.split('name="csrf_token" value="', 1)[1].split('"', 1)[0]
+        response = client.post(f"/jobs/{job_id}/export", data={"csrf_token": csrf}, follow_redirects=False)
         self.assertEqual(response.status_code, 303)
-        updated = store.get_job_snapshot_verification(job_id, "raw_spec")
-        self.assertEqual(updated["status"], "passed")
-
-        export_response = client.get(f"/jobs/{job_id}/spec-list.xlsx", follow_redirects=False)
-        self.assertEqual(export_response.status_code, 200)
+        self.assertEqual(response.headers["location"], f"/jobs/{job_id}")
+        export_dir = ensure_job_dirs("37796")["export_dir"]
+        generated_files = sorted(path for path in export_dir.glob("*") if path.is_file())
+        self.assertTrue(generated_files)
+        job_page_after_export = client.get(f"/jobs/{job_id}")
+        self.assertEqual(job_page_after_export.status_code, 200)
+        self.assertIn("Download", job_page_after_export.text)
+        self.assertNotIn("Locked", job_page_after_export.text)
+        download_response = client.get(f"/jobs/{job_id}/exports/{generated_files[0].name}", follow_redirects=False)
+        self.assertEqual(download_response.status_code, 200)
 
     def test_spec_list_page_hides_non_kitchen_island_bar_back_and_implicit_overheads(self) -> None:
         builder_id = store.create_builder("Clarendon", "clarendon", "")
@@ -10593,21 +10685,26 @@ Front Loader - standard 700mm size - LG Tower
         }
         excel_path = Path(build_spec_list_excel("37647", snapshot))
         workbook = load_workbook(excel_path)
-        self.assertIn("Special Sections", workbook.sheetnames)
-        rooms_sheet = workbook["Rooms"]
-        headers = [cell.value for cell in next(rooms_sheet.iter_rows(min_row=1, max_row=1))]
-        self.assertIn("door_colours_tall", headers)
-        self.assertIn("floating_shelf", headers)
-        self.assertIn("shelf", headers)
-        self.assertIn("feature_colour", headers)
-        self.assertIn("led_note", headers)
-        self.assertIn("accessories", headers)
-        self.assertIn("other_items", headers)
-        row_values = [cell.value for cell in next(rooms_sheet.iter_rows(min_row=2, max_row=2))]
-        self.assertEqual(row_values[headers.index("feature_colour")], "Polytec Boston Oak Woodmatt")
-        special_sheet = workbook["Special Sections"]
-        self.assertEqual(special_sheet["A2"].value, "feature_tall_doors")
-        self.assertEqual(special_sheet["C2"].value, "Tall")
+        self.assertIn("Summary", workbook.sheetnames)
+        self.assertIn("By Section", workbook.sheetnames)
+        self.assertIn("Material Summary", workbook.sheetnames)
+        self.assertNotIn("Flagged", workbook.sheetnames)
+        self.assertNotIn("Special Sections", workbook.sheetnames)
+        current_section = ""
+        by_area = {}
+        for row in workbook["By Section"].iter_rows(min_row=2, values_only=True):
+            if row[0] and not row[1] and not row[2] and not row[3]:
+                current_section = row[0]
+                continue
+            if row[0]:
+                by_area[(current_section, row[0])] = row[1]
+        self.assertEqual(by_area[("KITCHEN", "Feature Colour")], "Polytec Boston Oak Woodmatt")
+        self.assertEqual(by_area[("KITCHEN", "Floating Shelf")], "Polytec Boston Oak Woodmatt 33mm pencil round edge")
+        self.assertEqual(by_area[("KITCHEN", "Shelf")], "White Melamine")
+        self.assertEqual(by_area[("KITCHEN", "LED Note")], "LED STRIP LIGHTING - Warm white strip light")
+        self.assertEqual(by_area[("KITCHEN", "Accessories")], "Safe Desk Prodigy Cable Basket 950mm Black")
+        self.assertEqual(by_area[("KITCHEN", "Other Items")], "RAIL: Square Edge recessed rail in black")
+        self.assertEqual(by_area[("FEATURE TALL DOORS", "Tall")], "Polytec Valla Profile Door in Thermolaminated Vinyl Wrap Boston Oak Woodmatt EM0 Edge")
 
     def test_jobs_open_links_use_new_tab(self) -> None:
         builder_id = store.create_builder("Imperial", "imperial", "")
@@ -15317,11 +15414,7 @@ Front Loader - standard 700mm size - LG Tower
         )
 
     def test_snapshot_verification_checklist_includes_shelf_field(self) -> None:
-        builder_id = store.create_builder("Yellowwood", "yellowwood", "")
-        job_id = store.create_job("38124", builder_id, "Shelf QA", "")
-        store.upsert_snapshot(
-            job_id,
-            "raw_spec",
+        checklist = store._build_snapshot_verification_checklist(
             {
                 "job_no": "38124",
                 "builder_name": "Yellowwood",
@@ -15339,11 +15432,9 @@ Front Loader - standard 700mm size - LG Tower
                 "others": {},
                 "warnings": [],
                 "source_documents": [],
-            },
+            }
         )
-        verification = store.get_job_snapshot_verification(job_id, "raw_spec")
-        self.assertIsNotNone(verification)
-        fields = {item["field_name"] for item in verification["checklist"]}
+        fields = {item["field_name"] for item in checklist}
         self.assertIn("shelf", fields)
         self.assertIn("feature_colour", fields)
 
@@ -25327,33 +25418,6 @@ BAR FRIDGE (LAUNDRY) Specs - TBC N / A - By others By others
             appliance_items[0]["extracted_value"],
             "[BY CLIENT] - Tucker Horizon Marine Grade BBQ Built In with Slimline Hood SKU-os-horbbqz2+m1+pk-5 - ((Gas bottles to be stored under))",
         )
-
-    def _mark_raw_spec_qa_passed(self, job_id: int) -> None:
-        verification = store.get_job_snapshot_verification(job_id, "raw_spec")
-        self.assertIsNotNone(verification)
-        checklist = []
-        for item in verification["checklist"]:
-            updated = dict(item)
-            updated["status"] = "pass"
-            updated["pdf_page_ref"] = updated.get("source_page_refs", "") or "1"
-            checklist.append(updated)
-        saved = store.save_snapshot_verification(int(verification["snapshot_id"]), checklist, checked_by="admin", notes="Automated test pass")
-        self.assertIsNotNone(saved)
-        self.assertEqual(saved["status"], "passed")
-
-    def _qa_form_payload(self, verification: dict[str, object], csrf: str, item_status: str = "pass") -> dict[str, str]:
-        payload: dict[str, str] = {"csrf_token": csrf, "item_count": str(len(verification.get("checklist", []))), "notes": "QA test"}
-        for index, item in enumerate(verification.get("checklist", [])):
-            row = dict(item)
-            payload[f"section_type_{index}"] = str(row.get("section_type", ""))
-            payload[f"entity_label_{index}"] = str(row.get("entity_label", ""))
-            payload[f"field_name_{index}"] = str(row.get("field_name", ""))
-            payload[f"extracted_value_{index}"] = str(row.get("extracted_value", ""))
-            payload[f"source_page_refs_{index}"] = str(row.get("source_page_refs", ""))
-            payload[f"pdf_page_ref_{index}"] = str(row.get("source_page_refs", "") or "1")
-            payload[f"status_{index}"] = item_status
-            payload[f"qa_note_{index}"] = ""
-        return payload
 
     def _login(self, client: TestClient) -> str:
         login_page = client.get("/login")

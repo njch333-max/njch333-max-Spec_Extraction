@@ -39,7 +39,7 @@
 - The Jobs list `Open` action is a button-styled control that opens each job in a new browser tab.
 - The Jobs list supports `Created` and `Last Updated` sorting while preserving the current search filter.
 - The Job Workspace run history shows actual `Duration`, separate `Worker / Build` metadata, and per-run actions such as `Open Result` for succeeded spec runs with stored result JSON.
-- The app exposes a read-only historical spec result route at `/jobs/{job_id}/runs/{run_id}/spec-list`; it renders stored run JSON, does not mutate the latest snapshot, and does not allow export or PDF QA from the historical view.
+- The app exposes a read-only historical spec result route at `/jobs/{job_id}/runs/{run_id}/spec-list`; it renders stored run JSON, does not mutate the latest snapshot, and does not allow export from the historical view.
 - Dense tables switch to a stacked card-style presentation below roughly `1280px` so 1080p half-screen layouts stay readable without horizontal scrolling.
 
 ### 3.2 Persistence
@@ -95,7 +95,7 @@
   - run room-local overlay merge
   - run the builder finalizer
   - render and sort fields only after extraction is complete
-5c. Builder routing identity is owned by the website job record, not by uploaded PDF header text. `Client`, `Builder`, logos, or external sheet branding may describe document origin, but they must not override the parser/finalizer/QA route implied by the job's assigned Builder.
+5c. Builder routing identity is owned by the website job record, not by uploaded PDF header text. `Client`, `Builder`, logos, or external sheet branding may describe document origin, but they must not override the parser, finalizer, or regression route implied by the job's assigned Builder.
 6. Run heuristic extraction into canonical schema, then rebuild shared fields through `layout_rows -> row-fragment -> row-local mapping` so supplier, model, profile, note, and value text stay attached to the owning row.
 7. Run a builder-finalizer dispatch stage:
    - the shared layer owns page classification, room/row block detection, room-local overlays, and generic noise cleanup
@@ -167,11 +167,11 @@
   - creating short-lived feature branches
   - preserving the existing checkpoint/history/restore flow
 - `.github/PULL_REQUEST_TEMPLATE.md` and `.github/CODEOWNERS` define the default review shape once the remote repository is connected.
-- Expected review focus for parser work is regression safety rather than code style: room-local ownership, builder-specific finalizers, PDF QA gating, and UI/export/schema consistency.
+- Expected review focus for parser work is regression safety rather than code style: room-local ownership, builder-specific finalizers, and UI/export/schema consistency.
 - `IMPERIAL_GRID_TRACKER.md` is the durable execution tracker for Imperial structural work. It maps the current codebase to three staged phases (`Grid Truth`, `Row Assembly`, `Semantic / Summary`) and records the live regression matrix, open blockers, and next target so Imperial work does not depend on chat-session memory.
 - Architectural rule for Imperial structure work: `grid boundary recovery` is the upstream truth layer. When `AREA / ITEM` absorbs `SPECS / DESCRIPTION`, or merged-cell content spills across rows, the fix belongs in separator recovery / row assembly first, not in summary cleanup or UI-only patching.
 - Display rule for Imperial room cards: preserve the source-table `AREA / ITEM` label when it is available. Parser-side normalization remains valid for tags, matching, and constrained repair, but the rendered title should not replace the original label text with a synthesized variant.
-- Operational rule: use `fix this bug` as the default path for PDF-grounded live defects with a clear target field/room/result. Use `review this PR` when the code change affects shared parser flow, grouped-row cleanup, builder finalizers, or PDF QA state transitions.
+- Operational rule: use `fix this bug` as the default path for PDF-grounded live defects with a clear target field/room/result. Use `review this PR` when the code change affects shared parser flow, grouped-row cleanup, builder finalizers, user workflow, or exports.
  - `tests/fixtures/imperial_37867_gold.json` is the highest-priority Imperial regression fixture. Any change that affects Imperial raw rows, row order, handle preservation, summary grouping, or retained bottom fields must pass that fixture before broader Imperial reruns.
   - parse table-style rows so `BENCHTOPS`, `SPLASHBACK`, `UPPER CABINETRY COLOUR + TALL CABINETS`, `BASE CABINETRY COLOUR`, `KICKBOARDS`, and `HANDLES` stay on their own row boundaries
   - treat auxiliary all-caps row starts such as `ISLAND CABINETRY COLOUR`, `GPO'S`, `BIN`, `HAMPER`, `HANGING RAIL`, `MIRRORED SHAVING CABINET`, and `EXTRA TOP IN ...` as stop markers for the previous row, even when those rows do not yet map to a top-level room field
@@ -192,7 +192,7 @@
 18. Before final appliance storage, placeholder rows such as `As Above`, `By Client`, `N/A - By others`, and `N/A CLIENT TO CHECK` keep their original wording, but same-source placeholder rows are deduplicated away when a concrete model of the same appliance type already exists.
 19. Extract an optional `site_address` from the authoritative source text and carry it in the snapshot for header display on the Job Workspace and Raw Spec List pages.
 20. Save the raw snapshot.
-21. Immediately generate or reset a `snapshot_verifications` row for the latest `raw_spec` snapshot with status `pending` and a field-level checklist derived from the extracted room/appliance fields.
+21. Save the latest `raw_spec` snapshot without automatically creating or resetting a user-facing verification record.
 
 ### 3.5 Review Pipeline
 1. Load latest raw snapshot.
@@ -201,9 +201,10 @@
 4. Save edited values as a reviewed snapshot, preserving the expanded appliance link fields.
 5. Export from the reviewed snapshot if present, otherwise from raw snapshot.
 
-### 3.6 PDF QA Pipeline
-1. Every new `raw_spec` snapshot creates or resets a one-to-one `snapshot_verifications` row.
-2. The verification record stores:
+### 3.6 Retired PDF QA Compatibility Layer
+1. The user-facing PDF QA workflow and routes have been removed.
+2. New `raw_spec` snapshots do not automatically create or reset `snapshot_verifications` records.
+3. The `snapshot_verifications` table remains in the schema as a compatibility and historical-data table. Its record shape stores:
   - `snapshot_id`
   - `snapshot_kind`
   - `status`
@@ -211,18 +212,12 @@
   - `checked_at`
   - `notes`
   - `checklist_json`
-3. `checklist_json` stores field-level items such as room title, benchtops, cabinetry colour splits, toe kick, bulkheads, floating shelf, shelf, handles, accessories/others, sink/basin/tap, drawers/hinges/flooring, and appliance rows.
-3a. Imperial joinery/material QA is now an explicit exception: the primary checklist focus is `material_rows` correctness, tag correctness, summary correctness, and the retained bottom fields (`Drawers`, `Hinges`, `Flooring`, `Sink`). `Tap` is intentionally excluded from Imperial primary QA.
-3b. Imperial QA item order follows canonical `material_rows.row_order` before stale provenance row-index hints, so the checklist mirrors source table order even when older layout provenance has drifted.
-4. The PDF QA page edits those checklist items directly and can save, mark pass, or mark fail.
-4a. Final PDF QA signoff is source-PDF, field-by-field signoff. A checklist item is not `pass` merely because `extracted_value` is non-empty.
-4b. Automated bulk `pass/na` writes based only on non-empty extracted values are invalid as final signoff and must not be recorded as accepted QA.
-5. `passed` is only valid when every checklist item is `pass` or `na` and no item is `fail`.
-6. Raw snapshots remain visible while QA is pending or failed, but formal exports are blocked until the latest raw-spec verification is `passed`.
+4. Internal checklist builder helpers can remain for regression analysis and old data interpretation, but they are not invoked by `upsert_snapshot()` and do not gate exports.
+5. Parser-accuracy acceptance remains source-PDF review outside the retired in-app PDF QA flow.
 
 ### 3.7 Raw Spec List Pipeline
 1. Load `snapshots.snapshot_kind = raw_spec` for the requested job.
-2. Load the latest matching `snapshot_verifications` row for PDF QA state.
+2. Do not load PDF QA state for the rendered page or export gate.
 3. Flatten room, appliance, and other fields into read-only page rows.
 4. Render the `Rooms` section as a vertical stack of wide horizontal room cards on desktop, with one display row per field and a separate metadata column.
 5. Non-Imperial room cards show room fixtures (`Sink`, `Basin`, `Tap`) directly on the room card and split door colours into `Overheads`, `Base`, `Tall`, `Island`, and `Bar Back`, while trimming location-only suffixes and filtering obvious OCR noise.
@@ -248,13 +243,18 @@
 9d. Imperial handle summary aggregation is subitem-first and identity-gated. `handle_subitems` provide the preferred source; summary canonicalization dedupes short/full PM2817, HT576, and Voda variants while keeping `No handles`, `Touch catch`, `finger space`, `PTO`, knobs, and pull handles as independent families. Absorbed inline provenance can recover true handle text, but non-handle material or accessory fragments such as timber finish text and `Casters` are rejected before grouping.
 10. Render appliance official links as a clickable wrapped `Product` column.
 11. Render non-room joinery sections such as `FEATURE TALL DOORS` in a dedicated `Special Sections` block instead of folding them into nearby rooms.
-12. Show `Generated at`, `Extraction duration`, and the current PDF QA status in Brisbane time / human-readable duration format on the raw Spec List page.
-13. Export that raw snapshot through a dedicated Excel route, including a `Special Sections` worksheet and the expanded room fields for `Floating Shelf`, `Shelf`, `LED`, `LED Note`, `Accessories`, and curated accessory `Others`, but only when PDF QA has passed.
-14. Never fall back to `reviews` when rendering the raw Spec List page.
+12. Show `Generated at` and `Extraction duration` in Brisbane time / human-readable duration format on the raw Spec List page.
+13. Export the latest raw snapshot through `/jobs/{job_id}/spec-list.xlsx` whenever a latest `raw_spec` snapshot exists.
+13a. Raw Spec List Excel uses the Claude-style workbook shape: `Summary`, `By Section`, optional `Flagged`, and `Material Summary` when Bench Tops / Door Colours / Handles rows exist.
+13b. `By Section` contains `Section / Area`, `Specs / Description`, `Supplier`, `Notes`, `Page`, and `Flag`, with a blue Arial 11 header row, green Arial 11 section header rows, Arial 10 wrapped item rows, yellow flagged-row fill, and frozen header row. Section names stay in section header rows; item rows keep only the raw area/item label.
+13c. `Material Summary` is a filtered review sheet for Bench Tops, Door Colours, and Handles only, with columns `Category`, `Section`, `Area`, `Supplier`, `Specs / Description`, and `Notes`.
+13d. Imperial Raw Spec List Excel prefers `rooms[].v6_review_rows` when present, preserving the Claude/v6 source item boundaries, row wording, and notes before parser finalization. It falls back to `rooms[].material_rows` for older snapshots. Non-Imperial snapshots flatten room fields, appliances, special sections, others, and warnings into `By Section`.
+13e. Historical run result pages stay read-only and do not expose Excel export.
+14. Never fall back to `reviews` when rendering or exporting the raw Spec List page.
 15. Start the page shell with the left navigation rail collapsed by default and let the user toggle it open client-side when needed.
 16. When a parsed `site_address` exists, append it to the page heading as `job no - site address`; otherwise omit the separator.
 17. Below roughly `1280px`, remove fixed wide-table minimum widths, force card containers to `min-width: 0`, and suppress page-level horizontal overflow so the raw snapshot remains readable in 1080p half-screen windows without horizontal dragging.
-18. Shared UI density is intentionally tighter than the original baseline; the common stylesheet should shrink fonts and spacing to roughly 75% visual scale across jobs, builders, QA, and spec-list pages without using browser-level zoom.
+18. Shared UI density is intentionally tighter than the original baseline; the common stylesheet should shrink fonts and spacing to roughly 75% visual scale across jobs, builders, and spec-list pages without using browser-level zoom.
 19. Room-card sorting should treat grouped vanity titles such as `VANITIES` as part of the vanity/bathroom priority bucket instead of leaving them in generic `Other`.
 20. Imperial debug metadata such as issue types, repair verdicts, order hints, and revalidation hints remain available in backend snapshot payloads, but the default frontend rendering suppresses them unless a debug-oriented UI is introduced later.
 21. Ongoing Imperial structural work is tracked outside the rendered UI in `IMPERIAL_GRID_TRACKER.md`. The intended implementation order is:
@@ -262,7 +262,7 @@
   - coalesce adjacent row bands before cell extraction only when separator evidence is soft (`none` / `inferred_low`) and row evidence supports same-cell continuation
   - repair weak-boundary leading fragments at the five-column row assembly layer, for example assigning `GPO` accessory text to the following `ACCESSORIES` row when no hard separator proves a separate row
   - correct boundary-straddling size prefixes during Imperial postprocess and display/checklist rendering, for example moving `450mm` from `AREA / ITEM` back into the `BIN` value when visible grid evidence places it on the description side
-  - backfill empty Imperial supplier fields from clean cell-aware provenance, including `By Imperial`, so raw rows and PDF-QA checklist values preserve the supplier cell even when summary later performs supplier-free grouping; exact duplicate notes equal to the supplier are removed during final row assignment
+- backfill empty Imperial supplier fields from clean cell-aware provenance, including `By Imperial`, so raw rows and raw export values preserve the supplier cell even when summary later performs supplier-free grouping; exact duplicate notes equal to the supplier are removed during final row assignment
   - keep valid tagged `FEATURE CABINETRY` rows in `Door Colours` summary even when they include `Standard Whiteboard Internals`, and clean trailing bench-top separators after WFE/cutout tail stripping
   - keep single-word sinkware mounting continuations such as `Undermount` attached to the current room cluster and prefer fuller source candidates when they restore missing `By Others` supplier or mounting evidence without demoting product names such as `Undermount Sink`
   - repair deterministic sinkware cleanup tails after overlay selection, including `Sink Mounting Undermount sink` -> same-room undermount mounting evidence and split taphole endings such as `behind` / `behind basin sink` -> `behind sink` / `behind basin`
@@ -272,7 +272,7 @@
   - repair handle label/value spillover during material-row postprocess and display/checklist rendering, so contaminated labels such as `Momo HANDLES oval` become `HANDLES` before visual fragments and summary aggregation run, recover valid same-cell brand prefixes from provenance when the final label was already normalized, and prevent visual-subrow cleanup from trimming those accepted prefixes back out
   - stabilize `AREA / ITEM` anchored row assembly before later parsing stages
   - then tighten semantic subitems and summary inputs in `parsing.py` / `main.py`
-  - Phase 3A now attaches internal `handle_subitems` during Imperial material-row postprocess. `main.py` flattens those subitems into the summary layer, and PDF-QA checklist generation uses the same subitem `summary_text` / `text` source values. Provenance fields such as subitem `raw_text` remain evidence only and are not summary input. The summary layer also applies a handle-identity gate and identity dedupe so PM2817 / HT576 / Voda short and coded variants merge correctly without admitting non-handle absorbed material.
+- Phase 3A now attaches internal `handle_subitems` during Imperial material-row postprocess. `main.py` flattens those subitems into the summary layer, and raw export rendering uses the same subitem `summary_text` / `text` source values where subitem identity matters. Provenance fields such as subitem `raw_text` remain evidence only and are not summary input. The summary layer also applies a handle-identity gate and identity dedupe so PM2817 / HT576 / Voda short and coded variants merge correctly without admitting non-handle absorbed material.
 
 ### 3.7 Upload Interaction
 1. Job detail uses the existing upload POST route.
@@ -432,10 +432,6 @@ Auxiliary tool: `render_v6_review.py` (local tool, not in mainline) renders laye
 - `GET /jobs/{job_id}`
 - `GET /jobs/{job_id}/spec-list`
 - `GET /jobs/{job_id}/spec-list.xlsx`
-- `GET /jobs/{job_id}/pdf-qa`
-- `POST /jobs/{job_id}/pdf-qa/save`
-- `POST /jobs/{job_id}/pdf-qa/mark-pass`
-- `POST /jobs/{job_id}/pdf-qa/mark-fail`
 - `POST /jobs/{job_id}/files/upload`
 - `POST /jobs/files/{file_id}/delete`
 - `GET /jobs/files/{file_id}/download`

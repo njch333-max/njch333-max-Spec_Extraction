@@ -12,12 +12,9 @@
     </div>
     <form method="post" action="/jobs/{{ job.id }}/export">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <button type="submit" class="primary-button" {% if not raw_verification_summary.can_export %}disabled title="PDF QA must pass before formal exports are available."{% endif %}>Generate Exports</button>
+      <button type="submit" class="primary-button">Generate Exports</button>
     </form>
   </div>
-  {% if not raw_verification_summary.can_export %}
-  <p class="muted">Formal exports are locked until the latest raw spec snapshot passes PDF QA.</p>
-  {% endif %}
   <div class="table-wrap">
     <table class="table-cardify">
       <thead>

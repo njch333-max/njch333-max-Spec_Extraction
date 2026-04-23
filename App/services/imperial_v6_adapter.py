@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 import re
 import subprocess
 import sys
@@ -59,16 +60,35 @@ def build_material_rows_from_v6_section(v6_section: dict, source_pdf: str) -> li
     return rows
 
 
+def build_review_rows_from_v6_section(v6_section: dict, source_pdf: str) -> list[dict]:
+    """v6 section -> Claude review rows, preserving original item boundaries."""
+    section_title = str(v6_section.get("section_title") or "")
+    items = list(v6_section.get("items") or [])
+    page_orders: dict[int, int] = {}
+    rows: list[dict] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        page_no = _item_page_no(item)
+        page_orders[page_no] = page_orders.get(page_no, 0) + 1
+        rows.append(_map_v6_item_to_material_row(item, source_pdf, page_orders[page_no], section_title))
+    return rows
+
+
 def build_room_from_v6_section(v6_section: dict, source_pdf: str, all_v6_sections=None) -> RoomRow:
     """v6 section -> complete RoomRow (material_rows + basic RoomRow fields)."""
     section_title = str(v6_section.get("section_title") or "")
     label = section_title.replace(" JOINERY SELECTION SHEET", "").strip()
     pages = v6_section.get("pages") or []
+    material_rows = build_material_rows_from_v6_section(v6_section, source_pdf)
+    review_rows = build_review_rows_from_v6_section(v6_section, source_pdf)
     room = RoomRow(
         room_key=_derive_room_key(section_title),
         original_room_label=label,
         room_order=0,
-        material_rows=build_material_rows_from_v6_section(v6_section, source_pdf),
+        v6_metadata=dict(v6_section.get("metadata") or {}),
+        v6_review_rows=deepcopy(review_rows),
+        material_rows=material_rows,
         source_file=source_pdf,
         page_refs=",".join(str(page) for page in pages),
         evidence_snippet="",

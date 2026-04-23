@@ -7,6 +7,7 @@ from pathlib import Path
 from App.services.imperial_v6_adapter import (
     _merge_adjacent_subrow_items,
     build_material_rows_from_v6_section,
+    build_review_rows_from_v6_section,
     build_room_from_v6_section,
 )
 
@@ -99,6 +100,23 @@ def test_merge_no_changes():
     assert merged[1]["area"] == "BASE CABINETRY COLOUR"
 
 
+def test_review_rows_preserve_empty_area_continuations():
+    v6_section = {
+        "section_title": "KITCHEN JOINERY SELECTION SHEET",
+        "items": [
+            {"area": "HANDLES", "specs": "DRAWERS - Momo", "supplier": "Momo", "notes": "", "_source": {"page": 1}},
+            {"area": "", "specs": "DOORS - Momo Lugo", "supplier": "", "notes": "", "_source": {"page": 1}},
+        ],
+    }
+    review_rows = build_review_rows_from_v6_section(v6_section, "dummy.pdf")
+    material_rows = build_material_rows_from_v6_section(v6_section, "dummy.pdf")
+    assert len(review_rows) == 2
+    assert review_rows[1]["area_or_item"] == ""
+    assert review_rows[1]["specs_or_description"] == "DOORS - Momo Lugo"
+    assert len(material_rows) == 1
+    assert "DOORS - Momo Lugo" in material_rows[0]["specs_or_description"]
+
+
 def test_rows_survive_finalize():
     import App.services.parsing as parsing
 
@@ -149,4 +167,6 @@ def test_build_room():
     assert isinstance(room, RoomRow)
     assert room.room_key == "kitchen"
     assert room.original_room_label
+    assert len(room.v6_review_rows) >= len(room.material_rows)
+    assert any(row.get("notes") for row in room.v6_review_rows)
     assert len(room.material_rows) > 0

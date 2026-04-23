@@ -62,6 +62,8 @@ class RoomRow(BaseModel):
     original_room_label: str = ""
     room_name: str = ""
     room_order: int = 0
+    v6_metadata: dict[str, object] = Field(default_factory=dict)
+    v6_review_rows: list[dict[str, object]] = Field(default_factory=list)
     material_rows: list[dict[str, object]] = Field(default_factory=list)
     bench_tops: list[str] = Field(default_factory=list)
     bench_tops_wall_run: str = ""

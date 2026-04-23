@@ -589,11 +589,6 @@ def upsert_snapshot(job_id: int, snapshot_kind: str, data: dict[str, Any]) -> No
                 """,
                 (job_id, snapshot_kind, payload, now, now),
             )
-            snapshot_id = int(conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"])
-        if existing:
-            snapshot_id = int(existing["id"])
-        if snapshot_kind == "raw_spec" and str(data.get("source_kind", "") or "spec").lower() == "spec":
-            _upsert_snapshot_verification_locked(conn, snapshot_id, snapshot_kind, data)
 
 
 def get_snapshot(job_id: int, snapshot_kind: str) -> dict[str, Any] | None:

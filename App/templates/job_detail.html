@@ -94,38 +94,7 @@
 
 <section class="grid-two">
   <article class="card">
-    <h3>PDF QA</h3>
-    {% if raw_snapshot %}
-    <p><span class="status-chip status-{{ raw_verification_summary.status_class }}">{{ raw_verification_summary.status_label }}</span></p>
-    <ul class="plain-list">
-      <li><strong>Checklist items:</strong> {{ raw_verification_summary.total }}</li>
-      <li><strong>Completed:</strong> {{ raw_verification_summary.done }}</li>
-      <li><strong>Pass:</strong> {{ raw_verification_summary.counts.pass }}</li>
-      <li><strong>Fail:</strong> {{ raw_verification_summary.counts.fail }}</li>
-      <li><strong>Pending:</strong> {{ raw_verification_summary.counts.pending }}</li>
-      <li><strong>N/A:</strong> {{ raw_verification_summary.counts.na }}</li>
-      <li><strong>Checked by:</strong> {{ raw_verification_summary.checked_by or "Not checked yet" }}</li>
-      <li><strong>Checked at:</strong> {{ raw_verification_summary.checked_at or "Not checked yet" }}</li>
-    </ul>
-    {% if raw_verification_summary.notes %}
-    <div class="subcard">
-      <h4>QA Notes</h4>
-      <p class="muted">{{ raw_verification_summary.notes }}</p>
-    </div>
-    {% endif %}
-    <div class="head-actions">
-      <a href="/jobs/{{ job.id }}/pdf-qa" class="primary-button">Open PDF QA</a>
-    </div>
-    {% else %}
-    <p class="muted">Run and complete a spec parse to generate the PDF QA checklist.</p>
-    {% endif %}
-  </article>
-
-  <article class="card">
     <h3>Available Exports</h3>
-    {% if not raw_verification_summary.can_export %}
-    <p class="muted">Formal exports are locked until the latest raw spec snapshot passes PDF QA.</p>
-    {% endif %}
     <div class="table-wrap">
       <table class="table-cardify">
         <thead><tr><th>No.</th><th>File</th><th>Modified</th><th>Size</th><th>Download</th></tr></thead>
@@ -137,11 +106,7 @@
             <td data-label="Modified">{{ file.modified }}</td>
             <td data-label="Size">{{ file.size_bytes }}</td>
             <td data-label="Download">
-              {% if raw_verification_summary.can_export %}
               <a href="/jobs/{{ job.id }}/exports/{{ file.name }}" class="text-link">Download</a>
-              {% else %}
-              <span class="muted">Locked</span>
-              {% endif %}
             </td>
           </tr>
           {% else %}

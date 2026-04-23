@@ -10,15 +10,11 @@
     {% if raw_snapshot %}
       {% if historical_view %}
     <span class="primary-button button-disabled" aria-disabled="true">Export Disabled</span>
-      {% elif raw_verification_summary.can_export %}
-    <a href="/jobs/{{ job.id }}/spec-list.xlsx" class="primary-button">Export Excel</a>
       {% else %}
-    <span class="primary-button button-disabled" aria-disabled="true">Export Excel</span>
+    <a href="/jobs/{{ job.id }}/spec-list.xlsx" class="primary-button">Export Excel</a>
       {% endif %}
     {% if historical_view %}
     <a href="/jobs/{{ job.id }}/spec-list" class="ghost-button">Open Latest Spec List</a>
-    {% else %}
-    <a href="/jobs/{{ job.id }}/pdf-qa" class="ghost-button">Open PDF QA</a>
     {% endif %}
     {% endif %}
     <a href="/jobs/{{ job.id }}" class="ghost-button">Back to Job</a>
@@ -35,18 +31,8 @@
 <section class="card">
   <span class="eyebrow">Read-only</span>
   <h3>Historical spec result</h3>
-  <p>This page shows the stored result from spec run <strong>#{{ historical_run.id }}</strong>. It does not replace the latest raw snapshot and cannot be exported or QA-signed.</p>
+  <p>This page shows the stored result from spec run <strong>#{{ historical_run.id }}</strong>. It does not replace the latest raw snapshot and cannot be exported.</p>
   <p class="muted">Requested: {{ historical_run.requested_at }} | Finished: {{ historical_run.finished_at }} | Duration: {{ historical_run.duration }}{% if historical_run.app_build_id %} | Build: {{ historical_run.app_build_id }}{% endif %}</p>
-</section>
-{% elif not raw_verification_summary.can_export %}
-<section class="card warning-card">
-  <span class="eyebrow">Pending PDF QA</span>
-  <h3>Formal export is locked</h3>
-  <p>The latest raw spec snapshot is visible for review, but it must pass field-level PDF QA before formal exports are available.</p>
-  <p class="muted">Status: {{ raw_verification_summary.status_label }} | Pass {{ raw_verification_summary.counts.pass }} | Fail {{ raw_verification_summary.counts.fail }} | Pending {{ raw_verification_summary.counts.pending }}</p>
-  <div class="head-actions">
-    <a href="/jobs/{{ job.id }}/pdf-qa" class="primary-button">Open PDF QA</a>
-  </div>
 </section>
 {% endif %}
 <section class="card">
@@ -347,7 +333,6 @@
       <li><strong>Rooms:</strong> {{ raw_spec_rooms|length }}</li>
       <li><strong>Appliances:</strong> {{ raw_spec_appliances|length }}</li>
       <li><strong>Warnings:</strong> {{ raw_spec_warnings|length }}</li>
-      <li><strong>PDF QA:</strong> {{ "Historical run result (latest snapshot only)" if historical_view else raw_verification_summary.status_label }}</li>
       <li><strong>Room master file:</strong> {{ raw_analysis.room_master_file or "Single-file parse" }}</li>
       <li><strong>Supplement files:</strong> {{ raw_analysis.supplement_files|join(", ") if raw_analysis.supplement_files else "None" }}</li>
       <li><strong>Ignored unmatched room-like lines:</strong> {{ raw_analysis.ignored_room_like_lines_count }}</li>

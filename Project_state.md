@@ -27,7 +27,7 @@
   - `Clarendon drawing pages`: heuristic-only
 - Workflow rule is now explicit:
   - default to `fix this bug` for specific live defects that are already PDF-grounded
-  - use `review this PR` for shared parser, grouped-row, builder-finalizer, or PDF-QA state-flow changes
+- use `review this PR` for shared parser, grouped-row, builder-finalizer, user-workflow, or export changes
 - Builder classification is website-owned, not PDF-owned:
   - parsing, QA scope, and regression routing follow the job's assigned Builder in the app
   - PDF header text such as `Client`, `Builder`, logos, or sheet styling may describe the source document but must not override the website Builder route
@@ -47,10 +47,10 @@
   - structure-first spec parsing for all builders, with lightweight page-layout analysis on every spec page and a speed-first runtime that uses selective Docling only on hard schedule/table pages for selected builders
   - shared structure-first `spec` parsing entrypoint for all builders, so new builders no longer default back to the legacy room-section text scan as their main room-creation path
   - layout diagnostics recorded per snapshot, including `layout_attempted`, `layout_succeeded`, `layout_mode`, `layout_pages`, `layout_provider`, `docling_pages`, and `layout_note`
-  - automatic field-level PDF QA records for every new `raw_spec` snapshot, stored separately from review data
-  - dedicated `/jobs/{id}/pdf-qa` workflow with checklist save / pass / fail actions
-  - raw-spec pages remain visible before signoff, but formal exports are now locked until the latest raw snapshot passes PDF QA
-  - Job Workspace now shows a PDF QA status card, and Raw Snapshot pages show a clear pending-QA warning when the latest spec has not been signed off
+  - Raw Snapshot pages now export the latest `raw_spec` directly through `Export Excel` without a PDF QA gate
+  - Raw Snapshot Excel now uses a Claude-style workbook with `Summary`, `By Section`, optional `Flagged`, and filtered `Material Summary` sheets; the export keeps Claude's Arial font sizing, blue table headers, green section headers, yellow flagged rows, and section-header row layout, and Imperial v6 snapshots preserve `v6_review_rows` so the workbook can use the original v6 item boundaries, row wording, and notes
+  - user-visible PDF QA cards, routes, pending warnings, and export locks have been removed from Job Workspace and Raw Snapshot pages
+  - new `raw_spec` snapshot writes no longer auto-create `snapshot_verifications`; the table and internal helpers remain as compatibility residue
   - Clarendon-only deterministic post-polish that rebuilds cleaner room text from schedule and fixture pages while preserving source-driven room ownership
   - default runtime is now speed-first: all builders use `layout + row-local parser`, `Imperial / Simonds / Evoca / Yellowwood` may additionally use selective Docling, and automatic `Heavy Vision` / `AI merge` are disabled by default
   - Imperial joinery/material selection sheets now override that default and use Vision-assisted table/grid boundary recovery by default, because these Excel-to-PDF schedules are more reliable when parsed as visible tables rather than free text
@@ -91,7 +91,7 @@
   - Imperial sink and tap room fields now prefer the builder-specific non-joinery overlay parser over noisier AI fixture guesses when both are present
   - Imperial joinery/material now uses `cell-aware raw rows + constrained self-repair` as the primary output path: `AREA / ITEM` is the row title, the visible `SUPPLIER / SPECS / DESCRIPTION / NOTES` wording is preserved with minimal cleanup, and each row carries `row_order`, `confidence`, `needs_review`, and row/cell provenance
   - Imperial room cards now render `material_rows` in source room order and source row order instead of the older split field stack; the retained footer fields for Imperial are now only `Drawers`, `Hinges`, `Flooring`, and `Sink`
-  - Imperial `Tap` is intentionally omitted from room cards, primary summary output, and primary Imperial PDF QA so sinkware/tap overlay noise does not dominate the joinery/material workflow
+- Imperial `Tap` is intentionally omitted from room cards, primary summary output, and primary Imperial raw export/display so sinkware/tap overlay noise does not dominate the joinery/material workflow
   - Imperial handle cleanup is now deliberately conservative: handle blocks keep original `Specs / Description` wording order and only remove footer noise, duplicated fragments, or duplicated supplier prefixes instead of splitting into aggressive `description/notes` fragments
   - Imperial `Material Summary` now aggregates directly from tagged `material_rows`; `Door Colours`, `Handles`, and `Bench Tops` are grouped by normalized material text and each item renders a de-duplicated `Room: ...` list in source spec order
   - Imperial handle rows now carry internal `handle_subitems` for summary generation. Room-card raw rows still preserve source-like handle wording, while `Material Summary / Handles` reads semantic subitem `summary_text` / `text` before raw row text, never provenance `raw_text`, so parser evidence cannot become a displayed handle material.
@@ -107,7 +107,7 @@
   - Imperial Phase 1B row-band coalescing is now implemented locally: adjacent bands with no hard separator, or only `inferred_low`, can merge before cell extraction when they are same-cell continuation or label continuation, while `visible` and `inferred_high` remain hard row boundaries
   - Imperial Phase 2A row assembly now has a constrained leading-fragment repair for `GPO -> ACCESSORIES`, so weak-boundary accessory preludes can be owned by the following original `AREA / ITEM` label instead of becoming standalone rows
   - Imperial postprocess and display/checklist rendering now correct boundary-straddling size prefixes such as `450mm BIN`, keeping the original table label as `BIN` and moving the size token back into the value text when visible grid evidence puts it on the description side
-  - Imperial supplier-cell ownership now backfills empty supplier fields from clean cell-aware provenance, including `By Imperial`, so room-card raw rows and PDF-QA checklist values preserve supplier cells even when handle summary later removes suppliers; exact duplicate `notes == supplier` values are removed at final row assignment
+- Imperial supplier-cell ownership now backfills empty supplier fields from clean cell-aware provenance, including `By Imperial`, so room-card raw rows and raw export values preserve supplier cells even when handle summary later removes suppliers; exact duplicate `notes == supplier` values are removed at final row assignment
   - Imperial summary gating now preserves valid tagged `FEATURE CABINETRY` rows with shaving-cabinet / mirrored-door / colourboard-shelf evidence even when the row also mentions `Standard Whiteboard Internals`, while still excluding true internals/robe noise; bench-top summary cleanup removes dangling separators after WFE/cutout tails are stripped
   - Imperial sinkware overlay now keeps single-word mounting continuations such as `Undermount`, completes split taphole tails such as `behind sink`, and prefers fuller source-backed sink/basin candidates when they restore missing supplier or mounting evidence
   - Imperial Phase 3B local rules now constrain sinkware taphole sharing by normalized fixture base and clean appliance layout cells before row-first extraction, preventing `N / A - By others` / image-column placeholder text from becoming appliance model content while preserving explicit `Specs - TBC` rows
@@ -192,9 +192,9 @@
 - `spec.lxtransport.online` resolves to `43.160.209.86` and is now deployed live on the LXtransport Tencent Cloud server.
 - The production stack is running through `nginx + systemd + uvicorn`, with `spec-extraction-web.service` and `spec-extraction-worker.service` active on the server.
 - HTTPS for `spec.lxtransport.online` is now issued by Certbot and terminates correctly at Nginx.
-- The current live PDF QA state for the active 11-job regression matrix is:
+- The last recorded live source-PDF QA state for the active 11-job regression matrix was:
   - `passed`: `job 1`, `job 12`, `job 14`, `job 19`, `job 24`, `job 28`, `job 39`, `job 41`, `job 46`, `job 49`, `job 50`
-- The latest live reruns and PDF-QA acceptance now also include:
+- The latest live reruns and source-PDF acceptance records also include:
   - Yellowwood kitchen `Shelf` is suppressed unless the same room has explicit shelf-source wording
   - Yellowwood handle strings with a prefixed pantry/base note are reformatted into a cleaner handle value instead of leaving the note in front of the model
   - grouped-row builders such as Evoca now re-run benchtop-other dedupe after display cleaning, preventing wall-run/island values from being reintroduced into `bench_tops_other`
@@ -202,7 +202,7 @@
   - Clarendon tap cleanup preserves full source wording such as `Twin Handle Sink Mixer` instead of truncating valid model names at the word `Handle`
   - Imperial appliance dedupe now keeps `N / A - By others` dishwasher placeholders and merges make-bearing/noisy oven rows into clean `Westinghouse + WVE6516DD` output
   - Imperial sinkware semantic parsing now keeps laundry / powder / ensuite ownership separated while preserving sink mounting details such as `UNDERMOUNT`
-  - Imperial `job 49 / 50` now pass PDF QA on the latest build after Vision-grid-first joinery parsing, sink/tap recovery, appliance row cleanup, and the backend correction that classifies `job 50` as `Imperial`
+- Imperial `job 49 / 50` passed source-PDF QA on the latest recorded build after Vision-grid-first joinery parsing, sink/tap recovery, appliance row cleanup, and the backend correction that classifies `job 50` as `Imperial`
   - Simonds grouped-row recovery now restores clean benchtop/shelf/sink/tap/handle values for `Study`, `Butlers/WIP`, `Laundry`, `Bathroom`, `Powder`, and `Rumpus`
 
 ## Imperial V6 Replacement Phase
@@ -308,20 +308,20 @@ After the factory feedback window ends, Bug 6 should be investigated before Bug 
 - Smoke tests must not touch the real local app database
 - Confirmed implementation work is only done after production deployment and live verification succeed on `spec.lxtransport.online`
 - Parser-accuracy work is only done after the affected live rerun is checked against the source PDF, not just against an older webpage or snapshot
-- All new `spec` parse runs now default to field-level PDF QA. A parser fix is not considered complete until the latest live run passes that QA against the source PDF.
-- `Field-level PDF QA signoff` is strict source-PDF signoff. Each checklist item must be checked against the source PDF itself; non-empty extracted values are not enough for `pass`.
-- Bulk `pass/na` write-backs based only on checklist value presence are invalid and must not be treated as accepted signoff.
+- New `spec` parse runs no longer enter a user-visible PDF QA workflow or block exports behind a verification status.
+- Parser-accuracy work still requires source-PDF review of the affected fields; non-empty extracted values alone are not acceptance evidence.
+- Raw Snapshot Excel and formal export actions should remain available as soon as a latest `raw_spec` snapshot exists.
 
 ## Remaining Work
 - Continue driving Imperial structure work from `IMPERIAL_GRID_TRACKER.md` instead of ad hoc sample-by-sample cleanup
 - Imperial `job 64` post-Phase-2A rollback cycle remains closed, and the latest current-build strict Phase 3B signoff is `run 2251 / build local-c28adee4` with PDF QA `passed` (`61 pass / 1 na / 0 pending`). The verified fixes include accepted `GPO -> ACCESSORIES` preservation, handle label/value spillover recovery, boundary-straddling `450mm BIN`, `By Imperial` supplier-cell backfill, feature-cabinetry summary gating, bench-top separator cleanup, seven appliance rows, and sinkware `By Others` / `Undermount` / taphole-tail repair.
-- When reviewing Imperial debug overlays, treat `unrepaired_grid_rows` as evidence of the original row split only; acceptance must use repaired `grid_rows`, live parser output, and source-PDF QA
+- When reviewing Imperial debug overlays, treat `unrepaired_grid_rows` as evidence of the original row split only; acceptance must use repaired `grid_rows`, live parser output, and source-PDF review
 - Do not reopen `job 64` unless a new live regression is reported; the earlier invalid bulk signoff has been replaced by strict source-PDF field QA, most recently on `run 2251`.
 - Refine OCR fallback for image-heavy PDFs
 - Improve room-section detection for more builder formats
 - Improve official product URL lookup accuracy, size extraction coverage, and brand coverage
 - Continue checking the new `LED Note` rollout on live reruns so true LED evidence such as `LED STRIP LIGHTING`, `LED LIGHTING`, or `LED's As per drawings` lands on the right room without reintroducing false positives from sinkware noise such as `LED Topmount` or `LED UNDERMOUTNED`
-- Keep the active 5-builder / 11-job PDF-QA matrix green after future parser changes:
+- Keep the active 5-builder / 11-job source-PDF regression matrix green after future parser changes:
   - `Clarendon`: `job 1`, `job 46`
   - `Yellowwood`: `job 12`, `job 24`
   - `Imperial`: `job 28`, `job 41`, `job 49`, `job 50`, `job 60`
@@ -333,7 +333,7 @@ After the factory feedback window ends, Bug 6 should be investigated before Bug 
 - Continue tightening supplement-file room mapping so only clearly related fixture pages enrich grouped rooms while unrelated finish/glazing notes stay ignored
 - Continue strengthening Imperial `AREA / ITEM` label-cell recovery so more rows come from true label cells instead of regex fallback
 - Continue enriching Imperial row/cell provenance so every rendered raw row and summary entry can be traced back to specific source cells
-- Continue lifting Imperial sinkware/appliance pages toward the same structured-row discipline without reintroducing `Tap` into Imperial primary UI/QA
+- Continue lifting Imperial sinkware/appliance pages toward the same structured-row discipline without reintroducing `Tap` into Imperial primary UI/export
 - Formal Phase 3B acceptance is now closed for `67/2250`, `64/2251`, `62/2260`, and `61/2269`; move the next Imperial cycle to the next reported grid/row blocker rather than replaying targeted overlay readbacks
 - Continue reducing true row-boundary misses on long merged-cell Imperial pages so fewer rows need second-pass repair or fallback continuation
 - Continue deciding which current `needs_review` issue types are safe to upgrade from passive diagnostics into automatic accepted repairs
@@ -343,7 +343,7 @@ After the factory feedback window ends, Bug 6 should be investigated before Bug 
 - Decide whether to add a global all-job Spec List index in a later phase
 - Continue validating parsing changes through fresh online reruns on the affected jobs instead of relying on older snapshots
 - Continue pushing the shared structure layer deeper into strict row-fragment field reconstruction so high-precision layout analysis also controls final field ownership, not just room/section boundaries
-- Complete PDF QA signoff for the current Clarendon and Yellowwood regression samples after each fresh live rerun, rather than treating raw output as accepted
+- Complete source-PDF review for the current Clarendon and Yellowwood regression samples after each fresh live rerun, rather than treating raw output as accepted
 
 ## Risks
 - OCR fallback is currently warning-driven unless stronger OCR infrastructure or OpenAI vision is configured
