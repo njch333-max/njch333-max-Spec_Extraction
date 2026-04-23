@@ -368,6 +368,56 @@ def is_excluded_line(text):
     return False
 
 
+MISSING_ROW_SEPARATOR_HINT = "missing a row separator"
+
+
+def _non_empty_cell_lines(value):
+    return [line.strip() for line in str(value or "").splitlines() if line.strip()]
+
+
+def _split_review_hint_record(record, split_method):
+    hint = str(record.get("_review_hint", "") or "")
+    if MISSING_ROW_SEPARATOR_HINT not in hint:
+        return [record]
+
+    area_lines = _non_empty_cell_lines(record.get("area", ""))
+    if len(area_lines) < 2:
+        return [record]
+    specs_lines = _non_empty_cell_lines(record.get("specs", ""))
+    if len(specs_lines) != len(area_lines):
+        return [record]
+
+    supplier = str(record.get("supplier", "") or "")
+    supplier_lines = _non_empty_cell_lines(supplier)
+    split_supplier = len(supplier_lines) == len(area_lines)
+    notes = str(record.get("notes", "") or "")
+    image = str(record.get("image", "") or "")
+    source = record.get("_source") if isinstance(record.get("_source"), dict) else {}
+    row_index = source.get("row_index", "")
+    page = source.get("page")
+
+    children = []
+    for index, (area, specs) in enumerate(zip(area_lines, specs_lines)):
+        child = {key: value for key, value in record.items() if key not in {"area", "specs", "supplier", "notes", "image", "_review_hint", "_source"}}
+        child.update(
+            {
+                "area": area,
+                "specs": specs,
+                "supplier": supplier_lines[index] if split_supplier else supplier,
+                "notes": notes if index == 0 else "",
+                "image": image if index == 0 else "",
+                "_source": {
+                    "page": page,
+                    "row_index": f"{row_index}.{index}",
+                    "method": split_method,
+                },
+                "_split_from_review_hint": True,
+            }
+        )
+        children.append(child)
+    return children
+
+
 def extract_continuation_with_template(page, template, last_area, y_edges):
     """
     Extract rows from a continuation page using the section's column
@@ -542,7 +592,19 @@ def extract_continuation_with_template(page, template, last_area, y_edges):
             "row_index": f"row_{ri}",
             "method": "template_anchor",
         }
-        items.append(rec)
+        area_text = rec.get("area", "")
+        area_lines = area_text.count("\n") + 1 if area_text else 0
+        specs_text = rec.get("specs", "")
+        specs_lines = specs_text.count("\n") + 1 if specs_text else 0
+        if area_lines >= 3 and specs_lines >= area_lines:
+            rec["_review_hint"] = (
+                "AREA contains multiple line items and SPECS has "
+                "matching line count. Source PDF may be missing a row separator."
+            )
+        split_records = _split_review_hint_record(rec, "text_split")
+        if len(split_records) > 1:
+            last_area = split_records[-1].get("area") or last_area
+        items.extend(split_records)
 
     return items, last_area
 
@@ -703,8 +765,9 @@ def extract_pdf(pdf_path):
                                 "row_index": ri,
                                 "method": "grid",
                             }
-                            page_record["items"].append(record)
-                            current_section["items"].append(record)
+                            for split_record in _split_review_hint_record(record, "grid_split"):
+                                page_record["items"].append(split_record)
+                                current_section["items"].append(split_record)
 
             # =================================================================
             # CASE 2: This page is a continuation (no title)
