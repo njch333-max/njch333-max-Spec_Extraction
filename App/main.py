@@ -886,11 +886,17 @@ def _flatten_imperial_material_rows(room: dict[str, Any]) -> list[dict[str, Any]
         if notes and description.upper().endswith(notes.upper()):
             description = _display_value(description[: -len(notes)]).strip(" -|;,")
         value = " - ".join(part for part in (supplier, description, notes) if part)
-        display_lines = [
+        source_display_lines = [
+            _display_value(line)
+            for line in (item.get("display_lines", []) or [])
+            if _display_value(line)
+        ]
+        rendered_display_lines = [
             _display_value(line)
             for line in parsing._imperial_material_row_display_lines_for_view(item)
             if _display_value(line)
         ]
+        display_lines = source_display_lines if _imperial_material_row_is_v6_origin(item) and source_display_lines else rendered_display_lines
         display_value = "\n".join(display_lines) if display_lines else (_display_value(parsing._imperial_material_row_display_value_for_view(item)) or value)
         handle_fallback_sources = (
             _imperial_handle_summary_fallback_sources(item)
@@ -1807,6 +1813,27 @@ def _find_imperial_summary_entry(
     return None
 
 
+def _imperial_material_row_is_v6_origin(item: dict[str, Any]) -> bool:
+    provenance = item.get("provenance", {}) if isinstance(item.get("provenance", {}), dict) else {}
+    return (
+        provenance.get("source_provider") == "v6"
+        or provenance.get("source_extractor") == "pdf_to_structured_json_v6"
+        or provenance.get("raw") == "v6_cell"
+    )
+
+
+def _imperial_summary_line_with_supplier(line: str, supplier: str) -> str:
+    normalized_line = _display_value(line)
+    normalized_supplier = _display_value(supplier)
+    if not normalized_line or not normalized_supplier:
+        return normalized_line
+    line_lower = normalized_line.lower()
+    supplier_lower = normalized_supplier.lower()
+    if line_lower == supplier_lower or line_lower.startswith(f"{supplier_lower} - "):
+        return normalized_line
+    return f"{normalized_supplier} - {normalized_line}"
+
+
 def _sort_room_rows_by_priority(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(rows, key=_room_priority_sort_key)
 
@@ -2389,15 +2416,20 @@ def _build_imperial_material_summary(snapshot: dict[str, Any]) -> dict[str, dict
                                 display_line_texts.append(normalized_line)
                         display_line_summary_texts: list[str] = []
                         for source_text in display_line_texts:
-                            display_line_summary_texts.extend(
-                                _imperial_summary_values_for_bucket(
-                                    bucket_key,
-                                    source_text,
-                                    bucket_normalizers[bucket_key],
-                                    supplier=_display_value(item.get("supplier", "")),
-                                )
+                            source_values = _imperial_summary_values_for_bucket(
+                                bucket_key,
+                                source_text,
+                                bucket_normalizers[bucket_key],
+                                supplier=_display_value(item.get("supplier", "")),
                             )
-                        if bucket_key == "bench_tops" and display_line_summary_texts:
+                            if _imperial_material_row_is_v6_origin(item):
+                                source_values = [
+                                    _display_value(bucket_normalizers[bucket_key](source_text) or source_text)
+                                ]
+                            for source_value in source_values:
+                                if source_value and source_value not in display_line_summary_texts:
+                                    display_line_summary_texts.append(source_value)
+                        if bucket_key in {"door_colours", "bench_tops"} and display_line_summary_texts:
                             summary_texts = display_line_summary_texts
                         else:
                             source_texts: list[str] = list(display_line_texts)
@@ -3592,15 +3624,28 @@ def _imperial_material_row_handle_subitem_summary_candidates(item: dict[str, Any
 def _imperial_material_row_handle_summary_candidates(item: dict[str, Any]) -> list[str]:
     if not isinstance(item, dict):
         return []
-    subitem_candidates = _imperial_material_row_handle_subitem_summary_candidates(item)
-    if subitem_candidates:
-        return subitem_candidates
     supplier = _display_value(item.get("supplier", ""))
     display_lines = [
         _display_value(line)
         for line in item.get("display_lines", []) or []
         if _display_value(line)
     ]
+    if _imperial_material_row_is_v6_origin(item) and len(display_lines) >= 2:
+        v6_candidates: list[str] = []
+        for display_line in display_lines:
+            normalized_candidate = _display_value(_normalize_imperial_handle_summary_value(display_line))
+            if not normalized_candidate or normalized_candidate.lower() == "none":
+                continue
+            candidate = _imperial_summary_line_with_supplier(display_line, supplier)
+            if not candidate or candidate.lower() == "none":
+                continue
+            if not any(existing.lower() == candidate.lower() for existing in v6_candidates):
+                v6_candidates.append(candidate)
+        if len(v6_candidates) >= 2:
+            return v6_candidates
+    subitem_candidates = _imperial_material_row_handle_subitem_summary_candidates(item)
+    if subitem_candidates:
+        return subitem_candidates
     summary_sources: list[str] = []
     if display_lines:
         summary_sources.extend(display_lines)

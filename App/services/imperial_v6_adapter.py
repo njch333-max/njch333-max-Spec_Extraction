@@ -123,7 +123,7 @@ def _merge_adjacent_subrow_items(items: list[dict]) -> list[dict]:
 def _map_v6_item_to_material_row(item: dict, source_pdf: str, row_order: int, section_title: str) -> dict:
     source = item.get("_source") if isinstance(item.get("_source"), dict) else {}
     page_no = int(source.get("page") or 0)
-    return {
+    row = {
         "area_or_item": item.get("area", ""),
         "supplier": item.get("supplier", ""),
         "specs_or_description": item.get("specs", ""),
@@ -141,6 +141,42 @@ def _map_v6_item_to_material_row(item: dict, source_pdf: str, row_order: int, se
         "revalidation_issues": [],
         "revalidation_status": "passed",
     }
+    display_lines = _display_lines_for_v6_item(item)
+    if display_lines:
+        row["display_lines"] = display_lines
+    return row
+
+
+def _display_lines_for_v6_item(item: dict) -> list[str]:
+    specs = item.get("specs", "") or ""
+    supplier = item.get("supplier", "") or ""
+    spec_lines = [line.strip() for line in str(specs).splitlines() if line.strip()]
+    supplier_lines = [line.strip() for line in str(supplier).splitlines() if line.strip()]
+    spec_lines = _coalesce_soft_wrapped_v6_spec_lines(str(item.get("area", "") or ""), spec_lines, supplier_lines)
+    if len(spec_lines) == len(supplier_lines) and len(spec_lines) >= 1:
+        paired = [(spec_line, supplier_line) for spec_line, supplier_line in zip(spec_lines, supplier_lines)]
+    elif len(spec_lines) >= 1:
+        paired = [(spec_line, str(supplier)) for spec_line in spec_lines]
+    else:
+        paired = []
+    display_lines: list[str] = []
+    for spec_line, supplier_line in paired:
+        sup_clean = supplier_line.strip()
+        if sup_clean and not spec_line.lower().startswith(f"{sup_clean.lower()} - "):
+            display_lines.append(f"{sup_clean} - {spec_line}")
+        else:
+            display_lines.append(spec_line)
+    return display_lines
+
+
+def _coalesce_soft_wrapped_v6_spec_lines(area: str, spec_lines: list[str], supplier_lines: list[str]) -> list[str]:
+    if "BENCHTOP" not in area.upper() or len(supplier_lines) < 2 or len(spec_lines) <= len(supplier_lines):
+        return spec_lines
+    coalesced = list(spec_lines)
+    while len(coalesced) > len(supplier_lines):
+        tail = coalesced.pop()
+        coalesced[-1] = f"{coalesced[-1]} {tail}".strip()
+    return coalesced
 
 
 def _derive_room_key(section_title: str) -> str:
