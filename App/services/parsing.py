@@ -15786,6 +15786,15 @@ def _imperial_material_row_is_fragment_only_value(tag: str, text: str) -> bool:
 
 def _imperial_finalize_material_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows = _imperial_contextualize_generic_material_rows(rows)
+    finalized = _imperial_finalize_material_rows_core(rows)
+    return _dedupe_imperial_material_rows(finalized)
+
+
+def _imperial_finalize_material_rows_v6(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return _imperial_finalize_material_rows_core(rows)
+
+
+def _imperial_finalize_material_rows_core(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     finalized: list[dict[str, Any]] = []
     for original in rows:
         if not isinstance(original, dict):
@@ -15943,7 +15952,7 @@ def _imperial_finalize_material_rows(rows: list[dict[str, Any]]) -> list[dict[st
         finalized.append(row)
     finalized = _imperial_trim_material_row_spillover(finalized)
     finalized = _imperial_consolidate_handle_rows(finalized)
-    return _dedupe_imperial_material_rows(finalized)
+    return finalized
 
 
 def _imperial_should_keep_material_layout_row(row: dict[str, Any]) -> bool:
@@ -17007,7 +17016,7 @@ def _process_v6_imperial_document(
         if not isinstance(section, dict):
             continue
         row = imperial_v6_adapter.build_room_from_v6_section(section, pdf_path, all_v6_sections=v6_json.get("sections", []))
-        row.material_rows = _imperial_finalize_material_rows(row.material_rows)
+        row.material_rows = _imperial_finalize_material_rows_v6(row.material_rows)
         row.material_rows = _imperial_attach_handle_subitems(row.material_rows)
         section_order_counter += 1
         row.room_order = section_order_counter
