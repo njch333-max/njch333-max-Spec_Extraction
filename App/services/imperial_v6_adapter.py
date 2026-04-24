@@ -141,13 +141,15 @@ def _map_v6_item_to_material_row(item: dict, source_pdf: str, row_order: int, se
         "revalidation_issues": [],
         "revalidation_status": "passed",
     }
-    display_lines = _display_lines_for_v6_item(item)
-    if display_lines:
-        row["display_lines"] = display_lines
+    display_payload = _display_payload_for_v6_item(item)
+    if display_payload.get("display_lines"):
+        row["display_lines"] = display_payload["display_lines"]
+    if display_payload.get("display_groups"):
+        row["display_groups"] = display_payload["display_groups"]
     return row
 
 
-def _display_lines_for_v6_item(item: dict) -> list[str]:
+def _display_payload_for_v6_item(item: dict) -> dict[str, list]:
     specs = item.get("specs", "") or ""
     supplier = item.get("supplier", "") or ""
     supplier_lines = [line.strip() for line in str(supplier).splitlines() if line.strip()]
@@ -160,24 +162,55 @@ def _display_lines_for_v6_item(item: dict) -> list[str]:
     merged_spec = " | ".join(" ".join(block) for block in spec_blocks if block)
 
     if is_handles_row:
-        if n_supplier == len(flat_spec_lines) and n_supplier >= 1:
-            return [_join_supplier_spec(supplier_lines[index], flat_spec_lines[index]) for index in range(n_supplier)]
-        supplier_prefix = str(supplier).strip() if supplier else ""
-        return [_join_supplier_spec(supplier_prefix, line) for line in flat_spec_lines]
+        return _handle_display_payload(str(supplier), supplier_lines, flat_spec_lines)
 
     if n_supplier <= 1:
         prefix = supplier_lines[0] if n_supplier == 1 else ""
         if not merged_spec:
-            return [prefix] if prefix else []
-        return [_join_supplier_spec(prefix, merged_spec)]
+            return {"display_lines": [prefix] if prefix else []}
+        return {"display_lines": [_join_supplier_spec(prefix, merged_spec)]}
 
     if len(flat_spec_lines) == n_supplier:
-        return [_join_supplier_spec(supplier_lines[index], flat_spec_lines[index]) for index in range(n_supplier)]
+        return {
+            "display_lines": [_join_supplier_spec(supplier_lines[index], flat_spec_lines[index]) for index in range(n_supplier)]
+        }
 
     hinted_supplier = f"*{' / '.join(supplier_lines)}*"
     if merged_spec:
-        return [f"{hinted_supplier} - {merged_spec}"]
-    return [hinted_supplier]
+        return {"display_lines": [f"{hinted_supplier} - {merged_spec}"]}
+    return {"display_lines": [hinted_supplier]}
+
+
+def _handle_display_payload(supplier: str, supplier_lines: list[str], flat_spec_lines: list[str]) -> dict[str, list]:
+    n_supplier = len(supplier_lines)
+    if not flat_spec_lines:
+        return {"display_lines": []}
+
+    supplier_prefix = supplier.strip() if supplier else ""
+    if n_supplier <= 1:
+        return {
+            "display_lines": [_join_supplier_spec(supplier_prefix, line) for line in flat_spec_lines],
+            "display_groups": [{"supplier": supplier_prefix, "lines": flat_spec_lines}],
+        }
+
+    if len(flat_spec_lines) == n_supplier:
+        groups = [{"supplier": supplier_lines[index], "lines": [flat_spec_lines[index]]} for index in range(n_supplier)]
+        return {
+            "display_lines": [_join_supplier_spec(supplier_lines[index], flat_spec_lines[index]) for index in range(n_supplier)],
+            "display_groups": groups,
+        }
+
+    if len(flat_spec_lines) > n_supplier and len(flat_spec_lines) % n_supplier == 0:
+        chunk_size = len(flat_spec_lines) // n_supplier
+        display_lines: list[str] = []
+        display_groups: list[dict[str, list[str] | str]] = []
+        for index, supplier_line in enumerate(supplier_lines):
+            chunk = flat_spec_lines[index * chunk_size : (index + 1) * chunk_size]
+            display_groups.append({"supplier": supplier_line, "lines": chunk})
+            display_lines.extend(_join_supplier_spec(supplier_line, line) for line in chunk)
+        return {"display_lines": display_lines, "display_groups": display_groups}
+
+    return {"display_lines": [_join_supplier_spec(supplier_prefix, line) for line in flat_spec_lines]}
 
 
 def _split_specs_into_blocks(specs: str) -> list[list[str]]:

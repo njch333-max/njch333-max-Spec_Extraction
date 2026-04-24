@@ -109,7 +109,16 @@
         <div class="room-field-row room-field-stack">
           <strong>{{ item.title }}</strong>
           <div>
-            {% if item.display_lines %}
+            {% if item.display_groups %}
+              {% for group in item.display_groups %}
+                {% if group.supplier %}
+                <div class="supplier-group-header">{{ group.supplier }}</div>
+                {% endif %}
+                {% for line in group.lines %}
+                <div class="supplier-group-line">{{ line }}</div>
+                {% endfor %}
+              {% endfor %}
+            {% elif item.display_lines %}
               {% for line in item.display_lines %}
               <div>{{ line }}</div>
               {% endfor %}

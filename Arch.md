@@ -227,6 +227,7 @@
   - left column = `AREA / ITEM`
   - right column = lightly cleaned `SUPPLIER - SPECS / DESCRIPTION - NOTES`
   - preserve original handle-block wording order; do not aggressively split `HANDLES` text into artificial description/note fragments
+  - when an Imperial v6 `HANDLES` row carries structured `display_groups`, render supplier-group headers with indented grouped lines on the raw Spec List page; otherwise fall back to the existing flat `display_lines` block
   - prefer the most complete accepted raw-row/layout continuation text over truncated visual-subrow fragments when building the displayed value for desk / shelf / robe / study style rows
   - only retain `Drawers`, `Hinges`, `Flooring`, and `Sink` beneath the raw rows
   - omit `Tap` from Imperial room cards
@@ -250,6 +251,7 @@
 13c. `Material Summary` is a filtered review sheet for Bench Tops, Door Colours, and Handles only, with columns `Category`, `Section`, `Area`, `Supplier`, `Specs / Description`, and `Notes`.
 13d. Imperial Raw Spec List Excel prefers `rooms[].v6_review_rows` when present, preserving the Claude/v6 source item boundaries, row wording, and notes before parser finalization. It falls back to `rooms[].material_rows` for older snapshots. Non-Imperial snapshots flatten room fields, appliances, special sections, others, and warnings into `By Section`.
 13e. Historical run result pages stay read-only and do not expose Excel export.
+13f. Imperial v6 adapter-owned display payload is now split by purpose: `display_lines` remains the flat downstream summary/fallback surface, while optional HANDLES-only `display_groups` carries grouped `supplier + lines[]` data for room-card rendering. `main.py` only passes `display_groups` through to the template; Material Summary logic remains unchanged and continues to consume `display_lines`.
 14. Never fall back to `reviews` when rendering or exporting the raw Spec List page.
 15. Start the page shell with the left navigation rail collapsed by default and let the user toggle it open client-side when needed.
 16. When a parsed `site_address` exists, append it to the page heading as `job no - site address`; otherwise omit the separator.

@@ -891,12 +891,30 @@ def _flatten_imperial_material_rows(room: dict[str, Any]) -> list[dict[str, Any]
             for line in (item.get("display_lines", []) or [])
             if _display_value(line)
         ]
+        source_display_groups = [
+            {
+                "supplier": _display_value(group.get("supplier", "")),
+                "lines": [
+                    _display_value(line)
+                    for line in (group.get("lines", []) or [])
+                    if _display_value(line)
+                ],
+            }
+            for group in (item.get("display_groups", []) or [])
+            if isinstance(group, dict)
+        ]
+        source_display_groups = [
+            group
+            for group in source_display_groups
+            if group["supplier"] or group["lines"]
+        ]
         rendered_display_lines = [
             _display_value(line)
             for line in parsing._imperial_material_row_display_lines_for_view(item)
             if _display_value(line)
         ]
         display_lines = source_display_lines if _imperial_material_row_is_v6_origin(item) and source_display_lines else rendered_display_lines
+        display_groups = source_display_groups if _imperial_material_row_is_v6_origin(item) else []
         display_value = "\n".join(display_lines) if display_lines else (_display_value(parsing._imperial_material_row_display_value_for_view(item)) or value)
         handle_fallback_sources = (
             _imperial_handle_summary_fallback_sources(item)
@@ -958,6 +976,7 @@ def _flatten_imperial_material_rows(room: dict[str, Any]) -> list[dict[str, Any]
                 "value": value,
                 "display_value": display_value,
                 "display_lines": display_lines,
+                "display_groups": display_groups,
                 "supplier": supplier,
                 "specs_or_description": description,
                 "notes": notes,

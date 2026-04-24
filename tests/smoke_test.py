@@ -4149,6 +4149,50 @@ Front Loader - standard 700mm size - LG Tower
         )
         self.assertEqual(rows[0]["value"], "Barchie - Woodgate Round Cabinet Knob SKU:Part No: 422.33.030 Casters")
 
+    def test_flatten_imperial_material_rows_preserves_v6_display_groups(self) -> None:
+        rows = _flatten_imperial_material_rows(
+            {
+                "material_rows": [
+                    {
+                        "area_or_item": "HANDLES",
+                        "supplier": "Furnware\nTitus Tekform",
+                        "specs_or_description": "line one\nline two\nline three\nline four",
+                        "notes": "",
+                        "tags": ["handles"],
+                        "page_no": 1,
+                        "row_order": 1,
+                        "display_lines": [
+                            "Furnware - line one",
+                            "Furnware - line two",
+                            "Titus Tekform - line three",
+                            "Titus Tekform - line four",
+                        ],
+                        "display_groups": [
+                            {"supplier": "Furnware", "lines": ["line one", "line two"]},
+                            {"supplier": "Titus Tekform", "lines": ["line three", "line four"]},
+                        ],
+                        "provenance": {"source_provider": "v6"},
+                    }
+                ]
+            }
+        )
+        self.assertEqual(
+            rows[0]["display_groups"],
+            [
+                {"supplier": "Furnware", "lines": ["line one", "line two"]},
+                {"supplier": "Titus Tekform", "lines": ["line three", "line four"]},
+            ],
+        )
+        self.assertEqual(
+            rows[0]["display_lines"],
+            [
+                "Furnware - line one",
+                "Furnware - line two",
+                "Titus Tekform - line three",
+                "Titus Tekform - line four",
+            ],
+        )
+
     def test_flatten_imperial_material_rows_exposes_repair_diagnostics(self) -> None:
         rows = _flatten_imperial_material_rows(
             {
@@ -9929,6 +9973,66 @@ Front Loader - standard 700mm size - LG Tower
         self.assertTrue(any(row[0] == "Bench Tops" and row[2] == "Wall Run Bench Top" for row in material_rows))
         self.assertTrue(any(row[0] == "Door Colours" and row[2] == "Overhead Door Colours" for row in material_rows))
         self.assertTrue(any(row[0] == "Handles" and row[2] == "Handles" for row in material_rows))
+
+    def test_spec_list_page_renders_supplier_grouped_handles_when_display_groups_present(self) -> None:
+        builder_id = store.create_builder("Imperial", "imperial", "")
+        job_id = store.create_job("37867", builder_id, "Grouped Handles", "")
+        store.upsert_snapshot(
+            job_id,
+            "raw_spec",
+            {
+                "job_no": "37867",
+                "builder_name": "Imperial",
+                "source_kind": "spec",
+                "generated_at": "2026-04-24T10:00:00+00:00",
+                "analysis": {"mode": "heuristic_only", "parser_strategy": "imperial_v6"},
+                "rooms": [
+                    {
+                        "room_key": "upper_bed_3_astrid",
+                        "original_room_label": "UPPER-BED 3 (Astrid)",
+                        "room_order": 1,
+                        "material_rows": [
+                            {
+                                "area_or_item": "HANDLES",
+                                "supplier": "Furnware\nTitus Tekform",
+                                "specs_or_description": "line one\nline two\nline three\nline four",
+                                "notes": "",
+                                "tags": ["other_material"],
+                                "page_no": 1,
+                                "row_order": 1,
+                                "display_lines": [
+                                    "Furnware - line one",
+                                    "Furnware - line two",
+                                    "Titus Tekform - line three",
+                                    "Titus Tekform - line four",
+                                ],
+                                "display_groups": [
+                                    {"supplier": "Furnware", "lines": ["line one", "line two"]},
+                                    {"supplier": "Titus Tekform", "lines": ["line three", "line four"]},
+                                ],
+                                "provenance": {"source_provider": "v6"},
+                            }
+                        ],
+                    }
+                ],
+                "appliances": [],
+                "others": {},
+                "warnings": [],
+                "source_documents": [],
+            },
+        )
+
+        client = TestClient(app)
+        self._login(client)
+        response = client.get(f"/jobs/{job_id}/spec-list")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("supplier-group-header", response.text)
+        self.assertEqual(response.text.count('<div class="supplier-group-header">Furnware</div>'), 1)
+        self.assertEqual(response.text.count('<div class="supplier-group-header">Titus Tekform</div>'), 1)
+        self.assertEqual(response.text.count('class="supplier-group-line"'), 4)
+        self.assertIn('<div class="supplier-group-line">line one</div>', response.text)
+        self.assertNotIn('<div>Furnware - line one</div>', response.text)
 
     def test_raw_spec_snapshot_allows_direct_excel_export_without_pdf_qa(self) -> None:
         builder_id = store.create_builder("Imperial", "imperial", "")

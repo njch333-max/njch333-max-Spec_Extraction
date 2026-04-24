@@ -426,6 +426,19 @@ th {
   grid-template-columns: 1fr;
 }
 
+.supplier-group-header {
+  font-weight: 600;
+  margin-top: 0.3em;
+}
+
+.supplier-group-header:first-child {
+  margin-top: 0;
+}
+
+.supplier-group-line {
+  padding-left: 1em;
+}
+
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

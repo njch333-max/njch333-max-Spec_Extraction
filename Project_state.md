@@ -49,6 +49,7 @@
   - layout diagnostics recorded per snapshot, including `layout_attempted`, `layout_succeeded`, `layout_mode`, `layout_pages`, `layout_provider`, `docling_pages`, and `layout_note`
   - Raw Snapshot pages now export the latest `raw_spec` directly through `Export Excel` without a PDF QA gate
   - Raw Snapshot Excel now uses a Claude-style workbook with `Summary`, `By Section`, optional `Flagged`, and filtered `Material Summary` sheets; the export keeps Claude's Arial font sizing, blue table headers, green section headers, yellow flagged rows, and section-header row layout, and Imperial v6 snapshots preserve `v6_review_rows` so the workbook can use the original v6 item boundaries, row wording, and notes
+  - Imperial v6 raw Spec List room cards now support grouped `HANDLES` rendering: the adapter emits HANDLES-only `display_groups` when supplier ownership is safe enough (including the accepted equal-share multi-supplier case), the template renders one supplier header per group with indented lines beneath it, and flat `display_lines` stay available for Material Summary and fallback rendering
   - user-visible PDF QA cards, routes, pending warnings, and export locks have been removed from Job Workspace and Raw Snapshot pages
   - new `raw_spec` snapshot writes no longer auto-create `snapshot_verifications`; the table and internal helpers remain as compatibility residue
   - Clarendon-only deterministic post-polish that rebuilds cleaner room text from schedule and fixture pages while preserving source-driven room ownership

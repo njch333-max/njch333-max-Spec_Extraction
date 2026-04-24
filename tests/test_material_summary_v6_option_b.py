@@ -58,6 +58,17 @@ def test_v6_handle_summary_candidates_emit_all_display_lines_with_supplier_prefi
         ["handles"],
     )
 
+    assert row["display_groups"] == [
+        {
+            "supplier": "Kethy",
+            "lines": [
+                "Finger Pull on Uppers- PTO where required",
+                "L7817 - Oak Matt Black (OAKBK)",
+                "160mm - Lowers and Drawers",
+                "320mm - Pantry Door",
+            ],
+        }
+    ]
     assert app_main._imperial_material_row_handle_summary_candidates(row) == [
         "Kethy - Finger Pull on Uppers- PTO where required",
         "Kethy - L7817 - Oak Matt Black (OAKBK)",
@@ -183,9 +194,100 @@ def test_v6_handles_with_matching_supplier_count_pair_one_to_one():
         ["handles"],
     )
 
+    assert row["display_groups"] == [
+        {"supplier": "Supplier1", "lines": ["line one"]},
+        {"supplier": "Supplier2", "lines": ["line two"]},
+        {"supplier": "Supplier3", "lines": ["line three"]},
+        {"supplier": "Supplier4", "lines": ["line four"]},
+    ]
     assert row["display_lines"] == [
         "Supplier1 - line one",
         "Supplier2 - line two",
         "Supplier3 - line three",
         "Supplier4 - line four",
     ]
+
+
+def test_v6_handles_equal_share_groups_multi_supplier_block():
+    row = _v6_material_row(
+        "HANDLES",
+        (
+            "Tall Door Handles - Momo Hinoki Wood Big D\n"
+            "832mm Handle Oak-HIN0682.832.OAK\n"
+            "High Split Handle -Momo hinoki wood big d\n"
+            "416mm handle oak-HIN0682.416.OAK\n"
+            "Drawers - Bevel Edge finger pull\n"
+            "DESK - 2163 Voda Profile Handle Brushed\n"
+            "Nickel 300mm - SO-2163-300-BN\n"
+            "BENCHSEAT DRAWERS - PTO"
+        ),
+        "Furnware\nTitus Tekform",
+        ["handles"],
+    )
+
+    assert row["display_groups"] == [
+        {
+            "supplier": "Furnware",
+            "lines": [
+                "Tall Door Handles - Momo Hinoki Wood Big D",
+                "832mm Handle Oak-HIN0682.832.OAK",
+                "High Split Handle -Momo hinoki wood big d",
+                "416mm handle oak-HIN0682.416.OAK",
+            ],
+        },
+        {
+            "supplier": "Titus Tekform",
+            "lines": [
+                "Drawers - Bevel Edge finger pull",
+                "DESK - 2163 Voda Profile Handle Brushed",
+                "Nickel 300mm - SO-2163-300-BN",
+                "BENCHSEAT DRAWERS - PTO",
+            ],
+        },
+    ]
+    assert row["display_lines"] == [
+        "Furnware - Tall Door Handles - Momo Hinoki Wood Big D",
+        "Furnware - 832mm Handle Oak-HIN0682.832.OAK",
+        "Furnware - High Split Handle -Momo hinoki wood big d",
+        "Furnware - 416mm handle oak-HIN0682.416.OAK",
+        "Titus Tekform - Drawers - Bevel Edge finger pull",
+        "Titus Tekform - DESK - 2163 Voda Profile Handle Brushed",
+        "Titus Tekform - Nickel 300mm - SO-2163-300-BN",
+        "Titus Tekform - BENCHSEAT DRAWERS - PTO",
+    ]
+
+
+def test_v6_handles_mismatch_keeps_flat_fallback_without_display_groups():
+    row = _v6_material_row(
+        "HANDLES",
+        "line one\nline two\nline three\nline four\nline five",
+        "Supplier1\nSupplier2",
+        ["handles"],
+    )
+
+    assert "display_groups" not in row
+    assert row["display_lines"] == [
+        "Supplier1\nSupplier2 - line one",
+        "Supplier1\nSupplier2 - line two",
+        "Supplier1\nSupplier2 - line three",
+        "Supplier1\nSupplier2 - line four",
+        "Supplier1\nSupplier2 - line five",
+    ]
+
+
+def test_v6_handles_empty_specs_do_not_emit_display_groups_or_lines():
+    row = _v6_material_row("HANDLES", "", "Kethy", ["handles"])
+
+    assert "display_groups" not in row
+    assert "display_lines" not in row
+
+
+def test_v6_non_handles_do_not_emit_display_groups():
+    row = _v6_material_row(
+        "BENCHTOP",
+        "line one\nline two",
+        "Supplier1\nSupplier2",
+        ["bench_tops"],
+    )
+
+    assert "display_groups" not in row
