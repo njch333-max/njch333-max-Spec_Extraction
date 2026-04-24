@@ -150,33 +150,61 @@ def _map_v6_item_to_material_row(item: dict, source_pdf: str, row_order: int, se
 def _display_lines_for_v6_item(item: dict) -> list[str]:
     specs = item.get("specs", "") or ""
     supplier = item.get("supplier", "") or ""
-    spec_lines = [line.strip() for line in str(specs).splitlines() if line.strip()]
     supplier_lines = [line.strip() for line in str(supplier).splitlines() if line.strip()]
-    spec_lines = _coalesce_soft_wrapped_v6_spec_lines(str(item.get("area", "") or ""), spec_lines, supplier_lines)
-    if len(spec_lines) == len(supplier_lines) and len(spec_lines) >= 1:
-        paired = [(spec_line, supplier_line) for spec_line, supplier_line in zip(spec_lines, supplier_lines)]
-    elif len(spec_lines) >= 1:
-        paired = [(spec_line, str(supplier)) for spec_line in spec_lines]
-    else:
-        paired = []
-    display_lines: list[str] = []
-    for spec_line, supplier_line in paired:
-        sup_clean = supplier_line.strip()
-        if sup_clean and not spec_line.lower().startswith(f"{sup_clean.lower()} - "):
-            display_lines.append(f"{sup_clean} - {spec_line}")
-        else:
-            display_lines.append(spec_line)
-    return display_lines
+    n_supplier = len(supplier_lines)
+    area = str(item.get("area", "") or "")
+    is_handles_row = "HANDLES" in area.upper()
+
+    spec_blocks = _split_specs_into_blocks(str(specs))
+    flat_spec_lines = [line for block in spec_blocks for line in block]
+    merged_spec = " | ".join(" ".join(block) for block in spec_blocks if block)
+
+    if is_handles_row:
+        if n_supplier == len(flat_spec_lines) and n_supplier >= 1:
+            return [_join_supplier_spec(supplier_lines[index], flat_spec_lines[index]) for index in range(n_supplier)]
+        supplier_prefix = str(supplier).strip() if supplier else ""
+        return [_join_supplier_spec(supplier_prefix, line) for line in flat_spec_lines]
+
+    if n_supplier <= 1:
+        prefix = supplier_lines[0] if n_supplier == 1 else ""
+        if not merged_spec:
+            return [prefix] if prefix else []
+        return [_join_supplier_spec(prefix, merged_spec)]
+
+    if len(flat_spec_lines) == n_supplier:
+        return [_join_supplier_spec(supplier_lines[index], flat_spec_lines[index]) for index in range(n_supplier)]
+
+    hinted_supplier = f"*{' / '.join(supplier_lines)}*"
+    if merged_spec:
+        return [f"{hinted_supplier} - {merged_spec}"]
+    return [hinted_supplier]
 
 
-def _coalesce_soft_wrapped_v6_spec_lines(area: str, spec_lines: list[str], supplier_lines: list[str]) -> list[str]:
-    if "BENCHTOP" not in area.upper() or len(supplier_lines) < 2 or len(spec_lines) <= len(supplier_lines):
-        return spec_lines
-    coalesced = list(spec_lines)
-    while len(coalesced) > len(supplier_lines):
-        tail = coalesced.pop()
-        coalesced[-1] = f"{coalesced[-1]} {tail}".strip()
-    return coalesced
+def _split_specs_into_blocks(specs: str) -> list[list[str]]:
+    blocks: list[list[str]] = []
+    current: list[str] = []
+    for raw_line in str(specs or "").splitlines():
+        line = raw_line.strip()
+        if line:
+            current.append(line)
+        elif current:
+            blocks.append(current)
+            current = []
+    if current:
+        blocks.append(current)
+    return blocks
+
+
+def _join_supplier_spec(supplier: str, spec: str) -> str:
+    supplier = (supplier or "").strip()
+    spec = (spec or "").strip()
+    if not supplier:
+        return spec
+    if not spec:
+        return supplier
+    if spec.lower().startswith(f"{supplier.lower()} - "):
+        return spec
+    return f"{supplier} - {spec}"
 
 
 def _derive_room_key(section_title: str) -> str:

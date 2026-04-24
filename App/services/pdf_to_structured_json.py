@@ -297,7 +297,7 @@ def clean_cell(cell):
         return None
     cell = cell.strip()
     cell = re.sub(r"[ \t]+", " ", cell)
-    cell = re.sub(r"\n{2,}", "\n", cell)
+    cell = re.sub(r"\n{3,}", "\n\n", cell)
     return cell
 
 
@@ -373,6 +373,38 @@ MISSING_ROW_SEPARATOR_HINT = "missing a row separator"
 
 def _non_empty_cell_lines(value):
     return [line.strip() for line in str(value or "").splitlines() if line.strip()]
+
+
+def _review_hint_non_empty_line_count(value):
+    return len(_non_empty_cell_lines(value))
+
+
+def _coalesce_single_area_multisupplier_specs(record):
+    if not isinstance(record, dict):
+        return record
+    area_text = str(record.get("area", "") or "")
+    specs_text = str(record.get("specs", "") or "")
+    supplier_text = str(record.get("supplier", "") or "")
+    if "\n\n" in specs_text or "HANDLES" in area_text.upper():
+        return record
+    area_lines = _non_empty_cell_lines(area_text)
+    supplier_lines = _non_empty_cell_lines(supplier_text)
+    spec_lines = _non_empty_cell_lines(specs_text)
+    if len(area_lines) != 1 or len(supplier_lines) < 2 or len(spec_lines) <= len(supplier_lines):
+        return record
+    coalesced_spec_lines = list(spec_lines)
+    while len(coalesced_spec_lines) > len(supplier_lines):
+        tail = coalesced_spec_lines.pop()
+        coalesced_spec_lines[-1] = f"{coalesced_spec_lines[-1]} {tail}".strip()
+    updated = dict(record)
+    updated["specs"] = "\n".join(coalesced_spec_lines)
+    return updated
+
+
+def _should_add_missing_row_separator_review_hint(area_text, specs_text):
+    area_lines = _review_hint_non_empty_line_count(area_text)
+    specs_lines = _review_hint_non_empty_line_count(specs_text)
+    return area_lines >= 3 and specs_lines >= area_lines
 
 
 def _split_review_hint_record(record, split_method):
@@ -587,16 +619,13 @@ def extract_continuation_with_template(page, template, last_area, y_edges):
         elif "area" in rec:
             last_area = rec["area"]
 
+        rec = _coalesce_single_area_multisupplier_specs(rec)
         rec["_source"] = {
             "page": page.page_number,
             "row_index": f"row_{ri}",
             "method": "template_anchor",
         }
-        area_text = rec.get("area", "")
-        area_lines = area_text.count("\n") + 1 if area_text else 0
-        specs_text = rec.get("specs", "")
-        specs_lines = specs_text.count("\n") + 1 if specs_text else 0
-        if area_lines >= 3 and specs_lines >= area_lines:
+        if _should_add_missing_row_separator_review_hint(rec.get("area", ""), rec.get("specs", "")):
             rec["_review_hint"] = (
                 "AREA contains multiple line items and SPECS has "
                 "matching line count. Source PDF may be missing a row separator."
@@ -750,11 +779,8 @@ def extract_pdf(pdf_path):
                             elif "area" in record:
                                 last_area = record["area"]
 
-                            area_text = record.get("area", "")
-                            area_lines = area_text.count("\n") + 1 if area_text else 0
-                            specs_text = record.get("specs", "")
-                            specs_lines = specs_text.count("\n") + 1 if specs_text else 0
-                            if area_lines >= 3 and specs_lines >= area_lines:
+                            record = _coalesce_single_area_multisupplier_specs(record)
+                            if _should_add_missing_row_separator_review_hint(record.get("area", ""), record.get("specs", "")):
                                 record["_review_hint"] = (
                                     "AREA contains multiple line items and SPECS has "
                                     "matching line count. Source PDF may be missing a row separator."

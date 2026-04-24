@@ -66,7 +66,7 @@ def test_v6_handle_summary_candidates_emit_all_display_lines_with_supplier_prefi
     ]
 
 
-def test_v6_door_colour_summary_enumerates_display_lines_and_dedupes_rooms():
+def test_v6_door_colour_single_supplier_merges_specs_within_row():
     rows = [
         _v6_material_row("BASE AND UPPER (INCL BOTTOMS) CABINETRY COLOUR", "Amaro Matt", "Polytec", ["door_colours"], 1),
         _v6_material_row(
@@ -89,10 +89,9 @@ def test_v6_door_colour_summary_enumerates_display_lines_and_dedupes_rooms():
 
     assert set(texts) == {
         "Polytec - Amaro Matt",
-        "Polytec - Surround - Prime Oak Matt",
-        "Polytec - Backs only - Forage Smooth",
+        "Polytec - Surround - Prime Oak Matt Backs only - Forage Smooth",
     }
-    assert len(texts) == 3
+    assert len(texts) == 2
 
 
 def test_v6_benchtop_summary_pairs_supplier_and_spec_lines():
@@ -109,7 +108,7 @@ def test_v6_benchtop_summary_pairs_supplier_and_spec_lines():
     ]
 
 
-def test_v6_benchtop_display_lines_coalesce_soft_wrapped_spec_line():
+def test_v6_benchtop_mismatched_spec_count_emits_hinted_entry():
     row = _v6_material_row(
         "BENCHTOP",
         "2Omm Stone - 4030 Oyster - PR\n20mm Shadowline under Benchtop -Forage\nSmooth",
@@ -118,8 +117,7 @@ def test_v6_benchtop_display_lines_coalesce_soft_wrapped_spec_line():
     )
 
     assert row["display_lines"] == [
-        "Caesarstone - 2Omm Stone - 4030 Oyster - PR",
-        "By Imperial - 20mm Shadowline under Benchtop -Forage Smooth",
+        "*Caesarstone / By Imperial* - 2Omm Stone - 4030 Oyster - PR 20mm Shadowline under Benchtop -Forage Smooth",
     ]
 
 
@@ -152,3 +150,42 @@ def test_v6_single_display_line_handle_row_falls_through_to_existing_logic():
 
     assert row["display_lines"] == ["Kethy - Finger Pull on Uppers- PTO where required"]
     assert app_main._imperial_material_row_handle_summary_candidates(row) == ["Finger Pull on Uppers"]
+
+
+def test_v6_single_supplier_merges_blank_line_into_pipe_separator():
+    row = _v6_material_row("OPEN SHELVES", "line one\nline two\n\nline three", "Polytec", ["door_colours"])
+
+    assert row["display_lines"] == ["Polytec - line one line two | line three"]
+
+
+def test_v6_supplier_count_mismatch_emits_single_hinted_display_line():
+    row = _v6_material_row(
+        "DRAWERS",
+        "line one\nline two\nline three\nline four\nline five",
+        "Supplier1\nSupplier2",
+        ["door_colours"],
+    )
+
+    assert row["display_lines"] == ["*Supplier1 / Supplier2* - line one line two line three line four line five"]
+
+
+def test_v6_empty_supplier_and_specs_do_not_add_display_lines():
+    row = _v6_material_row("DRAWERS", "", "", ["door_colours"])
+
+    assert "display_lines" not in row
+
+
+def test_v6_handles_with_matching_supplier_count_pair_one_to_one():
+    row = _v6_material_row(
+        "HANDLES - BASE",
+        "line one\nline two\nline three\nline four",
+        "Supplier1\nSupplier2\nSupplier3\nSupplier4",
+        ["handles"],
+    )
+
+    assert row["display_lines"] == [
+        "Supplier1 - line one",
+        "Supplier2 - line two",
+        "Supplier3 - line three",
+        "Supplier4 - line four",
+    ]
