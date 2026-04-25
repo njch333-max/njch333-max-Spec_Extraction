@@ -21,6 +21,10 @@ def build_room(v6_section: dict, all_sections=None) -> RoomRow:
     return room
 
 
+def build_room_with_metadata(metadata: dict[str, object]) -> RoomRow:
+    return build_room({"section_title": "KITCHEN JOINERY SELECTION SHEET", "metadata": metadata, "items": []})
+
+
 def test_soft_close_populated_from_metadata():
     v6_section = load_fixture("job_61_kitchen_v6_section.json")
     room = build_room(v6_section)
@@ -32,6 +36,51 @@ def test_flooring_from_metadata():
     v6_section = load_fixture("job_61_kitchen_v6_section.json")
     room = build_room(v6_section)
     assert room.flooring == "Vinyl"
+
+
+def test_flooring_header_pollution_full_literal_dropped():
+    room = build_room_with_metadata({"floor_type": "AREA / ITEM SPECS / DESCRIPTION IMAGE SUPPLIER NOTES"})
+    assert not room.flooring
+
+
+def test_flooring_header_pollution_partial_subset_dropped():
+    room = build_room_with_metadata({"floor_type": "AREA / ITEM SPECS / DESCRIPTION"})
+    assert not room.flooring
+
+
+def test_flooring_header_pollution_case_insensitive_dropped():
+    room = build_room_with_metadata({"floor_type": "area / item specs / description image supplier notes"})
+    assert not room.flooring
+
+
+def test_flooring_single_word_preserved():
+    room = build_room_with_metadata({"floor_type": "Hybrid"})
+    assert room.flooring == "Hybrid"
+
+
+def test_flooring_multi_word_preserved():
+    room = build_room_with_metadata({"floor_type": "Tiled - 600x600 matte"})
+    assert room.flooring == "Tiled - 600x600 matte"
+
+
+def test_flooring_mixed_real_and_header_preserved():
+    room = build_room_with_metadata({"floor_type": "Hybrid AREA"})
+    assert room.flooring == "Hybrid AREA"
+
+
+def test_flooring_single_header_token_preserved():
+    room = build_room_with_metadata({"floor_type": "AREA"})
+    assert room.flooring == "AREA"
+
+
+def test_flooring_na_still_filtered():
+    room = build_room_with_metadata({"floor_type": "N/A"})
+    assert not room.flooring
+
+
+def test_flooring_empty_metadata_safe():
+    room = build_room_with_metadata({})
+    assert not room.flooring
 
 
 def test_toe_kick_populated():

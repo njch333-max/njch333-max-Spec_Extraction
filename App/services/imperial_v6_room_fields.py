@@ -5,6 +5,7 @@ v6's structured cells: section metadata plus item area/specs/supplier/notes.
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Callable
 
 from App.models import RoomRow
@@ -22,6 +23,8 @@ ACCESSORY_AREA_KEYWORDS = (
     "TROUSER RACK",
     "IRONING BOARD",
 )
+
+_PDF_HEADER_TOKENS = frozenset({"AREA", "ITEM", "SPECS", "DESCRIPTION", "IMAGE", "SUPPLIER", "NOTES"})
 
 
 def populate_room_fields_from_v6(
@@ -60,8 +63,21 @@ def _populate_soft_close(room: RoomRow, metadata: dict[str, Any]) -> None:
 
 def _populate_flooring(room: RoomRow, metadata: dict[str, Any]) -> None:
     flooring = _clean(metadata.get("floor_type"))
-    if flooring and "N/A" not in flooring.upper():
-        room.flooring = flooring
+    if not flooring:
+        return
+    if "N/A" in flooring.upper():
+        return
+    if _is_pdf_header_pollution(flooring):
+        return
+    room.flooring = flooring
+
+
+def _is_pdf_header_pollution(value: str) -> bool:
+    """Reject pure PDF column-header flooring pollution per PRD 4.16."""
+    if not value:
+        return False
+    tokens = [token for token in re.split(r"[\s/]+", value.upper()) if token]
+    return len(tokens) >= 2 and all(token in _PDF_HEADER_TOKENS for token in tokens)
 
 
 def _populate_toe_kick(room: RoomRow, items: list[dict[str, Any]]) -> None:
