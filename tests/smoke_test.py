@@ -58,6 +58,62 @@ class SmokeTest(unittest.TestCase):
             conn.execute("DELETE FROM builder_templates")
             conn.execute("DELETE FROM builders")
 
+    def _make_imperial_v6_material_row(
+        self,
+        area_or_item: str,
+        *,
+        specs_or_description: str = "",
+        supplier: str = "",
+        notes: object = "",
+        tags: list[str] | None = None,
+        row_order: int = 1,
+        display_lines: list[str] | None = None,
+        display_groups: list[dict[str, object]] | None = None,
+    ) -> dict[str, object]:
+        row: dict[str, object] = {
+            "area_or_item": area_or_item,
+            "supplier": supplier,
+            "specs_or_description": specs_or_description,
+            "notes": notes,
+            "tags": list(tags or ["other_material"]),
+            "page_no": 1,
+            "row_order": row_order,
+            "provenance": {"source_provider": "v6"},
+        }
+        if display_lines is not None:
+            row["display_lines"] = display_lines
+        if display_groups is not None:
+            row["display_groups"] = display_groups
+        return row
+
+    def _render_imperial_spec_list_page(self, rooms: list[dict[str, object]], *, job_no: str) -> str:
+        builder_id = store.create_builder("Imperial", "imperial", "")
+        job_id = store.create_job(job_no, builder_id, "Imperial Row Notes", "")
+        store.upsert_snapshot(
+            job_id,
+            "raw_spec",
+            {
+                "job_no": job_no,
+                "builder_name": "Imperial",
+                "source_kind": "spec",
+                "generated_at": "2026-04-25T10:00:00+00:00",
+                "analysis": {"mode": "heuristic_only", "parser_strategy": "imperial_v6"},
+                "rooms": rooms,
+                "appliances": [],
+                "others": {},
+                "warnings": [],
+                "source_documents": [],
+            },
+        )
+        client = TestClient(app)
+        self._login(client)
+        response = client.get(f"/jobs/{job_id}/spec-list")
+        self.assertEqual(response.status_code, 200)
+        return response.text
+
+    def _extract_material_summary_block(self, page_text: str) -> str:
+        return page_text.split('<section class="card">\n  <span class="eyebrow">Raw Snapshot</span>\n  <h3>Material Summary</h3>', 1)[1].split("</section>", 1)[0]
+
     def test_health(self) -> None:
         client = TestClient(app)
         response = client.get("/api/health")
@@ -10295,6 +10351,275 @@ Front Loader - standard 700mm size - LG Tower
         self.assertEqual(kitchen_section.count("BASE- BEVEL EDGE FINGERPULL"), 1)
         self.assertEqual(kitchen_section.count("UPPER - FINGERPULL"), 1)
         self.assertEqual(kitchen_section.count("TALL - PTO"), 1)
+
+    def test_spec_list_page_renders_v6_row_notes_inline_for_single_display_line(self) -> None:
+        page = self._render_imperial_spec_list_page(
+            [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "room_order": 1,
+                    "material_rows": [
+                        self._make_imperial_v6_material_row(
+                            "BENCHTOP",
+                            display_lines=["Caesarstone - 20mm Stone - 4030 Oyster - PR"],
+                            notes="Polished",
+                            row_order=1,
+                        )
+                    ],
+                }
+            ],
+            job_no="row-notes-inline-1",
+        )
+
+        rooms_section = page.split("<h3>Rooms</h3>", 1)[1]
+        self.assertIn("<div>Caesarstone - 20mm Stone - 4030 Oyster - PR - (Polished)</div>", rooms_section)
+        self.assertNotIn('<div class="muted">(Polished)</div>', rooms_section)
+
+    def test_spec_list_page_renders_v6_row_notes_as_muted_line_for_multi_display_lines(self) -> None:
+        page = self._render_imperial_spec_list_page(
+            [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "room_order": 1,
+                    "material_rows": [
+                        self._make_imperial_v6_material_row(
+                            "BENCHTOP",
+                            display_lines=["Line A", "Line B"],
+                            notes="Vertical Grain",
+                            row_order=1,
+                        )
+                    ],
+                }
+            ],
+            job_no="row-notes-separate-lines",
+        )
+
+        rooms_section = page.split("<h3>Rooms</h3>", 1)[1]
+        self.assertIn("<div>Line A</div>", rooms_section)
+        self.assertIn("<div>Line B</div>", rooms_section)
+        self.assertIn('<div class="muted">(Vertical Grain)</div>', rooms_section)
+        self.assertNotIn("Line B - (Vertical Grain)", rooms_section)
+
+    def test_spec_list_page_renders_v6_group_notes_inline_for_single_line_without_supplier(self) -> None:
+        page = self._render_imperial_spec_list_page(
+            [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "room_order": 1,
+                    "material_rows": [
+                        self._make_imperial_v6_material_row(
+                            "HANDLES",
+                            display_groups=[{"supplier": "", "lines": ["Single Line"]}],
+                            notes="Note here",
+                            row_order=1,
+                        )
+                    ],
+                }
+            ],
+            job_no="row-notes-group-inline",
+        )
+
+        rooms_section = page.split("<h3>Rooms</h3>", 1)[1]
+        self.assertIn('<div class="supplier-group-line">Single Line - (Note here)</div>', rooms_section)
+        self.assertNotIn('<div class="supplier-group-line muted">(Note here)</div>', rooms_section)
+
+    def test_spec_list_page_renders_v6_group_notes_as_indented_muted_line_with_supplier(self) -> None:
+        page = self._render_imperial_spec_list_page(
+            [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "room_order": 1,
+                    "material_rows": [
+                        self._make_imperial_v6_material_row(
+                            "HANDLES",
+                            display_groups=[{"supplier": "Kethy", "lines": ["L7817 - Oak Matt Black"]}],
+                            notes="Vertical Grain",
+                            row_order=1,
+                        )
+                    ],
+                }
+            ],
+            job_no="row-notes-group-separate-1",
+        )
+
+        rooms_section = page.split("<h3>Rooms</h3>", 1)[1]
+        self.assertIn('<div class="supplier-group-header">Kethy</div>', rooms_section)
+        self.assertIn('<div class="supplier-group-line">L7817 - Oak Matt Black</div>', rooms_section)
+        self.assertIn('<div class="supplier-group-line muted">(Vertical Grain)</div>', rooms_section)
+        self.assertNotIn("Kethy - (Vertical Grain)", rooms_section)
+
+    def test_spec_list_page_renders_v6_group_notes_as_indented_muted_line_for_multiple_groups(self) -> None:
+        page = self._render_imperial_spec_list_page(
+            [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "room_order": 1,
+                    "material_rows": [
+                        self._make_imperial_v6_material_row(
+                            "HANDLES",
+                            display_groups=[
+                                {"supplier": "A", "lines": ["a1", "a2"]},
+                                {"supplier": "B", "lines": ["b1"]},
+                            ],
+                            notes="Foo",
+                            row_order=1,
+                        )
+                    ],
+                }
+            ],
+            job_no="row-notes-group-separate-2",
+        )
+
+        rooms_section = page.split("<h3>Rooms</h3>", 1)[1]
+        self.assertIn('<div class="supplier-group-header">A</div>', rooms_section)
+        self.assertIn('<div class="supplier-group-header">B</div>', rooms_section)
+        self.assertIn('<div class="supplier-group-line muted">(Foo)</div>', rooms_section)
+
+    def test_spec_list_page_omits_v6_row_notes_when_empty(self) -> None:
+        page = self._render_imperial_spec_list_page(
+            [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "room_order": 1,
+                    "material_rows": [
+                        self._make_imperial_v6_material_row(
+                            "BENCHTOP",
+                            display_lines=["x"],
+                            notes="",
+                            row_order=1,
+                        )
+                    ],
+                }
+            ],
+            job_no="row-notes-empty",
+        )
+
+        room_card = page.split('<article class="room-card">', 1)[1].split("</article>", 1)[0]
+        self.assertIn("<div>x</div>", room_card)
+        self.assertNotIn("x - (", room_card)
+        self.assertNotIn('<div class="muted">(', room_card)
+        self.assertNotIn('class="supplier-group-line muted">(', room_card)
+
+    def test_spec_list_page_omits_v6_row_notes_when_none(self) -> None:
+        page = self._render_imperial_spec_list_page(
+            [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "room_order": 1,
+                    "material_rows": [
+                        self._make_imperial_v6_material_row(
+                            "BENCHTOP",
+                            display_lines=["x"],
+                            notes=None,
+                            row_order=1,
+                        )
+                    ],
+                }
+            ],
+            job_no="row-notes-none",
+        )
+
+        room_card = page.split('<article class="room-card">', 1)[1].split("</article>", 1)[0]
+        self.assertIn("<div>x</div>", room_card)
+        self.assertNotIn("x - (", room_card)
+        self.assertNotIn('<div class="muted">(', room_card)
+        self.assertNotIn('class="supplier-group-line muted">(', room_card)
+
+    def test_spec_list_page_escapes_v6_row_notes_html(self) -> None:
+        page = self._render_imperial_spec_list_page(
+            [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "room_order": 1,
+                    "material_rows": [
+                        self._make_imperial_v6_material_row(
+                            "BENCHTOP",
+                            display_lines=["x"],
+                            notes="Note with (parens) and <tag>",
+                            row_order=1,
+                        )
+                    ],
+                }
+            ],
+            job_no="row-notes-escape",
+        )
+
+        rooms_section = page.split("<h3>Rooms</h3>", 1)[1]
+        self.assertIn("<div>x - (Note with (parens) and &lt;tag&gt;)</div>", rooms_section)
+        self.assertNotIn("<tag>", rooms_section)
+
+    def test_spec_list_page_renders_v6_row_notes_inline_for_fallback_display_value(self) -> None:
+        page = self._render_imperial_spec_list_page(
+            [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "room_order": 1,
+                    "material_rows": [
+                        self._make_imperial_v6_material_row(
+                            "CUSTOM ROW",
+                            specs_or_description="fallback content",
+                            notes="N",
+                            row_order=1,
+                        )
+                    ],
+                }
+            ],
+            job_no="row-notes-fallback",
+        )
+
+        rooms_section = page.split("<h3>Rooms</h3>", 1)[1]
+        self.assertIn("<div>fallback content - (N)</div>", rooms_section)
+
+    def test_spec_list_page_keeps_material_summary_block_byte_identical_when_room_notes_render(self) -> None:
+        rooms = [
+            {
+                "room_key": "kitchen",
+                "original_room_label": "KITCHEN",
+                "room_order": 1,
+                "material_rows": [
+                    self._make_imperial_v6_material_row(
+                        "BASE CABINETRY COLOUR",
+                        specs_or_description="Amaro Matt",
+                        supplier="Polytec",
+                        tags=["door_colours"],
+                        row_order=1,
+                    ),
+                    self._make_imperial_v6_material_row(
+                        "HANDLES",
+                        display_groups=[{"supplier": "Kethy", "lines": ["Finger Pull on Uppers- PTO where required"]}],
+                        display_lines=["Kethy - Finger Pull on Uppers- PTO where required"],
+                        notes="Polished",
+                        tags=["handles"],
+                        row_order=2,
+                    ),
+                    self._make_imperial_v6_material_row(
+                        "BENCHTOP",
+                        specs_or_description="20mm Stone - 4030 Oyster - PR",
+                        supplier="Caesarstone",
+                        tags=["bench_tops"],
+                        row_order=3,
+                    ),
+                ],
+            }
+        ]
+        page_with_notes = self._render_imperial_spec_list_page(rooms, job_no="row-notes-summary-regression")
+        self._reset_db()
+        rooms[0]["material_rows"][1]["notes"] = ""
+        page_without_notes = self._render_imperial_spec_list_page(rooms, job_no="row-notes-summary-control")
+
+        self.assertEqual(
+            self._extract_material_summary_block(page_with_notes).strip(),
+            self._extract_material_summary_block(page_without_notes).strip(),
+        )
 
     def test_raw_spec_snapshot_allows_direct_excel_export_without_pdf_qa(self) -> None:
         builder_id = store.create_builder("Imperial", "imperial", "")

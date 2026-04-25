@@ -121,21 +121,49 @@
         <div class="room-field-row room-field-stack">
           <strong>{{ item.title }}</strong>
           <div>
+            {% set ns = namespace(line_count=0, render_path="fallback", notes_rendered=False) %}
+            {% if item.display_groups %}
+              {% set ns.render_path = "groups" %}
+              {% for group in item.display_groups %}
+                {% if group.supplier %}{% set ns.line_count = ns.line_count + 1 %}{% endif %}
+                {% set ns.line_count = ns.line_count + (group.lines | length) %}
+              {% endfor %}
+            {% elif item.display_lines %}
+              {% set ns.render_path = "lines" %}
+              {% set ns.line_count = item.display_lines | length %}
+            {% else %}
+              {% set ns.line_count = 1 %}
+            {% endif %}
             {% if item.display_groups %}
               {% for group in item.display_groups %}
                 {% if group.supplier %}
-                <div class="supplier-group-header">{{ group.supplier }}</div>
+                <div class="supplier-group-header">{{ group.supplier }}{% if item.notes and ns.line_count == 1 and not ns.notes_rendered %} - ({{ item.notes }}){% set ns.notes_rendered = True %}{% endif %}</div>
                 {% endif %}
                 {% for line in group.lines %}
-                <div class="supplier-group-line">{{ line }}</div>
+                <div class="supplier-group-line">{{ line }}{% if item.notes and ns.line_count == 1 and not ns.notes_rendered %} - ({{ item.notes }}){% set ns.notes_rendered = True %}{% endif %}</div>
                 {% endfor %}
               {% endfor %}
             {% elif item.display_lines %}
+              {% if item.notes and ns.line_count == 1 %}
+              <div>{{ item.display_lines[0] }} - ({{ item.notes }})</div>
+              {% else %}
               {% for line in item.display_lines %}
               <div>{{ line }}</div>
               {% endfor %}
+              {% endif %}
             {% else %}
+              {% if item.notes and ns.line_count == 1 %}
+              <div>{{ item.display_value or item.value }} - ({{ item.notes }})</div>
+              {% else %}
               {{ item.display_value or item.value }}
+              {% endif %}
+            {% endif %}
+            {% if item.notes and ns.line_count >= 2 %}
+              {% if ns.render_path == "groups" %}
+              <div class="supplier-group-line muted">({{ item.notes }})</div>
+              {% else %}
+              <div class="muted">({{ item.notes }})</div>
+              {% endif %}
             {% endif %}
           </div>
         </div>
