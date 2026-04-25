@@ -10180,7 +10180,7 @@ Front Loader - standard 700mm size - LG Tower
         handles_card = response.text.split("<h4>Handles</h4>", 1)[1].split("</article>", 1)[0]
         self.assertIn("1 distinct item", handles_card)
         self.assertIn("<strong>Kethy</strong>", handles_card)
-        self.assertIn("Room: KITCHEN", handles_card)
+        self.assertIn('<span class="muted">KITCHEN</span>', handles_card)
         self.assertEqual(handles_card.count('class="supplier-group-line"'), 4)
         self.assertIn('<div class="supplier-group-line">Finger Pull on Uppers- PTO where required</div>', handles_card)
         self.assertNotIn("Kethy - Finger Pull on Uppers- PTO where required", handles_card)

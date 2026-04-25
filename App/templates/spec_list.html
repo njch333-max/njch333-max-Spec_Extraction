@@ -47,7 +47,7 @@
         <li class="room-field-stack">
           <span>{{ item.display_text }}</span>
           {% if item.rooms_display is defined %}
-          <span class="muted">Room: {{ item.rooms_display or "-" }}</span>
+          <span class="muted">{{ item.rooms_display or "-" }}</span>
           {% endif %}
         </li>
         {% else %}
@@ -66,7 +66,7 @@
           <strong>{{ item.display_text }}</strong>
             {% endif %}
             {% if item.rooms_display is defined %}
-          <span class="muted">Room: {{ item.rooms_display or "-" }}</span>
+          <span class="muted">{{ item.rooms_display or "-" }}</span>
             {% endif %}
             {% for line in item.lines %}
           <div class="supplier-group-line">{{ line }}</div>
@@ -74,7 +74,7 @@
           {% else %}
           <span>{{ item.display_text }}</span>
             {% if item.rooms_display is defined %}
-          <span class="muted">Room: {{ item.rooms_display or "-" }}</span>
+          <span class="muted">{{ item.rooms_display or "-" }}</span>
             {% endif %}
           {% endif %}
         </li>
@@ -91,7 +91,7 @@
         <li class="room-field-stack">
           <span>{{ item.display_text }}</span>
           {% if item.rooms_display is defined %}
-          <span class="muted">Room: {{ item.rooms_display or "-" }}</span>
+          <span class="muted">{{ item.rooms_display or "-" }}</span>
           {% endif %}
         </li>
         {% else %}
