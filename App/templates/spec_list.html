@@ -137,14 +137,14 @@
             {% if item.display_groups %}
               {% for group in item.display_groups %}
                 {% if group.supplier %}
-                <div class="supplier-group-header">{{ group.supplier }}{% if item.notes and ns.line_count == 1 and not ns.notes_rendered %} - ({{ item.notes }}){% set ns.notes_rendered = True %}{% endif %}</div>
+                <div class="supplier-group-header">{{ group.supplier }}{% if item.notes and ns.line_count == 1 and '\n' not in item.notes and not ns.notes_rendered %} - ({{ item.notes }}){% set ns.notes_rendered = True %}{% endif %}</div>
                 {% endif %}
                 {% for line in group.lines %}
-                <div class="supplier-group-line">{{ line }}{% if item.notes and ns.line_count == 1 and not ns.notes_rendered %} - ({{ item.notes }}){% set ns.notes_rendered = True %}{% endif %}</div>
+                <div class="supplier-group-line">{{ line }}{% if item.notes and ns.line_count == 1 and '\n' not in item.notes and not ns.notes_rendered %} - ({{ item.notes }}){% set ns.notes_rendered = True %}{% endif %}</div>
                 {% endfor %}
               {% endfor %}
             {% elif item.display_lines %}
-              {% if item.notes and ns.line_count == 1 %}
+              {% if item.notes and ns.line_count == 1 and '\n' not in item.notes %}
               <div>{{ item.display_lines[0] }} - ({{ item.notes }})</div>
               {% else %}
               {% for line in item.display_lines %}
@@ -152,17 +152,17 @@
               {% endfor %}
               {% endif %}
             {% else %}
-              {% if item.notes and ns.line_count == 1 %}
+              {% if item.notes and ns.line_count == 1 and '\n' not in item.notes %}
               <div>{{ item.display_value or item.value }} - ({{ item.notes }})</div>
               {% else %}
               {{ item.display_value or item.value }}
               {% endif %}
             {% endif %}
-            {% if item.notes and ns.line_count >= 2 %}
+            {% if item.notes and (ns.line_count >= 2 or '\n' in item.notes) %}
               {% if ns.render_path == "groups" %}
-              <div class="supplier-group-line muted">({{ item.notes }})</div>
+              <div class="supplier-group-line muted row-note-multiline">({{ item.notes }})</div>
               {% else %}
-              <div class="muted">({{ item.notes }})</div>
+              <div class="muted row-note-multiline">({{ item.notes }})</div>
               {% endif %}
             {% endif %}
           </div>

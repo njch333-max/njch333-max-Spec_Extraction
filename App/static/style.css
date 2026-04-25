@@ -439,6 +439,10 @@ th {
   padding-left: 1em;
 }
 
+.row-note-multiline {
+  white-space: pre-line;
+}
+
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

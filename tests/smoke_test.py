@@ -10689,7 +10689,7 @@ Front Loader - standard 700mm size - LG Tower
         rooms_section = page.split("<h3>Rooms</h3>", 1)[1]
         self.assertIn("<div>Line A</div>", rooms_section)
         self.assertIn("<div>Line B</div>", rooms_section)
-        self.assertIn('<div class="muted">(Vertical Grain)</div>', rooms_section)
+        self.assertIn('<div class="muted row-note-multiline">(Vertical Grain)</div>', rooms_section)
         self.assertNotIn("Line B - (Vertical Grain)", rooms_section)
 
     def test_spec_list_page_renders_v6_group_notes_inline_for_single_line_without_supplier(self) -> None:
@@ -10739,7 +10739,7 @@ Front Loader - standard 700mm size - LG Tower
         rooms_section = page.split("<h3>Rooms</h3>", 1)[1]
         self.assertIn('<div class="supplier-group-header">Kethy</div>', rooms_section)
         self.assertIn('<div class="supplier-group-line">L7817 - Oak Matt Black</div>', rooms_section)
-        self.assertIn('<div class="supplier-group-line muted">(Vertical Grain)</div>', rooms_section)
+        self.assertIn('<div class="supplier-group-line muted row-note-multiline">(Vertical Grain)</div>', rooms_section)
         self.assertNotIn("Kethy - (Vertical Grain)", rooms_section)
 
     def test_spec_list_page_renders_v6_group_notes_as_indented_muted_line_for_multiple_groups(self) -> None:
@@ -10768,7 +10768,7 @@ Front Loader - standard 700mm size - LG Tower
         rooms_section = page.split("<h3>Rooms</h3>", 1)[1]
         self.assertIn('<div class="supplier-group-header">A</div>', rooms_section)
         self.assertIn('<div class="supplier-group-header">B</div>', rooms_section)
-        self.assertIn('<div class="supplier-group-line muted">(Foo)</div>', rooms_section)
+        self.assertIn('<div class="supplier-group-line muted row-note-multiline">(Foo)</div>', rooms_section)
 
     def test_spec_list_page_omits_v6_row_notes_when_empty(self) -> None:
         page = self._render_imperial_spec_list_page(
@@ -10795,6 +10795,7 @@ Front Loader - standard 700mm size - LG Tower
         self.assertNotIn("x - (", room_card)
         self.assertNotIn('<div class="muted">(', room_card)
         self.assertNotIn('class="supplier-group-line muted">(', room_card)
+        self.assertNotIn('row-note-multiline', room_card)
 
     def test_spec_list_page_omits_v6_row_notes_when_none(self) -> None:
         page = self._render_imperial_spec_list_page(
@@ -10821,6 +10822,7 @@ Front Loader - standard 700mm size - LG Tower
         self.assertNotIn("x - (", room_card)
         self.assertNotIn('<div class="muted">(', room_card)
         self.assertNotIn('class="supplier-group-line muted">(', room_card)
+        self.assertNotIn('row-note-multiline', room_card)
 
     def test_spec_list_page_escapes_v6_row_notes_html(self) -> None:
         page = self._render_imperial_spec_list_page(
@@ -10910,6 +10912,262 @@ Front Loader - standard 700mm size - LG Tower
             self._extract_material_summary_block(page_with_notes).strip(),
             self._extract_material_summary_block(page_without_notes).strip(),
         )
+
+    def test_spec_list_page_keeps_single_line_notes_inline_without_row_note_multiline_class(self) -> None:
+        page = self._render_imperial_spec_list_page(
+            [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "room_order": 1,
+                    "material_rows": [
+                        self._make_imperial_v6_material_row(
+                            "BENCHTOP",
+                            display_lines=["x"],
+                            notes="single",
+                            row_order=1,
+                        )
+                    ],
+                }
+            ],
+            job_no="row-notes-multiline-inline-regression",
+        )
+
+        rooms_section = page.split("<h3>Rooms</h3>", 1)[1]
+        self.assertIn("<div>x - (single)</div>", rooms_section)
+        self.assertNotIn("row-note-multiline", rooms_section)
+        self.assertNotIn('<div class="muted row-note-multiline">(single)</div>', rooms_section)
+
+    def test_spec_list_page_routes_single_line_display_with_multiline_notes_to_separate_div(self) -> None:
+        page = self._render_imperial_spec_list_page(
+            [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "room_order": 1,
+                    "material_rows": [
+                        self._make_imperial_v6_material_row(
+                            "BENCHTOP",
+                            display_lines=["x"],
+                            notes="line one\nline two",
+                            row_order=1,
+                        )
+                    ],
+                }
+            ],
+            job_no="row-notes-multiline-reroute",
+        )
+
+        rooms_section = page.split("<h3>Rooms</h3>", 1)[1]
+        self.assertIn("<div>x</div>", rooms_section)
+        self.assertNotIn("x - (line one", rooms_section)
+        self.assertIn('<div class="muted row-note-multiline">(line one\nline two)</div>', rooms_section)
+
+    def test_spec_list_page_adds_row_note_multiline_class_for_multi_display_lines_single_line_notes(self) -> None:
+        page = self._render_imperial_spec_list_page(
+            [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "room_order": 1,
+                    "material_rows": [
+                        self._make_imperial_v6_material_row(
+                            "BENCHTOP",
+                            display_lines=["A", "B"],
+                            notes="single",
+                            row_order=1,
+                        )
+                    ],
+                }
+            ],
+            job_no="row-notes-multiline-class-single",
+        )
+
+        rooms_section = page.split("<h3>Rooms</h3>", 1)[1]
+        self.assertIn("<div>A</div>", rooms_section)
+        self.assertIn("<div>B</div>", rooms_section)
+        self.assertIn('<div class="muted row-note-multiline">(single)</div>', rooms_section)
+
+    def test_spec_list_page_preserves_linefeeds_for_multi_display_lines_multiline_notes(self) -> None:
+        page = self._render_imperial_spec_list_page(
+            [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "room_order": 1,
+                    "material_rows": [
+                        self._make_imperial_v6_material_row(
+                            "BENCHTOP",
+                            display_lines=["A", "B"],
+                            notes="line one\nline two",
+                            row_order=1,
+                        )
+                    ],
+                }
+            ],
+            job_no="row-notes-multiline-lines-and-notes",
+        )
+
+        rooms_section = page.split("<h3>Rooms</h3>", 1)[1]
+        self.assertIn('<div class="muted row-note-multiline">(line one\nline two)</div>', rooms_section)
+
+    def test_spec_list_page_adds_row_note_multiline_class_for_grouped_single_line_notes(self) -> None:
+        page = self._render_imperial_spec_list_page(
+            [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "room_order": 1,
+                    "material_rows": [
+                        self._make_imperial_v6_material_row(
+                            "HANDLES",
+                            display_groups=[{"supplier": "Kethy", "lines": ["L1"]}],
+                            notes="Plain",
+                            row_order=1,
+                        )
+                    ],
+                }
+            ],
+            job_no="row-notes-multiline-group-single",
+        )
+
+        rooms_section = page.split("<h3>Rooms</h3>", 1)[1]
+        self.assertIn('<div class="supplier-group-header">Kethy</div>', rooms_section)
+        self.assertIn('<div class="supplier-group-line">L1</div>', rooms_section)
+        self.assertIn('<div class="supplier-group-line muted row-note-multiline">(Plain)</div>', rooms_section)
+
+    def test_spec_list_page_preserves_linefeeds_for_grouped_multiline_notes_job76_shape(self) -> None:
+        page = self._render_imperial_spec_list_page(
+            [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "room_order": 1,
+                    "material_rows": [
+                        self._make_imperial_v6_material_row(
+                            "HANDLES",
+                            display_groups=[
+                                {
+                                    "supplier": "Kethy",
+                                    "lines": [
+                                        "Finger Pull on Uppers- PTO where required",
+                                        "L7817 - Oak Matt Black (OAKBK)",
+                                        "160mm - Lowers and Drawers",
+                                        "320mm - Pantry Door",
+                                    ],
+                                }
+                            ],
+                            notes="Horizontal on Drawers and Vertical on\nDoors",
+                            row_order=1,
+                        )
+                    ],
+                }
+            ],
+            job_no="row-notes-multiline-group-job76",
+        )
+
+        rooms_section = page.split("<h3>Rooms</h3>", 1)[1]
+        self.assertIn('<div class="supplier-group-header">Kethy</div>', rooms_section)
+        self.assertIn('<div class="supplier-group-line">Finger Pull on Uppers- PTO where required</div>', rooms_section)
+        self.assertIn('<div class="supplier-group-line muted row-note-multiline">(Horizontal on Drawers and Vertical on\nDoors)</div>', rooms_section)
+
+    def test_spec_list_page_keeps_single_group_supplier_header_inline_when_notes_are_single_line(self) -> None:
+        page = self._render_imperial_spec_list_page(
+            [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "room_order": 1,
+                    "material_rows": [
+                        self._make_imperial_v6_material_row(
+                            "HANDLES",
+                            display_groups=[{"supplier": "Foo", "lines": []}],
+                            notes="N",
+                            row_order=1,
+                        )
+                    ],
+                }
+            ],
+            job_no="row-notes-multiline-group-header-inline",
+        )
+
+        rooms_section = page.split("<h3>Rooms</h3>", 1)[1]
+        self.assertIn('<div class="supplier-group-header">Foo - (N)</div>', rooms_section)
+        self.assertNotIn('row-note-multiline', rooms_section)
+
+    def test_spec_list_page_omits_multiline_notes_markup_when_notes_empty(self) -> None:
+        page = self._render_imperial_spec_list_page(
+            [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "room_order": 1,
+                    "material_rows": [
+                        self._make_imperial_v6_material_row(
+                            "BENCHTOP",
+                            display_lines=["x"],
+                            notes="",
+                            row_order=1,
+                        )
+                    ],
+                }
+            ],
+            job_no="row-notes-multiline-empty",
+        )
+
+        room_card = page.split('<article class="room-card">', 1)[1].split("</article>", 1)[0]
+        self.assertNotIn("row-note-multiline", room_card)
+        self.assertNotIn("x - (", room_card)
+        self.assertNotIn("()</div>", room_card)
+
+    def test_spec_list_page_treats_newline_only_notes_as_empty_after_display_value_cleanup(self) -> None:
+        page = self._render_imperial_spec_list_page(
+            [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "room_order": 1,
+                    "material_rows": [
+                        self._make_imperial_v6_material_row(
+                            "BENCHTOP",
+                            display_lines=["x"],
+                            notes="\n",
+                            row_order=1,
+                        )
+                    ],
+                }
+            ],
+            job_no="row-notes-multiline-newline-only",
+        )
+
+        rooms_section = page.split("<h3>Rooms</h3>", 1)[1]
+        self.assertIn("<div>x</div>", rooms_section)
+        self.assertNotIn("row-note-multiline", rooms_section)
+        self.assertNotIn("x - (", rooms_section)
+
+    def test_spec_list_page_escapes_html_chars_in_multiline_notes_separate_path(self) -> None:
+        page = self._render_imperial_spec_list_page(
+            [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "room_order": 1,
+                    "material_rows": [
+                        self._make_imperial_v6_material_row(
+                            "BENCHTOP",
+                            display_lines=["x"],
+                            notes="line<one>\nline<two>",
+                            row_order=1,
+                        )
+                    ],
+                }
+            ],
+            job_no="row-notes-multiline-escape",
+        )
+
+        rooms_section = page.split("<h3>Rooms</h3>", 1)[1]
+        self.assertIn('<div class="muted row-note-multiline">(line&lt;one&gt;\nline&lt;two&gt;)</div>', rooms_section)
+        self.assertNotIn("<one>", rooms_section)
 
     def test_raw_spec_snapshot_allows_direct_excel_export_without_pdf_qa(self) -> None:
         builder_id = store.create_builder("Imperial", "imperial", "")
