@@ -51,6 +51,34 @@ def _bucket_texts(summary: dict, bucket_key: str) -> list[str]:
     return [entry["text"] for entry in summary[bucket_key]["entries"]]
 
 
+def _raw_v6_handle_row(
+    specs: str,
+    row_order: int,
+    *,
+    display_lines: list[str] | None = None,
+    display_groups: list[dict] | None = None,
+    supplier: str = "",
+    provenance: dict | None = None,
+) -> dict:
+    row = {
+        "area_or_item": "HANDLES",
+        "supplier": supplier,
+        "specs_or_description": specs,
+        "notes": "",
+        "tags": ["handles"],
+        "page_no": 1,
+        "row_order": row_order,
+        "provenance": {"source_provider": "v6"},
+    }
+    if display_lines is not None:
+        row["display_lines"] = display_lines
+    if display_groups is not None:
+        row["display_groups"] = display_groups
+    if provenance:
+        row["provenance"].update(provenance)
+    return row
+
+
 def test_v6_handle_summary_candidates_emit_all_display_lines_with_supplier_prefix():
     row = _v6_material_row(
         "HANDLES",
@@ -481,3 +509,194 @@ def test_v6_grouped_handles_summary_keeps_bench_tops_flat():
             "area_or_items": ["BENCHTOP"],
         },
     ]
+
+
+def test_v6_handle_subset_rows_drop_single_line_derivatives_from_grouped_row():
+    canonical_row = _raw_v6_handle_row(
+        "BASE- BEVEL EDGE FINGERPULL | UPPER - FINGERPULL TALL - PTO",
+        5,
+        display_lines=[
+            "BASE- BEVEL EDGE FINGERPULL",
+            "UPPER - FINGERPULL",
+            "TALL - PTO",
+        ],
+        display_groups=[
+            {
+                "supplier": "",
+                "lines": [
+                    "BASE- BEVEL EDGE FINGERPULL",
+                    "UPPER - FINGERPULL",
+                    "TALL - PTO",
+                ],
+            }
+        ],
+    )
+    derivative_rows = [
+        _raw_v6_handle_row("BASE- BEVEL EDGE FINGERPULL", 7),
+        _raw_v6_handle_row("UPPER - FINGERPULL", 8),
+    ]
+
+    deduped = app_main._dedupe_v6_handle_subset_rows([canonical_row, *derivative_rows])
+    summary = _summary_for_rows([canonical_row, *derivative_rows])
+
+    assert deduped == [canonical_row]
+    assert summary["handles"]["count"] == 1
+    assert summary["handles"]["entries"] == [
+        {
+            "text": "",
+            "display_text": "",
+            "lines": [
+                "BASE- BEVEL EDGE FINGERPULL",
+                "UPPER - FINGERPULL",
+                "TALL - PTO",
+            ],
+            "rooms": ["KITCHEN"],
+            "rooms_display": "KITCHEN",
+            "area_or_items": ["HANDLES"],
+        }
+    ]
+
+
+def test_v6_handle_subset_rows_drop_repeated_derivatives_from_job73_shape():
+    canonical_row = _raw_v6_handle_row(
+        "BASE- BEVEL EDGE FINGERPULL | UPPER - FINGERPULL TALL - PTO",
+        5,
+        display_lines=[
+            "BASE- BEVEL EDGE FINGERPULL",
+            "UPPER - FINGERPULL",
+            "TALL - PTO",
+        ],
+        display_groups=[
+            {
+                "supplier": "",
+                "lines": [
+                    "BASE- BEVEL EDGE FINGERPULL",
+                    "UPPER - FINGERPULL",
+                    "TALL - PTO",
+                ],
+            }
+        ],
+    )
+    derivative_rows = [
+        {
+            "area_or_item": "HANDLES",
+            "supplier": "",
+            "specs_or_description": "BASE- BEVEL EDGE FINGERPULL",
+            "notes": "",
+            "tags": ["handles"],
+            "page_no": 1,
+            "row_order": 7,
+            "provenance": {"synthesized_from_room_handles": True},
+        },
+        {
+            "area_or_item": "HANDLES",
+            "supplier": "",
+            "specs_or_description": "UPPER - FINGERPULL",
+            "notes": "",
+            "tags": ["handles"],
+            "page_no": 1,
+            "row_order": 8,
+            "provenance": {"synthesized_from_room_handles": True},
+        },
+        {
+            "area_or_item": "HANDLES",
+            "supplier": "",
+            "specs_or_description": "BASE- BEVEL EDGE FINGERPULL",
+            "notes": "",
+            "tags": ["handles"],
+            "page_no": 1,
+            "row_order": 9,
+            "provenance": {"synthesized_from_room_handles": True},
+        },
+        {
+            "area_or_item": "HANDLES",
+            "supplier": "",
+            "specs_or_description": "UPPER - FINGERPULL",
+            "notes": "",
+            "tags": ["handles"],
+            "page_no": 1,
+            "row_order": 10,
+            "provenance": {"synthesized_from_room_handles": True},
+        },
+    ]
+
+    deduped = app_main._dedupe_v6_handle_subset_rows([canonical_row, *derivative_rows])
+
+    assert deduped == [canonical_row]
+
+
+def test_v6_handle_subset_rows_keep_non_subset_rows_in_same_room():
+    grouped_row = _raw_v6_handle_row(
+        "Kethy - line one | Kethy - line two",
+        1,
+        supplier="Kethy",
+        display_lines=["Kethy - line one", "Kethy - line two"],
+        display_groups=[{"supplier": "Kethy", "lines": ["line one", "line two"]}],
+    )
+    separate_row = _raw_v6_handle_row("TALL - PTO", 2)
+
+    deduped = app_main._dedupe_v6_handle_subset_rows([grouped_row, separate_row])
+
+    assert deduped == [grouped_row, separate_row]
+
+
+def test_v6_single_line_handle_room_survives_untouched():
+    single_row = _raw_v6_handle_row("Push to open", 1, display_lines=["Push to open"])
+
+    assert app_main._dedupe_v6_handle_subset_rows([single_row]) == [single_row]
+
+
+def test_v6_grouped_supplier_handle_row_survives_dedupe_unchanged():
+    row = _v6_material_row(
+        "HANDLES",
+        "Finger Pull on Uppers- PTO where required\nL7817 - Oak Matt Black (OAKBK)",
+        "Kethy",
+        ["handles"],
+    )
+
+    deduped = app_main._dedupe_v6_handle_subset_rows([deepcopy(row)])
+    summary = _summary_for_rows([row])
+
+    assert deduped == [row]
+    assert summary["handles"]["count"] == 1
+    assert summary["handles"]["entries"][0]["display_text"] == "Kethy"
+    assert summary["handles"]["entries"][0]["lines"] == [
+        "Finger Pull on Uppers- PTO where required",
+        "L7817 - Oak Matt Black (OAKBK)",
+    ]
+
+
+def test_non_v6_handle_rows_are_not_deduped_against_v6_canonical_row():
+    canonical_row = _raw_v6_handle_row(
+        "BASE- BEVEL EDGE FINGERPULL | UPPER - FINGERPULL TALL - PTO",
+        5,
+        display_lines=[
+            "BASE- BEVEL EDGE FINGERPULL",
+            "UPPER - FINGERPULL",
+            "TALL - PTO",
+        ],
+        display_groups=[
+            {
+                "supplier": "",
+                "lines": [
+                    "BASE- BEVEL EDGE FINGERPULL",
+                    "UPPER - FINGERPULL",
+                    "TALL - PTO",
+                ],
+            }
+        ],
+    )
+    legacy_row = {
+        "area_or_item": "HANDLES",
+        "supplier": "",
+        "specs_or_description": "BASE- BEVEL EDGE FINGERPULL",
+        "notes": "",
+        "tags": ["handles"],
+        "page_no": 1,
+        "row_order": 7,
+        "provenance": {"source_provider": "legacy"},
+    }
+
+    deduped = app_main._dedupe_v6_handle_subset_rows([canonical_row, legacy_row])
+
+    assert deduped == [canonical_row, legacy_row]

@@ -819,6 +819,7 @@ def _flatten_imperial_material_rows(room: dict[str, Any]) -> list[dict[str, Any]
         [item for item in material_rows if isinstance(item, dict)],
         key=_sort_key,
     )
+    ordered_rows = _dedupe_v6_handle_subset_rows(ordered_rows)
     generic_handle_row_candidates: list[list[str]] = []
     for item in ordered_rows:
         item_tags = {
@@ -997,6 +998,79 @@ def _flatten_imperial_material_rows(room: dict[str, Any]) -> list[dict[str, Any]
             }
         )
     return rows
+
+
+def _normalize_v6_handle_comparison_line(value: Any) -> str:
+    return parsing.normalize_space(_display_value(value)).lower()
+
+
+def _v6_handle_row_comparison_lines(item: dict[str, Any]) -> tuple[str, ...]:
+    if not isinstance(item, dict):
+        return ()
+    lines: list[str] = []
+    display_groups = item.get("display_groups", []) or []
+    if isinstance(display_groups, list):
+        for group in display_groups:
+            if not isinstance(group, dict):
+                continue
+            for line in group.get("lines", []) or []:
+                normalized_line = _normalize_v6_handle_comparison_line(line)
+                if normalized_line and normalized_line not in lines:
+                    lines.append(normalized_line)
+    if lines:
+        return tuple(lines)
+    for line in item.get("display_lines", []) or []:
+        normalized_line = _normalize_v6_handle_comparison_line(line)
+        if normalized_line and normalized_line not in lines:
+            lines.append(normalized_line)
+    if lines:
+        return tuple(lines)
+    specs = _display_value(item.get("specs_or_description", ""))
+    if not specs:
+        return ()
+    for fragment in re.split(r"\s*\|\s*|\n+", specs):
+        normalized_line = _normalize_v6_handle_comparison_line(fragment)
+        if normalized_line and normalized_line not in lines:
+            lines.append(normalized_line)
+    return tuple(lines)
+
+
+def _dedupe_v6_handle_subset_rows(material_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop v6 HANDLES rows whose normalized lines are a strict subset of a longer v6 HANDLES row."""
+    contexts: list[tuple[int, dict[str, Any], frozenset[str]]] = []
+    for index, item in enumerate(material_rows):
+        if not isinstance(item, dict):
+            continue
+        provenance = item.get("provenance", {}) if isinstance(item.get("provenance", {}), dict) else {}
+        if not (
+            _imperial_material_row_is_v6_origin(item)
+            or bool(provenance.get("synthesized_from_room_handles"))
+        ):
+            continue
+        item_tags = {
+            _display_value(tag).lower()
+            for tag in (item.get("tags", []) or [])
+            if _display_value(tag)
+        }
+        if "handles" not in item_tags:
+            continue
+        if _display_imperial_material_row_title(item).upper() != "HANDLES":
+            continue
+        comparison_lines = _v6_handle_row_comparison_lines(item)
+        if not comparison_lines:
+            continue
+        contexts.append((index, item, frozenset(comparison_lines)))
+    drop_indexes: set[int] = set()
+    for index, _item, line_set in contexts:
+        if len(line_set) < 1:
+            continue
+        for other_index, _other_item, other_line_set in contexts:
+            if index == other_index or len(line_set) >= len(other_line_set):
+                continue
+            if line_set < other_line_set:
+                drop_indexes.add(index)
+                break
+    return [item for index, item in enumerate(material_rows) if index not in drop_indexes]
 
 
 def _imperial_material_row_needs_review(item: dict[str, Any]) -> bool:

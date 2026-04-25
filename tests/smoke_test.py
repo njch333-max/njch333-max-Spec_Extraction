@@ -4193,6 +4193,83 @@ Front Loader - standard 700mm size - LG Tower
             ],
         )
 
+    def test_flatten_imperial_material_rows_dedupes_v6_handle_subset_derivatives(self) -> None:
+        rows = _flatten_imperial_material_rows(
+            {
+                "material_rows": [
+                    {
+                        "area_or_item": "HANDLES",
+                        "supplier": "",
+                        "specs_or_description": "BASE- BEVEL EDGE FINGERPULL | UPPER - FINGERPULL TALL - PTO",
+                        "notes": "",
+                        "tags": ["handles"],
+                        "page_no": 1,
+                        "row_order": 5,
+                        "display_lines": [
+                            "BASE- BEVEL EDGE FINGERPULL",
+                            "UPPER - FINGERPULL",
+                            "TALL - PTO",
+                        ],
+                        "display_groups": [
+                            {
+                                "supplier": "",
+                                "lines": [
+                                    "BASE- BEVEL EDGE FINGERPULL",
+                                    "UPPER - FINGERPULL",
+                                    "TALL - PTO",
+                                ],
+                            }
+                        ],
+                        "provenance": {"source_provider": "v6"},
+                    },
+                    {
+                        "area_or_item": "HANDLES",
+                        "supplier": "",
+                        "specs_or_description": "BASE- BEVEL EDGE FINGERPULL",
+                        "notes": "",
+                        "tags": ["handles"],
+                        "page_no": 1,
+                        "row_order": 7,
+                        "provenance": {"source_provider": "v6", "synthesized_from_room_handles": True},
+                    },
+                    {
+                        "area_or_item": "HANDLES",
+                        "supplier": "",
+                        "specs_or_description": "UPPER - FINGERPULL",
+                        "notes": "",
+                        "tags": ["handles"],
+                        "page_no": 1,
+                        "row_order": 8,
+                        "provenance": {"source_provider": "v6", "synthesized_from_room_handles": True},
+                    },
+                    {
+                        "area_or_item": "HANDLES",
+                        "supplier": "",
+                        "specs_or_description": "BASE- BEVEL EDGE FINGERPULL",
+                        "notes": "",
+                        "tags": ["handles"],
+                        "page_no": 1,
+                        "row_order": 9,
+                        "provenance": {"source_provider": "v6", "synthesized_from_room_handles": True},
+                    },
+                    {
+                        "area_or_item": "HANDLES",
+                        "supplier": "",
+                        "specs_or_description": "UPPER - FINGERPULL",
+                        "notes": "",
+                        "tags": ["handles"],
+                        "page_no": 1,
+                        "row_order": 10,
+                        "provenance": {"source_provider": "v6", "synthesized_from_room_handles": True},
+                    },
+                ]
+            }
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["display_groups"], [{"supplier": "", "lines": ["BASE- BEVEL EDGE FINGERPULL", "UPPER - FINGERPULL", "TALL - PTO"]}])
+        self.assertEqual(rows[0]["row_order"], 5)
+
     def test_flatten_imperial_material_rows_exposes_repair_diagnostics(self) -> None:
         rows = _flatten_imperial_material_rows(
             {
@@ -10107,6 +10184,117 @@ Front Loader - standard 700mm size - LG Tower
         self.assertEqual(handles_card.count('class="supplier-group-line"'), 4)
         self.assertIn('<div class="supplier-group-line">Finger Pull on Uppers- PTO where required</div>', handles_card)
         self.assertNotIn("Kethy - Finger Pull on Uppers- PTO where required", handles_card)
+
+    def test_spec_list_page_hides_v6_handle_subset_duplicates_from_rooms_and_summary(self) -> None:
+        builder_id = store.create_builder("Imperial", "imperial", "")
+        job_id = store.create_job("37558-2", builder_id, "Job 73 Handle Dedupe", "")
+        store.upsert_snapshot(
+            job_id,
+            "raw_spec",
+            {
+                "job_no": "37558-2",
+                "builder_name": "Imperial",
+                "source_kind": "spec",
+                "generated_at": "2026-04-25T10:00:00+00:00",
+                "analysis": {"mode": "heuristic_only", "parser_strategy": "imperial_v6"},
+                "rooms": [
+                    {
+                        "room_key": "kitchen",
+                        "original_room_label": "KITCHEN",
+                        "room_order": 1,
+                        "material_rows": [
+                            {
+                                "area_or_item": "HANDLES",
+                                "supplier": "",
+                                "specs_or_description": "BASE- BEVEL EDGE FINGERPULL | UPPER - FINGERPULL TALL - PTO",
+                                "notes": "",
+                                "tags": ["handles"],
+                                "page_no": 1,
+                                "row_order": 5,
+                                "display_lines": [
+                                    "BASE- BEVEL EDGE FINGERPULL",
+                                    "UPPER - FINGERPULL",
+                                    "TALL - PTO",
+                                ],
+                                "display_groups": [
+                                    {
+                                        "supplier": "",
+                                        "lines": [
+                                            "BASE- BEVEL EDGE FINGERPULL",
+                                            "UPPER - FINGERPULL",
+                                            "TALL - PTO",
+                                        ],
+                                    }
+                                ],
+                                "provenance": {"source_provider": "v6"},
+                            },
+                            {
+                                "area_or_item": "HANDLES",
+                                "supplier": "",
+                                "specs_or_description": "BASE- BEVEL EDGE FINGERPULL",
+                                "notes": "",
+                                "tags": ["handles"],
+                                "page_no": 1,
+                                "row_order": 7,
+                                "provenance": {"source_provider": "v6", "synthesized_from_room_handles": True},
+                            },
+                            {
+                                "area_or_item": "HANDLES",
+                                "supplier": "",
+                                "specs_or_description": "UPPER - FINGERPULL",
+                                "notes": "",
+                                "tags": ["handles"],
+                                "page_no": 1,
+                                "row_order": 8,
+                                "provenance": {"source_provider": "v6", "synthesized_from_room_handles": True},
+                            },
+                            {
+                                "area_or_item": "HANDLES",
+                                "supplier": "",
+                                "specs_or_description": "BASE- BEVEL EDGE FINGERPULL",
+                                "notes": "",
+                                "tags": ["handles"],
+                                "page_no": 1,
+                                "row_order": 9,
+                                "provenance": {"source_provider": "v6", "synthesized_from_room_handles": True},
+                            },
+                            {
+                                "area_or_item": "HANDLES",
+                                "supplier": "",
+                                "specs_or_description": "UPPER - FINGERPULL",
+                                "notes": "",
+                                "tags": ["handles"],
+                                "page_no": 1,
+                                "row_order": 10,
+                                "provenance": {"source_provider": "v6", "synthesized_from_room_handles": True},
+                            },
+                        ],
+                    }
+                ],
+                "appliances": [],
+                "others": {},
+                "warnings": [],
+                "source_documents": [],
+            },
+        )
+
+        client = TestClient(app)
+        self._login(client)
+        response = client.get(f"/jobs/{job_id}/spec-list")
+
+        self.assertEqual(response.status_code, 200)
+        handles_card = response.text.split("<h4>Handles</h4>", 1)[1].split("</article>", 1)[0]
+        self.assertIn("1 distinct item", handles_card)
+        self.assertEqual(handles_card.count('class="supplier-group-line"'), 3)
+        self.assertNotIn("BASE- BEVEL EDGE FINGERPULL</span>", handles_card)
+        self.assertNotIn("UPPER - FINGERPULL</span>", handles_card)
+
+        rooms_section = response.text.split("<h3>Rooms</h3>", 1)[1]
+        kitchen_section = rooms_section.split("<h4>KITCHEN</h4>", 1)[1].split("</article>", 1)[0]
+        self.assertEqual(kitchen_section.count('class="supplier-group-line"'), 3)
+        self.assertEqual(kitchen_section.count("BASE- BEVEL EDGE FINGERPULL"), 1)
+        self.assertEqual(kitchen_section.count("UPPER - FINGERPULL"), 1)
+        self.assertEqual(kitchen_section.count("TALL - PTO"), 1)
 
     def test_raw_spec_snapshot_allows_direct_excel_export_without_pdf_qa(self) -> None:
         builder_id = store.create_builder("Imperial", "imperial", "")

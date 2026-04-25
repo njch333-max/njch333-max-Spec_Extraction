@@ -256,6 +256,7 @@
   - Imperial raw Spec List room-card `HANDLES` rows: supplier header plus grouped lines
   - Imperial raw Spec List `Material Summary -> Handles`: one grouped entry per supplier/lines block, deduped across rooms by exact `(supplier, tuple(lines))`, with grouped-entry count used as the distinct-item count
 13h. When `display_groups` is absent, Imperial `Material Summary -> Handles` falls back to the existing flat `_imperial_material_row_handle_summary_candidates(...)` path. `Door Colours` and `Bench Tops` continue to use the existing flat summary-entry shape and rendering.
+13i. Before Imperial raw Spec List room rows are flattened for rendering, `main.py` now runs a v6 HANDLES-only subset dedupe pass. If one same-room `HANDLES` row's normalized line set is a strict subset of another row's longer line set, the smaller row is dropped from both room-card rendering and `Material Summary -> Handles`. This display-layer pass accepts both canonical v6 rows and `synthesized_from_room_handles` derivative rows as eligible inputs, but it does not mutate stored snapshot rows.
 14. Never fall back to `reviews` when rendering or exporting the raw Spec List page.
 15. Start the page shell with the left navigation rail collapsed by default and let the user toggle it open client-side when needed.
 16. When a parsed `site_address` exists, append it to the page heading as `job no - site address`; otherwise omit the separator.
