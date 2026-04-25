@@ -61,9 +61,21 @@
         <ul class="summary-list">
         {% for item in material_summary.handles.entries %}
         <li class="room-field-stack">
-          <span>{{ item.display_text }}</span>
-          {% if item.rooms_display is defined %}
+          {% if item.lines %}
+            {% if item.display_text %}
+          <strong>{{ item.display_text }}</strong>
+            {% endif %}
+            {% if item.rooms_display is defined %}
           <span class="muted">Room: {{ item.rooms_display or "-" }}</span>
+            {% endif %}
+            {% for line in item.lines %}
+          <div class="supplier-group-line">{{ line }}</div>
+            {% endfor %}
+          {% else %}
+          <span>{{ item.display_text }}</span>
+            {% if item.rooms_display is defined %}
+          <span class="muted">Room: {{ item.rooms_display or "-" }}</span>
+            {% endif %}
           {% endif %}
         </li>
         {% else %}

@@ -10027,12 +10027,86 @@ Front Loader - standard 700mm size - LG Tower
         response = client.get(f"/jobs/{job_id}/spec-list")
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("supplier-group-header", response.text)
-        self.assertEqual(response.text.count('<div class="supplier-group-header">Furnware</div>'), 1)
-        self.assertEqual(response.text.count('<div class="supplier-group-header">Titus Tekform</div>'), 1)
-        self.assertEqual(response.text.count('class="supplier-group-line"'), 4)
-        self.assertIn('<div class="supplier-group-line">line one</div>', response.text)
-        self.assertNotIn('<div>Furnware - line one</div>', response.text)
+        rooms_section = response.text.split("<h3>Rooms</h3>", 1)[1]
+        self.assertIn("supplier-group-header", rooms_section)
+        self.assertEqual(rooms_section.count('<div class="supplier-group-header">Furnware</div>'), 1)
+        self.assertEqual(rooms_section.count('<div class="supplier-group-header">Titus Tekform</div>'), 1)
+        self.assertEqual(rooms_section.count('class="supplier-group-line"'), 4)
+        self.assertIn('<div class="supplier-group-line">line one</div>', rooms_section)
+        self.assertNotIn('<div>Furnware - line one</div>', rooms_section)
+
+    def test_spec_list_material_summary_renders_grouped_handles_entries(self) -> None:
+        builder_id = store.create_builder("Imperial", "imperial", "")
+        job_id = store.create_job("38020", builder_id, "Grouped Summary Handles", "")
+        store.upsert_snapshot(
+            job_id,
+            "raw_spec",
+            {
+                "job_no": "38020",
+                "builder_name": "Imperial",
+                "source_kind": "spec",
+                "generated_at": "2026-04-24T10:00:00+00:00",
+                "analysis": {"mode": "heuristic_only", "parser_strategy": "imperial_v6"},
+                "rooms": [
+                    {
+                        "room_key": "kitchen",
+                        "original_room_label": "KITCHEN",
+                        "room_order": 1,
+                        "material_rows": [
+                            {
+                                "area_or_item": "HANDLES",
+                                "supplier": "Kethy",
+                                "specs_or_description": (
+                                    "Finger Pull on Uppers- PTO where required\n"
+                                    "L7817 - Oak Matt Black (OAKBK)\n"
+                                    "160mm - Lowers and Drawers\n"
+                                    "320mm - Pantry Door"
+                                ),
+                                "notes": "",
+                                "tags": ["handles"],
+                                "page_no": 1,
+                                "row_order": 1,
+                                "display_lines": [
+                                    "Kethy - Finger Pull on Uppers- PTO where required",
+                                    "Kethy - L7817 - Oak Matt Black (OAKBK)",
+                                    "Kethy - 160mm - Lowers and Drawers",
+                                    "Kethy - 320mm - Pantry Door",
+                                ],
+                                "display_groups": [
+                                    {
+                                        "supplier": "Kethy",
+                                        "lines": [
+                                            "Finger Pull on Uppers- PTO where required",
+                                            "L7817 - Oak Matt Black (OAKBK)",
+                                            "160mm - Lowers and Drawers",
+                                            "320mm - Pantry Door",
+                                        ],
+                                    }
+                                ],
+                                "provenance": {"source_provider": "v6"},
+                            }
+                        ],
+                    }
+                ],
+                "appliances": [],
+                "others": {},
+                "warnings": [],
+                "source_documents": [],
+            },
+        )
+
+        client = TestClient(app)
+        self._login(client)
+        response = client.get(f"/jobs/{job_id}/spec-list")
+
+        self.assertEqual(response.status_code, 200)
+        handles_card = response.text.split("<h4>Handles</h4>", 1)[1].split("</article>", 1)[0]
+        self.assertIn("1 distinct item", handles_card)
+        self.assertIn("<strong>Kethy</strong>", handles_card)
+        self.assertIn("Room: KITCHEN", handles_card)
+        self.assertEqual(handles_card.count('class="supplier-group-line"'), 4)
+        self.assertIn('<div class="supplier-group-line">Finger Pull on Uppers- PTO where required</div>', handles_card)
+        self.assertNotIn("Kethy - Finger Pull on Uppers- PTO where required", handles_card)
 
     def test_raw_spec_snapshot_allows_direct_excel_export_without_pdf_qa(self) -> None:
         builder_id = store.create_builder("Imperial", "imperial", "")

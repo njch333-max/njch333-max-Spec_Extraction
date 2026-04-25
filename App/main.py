@@ -1832,6 +1832,16 @@ def _find_imperial_summary_entry(
     return None
 
 
+def _find_imperial_summary_grouped_entry(
+    entries: list[dict[str, Any]],
+    dedupe_key: tuple[str, tuple[str, ...]],
+) -> dict[str, Any] | None:
+    for entry in entries:
+        if entry.get("_dedupe_key") == dedupe_key:
+            return entry
+    return None
+
+
 def _imperial_material_row_is_v6_origin(item: dict[str, Any]) -> bool:
     provenance = item.get("provenance", {}) if isinstance(item.get("provenance", {}), dict) else {}
     return (
@@ -2425,6 +2435,37 @@ def _build_imperial_material_summary(snapshot: dict[str, Any]) -> dict[str, dict
                     bucket_entries = buckets[bucket_key]["entries"]
                     area_or_item = _display_value(item.get("title", ""))
                     if bucket_key == "handles":
+                        display_groups = item.get("display_groups", []) or []
+                        if display_groups:
+                            for group in display_groups:
+                                if not isinstance(group, dict):
+                                    continue
+                                supplier_text = _display_value(group.get("supplier", ""))
+                                lines = [
+                                    _display_value(line)
+                                    for line in (group.get("lines", []) or [])
+                                    if _display_value(line)
+                                ]
+                                if not supplier_text and not lines:
+                                    continue
+                                dedupe_key = (supplier_text, tuple(lines))
+                                entry = _find_imperial_summary_grouped_entry(bucket_entries, dedupe_key)
+                                if entry is None:
+                                    entry = {
+                                        "text": supplier_text,
+                                        "display_text": supplier_text,
+                                        "lines": lines,
+                                        "rooms": [],
+                                        "rooms_display": "",
+                                        "area_or_items": [],
+                                        "_dedupe_key": dedupe_key,
+                                    }
+                                    bucket_entries.append(entry)
+                                if room_label and room_label not in entry["rooms"]:
+                                    entry["rooms"].append(room_label)
+                                if area_or_item and area_or_item not in entry["area_or_items"]:
+                                    entry["area_or_items"].append(area_or_item)
+                            continue
                         summary_texts = _imperial_material_row_handle_summary_candidates(item)
                     else:
                         summary_texts = []
@@ -2537,6 +2578,7 @@ def _build_imperial_material_summary(snapshot: dict[str, Any]) -> dict[str, dict
         for entry in bucket["entries"]:
             rooms = [room for room in entry.get("rooms", []) if room]
             entry["rooms_display"] = " | ".join(rooms)
+            entry.pop("_dedupe_key", None)
         bucket["count"] = len(bucket["entries"])
     return buckets
 

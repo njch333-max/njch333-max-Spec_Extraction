@@ -26,17 +26,23 @@ def _v6_material_row(area: str, specs: str, supplier: str, tags: list[str], row_
 
 
 def _summary_for_rows(rows: list[dict]) -> dict:
+    return _summary_for_rooms(
+        [
+            {
+                "room_key": "kitchen",
+                "original_room_label": "KITCHEN",
+                "room_order": 1,
+                "material_rows": deepcopy(rows),
+            }
+        ]
+    )
+
+
+def _summary_for_rooms(rooms: list[dict]) -> dict:
     return app_main._build_imperial_material_summary(
         {
             "builder_name": "Imperial",
-            "rooms": [
-                {
-                    "room_key": "kitchen",
-                    "original_room_label": "KITCHEN",
-                    "room_order": 1,
-                    "material_rows": deepcopy(rows),
-                }
-            ],
+            "rooms": deepcopy(rooms),
         }
     )
 
@@ -291,3 +297,187 @@ def test_v6_non_handles_do_not_emit_display_groups():
     )
 
     assert "display_groups" not in row
+
+
+def test_v6_grouped_handles_summary_uses_single_kethy_group_entry():
+    row = _v6_material_row(
+        "HANDLES",
+        (
+            "Finger Pull on Uppers- PTO where required\n"
+            "L7817 - Oak Matt Black (OAKBK)\n"
+            "160mm - Lowers and Drawers\n"
+            "320mm - Pantry Door"
+        ),
+        "Kethy",
+        ["handles"],
+    )
+
+    summary = _summary_for_rows([row])
+
+    assert summary["handles"]["count"] == 1
+    assert summary["handles"]["entries"] == [
+        {
+            "text": "Kethy",
+            "display_text": "Kethy",
+            "lines": [
+                "Finger Pull on Uppers- PTO where required",
+                "L7817 - Oak Matt Black (OAKBK)",
+                "160mm - Lowers and Drawers",
+                "320mm - Pantry Door",
+            ],
+            "rooms": ["KITCHEN"],
+            "rooms_display": "KITCHEN",
+            "area_or_items": ["HANDLES"],
+        }
+    ]
+
+
+def test_v6_grouped_handles_summary_emits_two_astrid_supplier_groups():
+    row = _v6_material_row(
+        "HANDLES",
+        (
+            "Tall Door Handles - Momo Hinoki Wood Big D\n"
+            "832mm Handle Oak-HIN0682.832.OAK\n"
+            "High Split Handle -Momo hinoki wood big d\n"
+            "416mm handle oak-HIN0682.416.OAK\n"
+            "Drawers - Bevel Edge finger pull\n"
+            "DESK - 2163 Voda Profile Handle Brushed\n"
+            "Nickel 300mm - SO-2163-300-BN\n"
+            "BENCHSEAT DRAWERS - PTO"
+        ),
+        "Furnware\nTitus Tekform",
+        ["handles"],
+    )
+    summary = _summary_for_rooms(
+        [
+            {
+                "room_key": "upper_bed_3_astrid",
+                "original_room_label": "UPPER-BED 3 (Astrid)",
+                "room_order": 1,
+                "material_rows": [row],
+            }
+        ]
+    )
+
+    assert summary["handles"]["count"] == 2
+    assert summary["handles"]["entries"] == [
+        {
+            "text": "Furnware",
+            "display_text": "Furnware",
+            "lines": [
+                "Tall Door Handles - Momo Hinoki Wood Big D",
+                "832mm Handle Oak-HIN0682.832.OAK",
+                "High Split Handle -Momo hinoki wood big d",
+                "416mm handle oak-HIN0682.416.OAK",
+            ],
+            "rooms": ["UPPER-BED 3 (Astrid)"],
+            "rooms_display": "UPPER-BED 3 (Astrid)",
+            "area_or_items": ["HANDLES"],
+        },
+        {
+            "text": "Titus Tekform",
+            "display_text": "Titus Tekform",
+            "lines": [
+                "Drawers - Bevel Edge finger pull",
+                "DESK - 2163 Voda Profile Handle Brushed",
+                "Nickel 300mm - SO-2163-300-BN",
+                "BENCHSEAT DRAWERS - PTO",
+            ],
+            "rooms": ["UPPER-BED 3 (Astrid)"],
+            "rooms_display": "UPPER-BED 3 (Astrid)",
+            "area_or_items": ["HANDLES"],
+        },
+    ]
+
+
+def test_v6_grouped_handles_summary_dedupes_identical_groups_across_rooms():
+    row = _v6_material_row(
+        "HANDLES",
+        "Finger Pull on Uppers- PTO where required\nL7817 - Oak Matt Black (OAKBK)",
+        "Kethy",
+        ["handles"],
+    )
+    summary = _summary_for_rooms(
+        [
+            {
+                "room_key": "kitchen",
+                "original_room_label": "KITCHEN",
+                "room_order": 1,
+                "material_rows": [deepcopy(row)],
+            },
+            {
+                "room_key": "lower_linen",
+                "original_room_label": "LOWER LINEN",
+                "room_order": 2,
+                "material_rows": [deepcopy(row)],
+            },
+        ]
+    )
+
+    assert summary["handles"]["count"] == 1
+    assert summary["handles"]["entries"][0]["display_text"] == "Kethy"
+    assert summary["handles"]["entries"][0]["lines"] == [
+        "Finger Pull on Uppers- PTO where required",
+        "L7817 - Oak Matt Black (OAKBK)",
+    ]
+    assert summary["handles"]["entries"][0]["rooms_display"] == "KITCHEN | LOWER LINEN"
+
+
+def test_v6_grouped_handles_summary_falls_back_to_flat_entries_without_display_groups():
+    row = _v6_material_row(
+        "HANDLES",
+        "line one\nline two\nline three\nline four\nline five",
+        "Supplier1\nSupplier2",
+        ["handles"],
+    )
+
+    summary = _summary_for_rows([row])
+
+    assert summary["handles"]["count"] > 0
+    assert all("lines" not in entry for entry in summary["handles"]["entries"])
+
+
+def test_v6_grouped_handles_summary_keeps_door_colours_flat():
+    row = _v6_material_row("BASE AND UPPER (INCL BOTTOMS) CABINETRY COLOUR", "Amaro Matt", "Polytec", ["door_colours"])
+
+    summary = _summary_for_rows([row])
+
+    assert summary["door_colours"]["count"] == 1
+    assert summary["door_colours"]["entries"] == [
+        {
+            "text": "Polytec - Amaro Matt",
+            "display_text": "Polytec - Amaro Matt",
+            "rooms": ["KITCHEN"],
+            "rooms_display": "KITCHEN",
+            "area_or_items": ["BASE AND UPPER (INCL BOTTOMS) CABINETRY COLOUR"],
+        }
+    ]
+
+
+def test_v6_grouped_handles_summary_keeps_bench_tops_flat():
+    row = _v6_material_row(
+        "BENCHTOP",
+        "2Omm Stone - 4030 Oyster - PR\n20mm Shadowline under Benchtop -Forage Smooth",
+        "Caesarstone\nBy Imperial",
+        ["bench_tops"],
+    )
+
+    summary = _summary_for_rows([row])
+
+    assert summary["bench_tops"]["count"] == 2
+    assert summary["bench_tops"]["entries"] == [
+        {
+            "text": "Caesarstone - 2Omm Stone - 4030 Oyster - PR",
+            "display_text": "Caesarstone - 2Omm Stone - 4030 Oyster - PR",
+            "rooms": ["KITCHEN"],
+            "rooms_display": "KITCHEN",
+            "area_or_items": ["BENCHTOP"],
+        },
+        {
+            "text": "By Imperial - 20mm Shadowline under Benchtop -Forage Smooth",
+            "display_text": "By Imperial - 20mm Shadowline under Benchtop -Forage Smooth",
+            "rooms": ["KITCHEN"],
+            "rooms_display": "KITCHEN",
+            "area_or_items": ["BENCHTOP"],
+        },
+    ]
