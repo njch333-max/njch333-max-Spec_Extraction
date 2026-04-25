@@ -4397,6 +4397,296 @@ Front Loader - standard 700mm size - LG Tower
         self.assertTrue(rows[0]["needs_review"])
         self.assertEqual(rows[0]["review_display_status"], "order_hint")
 
+    def test_flatten_imperial_material_rows_falls_back_to_v6_review_row_notes_on_strict_match(self) -> None:
+        rows = _flatten_imperial_material_rows(
+            {
+                "material_rows": [
+                    self._make_imperial_v6_material_row(
+                        "HANDLES",
+                        specs_or_description="Finger Pull",
+                        notes="",
+                        tags=["handles"],
+                        row_order=1,
+                    )
+                ],
+                "v6_review_rows": [
+                    self._make_imperial_v6_material_row(
+                        "HANDLES",
+                        specs_or_description="Finger Pull",
+                        notes="Vertical Grain",
+                        tags=["handles"],
+                        row_order=1,
+                    )
+                ],
+            }
+        )
+
+        self.assertEqual(rows[0]["notes"], "Vertical Grain")
+
+    def test_flatten_imperial_material_rows_keeps_existing_notes_without_fallback_override(self) -> None:
+        rows = _flatten_imperial_material_rows(
+            {
+                "material_rows": [
+                    self._make_imperial_v6_material_row(
+                        "HANDLES",
+                        specs_or_description="Finger Pull",
+                        notes="Existing note",
+                        tags=["handles"],
+                        row_order=1,
+                    )
+                ],
+                "v6_review_rows": [
+                    self._make_imperial_v6_material_row(
+                        "HANDLES",
+                        specs_or_description="Finger Pull",
+                        notes="Different fallback",
+                        tags=["handles"],
+                        row_order=1,
+                    )
+                ],
+            }
+        )
+
+        self.assertEqual(rows[0]["notes"], "Existing note")
+
+    def test_flatten_imperial_material_rows_falls_back_on_area_and_page_when_row_order_misaligned(self) -> None:
+        rows = _flatten_imperial_material_rows(
+            {
+                "material_rows": [
+                    self._make_imperial_v6_material_row(
+                        "HANDLES",
+                        specs_or_description="Finger Pull",
+                        notes="",
+                        tags=["handles"],
+                        row_order=1,
+                    )
+                ],
+                "v6_review_rows": [
+                    self._make_imperial_v6_material_row(
+                        "HANDLES",
+                        specs_or_description="Finger Pull",
+                        notes="Page match fallback",
+                        tags=["handles"],
+                        row_order=2,
+                    )
+                ],
+            }
+        )
+
+        self.assertEqual(rows[0]["notes"], "Page match fallback")
+
+    def test_flatten_imperial_material_rows_refuses_ambiguous_area_and_page_match(self) -> None:
+        rows = _flatten_imperial_material_rows(
+            {
+                "material_rows": [
+                    self._make_imperial_v6_material_row(
+                        "HANDLES",
+                        specs_or_description="Finger Pull",
+                        notes="",
+                        tags=["handles"],
+                        row_order=1,
+                    )
+                ],
+                "v6_review_rows": [
+                    self._make_imperial_v6_material_row(
+                        "HANDLES",
+                        specs_or_description="Finger Pull",
+                        notes="First note",
+                        tags=["handles"],
+                        row_order=2,
+                    ),
+                    self._make_imperial_v6_material_row(
+                        "HANDLES",
+                        specs_or_description="Finger Pull",
+                        notes="Second note",
+                        tags=["handles"],
+                        row_order=3,
+                    ),
+                ],
+            }
+        )
+
+        self.assertEqual(rows[0]["notes"], "")
+
+    def test_flatten_imperial_material_rows_falls_back_on_unique_area_only_match(self) -> None:
+        rows = _flatten_imperial_material_rows(
+            {
+                "material_rows": [
+                    {
+                        **self._make_imperial_v6_material_row(
+                            "HANDLES",
+                            specs_or_description="Finger Pull",
+                            notes="",
+                            tags=["handles"],
+                            row_order=1,
+                        ),
+                        "page_no": 9,
+                    }
+                ],
+                "v6_review_rows": [
+                    {
+                        **self._make_imperial_v6_material_row(
+                            "HANDLES",
+                            specs_or_description="Finger Pull",
+                            notes="Area only fallback",
+                            tags=["handles"],
+                            row_order=8,
+                        ),
+                        "page_no": 1,
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(rows[0]["notes"], "Area only fallback")
+
+    def test_flatten_imperial_material_rows_ignores_missing_v6_review_rows(self) -> None:
+        rows = _flatten_imperial_material_rows(
+            {
+                "material_rows": [
+                    self._make_imperial_v6_material_row(
+                        "HANDLES",
+                        specs_or_description="Finger Pull",
+                        notes="",
+                        tags=["handles"],
+                        row_order=1,
+                    )
+                ]
+            }
+        )
+
+        self.assertEqual(rows[0]["notes"], "")
+
+    def test_flatten_imperial_material_rows_keeps_empty_notes_when_match_notes_empty(self) -> None:
+        rows = _flatten_imperial_material_rows(
+            {
+                "material_rows": [
+                    self._make_imperial_v6_material_row(
+                        "HANDLES",
+                        specs_or_description="Finger Pull",
+                        notes="",
+                        tags=["handles"],
+                        row_order=1,
+                    )
+                ],
+                "v6_review_rows": [
+                    self._make_imperial_v6_material_row(
+                        "HANDLES",
+                        specs_or_description="Finger Pull",
+                        notes="",
+                        tags=["handles"],
+                        row_order=1,
+                    )
+                ],
+            }
+        )
+
+        self.assertEqual(rows[0]["notes"], "")
+
+    def test_flatten_imperial_material_rows_matches_v6_review_rows_case_insensitively_by_area(self) -> None:
+        rows = _flatten_imperial_material_rows(
+            {
+                "material_rows": [
+                    self._make_imperial_v6_material_row(
+                        "HANDLES",
+                        specs_or_description="Finger Pull",
+                        notes="",
+                        tags=["handles"],
+                        row_order=1,
+                    )
+                ],
+                "v6_review_rows": [
+                    self._make_imperial_v6_material_row(
+                        "Handles",
+                        specs_or_description="Finger Pull",
+                        notes="Casefold note",
+                        tags=["handles"],
+                        row_order=1,
+                    )
+                ],
+            }
+        )
+
+        self.assertEqual(rows[0]["notes"], "Casefold note")
+
+    def test_flatten_imperial_material_rows_leaves_bug_b_split_rows_without_v6_review_note_match(self) -> None:
+        rows = _flatten_imperial_material_rows(
+            {
+                "material_rows": [
+                    self._make_imperial_v6_material_row("LED LIGHTING", specs_or_description="LED Provision ONLY to underside of OHC", notes="", row_order=1),
+                    self._make_imperial_v6_material_row("PULL-OUT BIN", specs_or_description="9291592 Waste Bin PO - 400mm 2x32Ltrs", notes="", row_order=2),
+                    self._make_imperial_v6_material_row("PULL-OUT SHELVES", specs_or_description="VSDSA.200.SSL.FG - VS Sub 200mm Wire", notes="", row_order=3),
+                    self._make_imperial_v6_material_row("PULL-OUT CORNER SHELVES", specs_or_description="ST22MCU.450L.CPWH - Elka Magic Corner", notes="", row_order=4),
+                ],
+                "v6_review_rows": [
+                    self._make_imperial_v6_material_row(
+                        "LED LIGHTING\nPULL-OUT BIN\nPULL-OUT SHELVES\nPULL-OUT CORNER SHELVES",
+                        specs_or_description=(
+                            "LED Provision ONLY to underside of OHC\n"
+                            "9291592 Waste Bin PO - 400mm 2x32Ltrs\n"
+                            "VSDSA.200.SSL.FG - VS Sub 200mm Wire\n"
+                            "ST22MCU.450L.CPWH - Elka Magic Corner"
+                        ),
+                        notes="Merged source row note",
+                        row_order=1,
+                    )
+                ],
+            }
+        )
+
+        self.assertEqual([row["notes"] for row in rows], ["", "", "", ""])
+
+    def test_flatten_imperial_material_rows_uses_job76_handles_fallback_note(self) -> None:
+        rows = _flatten_imperial_material_rows(
+            {
+                "material_rows": [
+                    {
+                        **self._make_imperial_v6_material_row(
+                            "HANDLES",
+                            supplier="Kethy",
+                            specs_or_description="Finger Pull on Uppers- PTO where required\nL7817 - Oak Matt Black (OAKBK)\n160mm - Lowers and Drawers\n320mm - Pantry Door",
+                            notes="",
+                            tags=["handles"],
+                            row_order=6,
+                            display_lines=[
+                                "Kethy - Finger Pull on Uppers- PTO where required",
+                                "Kethy - L7817 - Oak Matt Black (OAKBK)",
+                                "Kethy - 160mm - Lowers and Drawers",
+                                "Kethy - 320mm - Pantry Door",
+                            ],
+                            display_groups=[
+                                {
+                                    "supplier": "Kethy",
+                                    "lines": [
+                                        "Finger Pull on Uppers- PTO where required",
+                                        "L7817 - Oak Matt Black (OAKBK)",
+                                        "160mm - Lowers and Drawers",
+                                        "320mm - Pantry Door",
+                                    ],
+                                }
+                            ],
+                        ),
+                        "page_no": 1,
+                    }
+                ],
+                "v6_review_rows": [
+                    {
+                        **self._make_imperial_v6_material_row(
+                            "HANDLES",
+                            supplier="Kethy",
+                            specs_or_description="Finger Pull on Uppers- PTO where required\nL7817 - Oak Matt Black (OAKBK)\n160mm - Lowers and Drawers\n320mm - Pantry Door",
+                            notes="Horizontal on Drawers and Vertical on\nDoors",
+                            tags=["handles"],
+                            row_order=6,
+                        ),
+                        "page_no": 1,
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(rows[0]["notes"], "Horizontal on Drawers and Vertical on\nDoors")
+
     def test_imperial_material_row_display_value_for_view_prefers_layout_text_for_raw_row_fidelity(self) -> None:
         display = parsing_module._imperial_material_row_display_value_for_view(
             {

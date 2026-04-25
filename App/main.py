@@ -789,11 +789,60 @@ def _flatten_imperial_rooms(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     return flattened
 
 
+def _match_v6_review_row_for(material_item: dict[str, Any], v6_review_rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not isinstance(material_item, dict) or not isinstance(v6_review_rows, list):
+        return None
+
+    area_key = _display_value(material_item.get("area_or_item", "")).casefold()
+    if not area_key:
+        return None
+
+    def _normalized_int(value: Any) -> int | None:
+        try:
+            if value in {"", None}:
+                return None
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _area_key(row: dict[str, Any]) -> str:
+        return _display_value(row.get("area_or_item", "")).casefold()
+
+    page_key = _normalized_int(material_item.get("page_no"))
+    row_order_key = _normalized_int(material_item.get("row_order"))
+    review_rows = [row for row in v6_review_rows if isinstance(row, dict)]
+
+    strict_matches = [
+        row
+        for row in review_rows
+        if _area_key(row) == area_key
+        and _normalized_int(row.get("page_no")) == page_key
+        and _normalized_int(row.get("row_order")) == row_order_key
+    ]
+    if strict_matches:
+        return strict_matches[0]
+
+    area_page_matches = [
+        row
+        for row in review_rows
+        if _area_key(row) == area_key
+        and _normalized_int(row.get("page_no")) == page_key
+    ]
+    if len(area_page_matches) == 1:
+        return area_page_matches[0]
+
+    area_only_matches = [row for row in review_rows if _area_key(row) == area_key]
+    if len(area_only_matches) == 1:
+        return area_only_matches[0]
+    return None
+
+
 def _flatten_imperial_material_rows(room: dict[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     material_rows = room.get("material_rows", [])
     if not isinstance(material_rows, list):
         return rows
+    v6_review_rows = [row for row in (room.get("v6_review_rows", []) or []) if isinstance(row, dict)]
     def _sort_key(item: dict[str, Any]) -> tuple[int, float, float, int, int]:
         provenance = item.get("provenance", {}) if isinstance(item.get("provenance", {}), dict) else {}
         visual_sort_key = provenance.get("visual_sort_key", [])
@@ -917,6 +966,11 @@ def _flatten_imperial_material_rows(room: dict[str, Any]) -> list[dict[str, Any]
         display_lines = source_display_lines if _imperial_material_row_is_v6_origin(item) and source_display_lines else rendered_display_lines
         display_groups = source_display_groups if _imperial_material_row_is_v6_origin(item) else []
         display_value = "\n".join(display_lines) if display_lines else (_display_value(parsing._imperial_material_row_display_value_for_view(item)) or value)
+        resolved_notes = notes
+        if not resolved_notes and v6_review_rows:
+            review_match = _match_v6_review_row_for(item, v6_review_rows)
+            if review_match:
+                resolved_notes = _display_value(review_match.get("notes", ""))
         handle_fallback_sources = (
             _imperial_handle_summary_fallback_sources(item)
             if _imperial_summary_bucket_key_for_item(item) == "handles"
@@ -980,7 +1034,7 @@ def _flatten_imperial_material_rows(room: dict[str, Any]) -> list[dict[str, Any]
                 "display_groups": display_groups,
                 "supplier": supplier,
                 "specs_or_description": description,
-                "notes": notes,
+                "notes": resolved_notes,
                 "tags": tags,
                 "page_no": int(item.get("page_no", 0) or 0),
                 "row_order": int(item.get("row_order", 0) or 0),
