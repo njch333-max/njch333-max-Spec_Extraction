@@ -3814,12 +3814,20 @@ def _imperial_material_row_handle_summary_candidates(item: dict[str, Any]) -> li
     if not isinstance(item, dict):
         return []
     supplier = _display_value(item.get("supplier", ""))
+    provenance = item.get("provenance", {}) if isinstance(item.get("provenance", {}), dict) else {}
     display_lines = [
         _display_value(line)
         for line in item.get("display_lines", []) or []
         if _display_value(line)
     ]
-    if _imperial_material_row_is_v6_origin(item) and len(display_lines) >= 2:
+    source_backed_display_lines = bool(display_lines) and _imperial_material_row_is_v6_origin(item)
+    subitems = item.get("handle_subitems", [])
+    if (
+        (not isinstance(subitems, list) or not subitems)
+        and source_backed_display_lines
+        and bool(item.get("display_groups"))
+        and len(display_lines) >= 2
+    ):
         v6_candidates: list[str] = []
         for display_line in display_lines:
             normalized_candidate = _display_value(_normalize_imperial_handle_summary_value(display_line))
@@ -3832,139 +3840,70 @@ def _imperial_material_row_handle_summary_candidates(item: dict[str, Any]) -> li
                 v6_candidates.append(candidate)
         if len(v6_candidates) >= 2:
             return v6_candidates
-    subitem_candidates = _imperial_material_row_handle_subitem_summary_candidates(item)
-    if subitem_candidates:
-        return subitem_candidates
+    if (
+        (not isinstance(subitems, list) or not subitems)
+        and provenance.get("synthesized_from_room_handles") is not True
+        and source_backed_display_lines
+    ):
+        inferred_item = dict(item)
+        if not inferred_item.get("tags"):
+            inferred_item["tags"] = ["handles"]
+        inferred_item["supplier"] = ""
+        inferred_item["specs_or_description"] = ""
+        inferred_item["notes"] = ""
+        inferred_subitems = parsing._imperial_handle_subitems_for_row(inferred_item)
+        if inferred_subitems:
+            subitems = inferred_subitems
+    if isinstance(subitems, list) and subitems:
+        subitem_source_priority = (
+            "display_line",
+            "layout_value_text",
+            "raw_row",
+            "page_text_handle_block",
+            "rendered_line",
+        )
+        for source_name in subitem_source_priority:
+            prioritized_subitems = [
+                subitem
+                for subitem in subitems
+                if isinstance(subitem, dict) and _display_value(subitem.get("source", "")) == source_name
+            ]
+            if not prioritized_subitems:
+                continue
+            prioritized_item = dict(item)
+            prioritized_item["handle_subitems"] = prioritized_subitems
+            subitem_candidates = _imperial_material_row_handle_subitem_summary_candidates(prioritized_item)
+            if subitem_candidates:
+                return subitem_candidates
+    if source_backed_display_lines:
+        display_line_candidates: list[str] = []
+        for display_line in display_lines:
+            for summary_text in _imperial_summary_values_for_bucket(
+                "handles",
+                display_line,
+                _normalize_imperial_handle_summary_value,
+                supplier=supplier,
+            ):
+                if summary_text and summary_text not in display_line_candidates:
+                    display_line_candidates.append(summary_text)
+        if display_line_candidates:
+            return display_line_candidates
+
     summary_sources: list[str] = []
-    if display_lines:
-        summary_sources.extend(display_lines)
-    display_value = _display_value(item.get("display_value", "")) or _display_value(item.get("value", ""))
+    if provenance.get("synthesized_from_room_handles") is True:
+        layout_value_text = _display_value(provenance.get("layout_value_text", ""))
+        if layout_value_text:
+            summary_sources.append(layout_value_text)
     raw_composed_value = parsing._compose_supplier_description_note(
         _display_value(item.get("supplier", "")),
         _display_value(item.get("specs_or_description", "")),
         _display_value(item.get("notes", "")),
     )
-    display_line_candidates: list[str] = []
-    for line in display_lines:
-        for candidate in _imperial_summary_values_for_bucket(
-            "handles",
-            line,
-            _normalize_imperial_handle_summary_value,
-            supplier=supplier,
-        ):
-            if candidate and candidate not in display_line_candidates:
-                display_line_candidates.append(candidate)
-    if not display_value:
-        display_value = raw_composed_value
-    combined_candidates: list[str] = []
-    for combined_source in (display_value, raw_composed_value):
-        if not combined_source:
-            continue
-        for candidate in _imperial_summary_values_for_bucket(
-            "handles",
-            combined_source,
-            _normalize_imperial_handle_summary_value,
-            supplier=supplier,
-        ):
-            if candidate and candidate not in combined_candidates:
-                combined_candidates.append(candidate)
-    display_line_families = parsing._imperial_handle_display_line_family_keys(display_line_candidates)
-    combined_families = parsing._imperial_handle_display_line_family_keys(combined_candidates)
-    display_line_identity: set[str] = set()
-    for candidate in display_line_candidates:
-        display_line_identity.update(_imperial_handle_summary_identity_tokens(candidate))
-    combined_nonmatching = [
-        candidate
-        for candidate in combined_candidates
-        if not any(_imperial_summary_values_equivalent("handles", candidate, existing) for existing in display_line_candidates)
-    ]
-    meaningful_uncoded_handle_family_pattern = (
-        r"(?i)\b(?:"
-        r"bevel\s+edge\s+finger\s+pull|"
-        r"drawers?\s*-\s*bevel\s+edge\s+finger\s+pull|"
-        r"no\s+handles?(?:\s+on\s+[a-z ]+)?|"
-        r"finger\s+pull\s+only|"
-        r"touch\s+catch|"
-        r"push\s+to\s+open|"
-        r"pto|"
-        r"knob(?:\s*-|$)|"
-        r"cabinet\s+knob"
-        r")\b"
-    )
-    if display_line_candidates and combined_nonmatching:
-        coded_display_candidates = [
-            candidate
-            for candidate in display_line_candidates
-            if re.search(r"(?i)\b(?:SO-[A-Z0-9-]+|[A-Z]?\d+\.[A-Z0-9.]+|Product Code:\s*[A-Z0-9]+|Part no:\s*[A-Z0-9.]+)\b", candidate)
-        ]
-        if coded_display_candidates and all(
-            not re.search(r"(?i)\b(?:SO-[A-Z0-9-]+|[A-Z]?\d+\.[A-Z0-9.]+|Product Code:\s*[A-Z0-9]+|Part no:\s*[A-Z0-9.]+)\b", candidate)
-            for candidate in combined_nonmatching
-        ) and not any(
-            re.search(meaningful_uncoded_handle_family_pattern, candidate)
-            for candidate in combined_nonmatching
-        ):
-            return display_line_candidates
-    generic_handle_noise_pattern = (
-        r"(?i)^(?:HANLDES?|HANDLES?)\b|"
-        r"\b(?:no\s+handles?(?:\s+on\s+[a-z ]+)?|finger\s+pull\s+only|touch\s+catch|push\s+to\s+open|kickboards?)\b"
-    )
-    if display_line_candidates and combined_nonmatching:
-        if display_line_identity and all(
-            (
-                _imperial_handle_summary_identity_tokens(candidate)
-                and _imperial_handle_summary_identity_tokens(candidate) <= display_line_identity
-            )
-            or re.search(generic_handle_noise_pattern, candidate)
-            for candidate in combined_nonmatching
-        ):
-            return display_line_candidates
-        if all(re.search(generic_handle_noise_pattern, candidate) for candidate in combined_nonmatching):
-            return display_line_candidates
-    use_display_lines_as_truth = (
-        bool(display_line_candidates)
-        and (
-            (
-                len(display_lines) >= 2
-                and (
-                    not combined_candidates
-                    or all(
-                        any(_imperial_summary_values_equivalent("handles", candidate, existing) for existing in display_line_candidates)
-                        for candidate in combined_candidates
-                    )
-                )
-            )
-            or (
-                display_line_families
-                and combined_families
-                and combined_families <= display_line_families
-            )
-            or any(
-                parsing._imperial_handle_text_has_foreign_section_pollution(source_text)
-                for source_text in (display_value, raw_composed_value)
-                if source_text
-            )
-            or (
-                bool(display_line_identity)
-                and any(
-                    re.search(
-                        r"(?i)\b(?:no\s+handles?(?:\s+on\s+[a-z ]+)?|finger\s+pull\s+only|touch\s+catch|push\s+to\s+open)\b",
-                        candidate,
-                    )
-                    for candidate in combined_nonmatching
-                )
-            )
-        )
-    )
-    if display_value and not use_display_lines_as_truth:
-        summary_sources.append(display_value)
-    if raw_composed_value and raw_composed_value not in summary_sources and not use_display_lines_as_truth:
+    if raw_composed_value and raw_composed_value not in summary_sources and (
+        provenance.get("synthesized_from_room_handles") is not True or not summary_sources
+    ):
         summary_sources.append(raw_composed_value)
-    if _imperial_material_row_is_handle_summary_review_fallback(item):
-        if (not display_lines) or _imperial_handle_summary_should_append_fallback_sources(item, display_lines):
-            for fallback_source in _imperial_handle_summary_fallback_sources(item):
-                if fallback_source and fallback_source not in summary_sources:
-                    summary_sources.append(fallback_source)
+
     candidates: list[str] = []
     for source_text in summary_sources:
         for summary_text in _imperial_summary_values_for_bucket(
@@ -3975,6 +3914,31 @@ def _imperial_material_row_handle_summary_candidates(item: dict[str, Any]) -> li
         ):
             if summary_text and summary_text not in candidates:
                 candidates.append(summary_text)
+    if not candidates and source_backed_display_lines:
+        for display_line in display_lines:
+            fallback_candidate = _imperial_summary_line_with_supplier(display_line, supplier)
+            if fallback_candidate and fallback_candidate.lower() != "none" and fallback_candidate not in candidates:
+                candidates.append(fallback_candidate)
+    if not candidates:
+        provenance_fallbacks: list[str] = []
+        if _imperial_material_row_is_handle_summary_review_fallback(item):
+            for key in ("layout_value_text", "page_text_handle_block"):
+                provenance_text = _display_value(provenance.get(key, ""))
+                if provenance_text and provenance_text not in provenance_fallbacks:
+                    provenance_fallbacks.append(provenance_text)
+        else:
+            page_text_handle_block = _display_value(provenance.get("page_text_handle_block", ""))
+            if page_text_handle_block:
+                provenance_fallbacks.append(page_text_handle_block)
+        for provenance_text in provenance_fallbacks:
+            for summary_text in _imperial_summary_values_for_bucket(
+                "handles",
+                provenance_text,
+                _normalize_imperial_handle_summary_value,
+                supplier=supplier,
+            ):
+                if summary_text and summary_text not in candidates:
+                    candidates.append(summary_text)
     pruned_candidates: list[str] = []
     for candidate in candidates:
         candidate_identity = _imperial_handle_summary_identity_tokens(candidate)

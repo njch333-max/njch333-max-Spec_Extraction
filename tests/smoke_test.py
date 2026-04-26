@@ -16879,11 +16879,11 @@ Front Loader - standard 700mm size - LG Tower
             handle_summary_item["extracted_value"],
         )
         self.assertIn(
-            "DOORS - Momo Graf Knurled D Handle 160mm In Dull Brushed Nickel - Part no: G0430.160.DBR (Room: PANTRY)",
+            "DOORS - Momo Graf Knurled D Handle 160mm In Dull Brushed Nickel Part no: G0430.160.DBR (Room: PANTRY)",
             handle_summary_item["extracted_value"],
         )
         self.assertIn(
-            "DRAWERS - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel - Part no: G0430.256.DBR (Room: PANTRY)",
+            "DRAWERS - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel Part no: G0430.256.DBR (Room: PANTRY)",
             handle_summary_item["extracted_value"],
         )
         self.assertNotIn("None", handle_summary_item["extracted_value"])
@@ -19175,7 +19175,7 @@ Front Loader - standard 700mm size - LG Tower
             "value": "",
             "specs_or_description": "Upper cabinetry - No Handles, finger pull ONLY Drawers - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel Part no: G0430.256.DBR Doors - Momo Graf Knurled D Handle 160mm In Dull Brushed Nickel Part no: G0430.160.DBR Horizontal on Drawers",
             "notes": "",
-            "provenance": {},
+            "provenance": {"source_provider": "v6"},
             "issues": [],
             "revalidation_status": "passed",
         }
@@ -19202,7 +19202,7 @@ Front Loader - standard 700mm size - LG Tower
             "value": "",
             "specs_or_description": "160mm In Dull Brushed Nickel Part no: G0430.160.DBR - Momo Graf Knurled D Handle In Dull Brushed Nickel Part no: G0430.256.DBR - Horizontal front on Drawers",
             "notes": "Handle located at the top of front drawer front | Horizontal on Drawers",
-            "provenance": {},
+            "provenance": {"source_provider": "v6"},
             "issues": [],
             "revalidation_status": "passed",
         }
@@ -19227,7 +19227,7 @@ Front Loader - standard 700mm size - LG Tower
             "value": "",
             "specs_or_description": "Oval Allegra - Cabinet Handle Style 2103 - SKU: 2103 - 40mm - Brushed Grey wardrobe tube, ribbed, aluminium",
             "notes": "Note: Size shown differs from selection ie. 40mm",
-            "provenance": {},
+            "provenance": {"source_provider": "v6"},
             "issues": [],
             "revalidation_status": "passed",
         }
@@ -19256,6 +19256,7 @@ Front Loader - standard 700mm size - LG Tower
             "Voda Profile Handle Brushed 2163 Voda Hettich - Drawers - 300mm Doors - 200mm",
             "notes": "Vertical on Tall Cabinetry\nHorizontal on all\nDrawers - 300mm\nDoors - 200mm",
             "provenance": {
+                "source_provider": "v6",
                 "layout_value_text": "No handles on Uppers - PTO where required 7202 Square D Handle Vertical on Tall Cabinetry "
                 "TALLS - 7202 Square D Handle Brushed Horizontal on all "
                 "BASES-2163 Anthracite-SO-2163-200-BA&SO-2163-300-BA Anthracite 320mm - 608.8E18.320.016 "
@@ -19332,7 +19333,7 @@ Front Loader - standard 700mm size - LG Tower
             "notes": "",
             "issues": [],
             "revalidation_status": "passed",
-            "provenance": {},
+            "provenance": {"source_provider": "v6"},
         }
         item["value"] = item["display_value"] + " | FEATURE OVERHEADS - NO HANDLES - Recessed finger space - no handles"
         self.assertEqual(
@@ -19378,6 +19379,7 @@ Front Loader - standard 700mm size - LG Tower
             ],
             "revalidation_status": "needs_review",
             "provenance": {
+                "source_provider": "v6",
                 "layout_value_text": "Cabinet Handle – Style 2103 SKU: 2103 - 40mm - Brushed Grey Note: Size shown wardrobe tube, ribbed, aluminium"
             },
         }
@@ -19387,6 +19389,366 @@ Front Loader - standard 700mm size - LG Tower
         self.assertEqual(
             app_main._imperial_material_row_handle_summary_candidates(item),
             ["Cabinet Handle Style 2103 - SKU: 2103 - 40mm - Brushed Grey - (Note: Size shown differs from selection ie. 40mm)"],
+        )
+
+    def test_imperial_handle_subitems_for_row_ignores_rendered_line_helper_source(self) -> None:
+        row = {
+            "tags": ["handles"],
+            "display_lines": [
+                "Kethy - Doors - S225-480-MBK - Matt Black",
+                "Kethy - Drawers - S225-280-MBK - Matt Black",
+            ],
+            "supplier": "Kethy",
+            "specs_or_description": "Doors - S225-480-MBK - Matt Black Drawers - S225-280-MBK - Matt Black",
+            "notes": "Vertical on Doors and Horizontal on drawers",
+            "provenance": {
+                "layout_value_text": "Doors - S225-480-MBK - Matt Black Drawers - S225-280-MBK - Matt Black - Vertical on Doors and Horizontal on drawers"
+            },
+        }
+
+        subitems = parsing_module._imperial_handle_subitems_for_row(row)
+
+        self.assertTrue(subitems)
+        self.assertNotIn("rendered_line", [subitem.get("source") for subitem in subitems if isinstance(subitem, dict)])
+
+    def test_spec_list_material_summary_handles_is_stable_when_synth_helper_display_line_changes(self) -> None:
+        rooms_with_clean_display = [
+            {
+                "room_key": "bathroom",
+                "original_room_label": "UPPER BATHROOM",
+                "room_order": 1,
+                "material_rows": [
+                    {
+                        "area_or_item": "HANDLES",
+                        "supplier": "",
+                        "specs_or_description": "Bevel Edge",
+                        "notes": "finger pull",
+                        "tags": ["handles"],
+                        "page_no": 1,
+                        "row_order": 1,
+                        "display_lines": ["Bevel Edge"],
+                        "provenance": {
+                            "synthesized_from_room_handles": True,
+                            "layout_value_text": "Bevel Edge finger pull",
+                        },
+                    }
+                ],
+            }
+        ]
+        rooms_with_helper_style_display = [
+            {
+                "room_key": "bathroom",
+                "original_room_label": "UPPER BATHROOM",
+                "room_order": 1,
+                "material_rows": [
+                    {
+                        "area_or_item": "HANDLES",
+                        "supplier": "",
+                        "specs_or_description": "Bevel Edge",
+                        "notes": "finger pull",
+                        "tags": ["handles"],
+                        "page_no": 1,
+                        "row_order": 1,
+                        "display_lines": ["Bevel Edge - (finger pull)"],
+                        "display_value": "Bevel Edge - (finger pull)",
+                        "provenance": {
+                            "synthesized_from_room_handles": True,
+                            "layout_value_text": "Bevel Edge finger pull",
+                        },
+                    }
+                ],
+            }
+        ]
+
+        clean_block = self._extract_material_summary_block(
+            self._render_imperial_spec_list_page(rooms_with_clean_display, job_no="summary-decouple-clean")
+        )
+        self._reset_db()
+        helper_block = self._extract_material_summary_block(
+            self._render_imperial_spec_list_page(rooms_with_helper_style_display, job_no="summary-decouple-helper")
+        )
+
+        self.assertEqual(clean_block, helper_block)
+        self.assertIn("Bevel Edge finger pull", clean_block)
+        self.assertNotIn("Bevel Edge - (finger pull)", clean_block)
+
+    def test_build_imperial_material_summary_keeps_grouped_handles_path_unchanged(self) -> None:
+        import App.main as app_main
+
+        snapshot = {
+            "rooms": [
+                {
+                    "room_order": 1,
+                    "original_room_label": "KITCHEN",
+                    "material_rows": [
+                        self._make_imperial_v6_material_row(
+                            "HANDLES",
+                            specs_or_description="Finger Pull on Uppers- PTO where required\nL7817 - Oak Matt Black (OAKBK)",
+                            supplier="Kethy",
+                            notes="",
+                            tags=["handles"],
+                            row_order=1,
+                            display_lines=[
+                                "Kethy - Finger Pull on Uppers- PTO where required",
+                                "Kethy - L7817 - Oak Matt Black (OAKBK)",
+                            ],
+                            display_groups=[
+                                {
+                                    "supplier": "Kethy",
+                                    "lines": [
+                                        "Finger Pull on Uppers- PTO where required",
+                                        "L7817 - Oak Matt Black (OAKBK)",
+                                    ],
+                                }
+                            ],
+                        )
+                    ],
+                }
+            ]
+        }
+
+        summary = app_main._build_imperial_material_summary(snapshot)
+
+        self.assertEqual(summary["handles"]["count"], 1)
+        self.assertEqual(summary["handles"]["entries"][0]["text"], "Kethy")
+        self.assertEqual(
+            summary["handles"]["entries"][0]["lines"],
+            ["Finger Pull on Uppers- PTO where required", "L7817 - Oak Matt Black (OAKBK)"],
+        )
+        self.assertEqual(summary["handles"]["entries"][0]["rooms"], ["KITCHEN"])
+
+    def test_imperial_handle_summary_candidates_remain_subitem_first_when_handle_subitems_exist(self) -> None:
+        import App.main as app_main
+
+        item = {
+            "supplier": "Titus Tekform",
+            "display_lines": ["helper output that should not win"],
+            "display_value": "helper output that should not win",
+            "specs_or_description": "polluted raw row text",
+            "notes": "polluted note",
+            "provenance": {
+                "layout_value_text": "polluted layout text",
+                "page_text_handle_block": "polluted page text",
+            },
+            "handle_subitems": [
+                {"source": "display_line", "summary_text": "No handles on Upper cabinetry - Finger pull only"},
+                {
+                    "source": "display_line",
+                    "summary_text": "DOORS - Momo Graf Knurled D Handle 160mm In Dull Brushed Nickel - Part no: G0430.160.DBR",
+                },
+                {
+                    "source": "display_line",
+                    "summary_text": "DRAWERS - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel - Part no: G0430.256.DBR",
+                },
+            ],
+        }
+
+        self.assertEqual(
+            app_main._imperial_material_row_handle_summary_candidates(item),
+            [
+                "No handles on Upper cabinetry - Finger pull only",
+                "DOORS - Momo Graf Knurled D Handle 160mm In Dull Brushed Nickel - Part no: G0430.160.DBR",
+                "DRAWERS - Momo Graf Knurled D Handle 256m In Dull Brushed Nickel - Part no: G0430.256.DBR",
+            ],
+        )
+
+    def test_imperial_handle_summary_candidates_use_layout_value_text_for_synth_rows(self) -> None:
+        import App.main as app_main
+
+        item = {
+            "supplier": "",
+            "display_lines": ["Bevel Edge - (finger pull)"],
+            "display_value": "Bevel Edge - (finger pull)",
+            "specs_or_description": "Bevel Edge",
+            "notes": "finger pull",
+            "provenance": {
+                "synthesized_from_room_handles": True,
+                "layout_value_text": "Bevel Edge finger pull",
+            },
+            "tags": ["handles"],
+        }
+
+        self.assertEqual(
+            app_main._imperial_material_row_handle_summary_candidates(item),
+            ["Bevel Edge finger pull"],
+        )
+
+    def test_imperial_handle_summary_candidates_use_raw_row_fields_when_no_subitems_exist(self) -> None:
+        import App.main as app_main
+
+        item = {
+            "supplier": "Furnware",
+            "specs_or_description": "Bevel edge finger pull on lowers",
+            "notes": "",
+            "provenance": {},
+            "tags": ["handles"],
+        }
+
+        self.assertEqual(
+            app_main._imperial_material_row_handle_summary_candidates(item),
+            ["Bevel Edge finger pull"],
+        )
+
+    def test_imperial_material_summary_live_shape_job55_synth_handles_replay(self) -> None:
+        import App.main as app_main
+
+        snapshot = {
+            "rooms": [
+                {
+                    "room_order": 1,
+                    "original_room_label": "KITCHEN",
+                    "material_rows": [
+                        {
+                            "area_or_item": "HANDLES",
+                            "title": "HANDLES",
+                            "supplier": "",
+                            "specs_or_description": "Overheads:",
+                            "notes": "Recessed finger space cooktop overheads. Touch catch - Overheads above",
+                            "tags": ["handles"],
+                            "page_no": 1,
+                            "row_order": 1,
+                            "display_lines": ["Overheads:"],
+                            "provenance": {
+                                "synthesized_from_room_handles": True,
+                                "layout_value_text": "Overheads: Recessed finger space cooktop overheads. Touch catch - Overheads above",
+                            },
+                        }
+                    ],
+                }
+            ]
+        }
+
+        summary = app_main._build_imperial_material_summary(snapshot)
+        self.assertEqual(
+            [entry["text"] for entry in summary["handles"]["entries"]],
+            ["Recessed finger space cooktop overheads.", "Touch catch - Overheads above"],
+        )
+
+    def test_imperial_material_summary_live_shape_job73_grouped_handles_replay(self) -> None:
+        import App.main as app_main
+
+        snapshot = {
+            "rooms": [
+                {
+                    "room_order": 1,
+                    "original_room_label": "KITCHEN",
+                    "material_rows": [
+                        self._make_imperial_v6_material_row(
+                            "HANDLES",
+                            specs_or_description="BASE- BEVEL EDGE FINGERPULL | UPPER - FINGERPULL | TALL - PTO",
+                            supplier="",
+                            notes="",
+                            tags=["handles"],
+                            row_order=1,
+                            display_lines=[
+                                "BASE- BEVEL EDGE FINGERPULL",
+                                "UPPER - FINGERPULL",
+                                "TALL - PTO",
+                            ],
+                            display_groups=[
+                                {
+                                    "supplier": "",
+                                    "lines": [
+                                        "BASE- BEVEL EDGE FINGERPULL",
+                                        "UPPER - FINGERPULL",
+                                        "TALL - PTO",
+                                    ],
+                                }
+                            ],
+                        )
+                    ],
+                }
+            ]
+        }
+
+        summary = app_main._build_imperial_material_summary(snapshot)
+        self.assertEqual(summary["handles"]["count"], 1)
+        self.assertEqual(
+            summary["handles"]["entries"][0]["lines"],
+            ["BASE- BEVEL EDGE FINGERPULL", "UPPER - FINGERPULL", "TALL - PTO"],
+        )
+
+    def test_imperial_material_summary_live_shape_job74_synth_handles_replay(self) -> None:
+        import App.main as app_main
+
+        snapshot = {
+            "rooms": [
+                {
+                    "room_order": 1,
+                    "original_room_label": "UPPER BATHROOM",
+                    "material_rows": [
+                        {
+                            "area_or_item": "HANDLES",
+                            "title": "HANDLES",
+                            "supplier": "",
+                            "specs_or_description": "Bevel Edge",
+                            "notes": "finger pull",
+                            "tags": ["handles"],
+                            "page_no": 1,
+                            "row_order": 1,
+                            "display_lines": ["Bevel Edge"],
+                            "provenance": {
+                                "synthesized_from_room_handles": True,
+                                "layout_value_text": "Bevel Edge finger pull",
+                            },
+                        }
+                    ],
+                }
+            ]
+        }
+
+        summary = app_main._build_imperial_material_summary(snapshot)
+        self.assertEqual([entry["text"] for entry in summary["handles"]["entries"]], ["Bevel Edge finger pull"])
+
+    def test_imperial_material_summary_live_shape_job76_grouped_handles_replay(self) -> None:
+        import App.main as app_main
+
+        snapshot = {
+            "rooms": [
+                {
+                    "room_order": 1,
+                    "original_room_label": "KITCHEN",
+                    "material_rows": [
+                        self._make_imperial_v6_material_row(
+                            "HANDLES",
+                            specs_or_description="Finger Pull on Uppers- PTO where required\nL7817 - Oak Matt Black (OAKBK)\n160mm - Lowers and Drawers\n320mm - Pantry Door",
+                            supplier="Kethy",
+                            notes="Horizontal on Drawers and Vertical on Doors",
+                            tags=["handles"],
+                            row_order=1,
+                            display_lines=[
+                                "Kethy - Finger Pull on Uppers- PTO where required",
+                                "Kethy - L7817 - Oak Matt Black (OAKBK)",
+                                "Kethy - 160mm - Lowers and Drawers",
+                                "Kethy - 320mm - Pantry Door",
+                            ],
+                            display_groups=[
+                                {
+                                    "supplier": "Kethy",
+                                    "lines": [
+                                        "Finger Pull on Uppers- PTO where required",
+                                        "L7817 - Oak Matt Black (OAKBK)",
+                                        "160mm - Lowers and Drawers",
+                                        "320mm - Pantry Door",
+                                    ],
+                                }
+                            ],
+                        )
+                    ],
+                }
+            ]
+        }
+
+        summary = app_main._build_imperial_material_summary(snapshot)
+        self.assertEqual(summary["handles"]["entries"][0]["text"], "Kethy")
+        self.assertEqual(
+            summary["handles"]["entries"][0]["lines"],
+            [
+                "Finger Pull on Uppers- PTO where required",
+                "L7817 - Oak Matt Black (OAKBK)",
+                "160mm - Lowers and Drawers",
+                "320mm - Pantry Door",
+            ],
         )
 
     def test_imperial_material_row_display_lines_recover_style_2103_note_from_page_text_following_lines(self) -> None:

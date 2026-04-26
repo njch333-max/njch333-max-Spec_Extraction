@@ -6787,10 +6787,6 @@ def _imperial_handle_subitems_for_row(row: dict[str, Any]) -> list[dict[str, Any
         cleaned_line = normalize_space(str(line or ""))
         if cleaned_line:
             primary_sources.append(("display_line", cleaned_line))
-    for line in _imperial_material_row_display_lines_for_view(row):
-        cleaned_line = normalize_space(str(line or ""))
-        if cleaned_line:
-            primary_sources.append(("rendered_line", cleaned_line))
     supplier = normalize_space(str(row.get("supplier", "") or ""))
     description = normalize_space(str(row.get("specs_or_description", "") or ""))
     notes = normalize_space(str(row.get("notes", "") or ""))
@@ -6839,9 +6835,9 @@ def _imperial_handle_subitems_for_row(row: dict[str, Any]) -> list[dict[str, Any
 
     primary_subitems = _collect_subitems(primary_sources)
     if primary_subitems:
-        # Rendered/display lines are already the constrained raw-row view. Do not
-        # let noisy layout/page-text fallback sources reintroduce crossed-row text
-        # into summary itemization.
+        # Source-backed row text is the primary truth layer. Do not let noisier
+        # provenance fallback sources reintroduce crossed-row text into summary
+        # itemization once we already have usable row-local subitems.
         return primary_subitems
     return _collect_subitems(fallback_sources)
 
