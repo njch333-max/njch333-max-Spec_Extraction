@@ -229,6 +229,7 @@
   - preserve original handle-block wording order; do not aggressively split `HANDLES` text into artificial description/note fragments
   - when an Imperial v6 `HANDLES` row carries structured `display_groups`, render supplier-group headers with indented grouped lines on the raw Spec List page; otherwise fall back to the existing flat `display_lines` block
   - render row-local `notes` in the room-card row only: inline `text - (notes)` when the visible payload is one line and the notes string contains no `\n`, otherwise a trailing muted `(notes)` line with `.row-note-multiline { white-space: pre-line; }`; this rule does not alter `Material Summary`
+  - for `synthesized_from_room_handles` rows, helper-level display lines must emit only the supplier/description portion and leave `notes` on the row object so the room-card notes layer renders that note exactly once
   - prefer the most complete accepted raw-row/layout continuation text over truncated visual-subrow fragments when building the displayed value for desk / shelf / robe / study style rows
   - only retain `Drawers`, `Hinges`, `Flooring`, and `Sink` beneath the raw rows
   - omit `Tap` from Imperial room cards
