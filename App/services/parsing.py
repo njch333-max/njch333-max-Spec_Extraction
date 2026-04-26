@@ -13656,6 +13656,13 @@ def _imperial_reconcile_material_rows_with_room_fields(row: dict[str, Any]) -> N
         or any(_imperial_handle_reconcile_identity(handle_text) for handle_text in missing_legacy_handles)
     )
     if should_synthesize_handle_rows:
+        already_synthesized_handle_texts = {
+            normalize_space(str(provenance.get("layout_value_text", "") or ""))
+            for item in reconciled
+            for provenance in [item.get("provenance", {}) if isinstance(item, dict) and isinstance(item.get("provenance", {}), dict) else {}]
+            if provenance.get("synthesized_from_room_handles") is True
+        }
+        already_synthesized_handle_texts.discard("")
         declared_pages = [int(match) for match in re.findall(r"\d+", normalize_space(str(row.get("page_refs", "") or "")))]
         existing_pages = sorted(
             {
@@ -13704,6 +13711,8 @@ def _imperial_reconcile_material_rows_with_room_fields(row: dict[str, Any]) -> N
         ]
         next_row_order = (max(existing_row_orders) if existing_row_orders else 0) + 1
         for handle_text in missing_legacy_handles:
+            if normalize_space(handle_text) in already_synthesized_handle_texts:
+                continue
             supplier, remainder = _normalize_entry_supplier_text(handle_text)
             synthesized_description = remainder or normalize_space(handle_text)
             synthesized_notes = ""
