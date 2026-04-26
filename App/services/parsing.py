@@ -7989,7 +7989,7 @@ def _imperial_material_row_display_lines_for_view(row: dict[str, Any]) -> list[s
                     _imperial_material_row_display_line(
                         supplier=supplier,
                         description=direct_description,
-                        notes=direct_notes,
+                        notes="",
                     )
                 ]
         if (

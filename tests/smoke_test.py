@@ -26280,7 +26280,165 @@ BAR FRIDGE (LAUNDRY) Specs - TBC N / A - By others By others
         self.assertEqual(
             lines,
             [
-                "[Furnware] - Momo Ferrara Lip Pull FER038.SS.FG 25mm hole centre in Stainless Steel - (Horizontal on drawers and horizontal on doors)"
+                "[Furnware] - Momo Ferrara Lip Pull FER038.SS.FG 25mm hole centre in Stainless Steel"
+            ],
+        )
+
+    def test_imperial_material_row_display_lines_for_view_synthesized_room_handles_do_not_inline_notes(self) -> None:
+        row = {
+            "area_or_item": "HANDLES",
+            "supplier": "",
+            "specs_or_description": "Overheads:",
+            "notes": "Recessed finger space cooktop overheads. Touch catch - Overheads above",
+            "tags": ["handles"],
+            "page_no": 1,
+            "row_order": 4,
+            "provenance": {
+                "source_provider": "v6",
+                "synthesized_from_room_handles": True,
+                "layout_value_text": "Overheads: Recessed finger space cooktop overheads. Touch catch - Overheads above",
+            },
+        }
+        lines = parsing_module._imperial_material_row_display_lines_for_view(row)
+        self.assertEqual(lines, ["Overheads:"])
+
+    def test_imperial_material_row_display_lines_for_view_non_synth_handles_still_inline_notes(self) -> None:
+        row = {
+            "area_or_item": "HANDLES",
+            "supplier": "",
+            "specs_or_description": "Overheads:",
+            "notes": "Recessed finger space cooktop overheads. Touch catch - Overheads above",
+            "tags": ["handles"],
+            "page_no": 1,
+            "row_order": 4,
+            "provenance": {
+                "source_provider": "v6",
+                "layout_value_text": "Overheads: Recessed finger space cooktop overheads. Touch catch - Overheads above",
+            },
+        }
+        lines = parsing_module._imperial_material_row_display_lines_for_view(row)
+        self.assertEqual(
+            lines,
+            ["Overheads: Recessed finger space cooktop overheads. Touch catch - Overheads above"],
+        )
+
+    def test_flatten_imperial_material_rows_preserves_notes_for_synthesized_room_handles(self) -> None:
+        rows = _flatten_imperial_material_rows(
+            {
+                "material_rows": [
+                    {
+                        "area_or_item": "HANDLES",
+                        "supplier": "",
+                        "specs_or_description": "Overheads:",
+                        "notes": "Recessed finger space cooktop overheads. Touch catch - Overheads above",
+                        "tags": ["handles"],
+                        "page_no": 1,
+                        "row_order": 4,
+                        "revalidation_status": "passed",
+                        "provenance": {
+                            "source_provider": "v6",
+                            "synthesized_from_room_handles": True,
+                            "layout_value_text": "Overheads: Recessed finger space cooktop overheads. Touch catch - Overheads above",
+                        },
+                    }
+                ]
+            }
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["display_lines"], ["Overheads:"])
+        self.assertEqual(
+            rows[0]["notes"],
+            "Recessed finger space cooktop overheads. Touch catch - Overheads above",
+        )
+
+    def test_spec_list_page_renders_synth_handle_note_once_for_job55_shape(self) -> None:
+        page = self._render_imperial_spec_list_page(
+            [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "room_order": 1,
+                    "material_rows": [
+                        {
+                            **self._make_imperial_v6_material_row(
+                                "HANDLES",
+                                specs_or_description="Overheads:",
+                                notes="Recessed finger space cooktop overheads. Touch catch - Overheads above",
+                                tags=["handles"],
+                                row_order=4,
+                            ),
+                            "provenance": {
+                                "source_provider": "v6",
+                                "synthesized_from_room_handles": True,
+                                "layout_value_text": "Overheads: Recessed finger space cooktop overheads. Touch catch - Overheads above",
+                            },
+                        }
+                    ],
+                }
+            ],
+            job_no="synth-handle-double-render-job55",
+        )
+
+        rooms_section = page.split("<h3>Rooms</h3>", 1)[1]
+        self.assertIn(
+            "<div>Overheads: - (Recessed finger space cooktop overheads. Touch catch - Overheads above)</div>",
+            rooms_section,
+        )
+        self.assertNotIn(
+            "Overheads: - (Recessed finger space cooktop overheads. Touch catch - Overheads above) - (Recessed finger space cooktop overheads. Touch catch - Overheads above)",
+            rooms_section,
+        )
+
+    def test_imperial_material_summary_keeps_synth_handle_entries_stable(self) -> None:
+        import App.main as app_main
+
+        summary = app_main._build_imperial_material_summary(
+            {
+                "builder_name": "Imperial",
+                "rooms": [
+                    {
+                        "room_key": "kitchen",
+                        "original_room_label": "KITCHEN",
+                        "room_order": 1,
+                        "material_rows": [
+                            {
+                                "area_or_item": "HANDLES",
+                                "supplier": "",
+                                "specs_or_description": "Overheads:",
+                                "notes": "Recessed finger space cooktop overheads. Touch catch - Overheads above",
+                                "tags": ["handles"],
+                                "page_no": 1,
+                                "row_order": 4,
+                                "revalidation_status": "passed",
+                                "provenance": {
+                                    "source_provider": "v6",
+                                    "synthesized_from_room_handles": True,
+                                    "layout_value_text": "Overheads: Recessed finger space cooktop overheads. Touch catch - Overheads above",
+                                },
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+        self.assertEqual(summary["handles"]["count"], 2)
+        self.assertEqual(
+            summary["handles"]["entries"],
+            [
+                {
+                    "text": "Recessed finger space cooktop overheads.",
+                    "display_text": "Recessed finger space cooktop overheads.",
+                    "rooms": ["KITCHEN"],
+                    "rooms_display": "KITCHEN",
+                    "area_or_items": ["HANDLES"],
+                },
+                {
+                    "text": "Touch catch - Overheads above",
+                    "display_text": "Touch catch - Overheads above",
+                    "rooms": ["KITCHEN"],
+                    "rooms_display": "KITCHEN",
+                    "area_or_items": ["HANDLES"],
+                },
             ],
         )
 
