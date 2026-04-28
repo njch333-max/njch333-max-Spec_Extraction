@@ -124,6 +124,7 @@
   - final room names may only come from that master file
   - AFC/supplement pages may enrich existing rooms only
   - glued headers such as `VanitiesDate`, `LaundryDate`, and `TheatreDate` are normalized back to clean room titles
+  - deterministic polish can re-add a dropped room-master material room from a same-room `Drawings and Colours` schedule overlay when PDF text order put the room title after the material body
   - deterministic post-polish prefers `raw_text` over vision-normalized `text`
   - AFC `CARPET & MAIN FLOOR TILE` pages now act as room-local flooring overlays for existing master rooms such as `KITCHEN`, `BUTLERS PANTRY`, `THEATRE ROOM`, and `RUMPUS ROOM`
   - Clarendon flooring overlay is strict-PDF-only: broad AFC labels such as `WIL/Linen/s Ground Floor` must not be inferred back into `LAUNDRY`

@@ -76,6 +76,7 @@
   - Clarendon appliance placeholder rows such as `N/A CLIENT TO CHECK` now preserve source wording but are deduplicated away when the same source file already contains a concrete model for that appliance type
   - grouped room-master headings such as `Vanities` remain grouped while supplement bathroom/ensuite/powder fixture pages enrich that grouped room instead of creating extra room rows
   - grouped-room material ownership is now same-room-only, so `Vanities` benchtops and door colours can only come from the authoritative `VANITIES COLOUR SCHEDULE` section while grouped fixture fallback remains limited to basin/tap/sink details
+  - Clarendon room-master material rooms are now restored during deterministic polish when OCR/PDF text order caused earlier retention to drop the room before schedule-overlay fields were applied
   - supplement-file upload order no longer matters because the room-master room set is precomputed before supplement files are parsed
   - authoritative schedule labels such as `WALK-IN-PANTRY` and `MEALS ROOM` are now preserved as display labels instead of being shortened to generic pantry names
   - multi-file Clarendon parsing now keeps `BUTLERS PANTRY` and `WALK-IN-PANTRY` separate when the room-master schedule defines both

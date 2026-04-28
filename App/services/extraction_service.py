@@ -11728,11 +11728,36 @@ def _apply_clarendon_reference_polish(
     analysis = snapshot.get("analysis") or {}
     room_master_file = str(analysis.get("room_master_file", "") or "")
     overlays = _collect_clarendon_polish_overlays(documents, room_master_file=room_master_file)
-    polished_rooms = [
-        _polish_clarendon_room(dict(room), _select_clarendon_room_overlay(dict(room), overlays))
-        for room in snapshot.get("rooms", [])
-        if isinstance(room, dict)
-    ]
+    polished_rooms: list[dict[str, Any]] = []
+    seen_room_keys: set[str] = set()
+    for room in snapshot.get("rooms", []):
+        if not isinstance(room, dict):
+            continue
+        polished_room = _polish_clarendon_room(dict(room), _select_clarendon_room_overlay(dict(room), overlays))
+        polished_rooms.append(polished_room)
+        room_key = parsing.same_room_identity(
+            str(polished_room.get("original_room_label", "")),
+            str(polished_room.get("room_key", "")),
+        )
+        if room_key:
+            seen_room_keys.add(room_key)
+    for overlay_key, overlay in overlays.items():
+        room_key = parsing.same_room_identity(str(overlay_key))
+        if not room_key or room_key in seen_room_keys:
+            continue
+        if not _clarendon_overlay_has_material_content(overlay):
+            continue
+        source_file, page_refs = _clarendon_schedule_overlay_metadata(room_key, documents, room_master_file)
+        missing_room = {
+            "room_key": room_key,
+            "original_room_label": parsing.source_room_label(room_key.replace("_", " ").upper(), fallback_key=room_key),
+            "source_file": source_file or room_master_file,
+            "page_refs": page_refs,
+        }
+        polished_room = _polish_clarendon_room(missing_room, _select_clarendon_room_overlay(missing_room, overlays))
+        if _clarendon_overlay_has_material_content(overlay) and _room_has_meaningful_content(polished_room):
+            polished_rooms.append(polished_room)
+            seen_room_keys.add(room_key)
     polished = dict(snapshot)
     polished["rooms"] = polished_rooms
     return parsing.apply_snapshot_cleaning_rules(polished, rule_flags=rule_flags)
@@ -11875,6 +11900,31 @@ def _collect_clarendon_polish_overlays(documents: list[dict[str, object]], room_
                     overlay,
                 )
     return overlays
+
+
+def _clarendon_schedule_overlay_metadata(
+    room_key: str,
+    documents: list[dict[str, object]],
+    room_master_file: str = "",
+) -> tuple[str, str]:
+    source_file = ""
+    page_refs: list[str] = []
+    for document in documents:
+        file_name = str(document.get("file_name", ""))
+        if room_master_file and file_name != room_master_file:
+            continue
+        for page in document.get("pages", []):
+            text = str(page.get("raw_text", page.get("text", "")) or page.get("text", "") or "")
+            if not text:
+                continue
+            schedule_room_key = _clarendon_schedule_room_key(_clarendon_spacing_normalize(text))
+            if parsing.same_room_identity(schedule_room_key) != room_key:
+                continue
+            source_file = source_file or file_name
+            page_no = parsing.normalize_space(str(page.get("page_no", "") or ""))
+            if page_no and page_no not in page_refs:
+                page_refs.append(page_no)
+    return source_file, ", ".join(page_refs)
 
 
 def _blank_clarendon_overlay() -> dict[str, Any]:

@@ -1894,6 +1894,99 @@ class SmokeTest(unittest.TestCase):
         self.assertEqual(rooms["laundry"]["splashback"], "Tiled splashback by others")
         self.assertTrue(str(rooms["laundry"]["tap_info"]).startswith("Pina Sink Mixer Gooseneck"))
 
+    def test_clarendon_reference_polish_restores_overlay_only_master_material_room(self) -> None:
+        snapshot = {
+            "job_no": "37997",
+            "builder_name": "Clarendon",
+            "source_kind": "spec",
+            "analysis": {"parser_strategy": "global_conservative", "room_master_file": "drawings-and-colours.pdf"},
+            "rooms": [
+                {
+                    "room_key": "kitchen",
+                    "original_room_label": "KITCHEN",
+                    "bench_tops": ["Existing Stone"],
+                    "bench_tops_wall_run": "",
+                    "bench_tops_island": "",
+                    "bench_tops_other": "Existing Stone",
+                    "door_panel_colours": [],
+                    "door_colours_base": "Existing White",
+                    "handles": [],
+                }
+            ],
+        }
+        documents = [
+            {
+                "file_name": "drawings-and-colours.pdf",
+                "role": "spec",
+                "pages": [
+                    {
+                        "page_no": 10,
+                        "text": (
+                            "Client Signature :Date of Signed Dwgs :VanitiesDate: 29/10/25 "
+                            "BENCHTOP - QUANTUM ZERO TURINO - 20MM PENCIL ROUND EDGE"
+                            "DOORS/PANELS - POLYTEC NATURAL OAK MATT FINISH MELAMINE WITH MATCHING 1MM ABS EDGES "
+                            "(VERTICAL GRAIN DIRECTION) "
+                            "KICKBOARDS - N/A FLOATING"
+                            "BENCHTOP SHADOWLINE - AS DOOR COLOUR "
+                            "HANDLES - HETTICH MESSANA 115157 GLOSS CHROME KNOB"
+                            "DOOR HINGES - HETTICH SOFT CLOSE VANITIES COLOUR SCHEDULENOTE : ALL PLUMBING SETOUT "
+                            "DIMENSIONS ARE FROM THE TIMBER FRAME"
+                        ),
+                        "raw_text": (
+                            "Client Signature :Date of Signed Dwgs :VanitiesDate: 29/10/25 "
+                            "BENCHTOP - QUANTUM ZERO TURINO - 20MM PENCIL ROUND EDGE"
+                            "DOORS/PANELS - POLYTEC NATURAL OAK MATT FINISH MELAMINE WITH MATCHING 1MM ABS EDGES "
+                            "(VERTICAL GRAIN DIRECTION) "
+                            "KICKBOARDS - N/A FLOATING"
+                            "BENCHTOP SHADOWLINE - AS DOOR COLOUR "
+                            "HANDLES - HETTICH MESSANA 115157 GLOSS CHROME KNOB"
+                            "DOOR HINGES - HETTICH SOFT CLOSE VANITIES COLOUR SCHEDULENOTE : ALL PLUMBING SETOUT "
+                            "DIMENSIONS ARE FROM THE TIMBER FRAME"
+                        ),
+                        "needs_ocr": False,
+                    }
+                ],
+            },
+            {
+                "file_name": "colours-afc.pdf",
+                "role": "spec",
+                "pages": [
+                    {
+                        "page_no": 6,
+                        "text": (
+                            "MAIN BATHROOM VANITY "
+                            "Vanity Inset Basin FIENZA REBA SEMI INSET BASIN_0TH_WHITE (RB3134D) WHITE "
+                            "Vanity Tap Style: PHOENIX TEVA WALL BASIN/BATH MIXER SET 200MM_CHROME (152-7815-00-1) CHROME"
+                        ),
+                        "raw_text": (
+                            "MAIN BATHROOM VANITY "
+                            "Vanity Inset Basin FIENZA REBA SEMI INSET BASIN_0TH_WHITE (RB3134D) WHITE "
+                            "Vanity Tap Style: PHOENIX TEVA WALL BASIN/BATH MIXER SET 200MM_CHROME (152-7815-00-1) CHROME"
+                        ),
+                        "needs_ocr": False,
+                    }
+                ],
+            },
+        ]
+        polished = extraction_service._apply_clarendon_reference_polish(
+            snapshot,
+            documents,
+            builder_name="Clarendon",
+            parser_strategy="global_conservative",
+        )
+        rooms = {row["room_key"]: row for row in polished["rooms"]}
+        self.assertIn("vanities", rooms)
+        self.assertEqual(rooms["vanities"]["original_room_label"], "VANITIES")
+        self.assertEqual(rooms["vanities"]["source_file"], "drawings-and-colours.pdf")
+        self.assertEqual(rooms["vanities"]["page_refs"], "10")
+        self.assertEqual(rooms["vanities"]["bench_tops"], ["Quantum Zero Turino - 20MM Pencil Round Edge"])
+        self.assertEqual(
+            rooms["vanities"]["door_colours_base"],
+            "Polytec Natural Oak Matt Finish Melamine with Matching 1MM ABS Edges (Vertical Grain Direction)",
+        )
+        self.assertEqual(rooms["vanities"]["toe_kick"], ["N/A floating - no kickboard"])
+        self.assertEqual(rooms["vanities"]["handles"], ["Hettich - Messana 115157 Gloss Chrome Knob"])
+
     def test_clarendon_reference_polish_handles_luxe_single_line_schedule_family(self) -> None:
         snapshot = {
             "job_no": "37868",
