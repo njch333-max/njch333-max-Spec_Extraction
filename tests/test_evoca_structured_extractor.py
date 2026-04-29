@@ -134,10 +134,10 @@ def test_evoca_structured_workbook_exports_expected_columns(tmp_path: Path) -> N
     evoca_structured_extractor.write_structured_workbook(structured, output)
 
     workbook = load_workbook(output)
-    assert "20 PLUMBING" in workbook.sheetnames
-    sheet = workbook["20 PLUMBING"]
+    assert workbook.sheetnames[0] == "_summary"
+    assert "20_PLUMBING" in workbook.sheetnames
+    sheet = workbook["20_PLUMBING"]
     headers = [cell.value for cell in sheet[1]]
-    assert headers == ["Page", "Source Row", "Room", "Group", "Label", "Value", "Raw Cells", "Source Method"]
+    assert headers == ["Page", "Order", "Room", "Group", "Label", "Value", "Anchor", "Source Text"]
     values = [row[5].value for row in sheet.iter_rows(min_row=2)]
     assert "Burazzo Sink" in values
-

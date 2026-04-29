@@ -33,6 +33,16 @@ TERMINAL_GROUP_VALUES: frozenset[str] = frozenset(
         "tbc",
     }
 )
+WORKBOOK_HEADERS: tuple[str, ...] = ("Page", "Order", "Room", "Group", "Label", "Value", "Anchor", "Source Text")
+WORKBOOK_COLUMN_WIDTHS: tuple[int, ...] = (6, 7, 22, 28, 32, 44, 8, 60)
+HEADER_FILL = "222222"
+ROOM_BANNER_FILL = "DCE6F1"
+ANCHOR_FILL = "FFF2CC"
+GROUP_FILL = "F2F2F2"
+NOTE_FILL = "FCE4D6"
+BORDER_COLOR = "BBBBBB"
+TERMINAL_FONT_COLOR = "888888"
+ANCHOR_FONT_COLOR = "996600"
 
 
 def extract_evoca_pdf(pdf_path: str | Path) -> dict[str, Any]:
@@ -271,8 +281,6 @@ def flatten_rows_for_export(structured: dict[str, Any]) -> list[dict[str, str]]:
 
 def write_structured_workbook(structured: dict[str, Any], xlsx_path: str | Path) -> None:
     from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill
-    from openpyxl.utils import get_column_letter
 
     path = Path(xlsx_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -280,38 +288,18 @@ def write_structured_workbook(structured: dict[str, Any], xlsx_path: str | Path)
     default_sheet = workbook.active
     workbook.remove(default_sheet)
     used_sheet_names: set[str] = set()
-    headers = ["Page", "Source Row", "Room", "Group", "Label", "Value", "Raw Cells", "Source Method"]
-    header_fill = PatternFill("solid", fgColor="1F4E79")
-    header_font = Font(color="FFFFFF", bold=True)
+    styles = _workbook_styles()
+    summary_rows: list[dict[str, Any]] = []
 
     for section in structured.get("sections", []) or []:
         title = str(section.get("section_title", "Section") or "Section")
-        sheet = workbook.create_sheet(_unique_sheet_name(_sheet_name(title), used_sheet_names))
-        sheet.append(headers)
-        for cell in sheet[1]:
-            cell.fill = header_fill
-            cell.font = header_font
-        section_doc = {"sections": [section]}
-        for row in flatten_rows_for_export(section_doc):
-            sheet.append(
-                [
-                    row["page"],
-                    row["source_row"],
-                    row["room"],
-                    row["group"],
-                    row["label"],
-                    row["value"],
-                    row["raw_cells"],
-                    row["source_method"],
-                ]
-            )
-        widths = [10, 12, 20, 28, 26, 60, 80, 20]
-        for index, width in enumerate(widths, start=1):
-            sheet.column_dimensions[get_column_letter(index)].width = width
-        sheet.freeze_panes = "A2"
+        sheet_name = _unique_sheet_name(_sheet_name(title), used_sheet_names)
+        sheet = workbook.create_sheet(sheet_name)
+        summary_rows.append(_write_section_sheet(sheet, section, sheet_name, styles))
 
     if not workbook.worksheets:
         workbook.create_sheet("Evoca")
+    _build_summary_sheet(workbook, structured, summary_rows, styles)
     workbook.save(path)
 
 
@@ -710,17 +698,247 @@ def _export_group(section_title: str, room_label: str, group: dict[str, Any]) ->
 
 def _export_row(section_title: str, room_label: str, group_label: str, row: dict[str, Any]) -> dict[str, str]:
     _ = section_title
-    raw_cells = row.get("raw_cells", [])
+    is_anchor = bool(row.get("is_group_anchor"))
+    row_type = "anchor" if is_anchor else "note" if _is_note_row(row, group_label) else "group"
     return {
         "page": str(row.get("page_no", "") or ""),
-        "source_row": str(row.get("row_order", "") or ""),
+        "order": str(row.get("row_order", "") or ""),
         "room": room_label,
         "group": group_label,
         "label": str(row.get("label", "") or ""),
         "value": str(row.get("value", "") or ""),
-        "raw_cells": json.dumps(raw_cells, ensure_ascii=False),
-        "source_method": str(row.get("source_method", "") or ""),
+        "anchor": "ANCHOR" if is_anchor else "",
+        "source_text": _compact_source_text(row, is_anchor=is_anchor),
+        "row_type": row_type,
     }
+
+
+def _workbook_styles() -> dict[str, Any]:
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
+    thin_side = Side(style="thin", color=BORDER_COLOR)
+    return {
+        "header_fill": PatternFill("solid", fgColor=HEADER_FILL),
+        "room_fill": PatternFill("solid", fgColor=ROOM_BANNER_FILL),
+        "anchor_fill": PatternFill("solid", fgColor=ANCHOR_FILL),
+        "group_fill": PatternFill("solid", fgColor=GROUP_FILL),
+        "note_fill": PatternFill("solid", fgColor=NOTE_FILL),
+        "header_font": Font(color="FFFFFF", bold=True),
+        "room_font": Font(bold=True),
+        "anchor_font": Font(color=ANCHOR_FONT_COLOR, bold=True),
+        "note_font": Font(italic=True),
+        "terminal_font": Font(color=TERMINAL_FONT_COLOR, italic=True),
+        "default_font": Font(color="000000"),
+        "border": Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side),
+        "wrap_top": Alignment(wrap_text=True, vertical="top"),
+    }
+
+
+def _write_section_sheet(sheet: Any, section: dict[str, Any], sheet_name: str, styles: dict[str, Any]) -> dict[str, Any]:
+    sheet.append(list(WORKBOOK_HEADERS))
+    _style_header_row(sheet, 1, styles)
+    _apply_sheet_layout(sheet)
+
+    row_count = 0
+    anchor_count = 0
+    note_count = 0
+
+    for note in section.get("notes", []) or []:
+        stats = _append_export_row(sheet, _export_row(str(section.get("section_title", "") or ""), "", "", note), styles)
+        row_count += stats["rows"]
+        anchor_count += stats["anchors"]
+        note_count += stats["notes"]
+    for group in section.get("groups", []) or []:
+        for row in _export_group(str(section.get("section_title", "") or ""), "", group):
+            stats = _append_export_row(sheet, row, styles)
+            row_count += stats["rows"]
+            anchor_count += stats["anchors"]
+            note_count += stats["notes"]
+
+    for room in section.get("rooms", []) or []:
+        room_label = str(room.get("room_label", "") or "")
+        _append_room_banner(sheet, room_label, styles)
+        for note in room.get("notes", []) or []:
+            stats = _append_export_row(sheet, _export_row(str(section.get("section_title", "") or ""), room_label, "", note), styles)
+            row_count += stats["rows"]
+            anchor_count += stats["anchors"]
+            note_count += stats["notes"]
+        for group in room.get("groups", []) or []:
+            for row in _export_group(str(section.get("section_title", "") or ""), room_label, group):
+                stats = _append_export_row(sheet, row, styles)
+                row_count += stats["rows"]
+                anchor_count += stats["anchors"]
+                note_count += stats["notes"]
+
+    return {
+        "section_code": str(section.get("section_code", "") or ""),
+        "title": str(section.get("section_title", "") or ""),
+        "sheet": sheet_name,
+        "page": _page_range(section),
+        "rows": row_count,
+        "anchors": anchor_count,
+        "notes": note_count,
+    }
+
+
+def _build_summary_sheet(
+    workbook: Any,
+    structured: dict[str, Any],
+    summary_rows: list[dict[str, Any]],
+    styles: dict[str, Any],
+) -> None:
+    sheet = workbook.create_sheet("_summary", 0)
+    stats = structured.get("statistics", {}) or {}
+    diagnostics = structured.get("diagnostics", {}) or {}
+    source_pdf = str(structured.get("source_pdf", "") or "")
+    source_name = Path(source_pdf).name if source_pdf else str(structured.get("document_name", "") or "")
+
+    header_block = [
+        ("Source PDF", source_name),
+        ("Pages", stats.get("page_count", "")),
+        ("Sections", stats.get("section_count", "")),
+        ("Schema version", structured.get("schema_version", "")),
+    ]
+    for label, value in header_block:
+        sheet.append([label, value])
+        _style_summary_pair(sheet, sheet.max_row, styles)
+
+    if diagnostics:
+        sheet.append(["Diagnostics", ""])
+        _style_summary_pair(sheet, sheet.max_row, styles)
+        for key in ("shift_override_groups", "shift_overrides_applied", "shift_clears_applied"):
+            sheet.append([key, diagnostics.get(key, 0)])
+            _style_summary_pair(sheet, sheet.max_row, styles)
+
+    sheet.append([])
+    table_header_row = sheet.max_row + 1
+    sheet.append(["Section #", "Title", "Sheet", "Page", "Rows", "Anchors", "Notes"])
+    _style_header_row(sheet, table_header_row, styles)
+    for row in summary_rows:
+        sheet.append(
+            [
+                row["section_code"],
+                row["title"],
+                row["sheet"],
+                row["page"],
+                row["rows"],
+                row["anchors"],
+                row["notes"],
+            ]
+        )
+        _style_summary_table_row(sheet, sheet.max_row, styles)
+    if summary_rows:
+        sheet.append(["", "Total", "", "", sum(row["rows"] for row in summary_rows), sum(row["anchors"] for row in summary_rows), sum(row["notes"] for row in summary_rows)])
+        _style_summary_table_row(sheet, sheet.max_row, styles, bold=True)
+
+    for index, width in enumerate((12, 48, 24, 14, 10, 10, 10), start=1):
+        sheet.column_dimensions[_column_letter(index)].width = width
+    sheet.freeze_panes = f"A{table_header_row + 1}"
+
+
+def _append_export_row(sheet: Any, row: dict[str, str], styles: dict[str, Any]) -> dict[str, int]:
+    sheet.append(
+        [
+            row["page"],
+            row["order"],
+            row["room"],
+            row["group"],
+            row["label"],
+            row["value"],
+            row["anchor"],
+            row["source_text"],
+        ]
+    )
+    row_index = sheet.max_row
+    row_type = row.get("row_type", "group")
+    fill = styles["anchor_fill"] if row_type == "anchor" else styles["note_fill"] if row_type == "note" else styles["group_fill"]
+    for cell in sheet[row_index]:
+        cell.fill = fill
+        cell.font = styles["note_font"] if row_type == "note" else styles["default_font"]
+        cell.border = styles["border"]
+        cell.alignment = styles["wrap_top"]
+    if row.get("anchor"):
+        sheet.cell(row=row_index, column=7).font = styles["anchor_font"]
+    if _is_terminal_group_value(row.get("value", "")):
+        sheet.cell(row=row_index, column=6).font = styles["terminal_font"]
+    return {
+        "rows": 1,
+        "anchors": 1 if row.get("anchor") else 0,
+        "notes": 1 if row_type == "note" else 0,
+    }
+
+
+def _append_room_banner(sheet: Any, room_label: str, styles: dict[str, Any]) -> None:
+    sheet.append([f"room: {room_label}", "", "", "", "", "", "", ""])
+    row_index = sheet.max_row
+    sheet.merge_cells(start_row=row_index, start_column=1, end_row=row_index, end_column=len(WORKBOOK_HEADERS))
+    for cell in sheet[row_index]:
+        cell.fill = styles["room_fill"]
+        cell.font = styles["room_font"]
+        cell.border = styles["border"]
+        cell.alignment = styles["wrap_top"]
+
+
+def _style_header_row(sheet: Any, row_index: int, styles: dict[str, Any]) -> None:
+    for cell in sheet[row_index]:
+        cell.fill = styles["header_fill"]
+        cell.font = styles["header_font"]
+        cell.border = styles["border"]
+        cell.alignment = styles["wrap_top"]
+
+
+def _style_summary_pair(sheet: Any, row_index: int, styles: dict[str, Any]) -> None:
+    for cell in sheet[row_index]:
+        cell.border = styles["border"]
+        cell.alignment = styles["wrap_top"]
+    sheet.cell(row=row_index, column=1).fill = styles["header_fill"]
+    sheet.cell(row=row_index, column=1).font = styles["header_font"]
+
+
+def _style_summary_table_row(sheet: Any, row_index: int, styles: dict[str, Any], *, bold: bool = False) -> None:
+    for cell in sheet[row_index]:
+        cell.fill = styles["group_fill"]
+        cell.border = styles["border"]
+        cell.alignment = styles["wrap_top"]
+        if bold:
+            cell.font = styles["room_font"]
+
+
+def _apply_sheet_layout(sheet: Any) -> None:
+    for index, width in enumerate(WORKBOOK_COLUMN_WIDTHS, start=1):
+        sheet.column_dimensions[_column_letter(index)].width = width
+    sheet.freeze_panes = "A2"
+
+
+def _column_letter(index: int) -> str:
+    from openpyxl.utils import get_column_letter
+
+    return get_column_letter(index)
+
+
+def _page_range(section: dict[str, Any]) -> str:
+    start = str(section.get("page_start", "") or "")
+    end = str(section.get("page_end", "") or "")
+    if not start:
+        return ""
+    return start if not end or end == start else f"{start}-{end}"
+
+
+def _compact_source_text(row: dict[str, Any], *, is_anchor: bool) -> str:
+    label = parsing.normalize_space(str(row.get("label", "") or ""))
+    value = parsing.normalize_space(str(row.get("value", "") or ""))
+    if is_anchor:
+        return f"- {label}" if label else ""
+    if _is_note_row(row, ""):
+        return value or label
+    if label and value:
+        return f"{label}: {value}"
+    return label or value
+
+
+def _is_note_row(row: dict[str, Any], group_label: str) -> bool:
+    _ = group_label
+    return parsing.normalize_space(str(row.get("label", "") or "")).lower() in {"note", "section note"}
 
 
 def _build_value_lookup(pdf_path: Path) -> dict[int, dict[str, list[str]]]:
@@ -960,17 +1178,23 @@ def _row_has_text(row: list[str]) -> bool:
 
 def _sheet_name(value: str) -> str:
     aliases = {
-        "15 CABINETS": "15 CABINETS",
-        "17 APPLIANCES, ACCESSORIES & HOT WATER UNIT": "17 APPLIANCES",
-        "20 PLUMBING FIXTURES & TAPWARE": "20 PLUMBING",
-        "23 TILING / HARD FLOORING": "23 FLOORING",
-        "24 GLASS SPLASHBACK": "24 SPLASHBACK",
+        "15 CABINETS": "15_CABINETS",
+        "16 ELECTRICAL / ALARM SYSTEM / CCTV / SOLAR PV SYSTEM": "16_ELECTRICAL",
+        "17 APPLIANCES, ACCESSORIES & HOT WATER UNIT": "17_APPLIANCES",
+        "18 AIR-CONDITIONING": "18_AIR-CONDITIONING",
+        "19 PLUMBING & GAS": "19_PLUMBING_GAS",
+        "20 PLUMBING FIXTURES & TAPWARE": "20_PLUMBING",
+        "21 MIRRORS": "21_MIRRORS",
+        "22 WINDOW FURNISHINGS": "22_WINDOW_FURNISHINGS",
+        "23 TILING / HARD FLOORING": "23_FLOORING",
+        "24 GLASS SPLASHBACK": "24_SPLASHBACK",
+        "25 CARPET": "25_CARPET",
     }
     raw = parsing.normalize_space(value)
     if raw in aliases:
         return aliases[raw]
     cleaned = re.sub(r"[\[\]:*?/\\]", " ", raw)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip() or "Evoca"
+    cleaned = re.sub(r"\s+", "_", cleaned).strip("_") or "Evoca"
     return cleaned[:31]
 
 
