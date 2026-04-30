@@ -36,6 +36,8 @@ TERMINAL_GROUP_VALUES: frozenset[str] = frozenset(
 LOOKUP_ENTRIES_KEY = "__entries__"
 LOOKUP_LINES_KEY = "__raw_text_lines__"
 LINE_MATCH_TOLERANCE = 2.0
+UNASSIGNED_SOURCE_TEXT_LABEL = "Unassigned Source Text"
+APPEND_EXTRA_VALUE_LABEL_KEYS: frozenset[str] = frozenset({"extent"})
 KNOWN_GROUP_BOUNDARY_LABELS: frozenset[str] = frozenset(
     {
         "accessories",
@@ -458,6 +460,7 @@ def _consume_group(
                 values.extend(value_lines)
         next_index += 1
 
+    values = _coalesce_wrapped_value_lines(group_label, child_labels, values)
     group = {
         "group_label": group_label,
         "page_start": page_no,
@@ -523,6 +526,7 @@ def _consume_unanchored_parent_group(
                 values.extend(value_lines)
         next_index += 1
 
+    values = _coalesce_wrapped_value_lines(group_label, labels, values)
     group = {
         "group_label": group_label,
         "page_start": page_no,
@@ -583,6 +587,7 @@ def _consume_unanchored_group(
         values.extend(value_lines)
         next_index += 1
 
+    values = _coalesce_wrapped_value_lines(group_label, child_labels, values)
     group = {
         "group_label": group_label,
         "page_start": page_no,
@@ -648,16 +653,19 @@ def _build_group_rows(
             )
         )
     for extra_index, value in enumerate(cleaned_values[len(cleaned_labels) :], start=len(cleaned_labels)):
-        rows.append(
-            _structured_row(
-                label="Continuation",
-                value=value,
-                page_no=page_no,
-                table_index=table_index,
-                row_index=source_row + extra_index,
-                raw_rows=raw_rows,
-            )
+        if rows and _should_append_extra_value_to_previous(rows[-1], value):
+            rows[-1]["value"] = parsing.normalize_space(f"{rows[-1].get('value', '')} {value}")
+            continue
+        row = _structured_row(
+            label=UNASSIGNED_SOURCE_TEXT_LABEL,
+            value=value,
+            page_no=page_no,
+            table_index=table_index,
+            row_index=source_row + extra_index,
+            raw_rows=raw_rows,
         )
+        row["is_diagnostic"] = True
+        rows.append(row)
     if not rows and raw_rows:
         rows.append(
             _structured_row(
@@ -677,6 +685,45 @@ def _decompose_meta(labels: list[str], values: list[str]) -> dict[str, int]:
         "labels_count": len([_clean_label(label) for label in labels if _clean_label(label)]),
         "values_count": len([parsing.normalize_space(value) for value in values if parsing.normalize_space(value)]),
     }
+
+
+def _coalesce_wrapped_value_lines(group_label: str, labels: list[str], values: list[str]) -> list[str]:
+    cleaned_values = [parsing.normalize_space(value) for value in values if parsing.normalize_space(value)]
+    if len(cleaned_values) <= len(labels) or _norm_label_key(group_label) != "shower":
+        return cleaned_values
+
+    label_keys = [_norm_label_key(label) for label in labels]
+    index = 0
+    while len(cleaned_values) > len(label_keys) and index < min(len(label_keys), len(cleaned_values) - 1):
+        if label_keys[index].startswith("shower rail / rose") and _looks_like_wrapped_product_line(
+            cleaned_values[index],
+            cleaned_values[index + 1],
+        ):
+            cleaned_values[index : index + 2] = [
+                parsing.normalize_space(f"{cleaned_values[index]} {cleaned_values[index + 1]}")
+            ]
+            continue
+        index += 1
+    return cleaned_values
+
+
+def _looks_like_wrapped_product_line(current: str, next_value: str) -> bool:
+    current = parsing.normalize_space(current)
+    next_value = parsing.normalize_space(next_value)
+    if not current or not next_value:
+        return False
+    lowered_next = next_value.lower()
+    if "semi-frameless" in lowered_next or lowered_next in {"gunmetal", "chrome", "black", "white"}:
+        return False
+    if current.endswith("-") or current.count("(") > current.count(")"):
+        return True
+    return bool(re.search(r"\b(?:round|rail|rose|head|shower)\b$", current, flags=re.IGNORECASE) and "(" in next_value)
+
+
+def _should_append_extra_value_to_previous(row: dict[str, Any], value: str) -> bool:
+    if not parsing.normalize_space(value):
+        return False
+    return _norm_label_key(row.get("label", "")) in APPEND_EXTRA_VALUE_LABEL_KEYS
 
 
 def _append_unanchored_row(
@@ -750,7 +797,15 @@ def _export_group(section_title: str, room_label: str, group: dict[str, Any]) ->
 def _export_row(section_title: str, room_label: str, group_label: str, row: dict[str, Any]) -> dict[str, str]:
     _ = section_title
     is_anchor = bool(row.get("is_group_anchor"))
-    row_type = "anchor" if is_anchor else "note" if _is_note_row(row, group_label) else "group"
+    row_type = (
+        "anchor"
+        if is_anchor
+        else "diagnostic"
+        if _is_diagnostic_row(row)
+        else "note"
+        if _is_note_row(row, group_label)
+        else "group"
+    )
     return {
         "page": str(row.get("page_no", "") or ""),
         "order": str(row.get("row_order", "") or ""),
@@ -999,6 +1054,12 @@ def _compact_source_text(row: dict[str, Any], *, is_anchor: bool) -> str:
 def _is_note_row(row: dict[str, Any], group_label: str) -> bool:
     _ = group_label
     return parsing.normalize_space(str(row.get("label", "") or "")).lower() in {"note", "section note"}
+
+
+def _is_diagnostic_row(row: dict[str, Any]) -> bool:
+    return bool(row.get("is_diagnostic")) or (
+        _norm_label_key(row.get("label", "")) == _norm_label_key(UNASSIGNED_SOURCE_TEXT_LABEL)
+    )
 
 
 def _build_value_lookup(pdf_path: Path) -> dict[int, dict[str, Any]]:
@@ -1345,6 +1406,7 @@ def _parse_raw_text_pairs_for_group(group: dict[str, Any], block: dict[str, Any]
         for row in group.get("rows", []) or []
         if not row.get("is_group_anchor")
         and not _is_note_row(row, "")
+        and not _is_diagnostic_row(row)
         and _norm_label_key(row.get("label", "")) != "continuation"
     ]
     label_specs = _label_token_specs(labels)
@@ -1459,7 +1521,7 @@ def _apply_raw_text_fallback(
         return
     filled = 0
     for row in rows:
-        if row.get("is_group_anchor") or _is_note_row(row, ""):
+        if row.get("is_group_anchor") or _is_note_row(row, "") or _is_diagnostic_row(row):
             continue
         key = _norm_label_key(row.get("label", ""))
         if not key or key == "continuation":
@@ -1511,6 +1573,8 @@ def _rescue_group(
         _apply_raw_text_fallback(rows, raw_text_lookup, diagnostics)
         return
     for row in rows:
+        if _is_diagnostic_row(row):
+            continue
         key = _norm_label_key(row.get("label", ""))
         if not key:
             continue
@@ -1559,6 +1623,7 @@ def _promote_group_anchor_value(
         for row in rows
         if not row.get("is_group_anchor")
         and not _is_note_row(row, "")
+        and not _is_diagnostic_row(row)
         and _norm_label_key(row.get("label", "")) != "continuation"
     ]
     if not child_rows:
@@ -1607,6 +1672,8 @@ def _shift_override_eligible(
     if not labels_count > values_count > 0:
         return False
     for row in rows:
+        if _is_diagnostic_row(row):
+            continue
         if row.get("is_group_anchor"):
             continue
         old_value = parsing.normalize_space(str(row.get("value") or ""))
@@ -1633,6 +1700,8 @@ def _apply_shift_override(
     """
     diagnostics["shift_override_groups"] += 1
     for row in rows:
+        if _is_diagnostic_row(row):
+            continue
         if row.get("is_group_anchor"):
             continue
         key = _norm_label_key(row.get("label", ""))

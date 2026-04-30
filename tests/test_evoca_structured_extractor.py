@@ -514,3 +514,134 @@ def test_evoca_structured_raw_text_fallback_rejects_footer_continuation() -> Non
         ("Handles", "2163 Voda Profile Handle"),
         ("Drawer Handle", ""),
     ]
+
+
+def test_evoca_structured_appends_extent_continuation_without_business_label() -> None:
+    structured = evoca_structured_extractor.extract_evoca_pages(
+        [
+            _page(
+                15,
+                [
+                    ["22 WINDOW FURNISHINGS", None, None],
+                    ["-", "Vertical / Roller Blinds\nType\nColour\nFabric\nExtent", "Roller"],
+                    [None, None, "Chalk"],
+                    [
+                        None,
+                        None,
+                        "Essentials\nTo all Aluminium Sliding Doors & Clear Glazed Windows Excluding Wet Area's & Kitchen / Butlers\nSplashback window**",
+                    ],
+                ],
+            )
+        ],
+        source_pdf="evoca.pdf",
+    )
+
+    rows = structured["sections"][0]["groups"][0]["rows"]
+    assert [(row["label"], row["value"]) for row in rows] == [
+        ("Type", "Roller"),
+        ("Colour", "Chalk"),
+        ("Fabric", "Essentials"),
+        (
+            "Extent",
+            "To all Aluminium Sliding Doors & Clear Glazed Windows Excluding Wet Area's & Kitchen / Butlers Splashback window**",
+        ),
+    ]
+    assert all(row["label"] != "Continuation" for row in rows)
+
+
+def test_evoca_structured_merges_wrapped_shower_rail_before_screen_colour() -> None:
+    structured = evoca_structured_extractor.extract_evoca_pages(
+        [
+            _page(
+                13,
+                [
+                    ["20 PLUMBING FIXTURES & TAPWARE", None, None, ""],
+                    ["", "Ensuite", None, None],
+                    ["-", "Shower\nMixer\nShower Rail / Rose\nShower Screen\nShower Screen Colour", "", None],
+                    [None, None, "Spin Gun Metal In-wall Mixer (SP141-GM)", None],
+                    [
+                        None,
+                        None,
+                        "Omega Integrated Gun Metal Shower System with Eden Hand Shower Head & 250mm Round\nMonsoon Shower (OMG02-GM & EDEN-GM & MS250R-GM)",
+                        None,
+                    ],
+                    [None, None, "Semi-frameless with Clear Toughened Glass", None],
+                    [None, None, "Gunmetal", None],
+                ],
+            )
+        ],
+        source_pdf="evoca.pdf",
+    )
+
+    rows = structured["sections"][0]["rooms"][0]["groups"][0]["rows"]
+    assert [(row["label"], row["value"]) for row in rows] == [
+        ("Mixer", "Spin Gun Metal In-wall Mixer (SP141-GM)"),
+        (
+            "Shower Rail / Rose",
+            "Omega Integrated Gun Metal Shower System with Eden Hand Shower Head & 250mm Round Monsoon Shower (OMG02-GM & EDEN-GM & MS250R-GM)",
+        ),
+        ("Shower Screen", "Semi-frameless with Clear Toughened Glass"),
+        ("Shower Screen Colour", "Gunmetal"),
+    ]
+    assert all(row["label"] != "Continuation" for row in rows)
+
+
+def test_evoca_structured_keeps_unowned_extra_value_as_diagnostic() -> None:
+    structured = evoca_structured_extractor.extract_evoca_pages(
+        [
+            _page(
+                13,
+                [
+                    ["20 PLUMBING FIXTURES & TAPWARE", None, None, ""],
+                    ["", "Powder", None, None],
+                    [
+                        "-",
+                        "Accessories & Toilet Suite\nHand Towel Rail\nToilet Roll Holder\nToilet Suite",
+                        "Spin Gun Metal robe hook (SP54-GM)",
+                        None,
+                    ],
+                    [None, None, "Spin Gun Metal Toilet Roll Holder (SP51-GM)", None],
+                    [None, None, "Lana Rimless Back to Wall Toilet Suite Gloss White (6002-R-W)", None],
+                    ["", "WC**", None, None],
+                ],
+            )
+        ],
+        source_pdf="evoca.pdf",
+    )
+
+    rows = structured["sections"][0]["rooms"][0]["groups"][0]["rows"]
+    assert [(row["label"], row["value"]) for row in rows] == [
+        ("Hand Towel Rail", "Spin Gun Metal robe hook (SP54-GM)"),
+        ("Toilet Roll Holder", "Spin Gun Metal Toilet Roll Holder (SP51-GM)"),
+        ("Toilet Suite", "Lana Rimless Back to Wall Toilet Suite Gloss White (6002-R-W)"),
+        ("Unassigned Source Text", "WC"),
+    ]
+    assert rows[-1]["is_diagnostic"] is True
+    assert all(row["label"] != "Continuation" for row in rows)
+
+
+def test_evoca_structured_does_not_append_lost_mixer_anchor_to_basin_type() -> None:
+    structured = evoca_structured_extractor.extract_evoca_pages(
+        [
+            _page(
+                13,
+                [
+                    ["20 PLUMBING FIXTURES & TAPWARE", None, None, ""],
+                    ["", "Ensuite 2", None, None],
+                    ["-", "Basin\nModel\nType", "", None],
+                    [None, None, "Byron Bench Mount Gloss White (FL4149-W) with Overflow", None],
+                    [None, None, "Overmount", None],
+                    [None, None, "Spin Gun Metal Tall Basin Mixer (SP110-GM)", None],
+                ],
+            )
+        ],
+        source_pdf="evoca.pdf",
+    )
+
+    rows = structured["sections"][0]["rooms"][0]["groups"][0]["rows"]
+    assert [(row["label"], row["value"]) for row in rows] == [
+        ("Model", "Byron Bench Mount Gloss White (FL4149-W) with Overflow"),
+        ("Type", "Overmount"),
+        ("Unassigned Source Text", "Spin Gun Metal Tall Basin Mixer (SP110-GM)"),
+    ]
+    assert rows[-1]["is_diagnostic"] is True

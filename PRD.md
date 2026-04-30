@@ -240,7 +240,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
   - `Imperial`: `job 34`, `job 35`, `job 36`, `job 38`
   - `Simonds`: `job 19`
   - `Evoca`: `job 39`
-- The standalone Evoca structured parser spike is not part of production snapshot generation yet. Current work on EVOC447 fixes source-native JSON/QA workbook behavior only, including room-note boundaries, group-bounded text rescue, and group-bounded raw-text fallback for values missed by both table and text-grid extraction.
+- The standalone Evoca structured parser spike is not part of production snapshot generation yet. Current EVOC447/467/473 work fixes source-native JSON/QA workbook behavior only, including room-note boundaries, group-bounded text rescue, group-bounded raw-text fallback for values missed by both table and text-grid extraction, and safe handling of table overflow text without emitting fake `Continuation` business labels.
 
 ### 4.6 Export
 - Export reviewed data to:

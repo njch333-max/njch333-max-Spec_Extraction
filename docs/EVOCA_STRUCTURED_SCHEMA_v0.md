@@ -109,6 +109,16 @@ Rows preserve the parsed label/value pair and the raw table evidence used to der
 ```
 
 `Not Applicable`, `#N/A`, blank values, and continuation values are intentionally preserved. The raw parser layer must not suppress them.
+The parser must not emit a literal business label named `Continuation`. Source-backed overflow text is either appended to the owning prior row when the PDF evidence supports that ownership, or preserved as a diagnostic row:
+
+```json
+{
+  "label": "Unassigned Source Text",
+  "value": "WC",
+  "is_diagnostic": true,
+  "source_method": "pdfplumber_table"
+}
+```
 
 Rows whose value is filled from the secondary text-aligned table pass use:
 
@@ -156,6 +166,7 @@ Group detection:
 - A group boundary is a row whose first cell is `-` and whose second cell has a label.
 - Child labels come from the remaining lines in the group label cell.
 - Values come from the group value cell plus following continuation rows until the next section, room, or group boundary.
+- Extra value lines must not become a literal `Continuation` business label. Known source-backed wraps such as `Extent` second lines are appended to the prior row; unsafe extras remain `Unassigned Source Text` diagnostics and are ignored by text rescue / shift override passes.
 - Some Evoca rows visually start a new group without a leading `-`, for example `Overhead Cupboards` under cabinets. v0 detects these as unanchored groups when the label cell has more lines than the value cell.
 - Terminal group values such as `Not Applicable`, `Not Included`, `Not Required`, `N/A`, `#N/A`, and `TBC` apply to the group anchor row. Child property rows remain present with blank values so the Excel QA workbook stays close to the source PDF.
 - Non-terminal group-level values are detected from the secondary text-grid lookup when `group_label -> value` exists on the same source row. The group value becomes an `is_group_anchor` row and child property rows are realigned from the text-grid lookup.

@@ -25,7 +25,7 @@
   - `Clarendon colour schedule`: heuristic-grid-first
   - `Clarendon AFC sinkware/appliances/flooring`: table/grid-first
   - `Clarendon drawing pages`: heuristic-only
-- Standalone Evoca structured parser work remains offline from production snapshot generation. The current EVOC447 pass targets source-native JSON/QA Excel only, with room-note boundary fixes, group-bounded text rescue, and group-bounded raw-text fallback to recover values missed by both table and text-grid extraction.
+- Standalone Evoca structured parser work remains offline from production snapshot generation. The current EVOC447/467/473 pass targets source-native JSON/QA Excel only, with room-note boundary fixes, group-bounded text rescue, group-bounded raw-text fallback to recover values missed by both table and text-grid extraction, and Bug 8 overflow handling that appends source-backed wraps while preserving unsafe extras as `Unassigned Source Text` diagnostics instead of fake `Continuation` rows.
 - Workflow rule is now explicit:
   - default to `fix this bug` for specific live defects that are already PDF-grounded
 - use `review this PR` for shared parser, grouped-row, builder-finalizer, user-workflow, or export changes

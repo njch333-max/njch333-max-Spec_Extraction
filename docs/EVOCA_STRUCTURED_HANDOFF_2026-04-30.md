@@ -134,10 +134,10 @@ Last full test after Bug 4:
 | Bug | Status | Root Problem | Example | Risk | Suggested Order |
 |---|---:|---|---|---|---:|
 | Bug 4 | Fixed, keep regression | Group heading has its own value but old parser had no anchor slot | EVOC473 Kitchen `Overhead Cupboards = * Overhead Cupboard above Oven...` | Medium | 0 |
-| Bug 5 | Open | Unanchored parent/group heuristic is too broad and treats room notes as group headers | EVOC447 Kitchen `No shelf to cupboard underneath sink` swallowed `Benchtops` | High | 1 |
-| Bug 6 | Open, most urgent | Page-level rescue pool reuses candidates across groups; table-filled rows do not consume text candidates | EVOC447 Bathroom `Basin Mixer Type = Overmount`, `Bath Mixer Model = Eden Bench Mount...`, handles cross-contamination | Highest | 2 |
-| Bug 8 | Open | Extra values become fake business row label `Continuation` | `Continuation = WC`, `Gunmetal`, `Splashback window**` | Medium-high | 3 |
-| Bug 7 | Open, needs evidence | Text-strategy may miss or mis-key some valid label/value pairs | EVOC447 multiple Benchtops `Colour` rows blank; Shower Mixer/Rail blank | Medium-high | 4 |
+| Bug 5 | Fixed 2026-04-30 | Unanchored parent/group heuristic was too broad and treated room notes as group headers | EVOC447 Kitchen `No shelf to cupboard underneath sink` swallowed `Benchtops` | High | 1 |
+| Bug 6 | Fixed 2026-04-30 | Page-level rescue pool reused candidates across groups; table-filled rows did not consume text candidates | EVOC447 Bathroom `Basin Mixer Type = Overmount`, `Bath Mixer Model = Eden Bench Mount...`, handles cross-contamination | Highest | 2 |
+| Bug 8 | Fixed 2026-04-30 | Extra values became fake business row label `Continuation` | `Continuation = WC`, `Gunmetal`, `Splashback window**` | Medium-high | 3 |
+| Bug 7 | Fixed 2026-04-30 | Text-strategy missed valid label/value pairs; bounded raw-text fallback now fills source-backed blank rows | EVOC447 multiple Benchtops `Colour` rows blank; Shower Mixer/Rail blank | Medium-high | 4 |
 
 ## EVOC447 Evidence Already Confirmed
 
@@ -196,26 +196,18 @@ Handles = Finger Grip
 
 Do **not** proceed to adapter or fast path.
 
-Next task should be a focused parser pass:
+Completed parser pass on 2026-04-30:
 
-1. Fix Bug 5 first.
-   - Tighten `detect_unanchored_parent_header()` / unanchored group detection.
-   - `No shelf to cupboard underneath sink` must remain note, not group label.
-   - Avoid broad language-only heuristics as the only guard. Use structure and known heading shape.
+1. Bug 5 fixed: room notes no longer become broad unanchored group headers.
+2. Bug 6 fixed: rescue is group-bounded so generic labels do not reuse stale values from earlier groups.
+3. Bug 7 fixed: bounded raw-text fallback fills source-backed values missed by table and text-grid extraction.
+4. Bug 8 fixed: literal `Continuation` rows are removed; safe wraps are merged and unsafe extras become `Unassigned Source Text` diagnostics.
 
-2. Fix Bug 6 second.
-   - Stop relying on page-wide `label_key -> pop(0)` for generic labels.
-   - Prefer group-bounded text lookup / consumption.
-   - At minimum, table-filled same-group rows must consume corresponding text candidates before rescue can use them.
-   - Generic keys like `manufacturer`, `type`, `model`, `handles`, `colour` are dangerous if consumed page-wide.
+Next focused parser task should be Bug 9 evidence, not adapter wiring:
 
-3. Fix Bug 8 after Bug 5/6.
-   - Do not create literal business label `Continuation`.
-   - Extra unassigned values should become diagnostics / unassigned source text, or be appended to the prior row only when source evidence supports it.
-
-4. Investigate Bug 7 with raw dumps.
-   - Dump EVOC447 page 8 text-strategy raw output.
-   - Confirm whether `Colour -> Statuario Zero` exists, is mis-keyed, or is not extracted at all.
+- Confirm cross-page anchor loss against source PDFs before changing code.
+- Known candidate examples: EVOC447 Powder `Benchtops` across page 11/12, and EVOC473 `Ensuite 2 / Basin Mixer` split across page 13/14.
+- Keep the same rule: source PDF first, standalone parser only, no production fast path.
 
 ## Suggested Next Chat Prompt
 
