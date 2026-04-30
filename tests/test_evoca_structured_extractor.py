@@ -756,3 +756,56 @@ def test_evoca_structured_repairs_cross_page_missing_basin_mixer_group() -> None
         ("Model", "Byron Bench Mount Gloss White (FL4149-W) with Overflow"),
         ("Type", "Overmount"),
     ]
+
+
+def test_evoca_structured_cross_page_repair_removes_owned_group_notes() -> None:
+    structured = evoca_structured_extractor.extract_evoca_pages(
+        [
+            _page(
+                15,
+                [
+                    ["20 PLUMBING FIXTURES & TAPWARE", None, None, ""],
+                    ["", "Ensuite 5", None, None],
+                    ["-", "Basin\nModel\nType", "", None],
+                    [None, None, "Byron Bench Mount Gloss White (FL4149-W) with Overflow", None],
+                    [None, None, "Overmount", None],
+                    ["", "", "Spin Gun Metal Tall Basin Mixer (SP110-GM)", None],
+                ],
+            ),
+            _page(16, [["", "", "Centre of Basin", None], ["-", "Shower\nMixer", "", None]]),
+        ],
+        source_pdf="evoca.pdf",
+    )
+    evoca_structured_extractor._repair_cross_page_missing_groups(
+        structured,
+        {
+            15: {
+                evoca_structured_extractor.LOOKUP_LINES_KEY: [
+                    _raw_line(100, [("20", 35), ("PLUMBING", 55), ("FIXTURES", 120), ("&", 180), ("TAPWARE", 195)]),
+                    _raw_line(120, [("Ensuite", 45), ("5", 95)]),
+                    _raw_line(140, [("-", 35), ("Basin", 50)]),
+                    _raw_line(160, [("Model", 70), ("Byron", 200)]),
+                    _raw_line(180, [("Type", 70), ("Overmount", 200)]),
+                    _raw_line(200, [("-", 35), ("Basin", 50), ("Mixer", 85)]),
+                    _raw_line(220, [("Type", 70), ("Spin", 200), ("Gun", 230), ("Metal", 255), ("Tall", 285), ("Basin", 310), ("Mixer", 345), ("(SP110-GM)", 380)]),
+                ]
+            },
+            16: {
+                evoca_structured_extractor.LOOKUP_LINES_KEY: [
+                    _raw_line(100, [("Location", 70), ("Centre", 200), ("of", 235), ("Basin", 250)]),
+                    _raw_line(120, [("-", 35), ("Shower", 50)]),
+                ]
+            },
+        },
+    )
+
+    room = structured["sections"][0]["rooms"][0]
+    basin_rows = room["groups"][0]["rows"]
+    assert [(row["label"], row["value"]) for row in basin_rows] == [
+        ("Model", "Byron Bench Mount Gloss White (FL4149-W) with Overflow"),
+        ("Type", "Overmount"),
+    ]
+    assert [(row["label"], row["value"]) for row in room["groups"][1]["rows"]] == [
+        ("Type", "Spin Gun Metal Tall Basin Mixer (SP110-GM)"),
+        ("Location", "Centre of Basin"),
+    ]

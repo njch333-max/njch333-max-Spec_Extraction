@@ -1465,7 +1465,10 @@ def _remove_owned_unassigned_text(room: dict[str, Any], owned_values: set[str]) 
         group["rows"] = [
             row
             for row in group.get("rows", []) or []
-            if not (_is_diagnostic_row(row) and parsing.normalize_space(str(row.get("value") or "")) in owned_values)
+            if not (
+                (_is_diagnostic_row(row) or _is_note_row(row, ""))
+                and parsing.normalize_space(str(row.get("value") or "")) in owned_values
+            )
         ]
 
 

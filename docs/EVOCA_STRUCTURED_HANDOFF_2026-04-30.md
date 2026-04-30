@@ -199,6 +199,7 @@ Bug 9 confirmed and fixed:
 - EVOC473 page 13/14 source PDF has `Ensuite 2 -> Basin Mixer -> Type Spin Gun Metal Tall Basin Mixer (SP110-GM) / Location Centre of Basin`, but the table layer dropped the `Basin Mixer` label and previously left the product as an unsafe diagnostic under `Basin`.
 - EVOC473 page 15/16 has the same `Ensuite 5 -> Basin Mixer` split and is fixed by the same narrow rule.
 - The fix synthesizes only exact source-backed `Benchtops` / `Basin Mixer` groups from raw-text group and child-label evidence, with `source_method = pdfplumber_raw_text_cross_page`.
+- Same-room stale notes or diagnostics that held the recovered values are removed after synthesis to avoid duplicates.
 
 ## Recommended Next Work
 
