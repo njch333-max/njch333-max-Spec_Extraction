@@ -138,6 +138,7 @@ Last full test after Bug 4:
 | Bug 6 | Fixed 2026-04-30 | Page-level rescue pool reused candidates across groups; table-filled rows did not consume text candidates | EVOC447 Bathroom `Basin Mixer Type = Overmount`, `Bath Mixer Model = Eden Bench Mount...`, handles cross-contamination | Highest | 2 |
 | Bug 8 | Fixed 2026-04-30 | Extra values became fake business row label `Continuation` | `Continuation = WC`, `Gunmetal`, `Splashback window**` | Medium-high | 3 |
 | Bug 7 | Fixed 2026-04-30 | Text-strategy missed valid label/value pairs; bounded raw-text fallback now fills source-backed blank rows | EVOC447 multiple Benchtops `Colour` rows blank; Shower Mixer/Rail blank | Medium-high | 4 |
+| Bug 9 | Fixed 2026-04-30 | `pdfplumber` table rows drop group anchors at page edges; first values on the next page become notes or diagnostics | EVOC473 `Powder / Benchtops`, `Ensuite 2 / Basin Mixer`, `Ensuite 5 / Basin Mixer` | High | 5 |
 
 ## EVOC447 Evidence Already Confirmed
 
@@ -192,6 +193,13 @@ Colour & Finish = Rojo Walnut Woodmatt
 Handles = Finger Grip
 ```
 
+Bug 9 confirmed and fixed:
+
+- EVOC473 page 11/12 source PDF has `Powder -> Benchtops -> Manufacturer Quantum Quartz / Colour Polar / Edge Profile 20mm Arissed`, but the table layer dropped the `Benchtops` anchor at the page edge and previously emitted `Polar` / `20mm Arissed` as room notes.
+- EVOC473 page 13/14 source PDF has `Ensuite 2 -> Basin Mixer -> Type Spin Gun Metal Tall Basin Mixer (SP110-GM) / Location Centre of Basin`, but the table layer dropped the `Basin Mixer` label and previously left the product as an unsafe diagnostic under `Basin`.
+- EVOC473 page 15/16 has the same `Ensuite 5 -> Basin Mixer` split and is fixed by the same narrow rule.
+- The fix synthesizes only exact source-backed `Benchtops` / `Basin Mixer` groups from raw-text group and child-label evidence, with `source_method = pdfplumber_raw_text_cross_page`.
+
 ## Recommended Next Work
 
 Do **not** proceed to adapter or fast path.
@@ -202,12 +210,12 @@ Completed parser pass on 2026-04-30:
 2. Bug 6 fixed: rescue is group-bounded so generic labels do not reuse stale values from earlier groups.
 3. Bug 7 fixed: bounded raw-text fallback fills source-backed values missed by table and text-grid extraction.
 4. Bug 8 fixed: literal `Continuation` rows are removed; safe wraps are merged and unsafe extras become `Unassigned Source Text` diagnostics.
+5. Bug 9 fixed: narrow cross-page raw-text synthesis restores table-dropped `Benchtops` and `Basin Mixer` groups.
 
-Next focused parser task should be Bug 9 evidence, not adapter wiring:
+Next focused task should remain evidence-first and standalone-parser only:
 
-- Confirm cross-page anchor loss against source PDFs before changing code.
-- Known candidate examples: EVOC447 Powder `Benchtops` across page 11/12, and EVOC473 `Ensuite 2 / Basin Mixer` split across page 13/14.
-- Keep the same rule: source PDF first, standalone parser only, no production fast path.
+- Do not proceed to adapter or fast path without explicit approval.
+- If another issue is raised, confirm the source PDF and current `tmp/evoca_structured_bug9/` JSON before changing code.
 
 ## Suggested Next Chat Prompt
 

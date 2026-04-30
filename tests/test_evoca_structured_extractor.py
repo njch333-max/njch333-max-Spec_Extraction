@@ -645,3 +645,114 @@ def test_evoca_structured_does_not_append_lost_mixer_anchor_to_basin_type() -> N
         ("Unassigned Source Text", "Spin Gun Metal Tall Basin Mixer (SP110-GM)"),
     ]
     assert rows[-1]["is_diagnostic"] is True
+
+
+def test_evoca_structured_repairs_cross_page_missing_benchtops_group() -> None:
+    structured = evoca_structured_extractor.extract_evoca_pages(
+        [
+            _page(
+                11,
+                [
+                    ["15 CABINETS", None, None, ""],
+                    ["", "Powder", None, None],
+                ],
+            ),
+            _page(
+                12,
+                [
+                    [None, None, "Polar", None],
+                    [None, None, "20mm Arissed", None],
+                    ["-", "Underbench\nManufacturer", "Polytec", None],
+                ],
+            ),
+        ],
+        source_pdf="evoca.pdf",
+    )
+    evoca_structured_extractor._repair_cross_page_missing_groups(
+        structured,
+        {
+            11: {
+                evoca_structured_extractor.LOOKUP_LINES_KEY: [
+                    _raw_line(100, [("15", 35), ("CABINETS", 55)]),
+                    _raw_line(120, [("Powder", 45)]),
+                    _raw_line(140, [("-", 35), ("Benchtops", 50)]),
+                    _raw_line(160, [("Manufacturer", 70), ("Quantum", 200), ("Quartz", 238)]),
+                    _raw_line(700, [("Page", 200), ("11", 230), ("of", 245), ("91", 260), ("Client", 300)]),
+                ]
+            },
+            12: {
+                evoca_structured_extractor.LOOKUP_LINES_KEY: [
+                    _raw_line(100, [("Colour", 70), ("Polar", 200)]),
+                    _raw_line(120, [("Edge", 70), ("Profile", 95), ("20mm", 200), ("Arissed", 230)]),
+                    _raw_line(140, [("-", 35), ("Underbench", 50)]),
+                    _raw_line(160, [("Manufacturer", 70), ("Polytec", 200)]),
+                ]
+            },
+        },
+    )
+
+    room = structured["sections"][0]["rooms"][0]
+    assert room["page_end"] == 12
+    assert [group["group_label"] for group in room["groups"]] == ["Benchtops", "Underbench"]
+    assert [(row["label"], row["value"], row["source_method"]) for row in room["groups"][0]["rows"]] == [
+        ("Manufacturer", "Quantum Quartz", "pdfplumber_raw_text_cross_page"),
+        ("Colour", "Polar", "pdfplumber_raw_text_cross_page"),
+        ("Edge Profile", "20mm Arissed", "pdfplumber_raw_text_cross_page"),
+    ]
+    assert room["notes"] == []
+    assert structured["diagnostics"]["raw_text_cross_page_groups"] == 1
+    assert structured["diagnostics"]["raw_text_cross_page_pairs_filled"] == 3
+
+
+def test_evoca_structured_repairs_cross_page_missing_basin_mixer_group() -> None:
+    structured = evoca_structured_extractor.extract_evoca_pages(
+        [
+            _page(
+                13,
+                [
+                    ["20 PLUMBING FIXTURES & TAPWARE", None, None, ""],
+                    ["", "Ensuite 2", None, None],
+                    ["-", "Basin\nModel\nType", "", None],
+                    [None, None, "Byron Bench Mount Gloss White (FL4149-W) with Overflow", None],
+                    [None, None, "Overmount", None],
+                    [None, None, "Spin Gun Metal Tall Basin Mixer (SP110-GM)", None],
+                ],
+            ),
+            _page(14, [["-", "Bath", "Not Applicable", None]]),
+        ],
+        source_pdf="evoca.pdf",
+    )
+    evoca_structured_extractor._repair_cross_page_missing_groups(
+        structured,
+        {
+            13: {
+                evoca_structured_extractor.LOOKUP_LINES_KEY: [
+                    _raw_line(100, [("20", 35), ("PLUMBING", 55), ("FIXTURES", 120), ("&", 180), ("TAPWARE", 195)]),
+                    _raw_line(120, [("Ensuite", 45), ("2", 95)]),
+                    _raw_line(140, [("-", 35), ("Basin", 50)]),
+                    _raw_line(160, [("Model", 70), ("Byron", 200)]),
+                    _raw_line(180, [("Type", 70), ("Overmount", 200)]),
+                    _raw_line(200, [("-", 35), ("Basin", 50), ("Mixer", 85)]),
+                    _raw_line(220, [("Type", 70), ("Spin", 200), ("Gun", 230), ("Metal", 255), ("Tall", 285), ("Basin", 310), ("Mixer", 345), ("(SP110-GM)", 380)]),
+                    _raw_line(700, [("Page", 200), ("13", 230), ("of", 245), ("91", 260), ("Client", 300)]),
+                ]
+            },
+            14: {
+                evoca_structured_extractor.LOOKUP_LINES_KEY: [
+                    _raw_line(100, [("Location", 70), ("Centre", 200), ("of", 235), ("Basin", 250)]),
+                    _raw_line(120, [("-", 35), ("Bath", 50), ("Not", 200), ("Applicable", 225)]),
+                ]
+            },
+        },
+    )
+
+    room = structured["sections"][0]["rooms"][0]
+    assert [group["group_label"] for group in room["groups"]] == ["Basin", "Basin Mixer", "Bath"]
+    assert [(row["label"], row["value"], row["source_method"]) for row in room["groups"][1]["rows"]] == [
+        ("Type", "Spin Gun Metal Tall Basin Mixer (SP110-GM)", "pdfplumber_raw_text_cross_page"),
+        ("Location", "Centre of Basin", "pdfplumber_raw_text_cross_page"),
+    ]
+    assert [(row["label"], row["value"]) for row in room["groups"][0]["rows"]] == [
+        ("Model", "Byron Bench Mount Gloss White (FL4149-W) with Overflow"),
+        ("Type", "Overmount"),
+    ]

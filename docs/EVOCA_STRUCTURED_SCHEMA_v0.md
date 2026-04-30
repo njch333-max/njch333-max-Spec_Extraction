@@ -132,6 +132,12 @@ Rows whose value is filled from the bounded raw-text word layer use:
 "source_method": "pdfplumber_raw_text_fallback"
 ```
 
+Rows that belong to a group synthesized from exact raw-text evidence across a page boundary use:
+
+```json
+"source_method": "pdfplumber_raw_text_cross_page"
+```
+
 The rescue pass only fills empty parser values and leaves existing table-derived values intact.
 
 When the visible group heading itself has a value, the parser promotes that value to a group anchor row:
@@ -173,7 +179,8 @@ Group detection:
 - The secondary rescue lookup uses `pdfplumber` with line-based vertical boundaries and text-based horizontal boundaries. It is a value backfill, not a new section/room detector.
 - When the text-grid pass exposes group headings, rescue candidates are bounded to the matching group block before falling back to page-wide lookup. Generic labels such as `Model`, `Type`, `Location`, `Handles`, and `Colour` must not be reused across later groups on the same page.
 - If both the table pass and text-grid pass miss a value, the raw-text fallback may fill the blank row only inside that group bbox. It matches exact current-group labels, prefers same-line values, may use the immediate next line only when that line is not another current-group label, and rejects footer noise such as `Page ... Client Initials`.
-- Diagnostics include `raw_text_fallback_groups` and `raw_text_fallback_pairs_filled` so QA can see when the raw-text fallback changed the artifact.
+- If the table layer drops a group anchor at a page edge, the cross-page raw-text pass may synthesize a missing group only from exact known Evoca group labels and exact known child labels. Current allowed synthesis is narrow: `Benchtops` and `Basin Mixer`.
+- Diagnostics include `raw_text_fallback_groups`, `raw_text_fallback_pairs_filled`, `raw_text_cross_page_groups`, and `raw_text_cross_page_pairs_filled` so QA can see when the raw-text layers changed the artifact.
 
 Color and visual styling:
 

@@ -66,6 +66,7 @@ If a change affects user-visible behavior, architecture, storage, deployment, wo
       - finishes/flooring/plumbing/appliance schedules: table/grid-first, then room-local mapping
       - standalone `evoca_structured_extractor.py` work stays disconnected from production snapshot generation until explicitly approved; wrong source-native JSON values must be fixed in the parser, not hidden in a downstream adapter.
       - standalone Evoca overflow values must not be emitted as a literal `Continuation` business label; append only source-backed wraps and otherwise preserve unsafe extras as diagnostics.
+      - standalone Evoca cross-page recovery may synthesize only source-backed missing groups from exact raw-text group and child-label evidence; keep it narrow and observable with diagnostics.
       - bounded raw-text fallback may fill only blank row-local values inside the current group bbox; it must not overwrite table/text-grid values or borrow generic labels across groups.
     - `Clarendon`
       - `Drawings and Colours / Colour Schedule`: heuristic-grid-first, not Vision-first

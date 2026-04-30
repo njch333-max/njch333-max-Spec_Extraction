@@ -38,6 +38,19 @@ LOOKUP_LINES_KEY = "__raw_text_lines__"
 LINE_MATCH_TOLERANCE = 2.0
 UNASSIGNED_SOURCE_TEXT_LABEL = "Unassigned Source Text"
 APPEND_EXTRA_VALUE_LABEL_KEYS: frozenset[str] = frozenset({"extent"})
+CROSS_PAGE_SYNTH_SOURCE_METHOD = "pdfplumber_raw_text_cross_page"
+CROSS_PAGE_SYNTH_GROUP_LABELS: dict[str, tuple[str, ...]] = {
+    "basin mixer": ("Type", "Location"),
+    "benchtops": (
+        "Manufacturer",
+        "Colour & Finish",
+        "Colour",
+        "Island Colour",
+        "Edge Profile",
+        "Island Edge Profile",
+        "Waterfall End to Island",
+    ),
+}
 KNOWN_GROUP_BOUNDARY_LABELS: frozenset[str] = frozenset(
     {
         "accessories",
@@ -97,6 +110,7 @@ def extract_evoca_pdf(pdf_path: str | Path) -> dict[str, Any]:
     structured = extract_evoca_pages(pages, source_pdf=str(path), document_name=path.name)
     value_lookup = _build_value_lookup(path)
     _rescue_missing_values(structured, value_lookup)
+    _repair_cross_page_missing_groups(structured, value_lookup)
     _update_statistics(structured)
     return structured
 
@@ -124,6 +138,8 @@ def extract_evoca_pages(
             "anchor_value_child_realignments": 0,
             "raw_text_fallback_groups": 0,
             "raw_text_fallback_pairs_filled": 0,
+            "raw_text_cross_page_groups": 0,
+            "raw_text_cross_page_pairs_filled": 0,
         },
         "statistics": {
             "page_count": len(pages),
@@ -1201,6 +1217,8 @@ def _rescue_missing_values(structured: dict[str, Any], lookup: dict[int, dict[st
         "anchor_value_child_realignments",
         "raw_text_fallback_groups",
         "raw_text_fallback_pairs_filled",
+        "raw_text_cross_page_groups",
+        "raw_text_cross_page_pairs_filled",
     ):
         diagnostics.setdefault(key, 0)
     group_context = _build_rescue_group_context(structured, consumable)
@@ -1210,6 +1228,255 @@ def _rescue_missing_values(structured: dict[str, Any], lookup: dict[int, dict[st
         for room in section.get("rooms", []) or []:
             for group in room.get("groups", []) or []:
                 _rescue_group(group, consumable, diagnostics, group_context)
+
+
+def _repair_cross_page_missing_groups(structured: dict[str, Any], lookup: dict[int, dict[str, Any]]) -> None:
+    """Synthesize narrow source-backed groups that the table layer dropped at page edges."""
+
+    diagnostics = structured.setdefault("diagnostics", {})
+    diagnostics.setdefault("raw_text_cross_page_groups", 0)
+    diagnostics.setdefault("raw_text_cross_page_pairs_filled", 0)
+    raw_sections = _collect_raw_room_group_blocks(lookup)
+    if not raw_sections:
+        return
+
+    for section in structured.get("sections", []) or []:
+        section_code = str(section.get("section_code", "") or "")
+        raw_rooms = raw_sections.get(section_code) or {}
+        if not raw_rooms:
+            continue
+        for room in section.get("rooms", []) or []:
+            room_key = _norm_label_key(room.get("room_label", ""))
+            raw_room = raw_rooms.get(room_key)
+            if not raw_room:
+                continue
+            _synthesize_missing_room_groups(room, raw_room, diagnostics)
+
+
+def _collect_raw_room_group_blocks(lookup: dict[int, dict[str, Any]]) -> dict[str, dict[str, dict[str, Any]]]:
+    room_keys = {_norm_label_key(label) for label in ROOM_HEADINGS if _norm_label_key(label)}
+    raw_sections: dict[str, dict[str, dict[str, Any]]] = {}
+    current_section = ""
+    current_room_key = ""
+    current_group: dict[str, Any] | None = None
+    order = 0
+
+    for page_no in sorted(lookup):
+        raw_lines = lookup.get(page_no, {}).get(LOOKUP_LINES_KEY) or []
+        for line_index, source_line in enumerate(raw_lines):
+            line = dict(source_line)
+            line["page_no"] = page_no
+            line["line_index"] = line_index
+            text = parsing.normalize_space(str(line.get("text", "") or ""))
+            if not text or _is_raw_text_noise_value(text):
+                continue
+
+            section = detect_section_title([text])
+            if section:
+                current_section = section["section_code"]
+                current_room_key = ""
+                current_group = None
+                continue
+
+            room_key = _match_room_boundary_key(line, room_keys)
+            if room_key:
+                current_room_key = room_key
+                current_group = None
+                if current_section:
+                    raw_sections.setdefault(current_section, {}).setdefault(
+                        current_room_key,
+                        {"groups": []},
+                    )
+                continue
+
+            group_key = _match_group_boundary_key(line.get("words", []) or [], set(KNOWN_GROUP_BOUNDARY_LABELS))
+            if group_key:
+                current_group = None
+                if current_section and current_room_key:
+                    boundary_group = {
+                        "group_key": group_key,
+                        "page_start": page_no,
+                        "page_end": page_no,
+                        "order": order,
+                        "lines": [line] if group_key in CROSS_PAGE_SYNTH_GROUP_LABELS else [],
+                    }
+                    order += 1
+                    raw_sections.setdefault(current_section, {}).setdefault(
+                        current_room_key,
+                        {"groups": []},
+                    )["groups"].append(boundary_group)
+                    if group_key in CROSS_PAGE_SYNTH_GROUP_LABELS:
+                        current_group = boundary_group
+                continue
+
+            if current_group is not None:
+                current_group["page_end"] = page_no
+                current_group.setdefault("lines", []).append(line)
+
+    return raw_sections
+
+
+def _synthesize_missing_room_groups(
+    room: dict[str, Any],
+    raw_room: dict[str, Any],
+    diagnostics: dict[str, int],
+) -> None:
+    raw_groups = raw_room.get("groups", []) or []
+    if not raw_groups:
+        return
+    existing_group_keys = {_norm_label_key(group.get("group_label", "")) for group in room.get("groups", []) or []}
+    raw_order_by_key = {
+        str(group.get("group_key", "") or ""): int(group.get("order", 0) or 0)
+        for group in raw_groups
+        if str(group.get("group_key", "") or "")
+    }
+
+    for raw_group in raw_groups:
+        group_key = str(raw_group.get("group_key", "") or "")
+        if group_key not in CROSS_PAGE_SYNTH_GROUP_LABELS or group_key in existing_group_keys:
+            continue
+        labels = _raw_group_present_labels(group_key, raw_group.get("lines", []) or [])
+        if not labels:
+            continue
+        rows = _synthetic_rows_from_raw_group(labels, raw_group)
+        value_rows = [row for row in rows if parsing.normalize_space(str(row.get("value") or ""))]
+        if not value_rows:
+            continue
+        group = {
+            "group_label": _display_group_label(group_key),
+            "page_start": int(raw_group.get("page_start", 0) or 0),
+            "page_end": int(
+                raw_group.get("page_end", raw_group.get("page_start", 0))
+                or raw_group.get("page_start", 0)
+                or 0
+            ),
+            "raw_rows": [source for row in rows for source in row.get("source_rows", []) or []],
+            "value_lines": [
+                row.get("value", "")
+                for row in rows
+                if parsing.normalize_space(str(row.get("value") or ""))
+            ],
+            "_decompose_meta": _decompose_meta(labels, [row.get("value", "") for row in rows]),
+            "rows": rows,
+        }
+        _insert_group_by_raw_order(room, group, raw_order_by_key, int(raw_group.get("order", 0) or 0))
+        existing_group_keys.add(group_key)
+        owned_values = {parsing.normalize_space(str(row.get("value") or "")) for row in value_rows}
+        _remove_owned_unassigned_text(room, owned_values)
+        _extend_room_page_range(room, group["page_start"], group["page_end"])
+        diagnostics["raw_text_cross_page_groups"] += 1
+        diagnostics["raw_text_cross_page_pairs_filled"] += len(value_rows)
+
+
+def _raw_group_present_labels(group_key: str, lines: list[dict[str, Any]]) -> list[str]:
+    allowed = list(CROSS_PAGE_SYNTH_GROUP_LABELS.get(group_key, ()))
+    label_by_key = {_norm_label_key(label): label for label in allowed}
+    specs = _label_token_specs(allowed)
+    present: list[str] = []
+    seen: set[str] = set()
+    for line in lines:
+        tokens = [_norm_word_token(str(word.get("text", "") or "")) for word in line.get("words", []) or []]
+        match = _match_label_tokens(tokens, 0, specs)
+        if match is None:
+            continue
+        key, _token_count = match
+        if key in seen:
+            continue
+        seen.add(key)
+        present.append(label_by_key[key])
+    return present
+
+
+def _synthetic_rows_from_raw_group(labels: list[str], raw_group: dict[str, Any]) -> list[dict[str, Any]]:
+    dummy_group = {"rows": [{"label": label} for label in labels]}
+    lookup = _parse_raw_text_pairs_for_group(dummy_group, {"lines": raw_group.get("lines", []) or []})
+    rows: list[dict[str, Any]] = []
+    for label in labels:
+        key = _norm_label_key(label)
+        candidates = lookup.get(key) or []
+        value = parsing.normalize_space(candidates.pop(0)) if candidates else ""
+        source_line = _raw_group_label_line(label, raw_group.get("lines", []) or [])
+        source = _raw_text_source_record(source_line, label, value)
+        row = _structured_row(
+            label=label,
+            value=value,
+            page_no=int(source["page_no"]),
+            table_index=-1,
+            row_index=int(source["row_index"]),
+            raw_rows=[source],
+        )
+        row["source_method"] = CROSS_PAGE_SYNTH_SOURCE_METHOD
+        rows.append(row)
+    return rows
+
+
+def _raw_group_label_line(label: str, lines: list[dict[str, Any]]) -> dict[str, Any]:
+    specs = _label_token_specs([label])
+    for line in lines:
+        tokens = [_norm_word_token(str(word.get("text", "") or "")) for word in line.get("words", []) or []]
+        if _match_label_tokens(tokens, 0, specs) is not None:
+            return line
+    return lines[0] if lines else {"page_no": 0, "line_index": 0, "text": ""}
+
+
+def _raw_text_source_record(line: dict[str, Any], label: str, value: str) -> dict[str, Any]:
+    return {
+        "page_no": int(line.get("page_no", 0) or 0),
+        "table_index": -1,
+        "row_index": int(line.get("line_index", 0) or 0),
+        "raw_cells": ["", label, value],
+        "raw_text_line": parsing.normalize_space(str(line.get("text", "") or "")),
+    }
+
+
+def _display_group_label(group_key: str) -> str:
+    for label in KNOWN_GROUP_BOUNDARY_LABELS:
+        if _norm_label_key(label) == group_key:
+            return label.title() if label == label.lower() else label
+    return parsing.normalize_space(group_key.title())
+
+
+def _insert_group_by_raw_order(
+    room: dict[str, Any],
+    group: dict[str, Any],
+    raw_order_by_key: dict[str, int],
+    target_order: int,
+) -> None:
+    groups = room.setdefault("groups", [])
+    insert_at = len(groups)
+    for index, existing in enumerate(groups):
+        existing_key = _norm_label_key(existing.get("group_label", ""))
+        existing_order = raw_order_by_key.get(existing_key)
+        if existing_order is not None and existing_order > target_order:
+            insert_at = index
+            break
+    groups.insert(insert_at, group)
+
+
+def _remove_owned_unassigned_text(room: dict[str, Any], owned_values: set[str]) -> None:
+    if not owned_values:
+        return
+    room["notes"] = [
+        note
+        for note in room.get("notes", []) or []
+        if parsing.normalize_space(str(note.get("value") or "")) not in owned_values
+    ]
+    for group in room.get("groups", []) or []:
+        group["rows"] = [
+            row
+            for row in group.get("rows", []) or []
+            if not (_is_diagnostic_row(row) and parsing.normalize_space(str(row.get("value") or "")) in owned_values)
+        ]
+
+
+def _extend_room_page_range(room: dict[str, Any], page_start: Any, page_end: Any) -> None:
+    start = int(page_start or 0)
+    end = int(page_end or start or 0)
+    if not start:
+        return
+    if not room.get("page_start"):
+        room["page_start"] = start
+    room["page_end"] = max(int(room.get("page_end", start) or start), end)
 
 
 def _build_rescue_group_context(
