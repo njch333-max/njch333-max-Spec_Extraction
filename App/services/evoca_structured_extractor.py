@@ -33,9 +33,23 @@ TERMINAL_GROUP_VALUES: frozenset[str] = frozenset(
         "tbc",
     }
 )
+EXTENDED_TERMINAL_GROUP_PREFIXES: tuple[str, ...] = (
+    "not applicable",
+    "not included",
+    "not required",
+    "n/a",
+    "#n/a",
+)
+EXTENDED_TERMINAL_GROUP_VALUES: frozenset[str] = frozenset(
+    {
+        "client to supply & install after handover",
+        "client to supply and install after handover",
+    }
+)
 LOOKUP_ENTRIES_KEY = "__entries__"
 LOOKUP_LINES_KEY = "__raw_text_lines__"
 LINE_MATCH_TOLERANCE = 2.0
+LABEL_COLUMN_X_TOLERANCE = 80.0
 UNASSIGNED_SOURCE_TEXT_LABEL = "Unassigned Source Text"
 APPEND_EXTRA_VALUE_LABEL_KEYS: frozenset[str] = frozenset({"extent"})
 CROSS_PAGE_SYNTH_SOURCE_METHOD = "pdfplumber_raw_text_cross_page"
@@ -1703,7 +1717,9 @@ def _parse_raw_text_pairs_for_group(group: dict[str, Any], block: dict[str, Any]
             next_label_index = len(tokens)
             scan = value_start
             while scan < len(tokens):
-                if _match_label_tokens(tokens, scan, label_specs) is not None:
+                if _match_label_tokens(tokens, scan, label_specs) is not None and _is_same_line_label_boundary(
+                    words, index, scan
+                ):
                     next_label_index = scan
                     break
                 scan += 1
@@ -1718,6 +1734,15 @@ def _parse_raw_text_pairs_for_group(group: dict[str, Any], block: dict[str, Any]
                 break
             index = next_label_index
     return lookup
+
+
+def _is_same_line_label_boundary(words: list[dict[str, Any]], current_label_index: int, candidate_label_index: int) -> bool:
+    try:
+        current_x0 = float(words[current_label_index].get("x0", 0.0) or 0.0)
+        candidate_x0 = float(words[candidate_label_index].get("x0", 0.0) or 0.0)
+    except (IndexError, TypeError, ValueError, AttributeError):
+        return True
+    return candidate_x0 <= current_x0 + LABEL_COLUMN_X_TOLERANCE
 
 
 def _label_token_specs(labels: list[str]) -> list[tuple[str, tuple[str, ...]]]:
@@ -1834,8 +1859,10 @@ def _rescue_group(
     group_lookup = _next_group_rescue_lookup(group, group_context)
     anchor_value = rows[0].get("value", "")
     if _is_terminal_group_value(anchor_value):
+        _next_group_raw_text_lookup(group, group_context)
         return
     if _promote_group_anchor_value(group, rows, consumable, diagnostics, group_lookup):
+        _next_group_raw_text_lookup(group, group_context)
         return
     raw_text_lookup = _next_group_raw_text_lookup(group, group_context)
     if _shift_override_eligible(group, rows, consumable, group_lookup):
@@ -2027,7 +2054,14 @@ def _update_statistics(document: dict[str, Any]) -> None:
 
 
 def _is_terminal_group_value(value: Any) -> bool:
-    return parsing.normalize_space(str(value or "")).strip().lower() in TERMINAL_GROUP_VALUES
+    text = parsing.normalize_space(str(value or "")).strip().lower()
+    if text in TERMINAL_GROUP_VALUES or text in EXTENDED_TERMINAL_GROUP_VALUES:
+        return True
+    return any(
+        text.startswith(prefix)
+        and (len(text) == len(prefix) or not text[len(prefix)].isalnum())
+        for prefix in EXTENDED_TERMINAL_GROUP_PREFIXES
+    )
 
 
 def _is_known_group_boundary_label(label: Any) -> bool:

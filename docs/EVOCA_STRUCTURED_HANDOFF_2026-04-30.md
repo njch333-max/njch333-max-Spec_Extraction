@@ -139,6 +139,9 @@ Last full test after Bug 4:
 | Bug 8 | Fixed 2026-04-30 | Extra values became fake business row label `Continuation` | `Continuation = WC`, `Gunmetal`, `Splashback window**` | Medium-high | 3 |
 | Bug 7 | Fixed 2026-04-30 | Text-strategy missed valid label/value pairs; bounded raw-text fallback now fills source-backed blank rows | EVOC447 multiple Benchtops `Colour` rows blank; Shower Mixer/Rail blank | Medium-high | 4 |
 | Bug 9 | Fixed 2026-04-30 | `pdfplumber` table rows drop group anchors at page edges; first values on the next page become notes or diagnostics | EVOC473 `Powder / Benchtops`, `Ensuite 2 / Basin Mixer`, `Ensuite 5 / Basin Mixer` | High | 5 |
+| Bug 10 | Fixed 2026-04-30 | Terminal group values with source-native suffixes were not promoted to group anchors and were later cleared by rescue | EVOC482 Kitchen/Butlers `Benchtops = Not Applicable - by owner after handover`; EVOC471 `Carpets = Client to supply & install after handover` | Medium-high | 6 |
+| Bug 11 | Fixed 2026-04-30 | Raw-text group cursor could fall behind when terminal/skipped groups returned before advancing the cursor; same-line label words inside value-column product names could also truncate values | EVOC471 page 10 `Powder / Benchtops` and `Powder / Underbench` blank; EVOC471 `Toilet Suite` / appliances product names truncated | High | 7 |
+| Bug 12 | Open, needs fix spec | Wrapped value cells need pairing with following label-only continuation rows instead of becoming anchor plus diagnostics | EVOC482 Kitchen/Butlers `Drawers` `Standard` / `Pot` / `Bin` | Medium-high | 8 |
 
 ## EVOC447 Evidence Already Confirmed
 
@@ -201,6 +204,20 @@ Bug 9 confirmed and fixed:
 - The fix synthesizes only exact source-backed `Benchtops` / `Basin Mixer` groups from raw-text group and child-label evidence, with `source_method = pdfplumber_raw_text_cross_page`.
 - Same-room stale notes or diagnostics that held the recovered values are removed after synthesis to avoid duplicates.
 
+Bug 10 confirmed and fixed:
+
+- EVOC482 page 8/9 has `Kitchen` and `Butlers` `Benchtops` rows whose only value is `Not Applicable - by owner after handover`.
+- EVOC471 page 15 has group-level flooring/carpet terminal values such as `Client to supply & install after handover`.
+- These narrow extended terminal values now become `is_group_anchor` rows. Child rows stay present with blank values.
+- EVOC447/EVOC467/EVOC473 business row diff against the Bug 9 reference is zero.
+
+Bug 11 evidence:
+
+- Evidence dump: `tmp/evoca_bug11_evidence/evoc471_page10_powder_evidence.json` and `.txt`.
+- Page 10 raw-text blocks contain the missing Powder values, including `Manufacturer Quantum Quartz`, `Colour Verona Gold WK Stone`, `Manufacturer Polytec`, and `Handles Client to supply & install after handover`.
+- The failure is cursor alignment: terminal/skipped `Ensuite 2` groups return before advancing the raw-text cursor, so `Powder` consumes an empty `Ensuite 2` block instead of its own block.
+- The same cursor fix also restores EVOC471 page 13 `Ensuite / Accessories` values. Raw-text fallback now keeps label-like words inside the value column, so product text such as `Lana Rimless Back to Wall Toilet Suite Gloss White (6002-R-W)` is not truncated at the inner `Toilet Suite` words.
+
 ## Recommended Next Work
 
 Do **not** proceed to adapter or fast path.
@@ -212,11 +229,13 @@ Completed parser pass on 2026-04-30:
 3. Bug 7 fixed: bounded raw-text fallback fills source-backed values missed by table and text-grid extraction.
 4. Bug 8 fixed: literal `Continuation` rows are removed; safe wraps are merged and unsafe extras become `Unassigned Source Text` diagnostics.
 5. Bug 9 fixed: narrow cross-page raw-text synthesis restores table-dropped `Benchtops` and `Basin Mixer` groups.
+6. Bug 10 fixed: narrow extended terminal group values are promoted to anchor rows instead of being cleared.
+7. Bug 11 fixed: raw-text cursor advances through terminal/skipped repeated groups, and label-like product wording in the value column is preserved.
 
 Next focused task should remain evidence-first and standalone-parser only:
 
 - Do not proceed to adapter or fast path without explicit approval.
-- If another issue is raised, confirm the source PDF and current `tmp/evoca_structured_bug9/` JSON before changing code.
+- Keep Bug 12 separate unless future evidence proves it shares a mechanism with cursor alignment.
 
 ## Suggested Next Chat Prompt
 

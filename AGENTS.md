@@ -68,6 +68,9 @@ If a change affects user-visible behavior, architecture, storage, deployment, wo
       - standalone Evoca overflow values must not be emitted as a literal `Continuation` business label; append only source-backed wraps and otherwise preserve unsafe extras as diagnostics.
       - standalone Evoca cross-page recovery may synthesize only source-backed missing groups from exact raw-text group and child-label evidence; keep it narrow and observable with diagnostics.
       - bounded raw-text fallback may fill only blank row-local values inside the current group bbox; it must not overwrite table/text-grid values or borrow generic labels across groups.
+      - terminal Evoca group values, including narrow source-native extensions such as `Not Applicable - by owner after handover`, belong on `is_group_anchor` rows with child rows left blank.
+      - raw-text fallback cursors must still advance through terminal or promoted-anchor groups so later repeated groups do not consume stale blocks.
+      - raw-text fallback must not truncate value-column product text merely because the product contains words that also appear as current-group labels.
     - `Clarendon`
       - `Drawings and Colours / Colour Schedule`: heuristic-grid-first, not Vision-first
       - AFC/supplement `sinkware / appliances / flooring`: table/grid-first without default Vision

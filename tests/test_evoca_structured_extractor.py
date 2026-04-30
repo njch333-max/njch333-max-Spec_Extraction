@@ -82,6 +82,59 @@ def test_evoca_structured_preserves_not_applicable_rows() -> None:
     assert any(row["value"] == "Not Applicable" for row in rows)
 
 
+def test_evoca_structured_promotes_extended_terminal_group_value() -> None:
+    structured = evoca_structured_extractor.extract_evoca_pages(
+        [
+            _page(
+                1,
+                [
+                    ["15 CABINETS", None, None, ""],
+                    ["", "Kitchen", None, None],
+                    [
+                        "-",
+                        "Benchtops\nManufacturer\nColour\nIsland Colour\nEdge Profile",
+                        "Not Applicable - by owner after handover",
+                        None,
+                    ],
+                ],
+            )
+        ],
+        source_pdf="evoca.pdf",
+    )
+
+    rows = structured["sections"][0]["rooms"][0]["groups"][0]["rows"]
+    assert [(row["label"], row["value"], bool(row.get("is_group_anchor"))) for row in rows] == [
+        ("Benchtops", "Not Applicable - by owner after handover", True),
+        ("Manufacturer", "", False),
+        ("Colour", "", False),
+        ("Island Colour", "", False),
+        ("Edge Profile", "", False),
+    ]
+
+
+def test_evoca_structured_promotes_client_supply_group_terminal_value() -> None:
+    structured = evoca_structured_extractor.extract_evoca_pages(
+        [
+            _page(
+                1,
+                [
+                    ["25 CARPET", None, None, ""],
+                    ["-", "Carpets\nType\nColour\nUnderlay", "Client to supply & install after handover", None],
+                ],
+            )
+        ],
+        source_pdf="evoca.pdf",
+    )
+
+    rows = structured["sections"][0]["groups"][0]["rows"]
+    assert [(row["label"], row["value"], bool(row.get("is_group_anchor"))) for row in rows] == [
+        ("Carpets", "Client to supply & install after handover", True),
+        ("Type", "", False),
+        ("Colour", "", False),
+        ("Underlay", "", False),
+    ]
+
+
 def test_evoca_structured_carries_section_across_pages() -> None:
     structured = evoca_structured_extractor.extract_evoca_pages(
         [
@@ -361,6 +414,60 @@ def test_evoca_structured_raw_text_fallback_fills_group_bounded_missing_pair() -
     assert structured["diagnostics"]["raw_text_fallback_pairs_filled"] == 1
 
 
+def test_evoca_structured_raw_text_cursor_advances_past_terminal_group() -> None:
+    structured = evoca_structured_extractor.extract_evoca_pages(
+        [
+            _page(
+                1,
+                [
+                    ["15 CABINETS", None, None, ""],
+                    ["", "Ensuite", None, None],
+                    ["-", "Benchtops\nManufacturer\nColour\nEdge Profile", "", None],
+                    ["", "Ensuite 2", None, None],
+                    ["-", "Benchtops\nManufacturer\nColour\nEdge Profile", "Not Applicable", None],
+                    ["", "Powder", None, None],
+                    ["-", "Benchtops\nManufacturer\nColour\nEdge Profile", "", None],
+                ],
+            )
+        ],
+        source_pdf="evoca.pdf",
+    )
+
+    line_key = evoca_structured_extractor.LOOKUP_LINES_KEY
+    evoca_structured_extractor._rescue_missing_values(
+        structured,
+        {
+            1: {
+                line_key: [
+                    _raw_line(100, [("Ensuite", 40)]),
+                    _raw_line(120, [("-", 30), ("Benchtops", 45)]),
+                    _raw_line(135, [("Manufacturer", 70), ("Quantum", 200), ("Quartz", 238)]),
+                    _raw_line(150, [("Colour", 70), ("Verona", 200), ("Gold", 235)]),
+                    _raw_line(165, [("Edge", 70), ("Profile", 95), ("20mm", 200), ("Arissed", 228)]),
+                    _raw_line(200, [("Ensuite", 40), ("2", 78)]),
+                    _raw_line(220, [("-", 30), ("Benchtops", 45), ("Not", 200), ("Applicable", 220)]),
+                    _raw_line(235, [("Manufacturer", 70)]),
+                    _raw_line(250, [("Colour", 70)]),
+                    _raw_line(265, [("Edge", 70), ("Profile", 95)]),
+                    _raw_line(300, [("Powder", 40)]),
+                    _raw_line(320, [("-", 30), ("Benchtops", 45)]),
+                    _raw_line(335, [("Manufacturer", 70), ("Quantum", 200), ("Quartz", 238)]),
+                    _raw_line(350, [("Colour", 70), ("Polar", 200)]),
+                    _raw_line(365, [("Edge", 70), ("Profile", 95), ("20mm", 200), ("Arissed", 228)]),
+                ],
+            }
+        },
+    )
+
+    powder = structured["sections"][0]["rooms"][2]
+    assert powder["room_label"] == "Powder"
+    assert [(row["label"], row["value"], row["source_method"]) for row in powder["groups"][0]["rows"]] == [
+        ("Manufacturer", "Quantum Quartz", "pdfplumber_raw_text_fallback"),
+        ("Colour", "Polar", "pdfplumber_raw_text_fallback"),
+        ("Edge Profile", "20mm Arissed", "pdfplumber_raw_text_fallback"),
+    ]
+
+
 def test_evoca_structured_raw_text_fallback_does_not_cross_group_boundary() -> None:
     structured = evoca_structured_extractor.extract_evoca_pages(
         [
@@ -468,6 +575,59 @@ def test_evoca_structured_raw_text_fallback_uses_label_owned_next_line_value() -
         ("Mixer", "Adler Soho 54380", "pdfplumber_raw_text_fallback"),
         ("Shower Rail / Rose", "Alder Dual Shower Round Rail", "pdfplumber_raw_text_fallback"),
         ("Shower Screen", "Semi-frameless with Clear Toughened Glass", "pdfplumber_text_rescue"),
+    ]
+
+
+def test_evoca_structured_raw_text_fallback_keeps_label_words_inside_value_column() -> None:
+    structured = evoca_structured_extractor.extract_evoca_pages(
+        [
+            _page(
+                1,
+                [
+                    ["20 PLUMBING FIXTURES & TAPWARE", None, None, ""],
+                    ["", "Ensuite", None, None],
+                    ["-", "Accessories\nToilet Suite\nFloor Waste", "", None],
+                ],
+            )
+        ],
+        source_pdf="evoca.pdf",
+    )
+
+    line_key = evoca_structured_extractor.LOOKUP_LINES_KEY
+    evoca_structured_extractor._rescue_missing_values(
+        structured,
+        {
+            1: {
+                line_key: [
+                    _raw_line(100, [("Ensuite", 40)]),
+                    _raw_line(120, [("-", 30), ("Accessories", 45)]),
+                    _raw_line(
+                        135,
+                        [
+                            ("Toilet", 70),
+                            ("Suite", 105),
+                            ("Lana", 200),
+                            ("Rimless", 226),
+                            ("Back", 266),
+                            ("to", 291),
+                            ("Wall", 306),
+                            ("Toilet", 333),
+                            ("Suite", 368),
+                            ("Gloss", 400),
+                            ("White", 430),
+                            ("(6002-R-W)", 462),
+                        ],
+                    ),
+                    _raw_line(150, [("Floor", 70), ("Waste", 100), ("Tile", 200), ("Insert", 225)]),
+                ],
+            }
+        },
+    )
+
+    group = structured["sections"][0]["rooms"][0]["groups"][0]
+    assert [(row["label"], row["value"]) for row in group["rows"]] == [
+        ("Toilet Suite", "Lana Rimless Back to Wall Toilet Suite Gloss White (6002-R-W)"),
+        ("Floor Waste", "Tile Insert"),
     ]
 
 
