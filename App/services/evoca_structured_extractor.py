@@ -53,6 +53,7 @@ LABEL_COLUMN_X_TOLERANCE = 80.0
 UNASSIGNED_SOURCE_TEXT_LABEL = "Unassigned Source Text"
 APPEND_EXTRA_VALUE_LABEL_KEYS: frozenset[str] = frozenset({"extent"})
 CROSS_PAGE_SYNTH_SOURCE_METHOD = "pdfplumber_raw_text_cross_page"
+DRAWERS_CHILD_LABEL_KEYS: frozenset[str] = frozenset({"standard", "pot", "bin"})
 CROSS_PAGE_SYNTH_GROUP_LABELS: dict[str, tuple[str, ...]] = {
     "basin mixer": ("Type", "Location"),
     "benchtops": (
@@ -80,6 +81,7 @@ KNOWN_GROUP_BOUNDARY_LABELS: frozenset[str] = frozenset(
         "cctv",
         "contrasting facings",
         "ducted reverse cycle",
+        "drawers",
         "fridge water connection",
         "garden taps",
         "gas type",
@@ -482,7 +484,9 @@ def _consume_group(
                 child_labels.extend(center_lines)
                 values.extend(value_lines)
             elif center_lines:
-                if values:
+                if _should_pair_label_only_rows_with_wrapped_values(group_label, center_lines, values):
+                    child_labels.extend(center_lines)
+                elif values:
                     values.extend(center_lines)
                 else:
                     child_labels.extend(center_lines)
@@ -715,6 +719,15 @@ def _decompose_meta(labels: list[str], values: list[str]) -> dict[str, int]:
         "labels_count": len([_clean_label(label) for label in labels if _clean_label(label)]),
         "values_count": len([parsing.normalize_space(value) for value in values if parsing.normalize_space(value)]),
     }
+
+
+def _should_pair_label_only_rows_with_wrapped_values(group_label: str, labels: list[str], values: list[str]) -> bool:
+    if _norm_label_key(group_label) != "drawers":
+        return False
+    if not values:
+        return False
+    label_keys = [_norm_label_key(label) for label in labels if _norm_label_key(label)]
+    return bool(label_keys) and all(label_key in DRAWERS_CHILD_LABEL_KEYS for label_key in label_keys)
 
 
 def _coalesce_wrapped_value_lines(group_label: str, labels: list[str], values: list[str]) -> list[str]:

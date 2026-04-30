@@ -71,6 +71,7 @@ If a change affects user-visible behavior, architecture, storage, deployment, wo
       - terminal Evoca group values, including narrow source-native extensions such as `Not Applicable - by owner after handover`, belong on `is_group_anchor` rows with child rows left blank.
       - raw-text fallback cursors must still advance through terminal or promoted-anchor groups so later repeated groups do not consume stale blocks.
       - raw-text fallback must not truncate value-column product text merely because the product contains words that also appear as current-group labels.
+      - Evoca `Drawers` rows can express `Standard`, `Pot`, and `Bin` as label-only continuation rows after a wrapped value cell; pair those labels to the wrapped values and keep repeated Drawers groups bounded.
     - `Clarendon`
       - `Drawings and Colours / Colour Schedule`: heuristic-grid-first, not Vision-first
       - AFC/supplement `sinkware / appliances / flooring`: table/grid-first without default Vision

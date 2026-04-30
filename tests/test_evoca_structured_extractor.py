@@ -468,6 +468,90 @@ def test_evoca_structured_raw_text_cursor_advances_past_terminal_group() -> None
     ]
 
 
+def test_evoca_structured_pairs_drawer_label_only_rows_with_wrapped_values() -> None:
+    structured = evoca_structured_extractor.extract_evoca_pages(
+        [
+            _page(
+                1,
+                [
+                    ["15 CABINETS", None, None, ""],
+                    ["", "Kitchen", None, None],
+                    [
+                        "-",
+                        "Drawers",
+                        (
+                            "1x Set of 4 Drawers with Cutlery Tray to 1st Drawer, 5 x banks of 3 drawers\n"
+                            "2 x pot drawers below wall oven/microwave towers\n"
+                            "2 x 29L bins"
+                        ),
+                        None,
+                    ],
+                    ["", "Standard", None, None],
+                    ["", "Pot", None, None],
+                    ["", "Bin", None, None],
+                ],
+            )
+        ],
+        source_pdf="evoca.pdf",
+    )
+
+    rows = structured["sections"][0]["rooms"][0]["groups"][0]["rows"]
+    assert [(row["label"], row["value"]) for row in rows] == [
+        ("Standard", "1x Set of 4 Drawers with Cutlery Tray to 1st Drawer, 5 x banks of 3 drawers"),
+        ("Pot", "2 x pot drawers below wall oven/microwave towers"),
+        ("Bin", "2 x 29L bins"),
+    ]
+    assert all(row["label"] != "Unassigned Source Text" for row in rows)
+
+
+def test_evoca_structured_raw_text_fallback_bounds_repeated_drawer_groups() -> None:
+    structured = evoca_structured_extractor.extract_evoca_pages(
+        [
+            _page(
+                1,
+                [
+                    ["15 CABINETS", None, None, ""],
+                    ["", "Butlers", None, None],
+                    ["-", "Drawers\nStandard\nPot\nBin", "", None],
+                    ["", "Laundry", None, None],
+                    ["", "Drawers\nStandard", "1 x drawer below laminated laundry tower", None],
+                ],
+            )
+        ],
+        source_pdf="evoca.pdf",
+    )
+
+    line_key = evoca_structured_extractor.LOOKUP_LINES_KEY
+    evoca_structured_extractor._rescue_missing_values(
+        structured,
+        {
+            1: {
+                line_key: [
+                    _raw_line(100, [("Butlers", 40)]),
+                    _raw_line(120, [("-", 30), ("Drawers", 45)]),
+                    _raw_line(135, [("Standard", 70), ("1x", 200), ("Set", 218), ("of", 238), ("4", 252)]),
+                    _raw_line(150, [("Pot", 70), ("5", 200), ("x", 212), ("Banks", 224), ("of", 255), ("3", 270), ("Drawers", 282)]),
+                    _raw_line(165, [("Bin", 70), ("2", 200), ("x", 212), ("29L", 224), ("Bins", 246)]),
+                    _raw_line(200, [("Laundry", 40)]),
+                    _raw_line(220, [("Drawers", 45)]),
+                    _raw_line(235, [("Standard", 70), ("1", 200), ("x", 212), ("drawer", 224), ("below", 258)]),
+                ],
+            }
+        },
+    )
+
+    butlers = structured["sections"][0]["rooms"][0]
+    laundry = structured["sections"][0]["rooms"][1]
+    assert [(row["label"], row["value"], row["source_method"]) for row in butlers["groups"][0]["rows"]] == [
+        ("Standard", "1x Set of 4", "pdfplumber_raw_text_fallback"),
+        ("Pot", "5 x Banks of 3 Drawers", "pdfplumber_raw_text_fallback"),
+        ("Bin", "2 x 29L Bins", "pdfplumber_raw_text_fallback"),
+    ]
+    assert [(row["label"], row["value"]) for row in laundry["groups"][0]["rows"]] == [
+        ("Standard", "1 x drawer below laminated laundry tower")
+    ]
+
+
 def test_evoca_structured_raw_text_fallback_does_not_cross_group_boundary() -> None:
     structured = evoca_structured_extractor.extract_evoca_pages(
         [

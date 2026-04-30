@@ -141,7 +141,7 @@ Last full test after Bug 4:
 | Bug 9 | Fixed 2026-04-30 | `pdfplumber` table rows drop group anchors at page edges; first values on the next page become notes or diagnostics | EVOC473 `Powder / Benchtops`, `Ensuite 2 / Basin Mixer`, `Ensuite 5 / Basin Mixer` | High | 5 |
 | Bug 10 | Fixed 2026-04-30 | Terminal group values with source-native suffixes were not promoted to group anchors and were later cleared by rescue | EVOC482 Kitchen/Butlers `Benchtops = Not Applicable - by owner after handover`; EVOC471 `Carpets = Client to supply & install after handover` | Medium-high | 6 |
 | Bug 11 | Fixed 2026-04-30 | Raw-text group cursor could fall behind when terminal/skipped groups returned before advancing the cursor; same-line label words inside value-column product names could also truncate values | EVOC471 page 10 `Powder / Benchtops` and `Powder / Underbench` blank; EVOC471 `Toilet Suite` / appliances product names truncated | High | 7 |
-| Bug 12 | Open, needs fix spec | Wrapped value cells need pairing with following label-only continuation rows instead of becoming anchor plus diagnostics | EVOC482 Kitchen/Butlers `Drawers` `Standard` / `Pot` / `Bin` | Medium-high | 8 |
+| Bug 12 | Fixed 2026-04-30 | Wrapped value cells needed pairing with following label-only continuation rows; `Drawers` was also missing from raw-text group boundaries | EVOC482 Kitchen/Butlers `Drawers` `Standard` / `Pot` / `Bin` | Medium-high | 8 |
 
 ## EVOC447 Evidence Already Confirmed
 
@@ -218,6 +218,12 @@ Bug 11 evidence:
 - The failure is cursor alignment: terminal/skipped `Ensuite 2` groups return before advancing the raw-text cursor, so `Powder` consumes an empty `Ensuite 2` block instead of its own block.
 - The same cursor fix also restores EVOC471 page 13 `Ensuite / Accessories` values. Raw-text fallback now keeps label-like words inside the value column, so product text such as `Lana Rimless Back to Wall Toilet Suite Gloss White (6002-R-W)` is not truncated at the inner `Toilet Suite` words.
 
+Bug 12 confirmed and fixed:
+
+- EVOC482 page 8 `Kitchen / Drawers` table row has three wrapped value lines in the value cell, followed by label-only `Standard`, `Pot`, and `Bin` rows. These are now paired as child rows rather than emitted as an anchor plus `Unassigned Source Text` diagnostics.
+- EVOC482 page 9 `Butlers / Drawers` has `Standard`, `Pot`, and `Bin` values in raw text but missing from the table extraction. Adding `Drawers` to group-boundary detection lets raw-text fallback fill the correct Butlers block instead of borrowing the later Laundry drawer value.
+- The same source-backed raw-text boundary fix restores blank `Butlers / Drawers` values in EVOC447 and EVOC471.
+
 ## Recommended Next Work
 
 Do **not** proceed to adapter or fast path.
@@ -231,11 +237,12 @@ Completed parser pass on 2026-04-30:
 5. Bug 9 fixed: narrow cross-page raw-text synthesis restores table-dropped `Benchtops` and `Basin Mixer` groups.
 6. Bug 10 fixed: narrow extended terminal group values are promoted to anchor rows instead of being cleared.
 7. Bug 11 fixed: raw-text cursor advances through terminal/skipped repeated groups, and label-like product wording in the value column is preserved.
+8. Bug 12 fixed: Drawers `Standard` / `Pot` / `Bin` wrapped values are paired correctly and bounded raw-text fallback owns repeated Drawers groups.
 
 Next focused task should remain evidence-first and standalone-parser only:
 
 - Do not proceed to adapter or fast path without explicit approval.
-- Keep Bug 12 separate unless future evidence proves it shares a mechanism with cursor alignment.
+- Next candidate work should come from new PDF evidence; do not start adapter or fast path wiring from the standalone JSON alone.
 
 ## Suggested Next Chat Prompt
 
