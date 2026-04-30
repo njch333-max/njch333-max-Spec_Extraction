@@ -116,7 +116,26 @@ Rows whose value is filled from the secondary text-aligned table pass use:
 "source_method": "pdfplumber_text_rescue"
 ```
 
+Rows whose value is filled from the bounded raw-text word layer use:
+
+```json
+"source_method": "pdfplumber_raw_text_fallback"
+```
+
 The rescue pass only fills empty parser values and leaves existing table-derived values intact.
+
+When the visible group heading itself has a value, the parser promotes that value to a group anchor row:
+
+```json
+{
+  "label": "Overhead Cupboards",
+  "value": "* Overhead Cupboard above Oven to be Push to Open",
+  "is_group_anchor": true,
+  "source_method": "pdfplumber_text_rescue"
+}
+```
+
+Child rows remain row-local beneath that anchor, for example `Manufacturer`, `Colour & Finish`, and `Handles`.
 
 ## Boundary Rules
 
@@ -130,6 +149,7 @@ Room detection:
 
 - A room boundary is a known Evoca room label in the second cell with no meaningful value cell.
 - The parser does not treat room boundaries as material rows.
+- Single-line room notes before a known group boundary remain room notes. For example, `No shelf to cupboard underneath sink` must not become a parent group that swallows the following `Benchtops` group.
 
 Group detection:
 
@@ -138,7 +158,11 @@ Group detection:
 - Values come from the group value cell plus following continuation rows until the next section, room, or group boundary.
 - Some Evoca rows visually start a new group without a leading `-`, for example `Overhead Cupboards` under cabinets. v0 detects these as unanchored groups when the label cell has more lines than the value cell.
 - Terminal group values such as `Not Applicable`, `Not Included`, `Not Required`, `N/A`, `#N/A`, and `TBC` apply to the group anchor row. Child property rows remain present with blank values so the Excel QA workbook stays close to the source PDF.
+- Non-terminal group-level values are detected from the secondary text-grid lookup when `group_label -> value` exists on the same source row. The group value becomes an `is_group_anchor` row and child property rows are realigned from the text-grid lookup.
 - The secondary rescue lookup uses `pdfplumber` with line-based vertical boundaries and text-based horizontal boundaries. It is a value backfill, not a new section/room detector.
+- When the text-grid pass exposes group headings, rescue candidates are bounded to the matching group block before falling back to page-wide lookup. Generic labels such as `Model`, `Type`, `Location`, `Handles`, and `Colour` must not be reused across later groups on the same page.
+- If both the table pass and text-grid pass miss a value, the raw-text fallback may fill the blank row only inside that group bbox. It matches exact current-group labels, prefers same-line values, may use the immediate next line only when that line is not another current-group label, and rejects footer noise such as `Page ... Client Initials`.
+- Diagnostics include `raw_text_fallback_groups` and `raw_text_fallback_pairs_filled` so QA can see when the raw-text fallback changed the artifact.
 
 Color and visual styling:
 

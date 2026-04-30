@@ -29,6 +29,9 @@ If a change affects user-visible behavior, architecture, storage, deployment, wo
 - Git helper tools live under `tools/`
 - Project docs live at the project root
 
+## Collaboration Preference
+- Use Chinese by default when communicating with Jason in chat. This preference applies to assistant responses only; keep application UI, exports, code identifiers, and project documentation in English unless Jason explicitly asks otherwise.
+
 ## Working Rules
 1. Keep the web UI in English only.
 2. Preserve the canonical extraction schema unless the docs are updated together.
@@ -61,6 +64,8 @@ If a change affects user-visible behavior, architecture, storage, deployment, wo
       - grouped-row/property-row schedules: table/grid-first so `Manufacturer / Finish / Profile / Colour / Model / Supplier` are treated as columns before mapping
     - `Evoca`
       - finishes/flooring/plumbing/appliance schedules: table/grid-first, then room-local mapping
+      - standalone `evoca_structured_extractor.py` work stays disconnected from production snapshot generation until explicitly approved; wrong source-native JSON values must be fixed in the parser, not hidden in a downstream adapter.
+      - bounded raw-text fallback may fill only blank row-local values inside the current group bbox; it must not overwrite table/text-grid values or borrow generic labels across groups.
     - `Clarendon`
       - `Drawings and Colours / Colour Schedule`: heuristic-grid-first, not Vision-first
       - AFC/supplement `sinkware / appliances / flooring`: table/grid-first without default Vision

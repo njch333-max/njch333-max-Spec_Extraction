@@ -33,6 +33,50 @@ TERMINAL_GROUP_VALUES: frozenset[str] = frozenset(
         "tbc",
     }
 )
+LOOKUP_ENTRIES_KEY = "__entries__"
+LOOKUP_LINES_KEY = "__raw_text_lines__"
+LINE_MATCH_TOLERANCE = 2.0
+KNOWN_GROUP_BOUNDARY_LABELS: frozenset[str] = frozenset(
+    {
+        "accessories",
+        "accessories & toilet suite",
+        "alarm system",
+        "appliances",
+        "basin",
+        "basin mixer",
+        "bath",
+        "bath mixer / spout",
+        "benchtops",
+        "carpets",
+        "cctv",
+        "contrasting facings",
+        "ducted reverse cycle",
+        "fridge water connection",
+        "garden taps",
+        "gas type",
+        "home automation",
+        "hot water unit",
+        "integrated appliances",
+        "main floor tile",
+        "mirrors",
+        "overhead cupboards",
+        "pantry doors",
+        "shower",
+        "sink",
+        "sink mixer",
+        "solar pv system",
+        "switch plates / gpo's",
+        "tub",
+        "tub mixer",
+        "tv antenna",
+        "underbench",
+        "underbench including island",
+        "vertical / roller blinds",
+        "vinyl, hybrid or timber",
+        "washing machine taps",
+        "wet area",
+    }
+)
 WORKBOOK_HEADERS: tuple[str, ...] = ("Page", "Order", "Room", "Group", "Label", "Value", "Anchor", "Source Text")
 WORKBOOK_COLUMN_WIDTHS: tuple[int, ...] = (6, 7, 22, 28, 32, 44, 8, 60)
 HEADER_FILL = "222222"
@@ -73,6 +117,11 @@ def extract_evoca_pages(
             "shift_override_groups": 0,
             "shift_overrides_applied": 0,
             "shift_clears_applied": 0,
+            "anchor_value_groups": 0,
+            "anchor_values_promoted": 0,
+            "anchor_value_child_realignments": 0,
+            "raw_text_fallback_groups": 0,
+            "raw_text_fallback_pairs_filled": 0,
         },
         "statistics": {
             "page_count": len(pages),
@@ -259,6 +308,8 @@ def detect_unanchored_parent_header(table: list[list[str]], row_index: int) -> b
     if not detect_group_label(next_row) or _value_text(next_row):
         return False
     next_labels = _clean_label_lines(_cell(next_row, 1))
+    if next_labels and _is_known_group_boundary_label(next_labels[0]):
+        return False
     return len(next_labels) >= 2
 
 
@@ -806,7 +857,16 @@ def _build_summary_sheet(
     if diagnostics:
         sheet.append(["Diagnostics", ""])
         _style_summary_pair(sheet, sheet.max_row, styles)
-        for key in ("shift_override_groups", "shift_overrides_applied", "shift_clears_applied"):
+        for key in (
+            "shift_override_groups",
+            "shift_overrides_applied",
+            "shift_clears_applied",
+            "anchor_value_groups",
+            "anchor_values_promoted",
+            "anchor_value_child_realignments",
+            "raw_text_fallback_groups",
+            "raw_text_fallback_pairs_filled",
+        ):
             sheet.append([key, diagnostics.get(key, 0)])
             _style_summary_pair(sheet, sheet.max_row, styles)
 
@@ -941,44 +1001,117 @@ def _is_note_row(row: dict[str, Any], group_label: str) -> bool:
     return parsing.normalize_space(str(row.get("label", "") or "")).lower() in {"note", "section note"}
 
 
-def _build_value_lookup(pdf_path: Path) -> dict[int, dict[str, list[str]]]:
+def _build_value_lookup(pdf_path: Path) -> dict[int, dict[str, Any]]:
     import pdfplumber
 
-    lookup: dict[int, dict[str, list[str]]] = {}
+    lookup: dict[int, dict[str, Any]] = {}
     with pdfplumber.open(str(pdf_path)) as pdf:
         for page_index, page in enumerate(pdf.pages, start=1):
-            page_lookup: dict[str, list[str]] = {}
+            page_lookup: dict[str, Any] = {}
+            entries: list[dict[str, Any]] = []
             text_tables = page.extract_tables(
                 table_settings={
                     "vertical_strategy": "lines",
                     "horizontal_strategy": "text",
                 }
             ) or []
-            for table in text_tables:
-                for raw_row in table or []:
-                    pair = _lookup_pair_from_row(raw_row)
-                    if pair is None:
+            for table_index, table in enumerate(text_tables):
+                for row_index, raw_row in enumerate(table or []):
+                    entry = _lookup_entry_from_row(raw_row)
+                    if entry is None:
                         continue
-                    label, value = pair
+                    label, value = entry
                     key = _norm_label_key(label)
                     if not key:
                         continue
-                    page_lookup.setdefault(key, []).append(value)
+                    entries.append(
+                        {
+                            "key": key,
+                            "label": label,
+                            "value": value,
+                            "table_index": table_index,
+                            "row_index": row_index,
+                        }
+                    )
+                    if value:
+                        page_lookup.setdefault(key, []).append(value)
+            if entries:
+                page_lookup[LOOKUP_ENTRIES_KEY] = entries
+            raw_lines = _extract_word_lines(page)
+            if raw_lines:
+                page_lookup[LOOKUP_LINES_KEY] = raw_lines
             if page_lookup:
                 lookup[page_index] = page_lookup
     return lookup
 
 
+def _extract_word_lines(page: Any) -> list[dict[str, Any]]:
+    words = page.extract_words(x_tolerance=1, y_tolerance=3, keep_blank_chars=False) or []
+    normalized_words: list[dict[str, Any]] = []
+    for word in words:
+        text = parsing.normalize_space(str(word.get("text", "") or ""))
+        if not text:
+            continue
+        top = float(word.get("top", 0.0) or 0.0)
+        bottom = float(word.get("bottom", top) or top)
+        normalized_words.append(
+            {
+                "text": text,
+                "x0": float(word.get("x0", 0.0) or 0.0),
+                "x1": float(word.get("x1", 0.0) or 0.0),
+                "top": top,
+                "bottom": bottom,
+                "center": (top + bottom) / 2.0,
+            }
+        )
+    normalized_words.sort(key=lambda item: (item["center"], item["x0"]))
+
+    lines: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    for word in normalized_words:
+        if current is None or abs(float(word["center"]) - float(current["center"])) > LINE_MATCH_TOLERANCE:
+            current = {
+                "top": float(word["top"]),
+                "bottom": float(word["bottom"]),
+                "center": float(word["center"]),
+                "words": [],
+            }
+            lines.append(current)
+        current["words"].append(word)
+        current["top"] = min(float(current["top"]), float(word["top"]))
+        current["bottom"] = max(float(current["bottom"]), float(word["bottom"]))
+        current["center"] = (float(current["top"]) + float(current["bottom"])) / 2.0
+
+    for line in lines:
+        line["words"].sort(key=lambda item: item["x0"])
+        line["text"] = parsing.normalize_space(" ".join(str(word["text"]) for word in line["words"]))
+    return lines
+
+
 def _lookup_pair_from_row(raw_row: Any) -> tuple[str, str] | None:
+    entry = _lookup_entry_from_row(raw_row)
+    if entry is None:
+        return None
+    label, value = entry
+    if not value:
+        return None
+    return label, value
+
+
+def _lookup_entry_from_row(raw_row: Any) -> tuple[str, str] | None:
     if not isinstance(raw_row, (list, tuple)):
         return None
     cells = [parsing.normalize_space(str(cell).replace("\x00", " ")) if cell is not None else "" for cell in raw_row]
     non_empty = [cell for cell in cells if cell]
-    if len(non_empty) != 2:
+    if len(non_empty) == 1:
+        label = _clean_label(non_empty[0])
+        value = ""
+    elif len(non_empty) == 2:
+        label = _clean_label(non_empty[0])
+        value = parsing.normalize_space(non_empty[1])
+    else:
         return None
-    label = _clean_label(non_empty[0])
-    value = parsing.normalize_space(non_empty[1])
-    if not label or not value:
+    if not label:
         return None
     if label in {"-", "–", "—"}:
         return None
@@ -987,38 +1120,401 @@ def _lookup_pair_from_row(raw_row: Any) -> tuple[str, str] | None:
     return label, value
 
 
-def _rescue_missing_values(structured: dict[str, Any], lookup: dict[int, dict[str, list[str]]]) -> None:
-    consumable = {page: {key: list(values) for key, values in page_values.items()} for page, page_values in lookup.items()}
+def _rescue_missing_values(structured: dict[str, Any], lookup: dict[int, dict[str, Any]]) -> None:
+    consumable: dict[int, dict[str, Any]] = {}
+    for page, page_values in lookup.items():
+        page_copy: dict[str, Any] = {}
+        for key, values in page_values.items():
+            if key in {LOOKUP_ENTRIES_KEY, LOOKUP_LINES_KEY}:
+                page_copy[key] = [dict(entry) for entry in values]
+            else:
+                page_copy[key] = list(values)
+        consumable[page] = page_copy
     diagnostics = structured.setdefault("diagnostics", {})
-    for key in ("shift_override_groups", "shift_overrides_applied", "shift_clears_applied"):
+    for key in (
+        "shift_override_groups",
+        "shift_overrides_applied",
+        "shift_clears_applied",
+        "anchor_value_groups",
+        "anchor_values_promoted",
+        "anchor_value_child_realignments",
+        "raw_text_fallback_groups",
+        "raw_text_fallback_pairs_filled",
+    ):
         diagnostics.setdefault(key, 0)
+    group_context = _build_rescue_group_context(structured, consumable)
     for section in structured.get("sections", []) or []:
         for group in section.get("groups", []) or []:
-            _rescue_group(group, consumable, diagnostics)
+            _rescue_group(group, consumable, diagnostics, group_context)
         for room in section.get("rooms", []) or []:
             for group in room.get("groups", []) or []:
-                _rescue_group(group, consumable, diagnostics)
+                _rescue_group(group, consumable, diagnostics, group_context)
+
+
+def _build_rescue_group_context(
+    structured: dict[str, Any],
+    consumable: dict[int, dict[str, Any]],
+) -> dict[str, Any]:
+    boundaries = _collect_rescue_boundaries(structured)
+    blocks_by_page: dict[int, list[dict[str, Any]]] = {}
+    raw_blocks_by_page: dict[int, list[dict[str, Any]]] = {}
+    for page, page_lookup in consumable.items():
+        entries = page_lookup.get(LOOKUP_ENTRIES_KEY) or []
+        raw_lines = page_lookup.get(LOOKUP_LINES_KEY) or []
+        page_boundaries = boundaries.get(page) or {}
+        group_keys = page_boundaries.get("groups", set())
+        if not group_keys:
+            continue
+        room_keys = page_boundaries.get("rooms", set())
+        if entries:
+            blocks = _build_page_group_blocks(entries, group_keys, room_keys)
+            if blocks:
+                blocks_by_page[page] = blocks
+        if raw_lines:
+            raw_blocks = _build_page_raw_text_blocks(raw_lines, group_keys, room_keys)
+            if raw_blocks:
+                raw_blocks_by_page[page] = raw_blocks
+    return {"blocks_by_page": blocks_by_page, "raw_blocks_by_page": raw_blocks_by_page, "cursors": {}, "raw_cursors": {}}
+
+
+def _collect_rescue_boundaries(structured: dict[str, Any]) -> dict[int, dict[str, set[str]]]:
+    boundaries: dict[int, dict[str, set[str]]] = {}
+    for section in structured.get("sections", []) or []:
+        for group in section.get("groups", []) or []:
+            _record_group_boundary(boundaries, group)
+        for room in section.get("rooms", []) or []:
+            room_key = _norm_label_key(room.get("room_label", ""))
+            room_pages = _page_numbers_from_range(room.get("page_start"), room.get("page_end"))
+            for page in room_pages:
+                boundaries.setdefault(page, {"groups": set(), "rooms": set()})["rooms"].add(room_key)
+            for group in room.get("groups", []) or []:
+                _record_group_boundary(boundaries, group)
+    return boundaries
+
+
+def _record_group_boundary(boundaries: dict[int, dict[str, set[str]]], group: dict[str, Any]) -> None:
+    group_key = _norm_label_key(group.get("group_label", ""))
+    if not group_key or not _is_known_group_boundary_label(group_key):
+        return
+    pages = {
+        int(raw.get("page_no", 0) or 0)
+        for raw in group.get("raw_rows", []) or []
+        if int(raw.get("page_no", 0) or 0)
+    }
+    if not pages:
+        pages = _page_numbers_from_range(group.get("page_start"), group.get("page_end"))
+    for page in pages:
+        boundaries.setdefault(page, {"groups": set(), "rooms": set()})["groups"].add(group_key)
+
+
+def _page_numbers_from_range(start: Any, end: Any) -> set[int]:
+    start_page = int(start or 0)
+    end_page = int(end or start_page or 0)
+    if not start_page:
+        return set()
+    return set(range(start_page, max(start_page, end_page) + 1))
+
+
+def _build_page_group_blocks(
+    entries: list[dict[str, Any]],
+    group_keys: set[str],
+    room_keys: set[str],
+) -> list[dict[str, Any]]:
+    blocks: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    for entry in entries:
+        key = str(entry.get("key", "") or "")
+        if not key:
+            continue
+        value = parsing.normalize_space(str(entry.get("value", "") or ""))
+        if key in room_keys:
+            current = None
+            continue
+        if key in group_keys:
+            current = {"group_key": key, "values": {}}
+            blocks.append(current)
+            if value:
+                current["values"].setdefault(key, []).append(value)
+            continue
+        if current is not None and value:
+            current["values"].setdefault(key, []).append(value)
+    return blocks
+
+
+def _build_page_raw_text_blocks(
+    raw_lines: list[dict[str, Any]],
+    group_keys: set[str],
+    room_keys: set[str],
+) -> list[dict[str, Any]]:
+    boundary_lines: list[dict[str, Any]] = []
+    for index, line in enumerate(raw_lines):
+        words = line.get("words", []) or []
+        group_key = _match_group_boundary_key(words, group_keys)
+        room_key = _match_room_boundary_key(line, room_keys)
+        is_section = detect_section_title([str(line.get("text", "") or "")]) is not None
+        if group_key or room_key or is_section:
+            boundary_lines.append(
+                {
+                    "index": index,
+                    "top": float(line.get("top", 0.0) or 0.0),
+                    "group_key": group_key,
+                    "is_boundary": True,
+                }
+            )
+
+    blocks: list[dict[str, Any]] = []
+    for boundary_index, boundary in enumerate(boundary_lines):
+        group_key = str(boundary.get("group_key", "") or "")
+        if not group_key:
+            continue
+        start_index = int(boundary["index"])
+        end_index = len(raw_lines)
+        bottom = float("inf")
+        for next_boundary in boundary_lines[boundary_index + 1 :]:
+            end_index = int(next_boundary["index"])
+            bottom = float(next_boundary["top"])
+            break
+        block_lines = [
+            line
+            for line in raw_lines[start_index:end_index]
+            if float(line.get("center", line.get("top", 0.0)) or 0.0) >= float(boundary["top"]) - LINE_MATCH_TOLERANCE
+            and float(line.get("center", line.get("top", 0.0)) or 0.0) < bottom - LINE_MATCH_TOLERANCE
+        ]
+        blocks.append(
+            {
+                "group_key": group_key,
+                "top": float(boundary["top"]),
+                "bottom": bottom,
+                "lines": block_lines,
+            }
+        )
+    return blocks
+
+
+def _next_group_rescue_lookup(group: dict[str, Any], group_context: dict[str, Any]) -> dict[str, list[str]] | None:
+    rows = group.get("rows", []) or []
+    first_row = rows[0] if rows else {}
+    page = int(first_row.get("page_no", 0) or group.get("page_start", 0) or 0)
+    group_key = _norm_label_key(group.get("group_label", ""))
+    if not page or not group_key:
+        return None
+    blocks = group_context.get("blocks_by_page", {}).get(page) or []
+    if not blocks:
+        return None
+    cursors = group_context.setdefault("cursors", {}).setdefault(page, {})
+    start = int(cursors.get(group_key, 0) or 0)
+    for index in range(start, len(blocks)):
+        block = blocks[index]
+        if block.get("group_key") != group_key:
+            continue
+        cursors[group_key] = index + 1
+        return _copy_lookup_values(block.get("values", {}) or {})
+    cursors[group_key] = len(blocks)
+    return None
+
+
+def _next_group_raw_text_lookup(group: dict[str, Any], group_context: dict[str, Any]) -> dict[str, list[str]] | None:
+    rows = group.get("rows", []) or []
+    first_row = rows[0] if rows else {}
+    page = int(first_row.get("page_no", 0) or group.get("page_start", 0) or 0)
+    group_key = _norm_label_key(group.get("group_label", ""))
+    if not page or not group_key:
+        return None
+    blocks = group_context.get("raw_blocks_by_page", {}).get(page) or []
+    if not blocks:
+        return None
+    cursors = group_context.setdefault("raw_cursors", {}).setdefault(page, {})
+    start = int(cursors.get(group_key, 0) or 0)
+    for index in range(start, len(blocks)):
+        block = blocks[index]
+        if block.get("group_key") != group_key:
+            continue
+        cursors[group_key] = index + 1
+        return _parse_raw_text_pairs_for_group(group, block)
+    cursors[group_key] = len(blocks)
+    return None
+
+
+def _copy_lookup_values(values_by_key: dict[str, list[str]]) -> dict[str, list[str]]:
+    return {key: list(values) for key, values in values_by_key.items()}
+
+
+def _parse_raw_text_pairs_for_group(group: dict[str, Any], block: dict[str, Any]) -> dict[str, list[str]]:
+    labels = [
+        parsing.normalize_space(str(row.get("label", "") or ""))
+        for row in group.get("rows", []) or []
+        if not row.get("is_group_anchor")
+        and not _is_note_row(row, "")
+        and _norm_label_key(row.get("label", "")) != "continuation"
+    ]
+    label_specs = _label_token_specs(labels)
+    if not label_specs:
+        return {}
+
+    lookup: dict[str, list[str]] = {}
+    lines = block.get("lines", []) or []
+    consumed_line_indexes: set[int] = set()
+    for line_index, line in enumerate(lines):
+        if line_index in consumed_line_indexes:
+            continue
+        words = line.get("words", []) or []
+        tokens = [_norm_word_token(str(word.get("text", "") or "")) for word in words]
+        index = 0
+        if tokens and tokens[0] == "":
+            index = 1
+        while index < len(tokens):
+            match = _match_label_tokens(tokens, index, label_specs)
+            if match is None:
+                break
+            label_key, token_count = match
+            value_start = index + token_count
+            next_label_index = len(tokens)
+            scan = value_start
+            while scan < len(tokens):
+                if _match_label_tokens(tokens, scan, label_specs) is not None:
+                    next_label_index = scan
+                    break
+                scan += 1
+            value = parsing.normalize_space(
+                " ".join(str(words[word_index].get("text", "") or "") for word_index in range(value_start, next_label_index))
+            )
+            if not value and next_label_index >= len(tokens):
+                value = _next_raw_text_continuation_value(lines, line_index, label_specs, consumed_line_indexes)
+            if value and not _is_raw_text_noise_value(value):
+                lookup.setdefault(label_key, []).append(value)
+            if next_label_index >= len(tokens):
+                break
+            index = next_label_index
+    return lookup
+
+
+def _label_token_specs(labels: list[str]) -> list[tuple[str, tuple[str, ...]]]:
+    specs: list[tuple[str, tuple[str, ...]]] = []
+    seen: set[str] = set()
+    for label in labels:
+        key = _norm_label_key(label)
+        if not key or key in seen:
+            continue
+        tokens = tuple(_norm_word_token(token) for token in key.split() if _norm_word_token(token))
+        if not tokens:
+            continue
+        specs.append((key, tokens))
+        seen.add(key)
+    return sorted(specs, key=lambda item: len(item[1]), reverse=True)
+
+
+def _match_label_tokens(
+    tokens: list[str],
+    index: int,
+    label_specs: list[tuple[str, tuple[str, ...]]],
+) -> tuple[str, int] | None:
+    for key, label_tokens in label_specs:
+        end = index + len(label_tokens)
+        if end > len(tokens):
+            continue
+        if tuple(tokens[index:end]) == label_tokens:
+            return key, len(label_tokens)
+    return None
+
+
+def _next_raw_text_continuation_value(
+    lines: list[dict[str, Any]],
+    line_index: int,
+    label_specs: list[tuple[str, tuple[str, ...]]],
+    consumed_line_indexes: set[int],
+) -> str:
+    next_index = line_index + 1
+    if next_index >= len(lines) or next_index in consumed_line_indexes:
+        return ""
+    next_words = lines[next_index].get("words", []) or []
+    next_tokens = [_norm_word_token(str(word.get("text", "") or "")) for word in next_words]
+    if not next_tokens or _match_label_tokens(next_tokens, 0, label_specs) is not None:
+        return ""
+    value = parsing.normalize_space(" ".join(str(word.get("text", "") or "") for word in next_words))
+    if _is_raw_text_noise_value(value):
+        return ""
+    if value:
+        consumed_line_indexes.add(next_index)
+    return value
+
+
+def _is_raw_text_noise_value(value: Any) -> bool:
+    normalized = parsing.normalize_space(str(value or ""))
+    if not normalized:
+        return True
+    lowered = normalized.lower()
+    return bool(
+        re.search(r"\bpage\s+\d+\s+of\s+\d+\b", lowered)
+        or "client initials" in lowered
+        or "initials:" in lowered
+    )
+
+
+def _apply_raw_text_fallback(
+    rows: list[dict[str, Any]],
+    raw_text_lookup: dict[str, list[str]] | None,
+    diagnostics: dict[str, int],
+) -> None:
+    if not raw_text_lookup:
+        return
+    filled = 0
+    for row in rows:
+        if row.get("is_group_anchor") or _is_note_row(row, ""):
+            continue
+        key = _norm_label_key(row.get("label", ""))
+        if not key or key == "continuation":
+            continue
+        if parsing.normalize_space(str(row.get("value") or "")):
+            continue
+        candidates = raw_text_lookup.get(key)
+        if not candidates:
+            continue
+        value = parsing.normalize_space(candidates.pop(0))
+        if not value:
+            continue
+        row["value"] = value
+        row["source_method"] = "pdfplumber_raw_text_fallback"
+        filled += 1
+    if filled:
+        diagnostics["raw_text_fallback_groups"] += 1
+        diagnostics["raw_text_fallback_pairs_filled"] += filled
+
+
+def _row_rescue_lookup(
+    row: dict[str, Any],
+    consumable: dict[int, dict[str, Any]],
+    group_lookup: dict[str, list[str]] | None,
+) -> dict[str, list[str]]:
+    if group_lookup is not None:
+        return group_lookup
+    return consumable.get(int(row.get("page_no", 0) or 0), {})
 
 
 def _rescue_group(
     group: dict[str, Any],
-    consumable: dict[int, dict[str, list[str]]],
+    consumable: dict[int, dict[str, Any]],
     diagnostics: dict[str, int],
+    group_context: dict[str, Any],
 ) -> None:
-    rows = list(group.get("rows", []) or [])
+    rows = group.get("rows", []) or []
     if not rows:
         return
+    group_lookup = _next_group_rescue_lookup(group, group_context)
     anchor_value = rows[0].get("value", "")
     if _is_terminal_group_value(anchor_value):
         return
-    if _shift_override_eligible(group, rows, consumable):
-        _apply_shift_override(rows, consumable, diagnostics)
+    if _promote_group_anchor_value(group, rows, consumable, diagnostics, group_lookup):
+        return
+    raw_text_lookup = _next_group_raw_text_lookup(group, group_context)
+    if _shift_override_eligible(group, rows, consumable, group_lookup):
+        _apply_shift_override(rows, consumable, diagnostics, group_lookup)
+        _apply_raw_text_fallback(rows, raw_text_lookup, diagnostics)
         return
     for row in rows:
         key = _norm_label_key(row.get("label", ""))
         if not key:
             continue
-        page_lookup = consumable.get(int(row.get("page_no", 0) or 0), {})
+        page_lookup = _row_rescue_lookup(row, consumable, group_lookup)
         candidates = page_lookup.get(key)
         if not candidates:
             continue
@@ -1029,12 +1525,81 @@ def _rescue_group(
             continue
         row["value"] = candidates.pop(0)
         row["source_method"] = "pdfplumber_text_rescue"
+    _apply_raw_text_fallback(rows, raw_text_lookup, diagnostics)
+
+
+def _promote_group_anchor_value(
+    group: dict[str, Any],
+    rows: list[dict[str, Any]],
+    consumable: dict[int, dict[str, Any]],
+    diagnostics: dict[str, int],
+    group_lookup: dict[str, list[str]] | None,
+) -> bool:
+    group_label = parsing.normalize_space(str(group.get("group_label", "") or ""))
+    if not group_label or rows[0].get("is_group_anchor"):
+        return False
+
+    first_row = rows[0]
+    page_lookup = _row_rescue_lookup(first_row, consumable, group_lookup)
+    group_key = _norm_label_key(group_label)
+    group_candidates = page_lookup.get(group_key)
+    if not group_candidates:
+        return False
+
+    group_value = parsing.normalize_space(group_candidates[0])
+    value_lines = [parsing.normalize_space(value) for value in group.get("value_lines", []) or [] if parsing.normalize_space(value)]
+    first_value = parsing.normalize_space(str(first_row.get("value") or ""))
+    if not group_value or not value_lines:
+        return False
+    if group_value != value_lines[0] or group_value != first_value:
+        return False
+
+    child_rows = [
+        row
+        for row in rows
+        if not row.get("is_group_anchor")
+        and not _is_note_row(row, "")
+        and _norm_label_key(row.get("label", "")) != "continuation"
+    ]
+    if not child_rows:
+        return False
+
+    meta = group.get("_decompose_meta", {}) or {}
+    labels_count = int(meta.get("labels_count", 0) or 0)
+    values_count = int(meta.get("values_count", 0) or 0)
+    if labels_count and values_count and values_count < labels_count + 1:
+        return False
+
+    group_candidates.pop(0)
+    anchor_row = dict(first_row)
+    anchor_row["label"] = group_label
+    anchor_row["value"] = group_value
+    anchor_row["is_group_anchor"] = True
+    anchor_row["source_method"] = "pdfplumber_text_rescue"
+
+    realigned_rows = [anchor_row]
+    for row in child_rows:
+        key = _norm_label_key(row.get("label", ""))
+        candidates = page_lookup.get(key) if key else None
+        old_value = parsing.normalize_space(str(row.get("value") or ""))
+        value = candidates.pop(0) if candidates else ""
+        if old_value != parsing.normalize_space(value):
+            diagnostics["anchor_value_child_realignments"] += 1
+        row["value"] = value
+        row["source_method"] = "pdfplumber_text_rescue"
+        realigned_rows.append(row)
+
+    group["rows"] = realigned_rows
+    diagnostics["anchor_value_groups"] += 1
+    diagnostics["anchor_values_promoted"] += 1
+    return True
 
 
 def _shift_override_eligible(
     group: dict[str, Any],
     rows: list[dict[str, Any]],
-    consumable: dict[int, dict[str, list[str]]],
+    consumable: dict[int, dict[str, Any]],
+    group_lookup: dict[str, list[str]] | None,
 ) -> bool:
     meta = group.get("_decompose_meta", {}) or {}
     labels_count = int(meta.get("labels_count", 0) or 0)
@@ -1048,7 +1613,7 @@ def _shift_override_eligible(
         if not old_value:
             continue
         key = _norm_label_key(row.get("label", ""))
-        page_lookup = consumable.get(int(row.get("page_no", 0) or 0), {})
+        page_lookup = _row_rescue_lookup(row, consumable, group_lookup)
         if key and not page_lookup.get(key):
             return True
     return False
@@ -1056,8 +1621,9 @@ def _shift_override_eligible(
 
 def _apply_shift_override(
     rows: list[dict[str, Any]],
-    consumable: dict[int, dict[str, list[str]]],
+    consumable: dict[int, dict[str, Any]],
     diagnostics: dict[str, int],
+    group_lookup: dict[str, list[str]] | None,
 ) -> None:
     """Correct under-supplied groups using text-grid lookup in source order.
 
@@ -1071,7 +1637,7 @@ def _apply_shift_override(
             continue
         key = _norm_label_key(row.get("label", ""))
         old_value = parsing.normalize_space(str(row.get("value") or ""))
-        page_lookup = consumable.get(int(row.get("page_no", 0) or 0), {})
+        page_lookup = _row_rescue_lookup(row, consumable, group_lookup)
         candidates = page_lookup.get(key) if key else None
         if candidates:
             value = candidates.pop(0)
@@ -1123,6 +1689,45 @@ def _update_statistics(document: dict[str, Any]) -> None:
 
 def _is_terminal_group_value(value: Any) -> bool:
     return parsing.normalize_space(str(value or "")).strip().lower() in TERMINAL_GROUP_VALUES
+
+
+def _is_known_group_boundary_label(label: Any) -> bool:
+    return _norm_label_key(label) in KNOWN_GROUP_BOUNDARY_LABELS
+
+
+def _match_group_boundary_key(words: list[dict[str, Any]], group_keys: set[str]) -> str:
+    if not words:
+        return ""
+    first_token = _norm_word_token(str(words[0].get("text", "") or ""))
+    has_dash_marker = first_token == ""
+    return _match_line_label_key(words, group_keys, allow_extra_words=has_dash_marker)
+
+
+def _match_line_label_key(words: list[dict[str, Any]], keys: set[str], *, allow_extra_words: bool) -> str:
+    if not words or not keys:
+        return ""
+    tokens = [_norm_word_token(str(word.get("text", "") or "")) for word in words]
+    if tokens and tokens[0] == "":
+        tokens = tokens[1:]
+    if not tokens:
+        return ""
+    specs = _label_token_specs(list(keys))
+    for key, label_tokens in specs:
+        if len(tokens) < len(label_tokens):
+            continue
+        if tuple(tokens[: len(label_tokens)]) != label_tokens:
+            continue
+        if allow_extra_words or len(tokens) == len(label_tokens):
+            return key
+    return ""
+
+
+def _match_room_boundary_key(line: dict[str, Any], room_keys: set[str]) -> str:
+    return _match_line_label_key(line.get("words", []) or [], room_keys, allow_extra_words=False)
+
+
+def _norm_word_token(value: Any) -> str:
+    return _norm_label_key(value).strip("-")
 
 
 def _norm_label_key(label: Any) -> str:
