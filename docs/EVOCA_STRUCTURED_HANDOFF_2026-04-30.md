@@ -307,7 +307,8 @@ Use the current modified files as the latest baseline:
 
 Current state:
 - Bugs 1-15 are fixed in the standalone Evoca parser.
-- Latest output directory is tmp\evoca_structured_bug15\.
+- Section filter is active: sections 16/18/19/21/22 are recognized as boundaries but skipped from JSON/QA workbook output.
+- Latest output directory is tmp\evoca_structured_section_filter\.
 - Nine pressure PDFs have been used: EVOC447, EVOC467, EVOC471, EVOC473, EVOC482, EVOC436, EVOC449, EVOC479, and EVOC480.
 - Do not start adapter / fast path work unless Jason explicitly approves.
 
@@ -323,7 +324,7 @@ Acceptance sources:
 - C:\Users\Jason Niu - XM\Desktop\Builder\Evoca\38338\38338 - EVOC480 (Lot 1842 Streambed - COLOUR SELECTION DOCUMENT).pdf
 
 Next recommended action:
-- Open a draft PR / review checkpoint for the standalone parser branch, or run 2-3 more new EVOC PDFs as pressure tests before adapter design.
+- Review PR #2 as the standalone parser checkpoint. Adapter design should start only after the parser checkpoint is accepted.
 
 Run:
 .\.venv\Scripts\python.exe -m pytest tests\ -x
