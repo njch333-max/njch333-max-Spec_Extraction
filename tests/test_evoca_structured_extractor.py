@@ -135,6 +135,40 @@ def test_evoca_structured_promotes_client_supply_group_terminal_value() -> None:
     ]
 
 
+def test_evoca_structured_merges_multiline_anchor_value_without_child_labels() -> None:
+    structured = evoca_structured_extractor.extract_evoca_pages(
+        [
+            _page(
+                12,
+                [
+                    ["16 ELECTRICAL / ALARM SYSTEM / CCTV / SOLAR PV SYSTEM", None, None, ""],
+                    [
+                        "-",
+                        "Alarm System",
+                        (
+                            "1 x Paradox MG5050 alarm system with 4 x PIRs, 1 x internal\n"
+                            "siren, 1 x external siren, 1 x Led\n"
+                            "Keypad, 1 x internet connection module"
+                        ),
+                        None,
+                    ],
+                ],
+            )
+        ],
+        source_pdf="evoca.pdf",
+    )
+
+    rows = structured["sections"][0]["groups"][0]["rows"]
+    assert [(row["label"], row["value"], bool(row.get("is_group_anchor"))) for row in rows] == [
+        (
+            "Alarm System",
+            "1 x Paradox MG5050 alarm system with 4 x PIRs, 1 x internal siren, 1 x external siren, 1 x Led Keypad, 1 x internet connection module",
+            True,
+        )
+    ]
+    assert all(row["label"] != "Unassigned Source Text" for row in rows)
+
+
 def test_evoca_structured_carries_section_across_pages() -> None:
     structured = evoca_structured_extractor.extract_evoca_pages(
         [

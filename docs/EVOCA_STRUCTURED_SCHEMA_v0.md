@@ -172,6 +172,7 @@ Group detection:
 - A group boundary is a row whose first cell is `-` and whose second cell has a label.
 - Child labels come from the remaining lines in the group label cell.
 - Values come from the group value cell plus following continuation rows until the next section, room, or group boundary.
+- If a group has no child labels and its value cell wraps across multiple lines, the wrapped lines belong to the group anchor value and must be merged into one `is_group_anchor` row rather than emitted as diagnostics.
 - Extra value lines must not become a literal `Continuation` business label. Known source-backed wraps such as `Extent` second lines are appended to the prior row; unsafe extras remain `Unassigned Source Text` diagnostics and are ignored by text rescue / shift override passes.
 - `Drawers` may appear as a single group label with multiple wrapped value lines followed by label-only continuation rows such as `Standard`, `Pot`, and `Bin`. In that shape, those label-only rows are paired to the wrapped values as child labels instead of becoming diagnostics.
 - Some Evoca rows visually start a new group without a leading `-`, for example `Overhead Cupboards` under cabinets or `Shower` after a non-terminal `Bath Mixer / Spout`. v0 detects these as unanchored groups when the label cell starts with a known group label and carries child labels, even when the value cell is empty and the values appear on following rows.

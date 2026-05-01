@@ -727,10 +727,22 @@ def _build_group_rows(
                     raw_rows=raw_rows,
                     is_group_anchor=index == 0,
                 )
-            )
+        )
         return rows
     if not cleaned_labels:
-        cleaned_labels = [group_label] if cleaned_values else []
+        if cleaned_values:
+            return [
+                _structured_row(
+                    label=group_label,
+                    value=parsing.normalize_space(" ".join(cleaned_values)),
+                    page_no=page_no,
+                    table_index=table_index,
+                    row_index=source_row,
+                    raw_rows=raw_rows,
+                    is_group_anchor=True,
+                )
+            ]
+        cleaned_labels = []
     for index, label in enumerate(cleaned_labels):
         value = cleaned_values[index] if index < len(cleaned_values) else ""
         rows.append(

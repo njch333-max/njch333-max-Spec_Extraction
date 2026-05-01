@@ -73,6 +73,7 @@ If a change affects user-visible behavior, architecture, storage, deployment, wo
       - raw-text fallback must not truncate value-column product text merely because the product contains words that also appear as current-group labels.
       - Evoca `Drawers` rows can express `Standard`, `Pot`, and `Bin` as label-only continuation rows after a wrapped value cell; pair those labels to the wrapped values and keep repeated Drawers groups bounded.
       - Evoca no-dash group headings with an empty value cell can still be true groups when the label cell starts with a known group label and lists child labels; split them instead of letting the previous non-terminal group swallow the rows.
+      - Evoca group anchors with no child labels may have multiline wrapped values; merge those value lines into the anchor row instead of emitting the tail as `Unassigned Source Text`.
     - `Clarendon`
       - `Drawings and Colours / Colour Schedule`: heuristic-grid-first, not Vision-first
       - AFC/supplement `sinkware / appliances / flooring`: table/grid-first without default Vision

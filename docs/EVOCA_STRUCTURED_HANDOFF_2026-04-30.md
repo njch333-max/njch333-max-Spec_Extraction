@@ -69,6 +69,8 @@ C:\Users\Jason Niu - XM\Desktop\Builder\Evoca\38324\38324 - EVOC471 (Lot 214 Sor
 C:\Users\Jason Niu - XM\Desktop\Builder\Evoca\38335\38335 EVOC482 (Lot 1097 Harbour - COLOUR SELECTION DOCUMENT).pdf
 C:\Users\Jason Niu - XM\Desktop\Builder\Evoca\38208\38208 - EVOC436 (Lot 1850 Streambed - Colour Selection Document).pdf
 C:\Users\Jason Niu - XM\Desktop\Builder\Evoca\38213\38213 - EVOC449 (Lot 1900 Streambed - Colour Selection Document).pdf
+C:\Users\Jason Niu - XM\Desktop\Builder\Evoca\38337\38337 - EVOC479 (Lot 1870 Dewdrop - COLOUR SELECTION DOCUMENT).pdf
+C:\Users\Jason Niu - XM\Desktop\Builder\Evoca\38338\38338 - EVOC480 (Lot 1842 Streambed - COLOUR SELECTION DOCUMENT).pdf
 ```
 
 ## What Has Been Built
@@ -153,6 +155,7 @@ Last full test after Bug 4:
 | Bug 12 | Fixed 2026-04-30 | Wrapped value cells needed pairing with following label-only continuation rows; `Drawers` was also missing from raw-text group boundaries | EVOC482 Kitchen/Butlers `Drawers` `Standard` / `Pot` / `Bin` | Medium-high | 8 |
 | Bug 13 | Fixed 2026-05-01 | A no-dash group subheading with an empty value cell was swallowed by the previous non-terminal group | EVOC436 `Bathroom / Shower` became `Bath Mixer / Spout` diagnostics | High | 9 |
 | Bug 14 | Fixed 2026-05-01 | `pdfplumber` emitted dash rows with blank label cells, so same-page group anchors were lost and values became diagnostics or notes under the previous group | EVOC449 `Underbench` and `Accessories & Toilet Suite`; EVOC482 `Bathroom / Underbench` | High | 10 |
+| Bug 15 | Fixed 2026-05-01 | Group-level values with no child labels could wrap across multiple lines and become `Unassigned Source Text` diagnostics instead of one anchor value | EVOC479 Section 16 `Alarm System` | Medium | 11 |
 
 ## EVOC447 Evidence Already Confirmed
 
@@ -248,6 +251,14 @@ Bug 14 confirmed and fixed:
 - Raw-text anchor synthesis now supports same-page and cross-page missing anchors for `Accessories`, `Accessories & Toilet Suite`, `Basin Mixer`, `Benchtops`, `Underbench`, and `Underbench including Island`, using exact known child labels only.
 - Diagnostics are split into `raw_text_anchor_synthesized_same_page_*` and `raw_text_anchor_synthesized_cross_page_*`; legacy `raw_text_cross_page_*` counters now represent true cross-page synthesis only.
 
+Bug 15 confirmed and fixed:
+
+- EVOC479 page 12 has `Alarm System` as a group-level value with no child labels. The value cell wraps over five physical lines:
+  `1 x Paradox MG5050 alarm system...`, `siren...`, `Keypad...`, `commission...`, `house`.
+- The previous output kept only the first line on the `Alarm System` anchor and emitted the remaining four lines as `Unassigned Source Text`.
+- Groups with no child labels now merge all wrapped value lines into one `is_group_anchor` row. Existing child-label groups are not affected.
+- EVOC479 `Unassigned Source Text` count is now 0; EVOC480 is unchanged by row-level diff.
+
 ## Recommended Next Work
 
 Do **not** proceed to adapter or fast path.
@@ -264,6 +275,7 @@ Completed parser pass on 2026-04-30:
 8. Bug 12 fixed: Drawers `Standard` / `Pot` / `Bin` wrapped values are paired correctly and bounded raw-text fallback owns repeated Drawers groups.
 9. Bug 13 fixed: no-dash empty-value group subheadings such as EVOC436 `Bathroom / Shower` split correctly after a non-terminal group.
 10. Bug 14 fixed: same-page blank-label dash rows synthesize exact source-backed `Underbench` / `Accessories` groups instead of leaving values as diagnostics or notes.
+11. Bug 15 fixed: no-child-label group anchors merge wrapped multiline values instead of leaking the tail into `Unassigned Source Text`.
 
 Next focused task should remain evidence-first and standalone-parser only:
 
@@ -287,9 +299,9 @@ Use the current modified files as the latest baseline:
 - tests/test_evoca_structured_extractor.py
 
 Current state:
-- Bugs 1-14 are fixed in the standalone Evoca parser.
-- Latest output directory is tmp\evoca_structured_bug13_14\.
-- Seven pressure PDFs have been used: EVOC447, EVOC467, EVOC471, EVOC473, EVOC482, EVOC436, and EVOC449.
+- Bugs 1-15 are fixed in the standalone Evoca parser.
+- Latest output directory is tmp\evoca_structured_bug15\.
+- Nine pressure PDFs have been used: EVOC447, EVOC467, EVOC471, EVOC473, EVOC482, EVOC436, EVOC449, EVOC479, and EVOC480.
 - Do not start adapter / fast path work unless Jason explicitly approves.
 
 Acceptance sources:
@@ -300,6 +312,8 @@ Acceptance sources:
 - C:\Users\Jason Niu - XM\Desktop\Builder\Evoca\38335\38335 EVOC482 (Lot 1097 Harbour - COLOUR SELECTION DOCUMENT).pdf
 - C:\Users\Jason Niu - XM\Desktop\Builder\Evoca\38208\38208 - EVOC436 (Lot 1850 Streambed - Colour Selection Document).pdf
 - C:\Users\Jason Niu - XM\Desktop\Builder\Evoca\38213\38213 - EVOC449 (Lot 1900 Streambed - Colour Selection Document).pdf
+- C:\Users\Jason Niu - XM\Desktop\Builder\Evoca\38337\38337 - EVOC479 (Lot 1870 Dewdrop - COLOUR SELECTION DOCUMENT).pdf
+- C:\Users\Jason Niu - XM\Desktop\Builder\Evoca\38338\38338 - EVOC480 (Lot 1842 Streambed - COLOUR SELECTION DOCUMENT).pdf
 
 Next recommended action:
 - Open a draft PR / review checkpoint for the standalone parser branch, or run 2-3 more new EVOC PDFs as pressure tests before adapter design.
