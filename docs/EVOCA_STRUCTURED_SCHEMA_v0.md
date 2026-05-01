@@ -132,10 +132,10 @@ Rows whose value is filled from the bounded raw-text word layer use:
 "source_method": "pdfplumber_raw_text_fallback"
 ```
 
-Rows that belong to a group synthesized from exact raw-text evidence across a page boundary use:
+Rows that belong to a group synthesized from exact raw-text anchor evidence use:
 
 ```json
-"source_method": "pdfplumber_raw_text_cross_page"
+"source_method": "pdfplumber_raw_text_anchor_synthesis"
 ```
 
 The rescue pass only fills empty parser values and leaves existing table-derived values intact.
@@ -174,15 +174,15 @@ Group detection:
 - Values come from the group value cell plus following continuation rows until the next section, room, or group boundary.
 - Extra value lines must not become a literal `Continuation` business label. Known source-backed wraps such as `Extent` second lines are appended to the prior row; unsafe extras remain `Unassigned Source Text` diagnostics and are ignored by text rescue / shift override passes.
 - `Drawers` may appear as a single group label with multiple wrapped value lines followed by label-only continuation rows such as `Standard`, `Pot`, and `Bin`. In that shape, those label-only rows are paired to the wrapped values as child labels instead of becoming diagnostics.
-- Some Evoca rows visually start a new group without a leading `-`, for example `Overhead Cupboards` under cabinets. v0 detects these as unanchored groups when the label cell has more lines than the value cell.
+- Some Evoca rows visually start a new group without a leading `-`, for example `Overhead Cupboards` under cabinets or `Shower` after a non-terminal `Bath Mixer / Spout`. v0 detects these as unanchored groups when the label cell starts with a known group label and carries child labels, even when the value cell is empty and the values appear on following rows.
 - Terminal group values such as `Not Applicable`, `Not Included`, `Not Required`, `N/A`, `#N/A`, and `TBC` apply to the group anchor row. Narrow source-native extensions also stay on the group anchor, for example `Not Applicable - by owner after handover` and exact `Client to supply & install after handover`. Child property rows remain present with blank values so the Excel QA workbook stays close to the source PDF.
 - Non-terminal group-level values are detected from the secondary text-grid lookup when `group_label -> value` exists on the same source row. The group value becomes an `is_group_anchor` row and child property rows are realigned from the text-grid lookup.
 - The secondary rescue lookup uses `pdfplumber` with line-based vertical boundaries and text-based horizontal boundaries. It is a value backfill, not a new section/room detector.
 - When the text-grid pass exposes group headings, rescue candidates are bounded to the matching group block before falling back to page-wide lookup. Generic labels such as `Model`, `Type`, `Location`, `Handles`, and `Colour` must not be reused across later groups on the same page.
 - If both the table pass and text-grid pass miss a value, the raw-text fallback may fill the blank row only inside that group bbox. It matches exact current-group labels, prefers same-line values, may use the immediate next line only when that line is not another current-group label, preserves label-like product wording when it appears in the value column, and rejects footer noise such as `Page ... Client Initials`.
-- If the table layer drops a group anchor at a page edge, the cross-page raw-text pass may synthesize a missing group only from exact known Evoca group labels and exact known child labels. Current allowed synthesis is narrow: `Benchtops` and `Basin Mixer`.
-- When cross-page synthesis takes ownership of values previously emitted as same-room notes or diagnostics, those stale note/diagnostic rows are removed to avoid duplicate business data.
-- Diagnostics include `raw_text_fallback_groups`, `raw_text_fallback_pairs_filled`, `raw_text_cross_page_groups`, and `raw_text_cross_page_pairs_filled` so QA can see when the raw-text layers changed the artifact.
+- If the table layer drops a group anchor, the raw-text anchor synthesis pass may synthesize a missing group only from exact known Evoca group labels and exact known child labels. Current allowed synthesis is narrow: `Accessories`, `Accessories & Toilet Suite`, `Basin Mixer`, `Benchtops`, `Underbench`, and `Underbench including Island`.
+- When anchor synthesis takes ownership of values previously emitted as same-room notes or diagnostics, those stale note/diagnostic rows are removed to avoid duplicate business data.
+- Diagnostics include `raw_text_fallback_groups`, `raw_text_fallback_pairs_filled`, `raw_text_anchor_synthesized_same_page_groups`, `raw_text_anchor_synthesized_same_page_pairs_filled`, `raw_text_anchor_synthesized_cross_page_groups`, `raw_text_anchor_synthesized_cross_page_pairs_filled`, and legacy cross-page counters so QA can see when the raw-text layers changed the artifact.
 
 Color and visual styling:
 

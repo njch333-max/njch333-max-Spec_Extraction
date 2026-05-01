@@ -62,6 +62,15 @@ EVOC447 / job 38148:
 C:\Users\Jason Niu - XM\Downloads\38148 - EVOC447 (Lot 1042 Rufous - COLOUR SELECTION DOCUMENT).pdf
 ```
 
+Additional pressure-test PDFs:
+
+```text
+C:\Users\Jason Niu - XM\Desktop\Builder\Evoca\38324\38324 - EVOC471 (Lot 214 Sora - COLOUR SELECTION DOCUMENT).pdf
+C:\Users\Jason Niu - XM\Desktop\Builder\Evoca\38335\38335 EVOC482 (Lot 1097 Harbour - COLOUR SELECTION DOCUMENT).pdf
+C:\Users\Jason Niu - XM\Desktop\Builder\Evoca\38208\38208 - EVOC436 (Lot 1850 Streambed - Colour Selection Document).pdf
+C:\Users\Jason Niu - XM\Desktop\Builder\Evoca\38213\38213 - EVOC449 (Lot 1900 Streambed - Colour Selection Document).pdf
+```
+
 ## What Has Been Built
 
 Standalone extractor:
@@ -142,6 +151,8 @@ Last full test after Bug 4:
 | Bug 10 | Fixed 2026-04-30 | Terminal group values with source-native suffixes were not promoted to group anchors and were later cleared by rescue | EVOC482 Kitchen/Butlers `Benchtops = Not Applicable - by owner after handover`; EVOC471 `Carpets = Client to supply & install after handover` | Medium-high | 6 |
 | Bug 11 | Fixed 2026-04-30 | Raw-text group cursor could fall behind when terminal/skipped groups returned before advancing the cursor; same-line label words inside value-column product names could also truncate values | EVOC471 page 10 `Powder / Benchtops` and `Powder / Underbench` blank; EVOC471 `Toilet Suite` / appliances product names truncated | High | 7 |
 | Bug 12 | Fixed 2026-04-30 | Wrapped value cells needed pairing with following label-only continuation rows; `Drawers` was also missing from raw-text group boundaries | EVOC482 Kitchen/Butlers `Drawers` `Standard` / `Pot` / `Bin` | Medium-high | 8 |
+| Bug 13 | Fixed 2026-05-01 | A no-dash group subheading with an empty value cell was swallowed by the previous non-terminal group | EVOC436 `Bathroom / Shower` became `Bath Mixer / Spout` diagnostics | High | 9 |
+| Bug 14 | Fixed 2026-05-01 | `pdfplumber` emitted dash rows with blank label cells, so same-page group anchors were lost and values became diagnostics or notes under the previous group | EVOC449 `Underbench` and `Accessories & Toilet Suite`; EVOC482 `Bathroom / Underbench` | High | 10 |
 
 ## EVOC447 Evidence Already Confirmed
 
@@ -201,7 +212,7 @@ Bug 9 confirmed and fixed:
 - EVOC473 page 11/12 source PDF has `Powder -> Benchtops -> Manufacturer Quantum Quartz / Colour Polar / Edge Profile 20mm Arissed`, but the table layer dropped the `Benchtops` anchor at the page edge and previously emitted `Polar` / `20mm Arissed` as room notes.
 - EVOC473 page 13/14 source PDF has `Ensuite 2 -> Basin Mixer -> Type Spin Gun Metal Tall Basin Mixer (SP110-GM) / Location Centre of Basin`, but the table layer dropped the `Basin Mixer` label and previously left the product as an unsafe diagnostic under `Basin`.
 - EVOC473 page 15/16 has the same `Ensuite 5 -> Basin Mixer` split and is fixed by the same narrow rule.
-- The fix synthesizes only exact source-backed `Benchtops` / `Basin Mixer` groups from raw-text group and child-label evidence, with `source_method = pdfplumber_raw_text_cross_page`.
+- The fix synthesizes only exact source-backed groups from raw-text group and child-label evidence, now marked with `source_method = pdfplumber_raw_text_anchor_synthesis`.
 - Same-room stale notes or diagnostics that held the recovered values are removed after synthesis to avoid duplicates.
 
 Bug 10 confirmed and fixed:
@@ -224,6 +235,19 @@ Bug 12 confirmed and fixed:
 - EVOC482 page 9 `Butlers / Drawers` has `Standard`, `Pot`, and `Bin` values in raw text but missing from the table extraction. Adding `Drawers` to group-boundary detection lets raw-text fallback fill the correct Butlers block instead of borrowing the later Laundry drawer value.
 - The same source-backed raw-text boundary fix restores blank `Butlers / Drawers` values in EVOC447 and EVOC471.
 
+Bug 13 confirmed and fixed:
+
+- EVOC436 page 13 `Bathroom / Bath Mixer / Spout` has real `Model` and `Bath Spout Model` values, followed by a no-dash `Shower` subheading whose value cell is blank and whose values appear on following value-only rows.
+- The table-layer group boundary detector now treats known no-dash group labels with child labels as unanchored groups even when the value cell is empty.
+- `Bathroom / Shower` now owns `Mixer`, `Shower Rail / Rose`, `Shower Screen`, and `Shower Screen Colour`; `Bath Mixer / Spout` no longer carries these as `Unassigned Source Text`.
+
+Bug 14 confirmed and fixed:
+
+- EVOC449 pages 8-10 have dash rows where the dash cell survives but the group label cell is blank, for example `['-', None, 'Polytec']` where source PDF text shows `- Underbench`.
+- EVOC449 page 13 has the same failure for `Accessories & Toilet Suite`; product values previously spilled into `Shower` diagnostics and note rows.
+- Raw-text anchor synthesis now supports same-page and cross-page missing anchors for `Accessories`, `Accessories & Toilet Suite`, `Basin Mixer`, `Benchtops`, `Underbench`, and `Underbench including Island`, using exact known child labels only.
+- Diagnostics are split into `raw_text_anchor_synthesized_same_page_*` and `raw_text_anchor_synthesized_cross_page_*`; legacy `raw_text_cross_page_*` counters now represent true cross-page synthesis only.
+
 ## Recommended Next Work
 
 Do **not** proceed to adapter or fast path.
@@ -238,11 +262,13 @@ Completed parser pass on 2026-04-30:
 6. Bug 10 fixed: narrow extended terminal group values are promoted to anchor rows instead of being cleared.
 7. Bug 11 fixed: raw-text cursor advances through terminal/skipped repeated groups, and label-like product wording in the value column is preserved.
 8. Bug 12 fixed: Drawers `Standard` / `Pot` / `Bin` wrapped values are paired correctly and bounded raw-text fallback owns repeated Drawers groups.
+9. Bug 13 fixed: no-dash empty-value group subheadings such as EVOC436 `Bathroom / Shower` split correctly after a non-terminal group.
+10. Bug 14 fixed: same-page blank-label dash rows synthesize exact source-backed `Underbench` / `Accessories` groups instead of leaving values as diagnostics or notes.
 
 Next focused task should remain evidence-first and standalone-parser only:
 
 - Do not proceed to adapter or fast path without explicit approval.
-- Next candidate work should come from new PDF evidence; do not start adapter or fast path wiring from the standalone JSON alone.
+- Next candidate work should come from new PDF evidence or a dedicated draft PR review; do not start adapter or fast path wiring from the standalone JSON alone.
 
 ## Suggested Next Chat Prompt
 
@@ -260,24 +286,23 @@ Use the current modified files as the latest baseline:
 - docs/EVOCA_STRUCTURED_SCHEMA_v0.md
 - tests/test_evoca_structured_extractor.py
 
-Focus on Bug 5 and Bug 6 only:
-
-Bug 5:
-- EVOC447 page 8 row "No shelf to cupboard underneath sink" is a room note.
-- Current parser incorrectly treats it as a group header and swallows Benchtops.
-- Fix unanchored parent/group detection so the next group is Benchtops and the note stays a note.
-
-Bug 6:
-- Current rescue uses page-level label_key pools and reuses stale candidates across groups.
-- Bathroom Basin table-filled Model/Type values remain in the text rescue pool and then contaminate Basin Mixer / Bath Mixer / Shower rows.
-- Redesign rescue consumption to be group-bounded or otherwise synchronized so table-filled rows consume their matching text candidates before later rescue runs.
+Current state:
+- Bugs 1-14 are fixed in the standalone Evoca parser.
+- Latest output directory is tmp\evoca_structured_bug13_14\.
+- Seven pressure PDFs have been used: EVOC447, EVOC467, EVOC471, EVOC473, EVOC482, EVOC436, and EVOC449.
+- Do not start adapter / fast path work unless Jason explicitly approves.
 
 Acceptance sources:
 - C:\Users\Jason Niu - XM\Downloads\38148 - EVOC447 (Lot 1042 Rufous - COLOUR SELECTION DOCUMENT).pdf
-- Existing EVOC467 and EVOC473 PDFs must not regress.
+- C:\Users\Jason Niu - XM\Desktop\Builder\Evoca\38225\EVOC467 (Lot 1038 Oyster - COLOUR SELECTION DOCUMENT) 20251111125911918v06.pdf
+- C:\Users\Jason Niu - XM\Desktop\Builder\Evoca\38117\EVOC473 (Lot 403 Sehmish - Color Selection Document) 20251107090209080v08.pdf
+- C:\Users\Jason Niu - XM\Desktop\Builder\Evoca\38324\38324 - EVOC471 (Lot 214 Sora - COLOUR SELECTION DOCUMENT).pdf
+- C:\Users\Jason Niu - XM\Desktop\Builder\Evoca\38335\38335 EVOC482 (Lot 1097 Harbour - COLOUR SELECTION DOCUMENT).pdf
+- C:\Users\Jason Niu - XM\Desktop\Builder\Evoca\38208\38208 - EVOC436 (Lot 1850 Streambed - Colour Selection Document).pdf
+- C:\Users\Jason Niu - XM\Desktop\Builder\Evoca\38213\38213 - EVOC449 (Lot 1900 Streambed - Colour Selection Document).pdf
 
-Generate new outputs to:
-tmp\evoca_structured_bug6\
+Next recommended action:
+- Open a draft PR / review checkpoint for the standalone parser branch, or run 2-3 more new EVOC PDFs as pressure tests before adapter design.
 
 Run:
 .\.venv\Scripts\python.exe -m pytest tests\ -x

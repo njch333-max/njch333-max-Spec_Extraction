@@ -504,6 +504,157 @@ def test_evoca_structured_pairs_drawer_label_only_rows_with_wrapped_values() -> 
     assert all(row["label"] != "Unassigned Source Text" for row in rows)
 
 
+def test_evoca_structured_splits_unanchored_empty_value_group_header_after_non_terminal_group() -> None:
+    structured = evoca_structured_extractor.extract_evoca_pages(
+        [
+            _page(
+                13,
+                [
+                    ["20 PLUMBING FIXTURES & TAPWARE", None, None, ""],
+                    ["", "Bathroom", None, None],
+                    [
+                        "-",
+                        "Bath Mixer / Spout\nModel\nBath Spout Model",
+                        "Spin Brushed Nickel In-wall Mixer (SP141-BN)\nOmega Brushed Nickel Swivel 220mm Bath Spout (OMG220-BN)",
+                        None,
+                    ],
+                    ["", "Shower\nMixer\nShower Rail / Rose\nShower Screen\nShower Screen Colour", "", None],
+                    [None, None, "Spin Brushed Nickel In-wall Mixer (SP141-BN)", None],
+                    [
+                        None,
+                        None,
+                        "Spin Brushed Nickel Shower Rail with Eden Hand Shower Head (R166-BN & EDEN-BN)",
+                        None,
+                    ],
+                    [None, None, "Semi-frameless with Clear Toughened Glass", None],
+                    [None, None, "Brushed Nickel", None],
+                    ["-", "Accessories & Toilet Suite\nToilet Roll Holder", "Not Applicable", None],
+                ],
+            )
+        ],
+        source_pdf="evoca.pdf",
+    )
+
+    groups = structured["sections"][0]["rooms"][0]["groups"]
+    assert [group["group_label"] for group in groups] == ["Bath Mixer / Spout", "Shower", "Accessories & Toilet Suite"]
+    assert [(row["label"], row["value"]) for row in groups[0]["rows"]] == [
+        ("Model", "Spin Brushed Nickel In-wall Mixer (SP141-BN)"),
+        ("Bath Spout Model", "Omega Brushed Nickel Swivel 220mm Bath Spout (OMG220-BN)"),
+    ]
+    assert [(row["label"], row["value"]) for row in groups[1]["rows"]] == [
+        ("Mixer", "Spin Brushed Nickel In-wall Mixer (SP141-BN)"),
+        (
+            "Shower Rail / Rose",
+            "Spin Brushed Nickel Shower Rail with Eden Hand Shower Head (R166-BN & EDEN-BN)",
+        ),
+        ("Shower Screen", "Semi-frameless with Clear Toughened Glass"),
+        ("Shower Screen Colour", "Brushed Nickel"),
+    ]
+    assert all(row["label"] != "Unassigned Source Text" for group in groups for row in group["rows"])
+
+
+def test_evoca_structured_anchor_synthesis_repairs_same_page_blank_dash_underbench_group() -> None:
+    structured = evoca_structured_extractor.extract_evoca_pages(
+        [
+            _page(
+                8,
+                [
+                    ["15 CABINETS", None, None, ""],
+                    ["", "Kitchen", None, None],
+                    [
+                        "-",
+                        "Benchtops\nManufacturer\nColour\nEdge Profile",
+                        "Quantum Quartz\nLuna White\n20mm Arissed",
+                        None,
+                    ],
+                    ["-", None, "Polytec", None],
+                    [None, None, "Blosson White", None],
+                    ["-", "Overhead Cupboards\nManufacturer", "Polytec", None],
+                ],
+            )
+        ],
+        source_pdf="evoca.pdf",
+    )
+    evoca_structured_extractor._repair_missing_anchor_groups(
+        structured,
+        {
+            8: {
+                evoca_structured_extractor.LOOKUP_LINES_KEY: [
+                    _raw_line(100, [("15", 35), ("CABINETS", 55)]),
+                    _raw_line(120, [("Kitchen", 45)]),
+                    _raw_line(140, [("-", 35), ("Benchtops", 50)]),
+                    _raw_line(160, [("Manufacturer", 70), ("Quantum", 200), ("Quartz", 238)]),
+                    _raw_line(180, [("Colour", 70), ("Luna", 200), ("White", 230)]),
+                    _raw_line(200, [("Edge", 70), ("Profile", 95), ("20mm", 200), ("Arissed", 230)]),
+                    _raw_line(220, [("-", 35), ("Underbench", 50), ("including", 112), ("Island", 160)]),
+                    _raw_line(240, [("Manufacturer", 70), ("Polytec", 200)]),
+                    _raw_line(260, [("Colour", 70), ("&", 104), ("Finish", 116), ("Blosson", 200), ("White", 238)]),
+                    _raw_line(280, [("-", 35), ("Overhead", 50), ("Cupboards", 95)]),
+                ]
+            }
+        },
+    )
+
+    room = structured["sections"][0]["rooms"][0]
+    assert [group["group_label"] for group in room["groups"]] == [
+        "Benchtops",
+        "Underbench including Island",
+        "Overhead Cupboards",
+    ]
+    assert [(row["label"], row["value"], row["source_method"]) for row in room["groups"][1]["rows"]] == [
+        ("Manufacturer", "Polytec", "pdfplumber_raw_text_anchor_synthesis"),
+        ("Colour & Finish", "Blosson White", "pdfplumber_raw_text_anchor_synthesis"),
+    ]
+    assert all(
+        row["label"] != "Unassigned Source Text" for row in room["groups"][0]["rows"]
+    )
+    assert structured["diagnostics"]["raw_text_anchor_synthesized_same_page_groups"] == 1
+    assert structured["diagnostics"]["raw_text_anchor_synthesized_same_page_pairs_filled"] == 2
+    assert structured["diagnostics"]["raw_text_cross_page_groups"] == 0
+
+
+def test_evoca_structured_anchor_synthesis_repairs_same_page_blank_dash_accessories_group() -> None:
+    structured = evoca_structured_extractor.extract_evoca_pages(
+        [
+            _page(
+                13,
+                [
+                    ["20 PLUMBING FIXTURES & TAPWARE", None, None, ""],
+                    ["", "Ensuite", None, None],
+                    ["-", "Shower\nMixer", "Spin Chrome In-wall Mixer", None],
+                    ["-", None, "Spin Chrome Guest Towel Rail (SP53-CH)", None],
+                    [None, None, "Spin Chrome Toilet Roll Holder (SP51-CH)", None],
+                ],
+            )
+        ],
+        source_pdf="evoca.pdf",
+    )
+    evoca_structured_extractor._repair_missing_anchor_groups(
+        structured,
+        {
+            13: {
+                evoca_structured_extractor.LOOKUP_LINES_KEY: [
+                    _raw_line(100, [("20", 35), ("PLUMBING", 55), ("FIXTURES", 120), ("&", 180), ("TAPWARE", 195)]),
+                    _raw_line(120, [("Ensuite", 45)]),
+                    _raw_line(140, [("-", 35), ("Shower", 50)]),
+                    _raw_line(160, [("Mixer", 70), ("Spin", 200), ("Chrome", 230)]),
+                    _raw_line(180, [("-", 35), ("Accessories", 50), ("&", 115), ("Toilet", 130), ("Suite", 160)]),
+                    _raw_line(200, [("Hand", 70), ("Towel", 100), ("Rail", 130), ("Spin", 200), ("Chrome", 230), ("Guest", 268), ("Towel", 302), ("Rail", 334), ("(SP53-CH)", 360)]),
+                    _raw_line(220, [("Toilet", 70), ("Roll", 108), ("Holder", 134), ("Spin", 200), ("Chrome", 230), ("Toilet", 268), ("Roll", 302), ("Holder", 328), ("(SP51-CH)", 365)]),
+                ]
+            }
+        },
+    )
+
+    room = structured["sections"][0]["rooms"][0]
+    assert [group["group_label"] for group in room["groups"]] == ["Shower", "Accessories & Toilet Suite"]
+    assert [(row["label"], row["value"], row["source_method"]) for row in room["groups"][1]["rows"]] == [
+        ("Hand Towel Rail", "Spin Chrome Guest Towel Rail (SP53-CH)", "pdfplumber_raw_text_anchor_synthesis"),
+        ("Toilet Roll Holder", "Spin Chrome Toilet Roll Holder (SP51-CH)", "pdfplumber_raw_text_anchor_synthesis"),
+    ]
+    assert all(row["label"] != "Unassigned Source Text" for row in room["groups"][0]["rows"])
+
+
 def test_evoca_structured_raw_text_fallback_bounds_repeated_drawer_groups() -> None:
     structured = evoca_structured_extractor.extract_evoca_pages(
         [
@@ -939,9 +1090,9 @@ def test_evoca_structured_repairs_cross_page_missing_benchtops_group() -> None:
     assert room["page_end"] == 12
     assert [group["group_label"] for group in room["groups"]] == ["Benchtops", "Underbench"]
     assert [(row["label"], row["value"], row["source_method"]) for row in room["groups"][0]["rows"]] == [
-        ("Manufacturer", "Quantum Quartz", "pdfplumber_raw_text_cross_page"),
-        ("Colour", "Polar", "pdfplumber_raw_text_cross_page"),
-        ("Edge Profile", "20mm Arissed", "pdfplumber_raw_text_cross_page"),
+        ("Manufacturer", "Quantum Quartz", "pdfplumber_raw_text_anchor_synthesis"),
+        ("Colour", "Polar", "pdfplumber_raw_text_anchor_synthesis"),
+        ("Edge Profile", "20mm Arissed", "pdfplumber_raw_text_anchor_synthesis"),
     ]
     assert room["notes"] == []
     assert structured["diagnostics"]["raw_text_cross_page_groups"] == 1
@@ -993,8 +1144,8 @@ def test_evoca_structured_repairs_cross_page_missing_basin_mixer_group() -> None
     room = structured["sections"][0]["rooms"][0]
     assert [group["group_label"] for group in room["groups"]] == ["Basin", "Basin Mixer", "Bath"]
     assert [(row["label"], row["value"], row["source_method"]) for row in room["groups"][1]["rows"]] == [
-        ("Type", "Spin Gun Metal Tall Basin Mixer (SP110-GM)", "pdfplumber_raw_text_cross_page"),
-        ("Location", "Centre of Basin", "pdfplumber_raw_text_cross_page"),
+        ("Type", "Spin Gun Metal Tall Basin Mixer (SP110-GM)", "pdfplumber_raw_text_anchor_synthesis"),
+        ("Location", "Centre of Basin", "pdfplumber_raw_text_anchor_synthesis"),
     ]
     assert [(row["label"], row["value"]) for row in room["groups"][0]["rows"]] == [
         ("Model", "Byron Bench Mount Gloss White (FL4149-W) with Overflow"),

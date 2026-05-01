@@ -52,9 +52,23 @@ LINE_MATCH_TOLERANCE = 2.0
 LABEL_COLUMN_X_TOLERANCE = 80.0
 UNASSIGNED_SOURCE_TEXT_LABEL = "Unassigned Source Text"
 APPEND_EXTRA_VALUE_LABEL_KEYS: frozenset[str] = frozenset({"extent"})
-CROSS_PAGE_SYNTH_SOURCE_METHOD = "pdfplumber_raw_text_cross_page"
+ANCHOR_SYNTH_SOURCE_METHOD = "pdfplumber_raw_text_anchor_synthesis"
 DRAWERS_CHILD_LABEL_KEYS: frozenset[str] = frozenset({"standard", "pot", "bin"})
-CROSS_PAGE_SYNTH_GROUP_LABELS: dict[str, tuple[str, ...]] = {
+ANCHOR_SYNTH_GROUP_LABELS: dict[str, tuple[str, ...]] = {
+    "accessories & toilet suite": (
+        "Robe Hook",
+        "Hand Towel Rail",
+        "Toilet Roll Holder",
+        "Toilet Suite",
+        "Floor Waste",
+    ),
+    "accessories": (
+        "Robe Hook",
+        "Hand Towel Rail",
+        "Toilet Roll Holder",
+        "Toilet Suite",
+        "Floor Waste",
+    ),
     "basin mixer": ("Type", "Location"),
     "benchtops": (
         "Manufacturer",
@@ -65,6 +79,42 @@ CROSS_PAGE_SYNTH_GROUP_LABELS: dict[str, tuple[str, ...]] = {
         "Island Edge Profile",
         "Waterfall End to Island",
     ),
+    "underbench": (
+        "Manufacturer",
+        "Colour & Finish",
+        "Shaving Cabinets",
+        "Handles",
+        "Door Handle",
+        "Drawer Handle",
+    ),
+    "underbench including island": (
+        "Manufacturer",
+        "Colour & Finish",
+        "Shaving Cabinets",
+        "Handles",
+        "Door Handle",
+        "Drawer Handle",
+    ),
+}
+GROUP_BOUNDARY_DISPLAY_LABELS: dict[str, str] = {
+    "accessories & toilet suite": "Accessories & Toilet Suite",
+    "basin mixer": "Basin Mixer",
+    "bath mixer / spout": "Bath Mixer / Spout",
+    "fridge water connection": "Fridge Water Connection",
+    "hot water unit": "Hot Water Unit",
+    "main floor tile": "Main Floor Tile",
+    "overhead cupboards": "Overhead Cupboards",
+    "pantry doors": "Pantry Doors",
+    "sink mixer": "Sink Mixer",
+    "solar pv system": "Solar PV System",
+    "switch plates / gpo's": "Switch Plates / GPO's",
+    "tub mixer": "Tub Mixer",
+    "tv antenna": "TV Antenna",
+    "underbench including island": "Underbench including Island",
+    "vertical / roller blinds": "Vertical / Roller Blinds",
+    "vinyl, hybrid or timber": "Vinyl, Hybrid or Timber",
+    "washing machine taps": "Washing Machine Taps",
+    "wet area": "Wet Area",
 }
 KNOWN_GROUP_BOUNDARY_LABELS: frozenset[str] = frozenset(
     {
@@ -126,7 +176,7 @@ def extract_evoca_pdf(pdf_path: str | Path) -> dict[str, Any]:
     structured = extract_evoca_pages(pages, source_pdf=str(path), document_name=path.name)
     value_lookup = _build_value_lookup(path)
     _rescue_missing_values(structured, value_lookup)
-    _repair_cross_page_missing_groups(structured, value_lookup)
+    _repair_missing_anchor_groups(structured, value_lookup)
     _update_statistics(structured)
     return structured
 
@@ -154,6 +204,10 @@ def extract_evoca_pages(
             "anchor_value_child_realignments": 0,
             "raw_text_fallback_groups": 0,
             "raw_text_fallback_pairs_filled": 0,
+            "raw_text_anchor_synthesized_same_page_groups": 0,
+            "raw_text_anchor_synthesized_same_page_pairs_filled": 0,
+            "raw_text_anchor_synthesized_cross_page_groups": 0,
+            "raw_text_anchor_synthesized_cross_page_pairs_filled": 0,
             "raw_text_cross_page_groups": 0,
             "raw_text_cross_page_pairs_filled": 0,
         },
@@ -324,8 +378,12 @@ def detect_unanchored_group_header(row: list[str]) -> bool:
     if _cell(row, 0):
         return False
     label_lines = _clean_label_lines(_cell(row, 1))
+    if len(label_lines) < 2:
+        return False
     value_lines = _split_lines(_value_text(row))
-    return len(label_lines) >= 2 and len(value_lines) >= 1 and len(label_lines) > len(value_lines)
+    if _is_known_group_boundary_label(label_lines[0]):
+        return not value_lines or len(label_lines) > len(value_lines)
+    return len(value_lines) >= 1 and len(label_lines) > len(value_lines)
 
 
 def detect_unanchored_parent_header(table: list[list[str]], row_index: int) -> bool:
@@ -964,6 +1022,12 @@ def _build_summary_sheet(
             "anchor_value_child_realignments",
             "raw_text_fallback_groups",
             "raw_text_fallback_pairs_filled",
+            "raw_text_anchor_synthesized_same_page_groups",
+            "raw_text_anchor_synthesized_same_page_pairs_filled",
+            "raw_text_anchor_synthesized_cross_page_groups",
+            "raw_text_anchor_synthesized_cross_page_pairs_filled",
+            "raw_text_cross_page_groups",
+            "raw_text_cross_page_pairs_filled",
         ):
             sheet.append([key, diagnostics.get(key, 0)])
             _style_summary_pair(sheet, sheet.max_row, styles)
@@ -1244,6 +1308,10 @@ def _rescue_missing_values(structured: dict[str, Any], lookup: dict[int, dict[st
         "anchor_value_child_realignments",
         "raw_text_fallback_groups",
         "raw_text_fallback_pairs_filled",
+        "raw_text_anchor_synthesized_same_page_groups",
+        "raw_text_anchor_synthesized_same_page_pairs_filled",
+        "raw_text_anchor_synthesized_cross_page_groups",
+        "raw_text_anchor_synthesized_cross_page_pairs_filled",
         "raw_text_cross_page_groups",
         "raw_text_cross_page_pairs_filled",
     ):
@@ -1257,10 +1325,14 @@ def _rescue_missing_values(structured: dict[str, Any], lookup: dict[int, dict[st
                 _rescue_group(group, consumable, diagnostics, group_context)
 
 
-def _repair_cross_page_missing_groups(structured: dict[str, Any], lookup: dict[int, dict[str, Any]]) -> None:
-    """Synthesize narrow source-backed groups that the table layer dropped at page edges."""
+def _repair_missing_anchor_groups(structured: dict[str, Any], lookup: dict[int, dict[str, Any]]) -> None:
+    """Synthesize narrow source-backed groups that the table layer dropped."""
 
     diagnostics = structured.setdefault("diagnostics", {})
+    diagnostics.setdefault("raw_text_anchor_synthesized_same_page_groups", 0)
+    diagnostics.setdefault("raw_text_anchor_synthesized_same_page_pairs_filled", 0)
+    diagnostics.setdefault("raw_text_anchor_synthesized_cross_page_groups", 0)
+    diagnostics.setdefault("raw_text_anchor_synthesized_cross_page_pairs_filled", 0)
     diagnostics.setdefault("raw_text_cross_page_groups", 0)
     diagnostics.setdefault("raw_text_cross_page_pairs_filled", 0)
     raw_sections = _collect_raw_room_group_blocks(lookup)
@@ -1278,6 +1350,10 @@ def _repair_cross_page_missing_groups(structured: dict[str, Any], lookup: dict[i
             if not raw_room:
                 continue
             _synthesize_missing_room_groups(room, raw_room, diagnostics)
+
+
+def _repair_cross_page_missing_groups(structured: dict[str, Any], lookup: dict[int, dict[str, Any]]) -> None:
+    _repair_missing_anchor_groups(structured, lookup)
 
 
 def _collect_raw_room_group_blocks(lookup: dict[int, dict[str, Any]]) -> dict[str, dict[str, dict[str, Any]]]:
@@ -1325,14 +1401,14 @@ def _collect_raw_room_group_blocks(lookup: dict[int, dict[str, Any]]) -> dict[st
                         "page_start": page_no,
                         "page_end": page_no,
                         "order": order,
-                        "lines": [line] if group_key in CROSS_PAGE_SYNTH_GROUP_LABELS else [],
+                        "lines": [line] if group_key in ANCHOR_SYNTH_GROUP_LABELS else [],
                     }
                     order += 1
                     raw_sections.setdefault(current_section, {}).setdefault(
                         current_room_key,
                         {"groups": []},
                     )["groups"].append(boundary_group)
-                    if group_key in CROSS_PAGE_SYNTH_GROUP_LABELS:
+                    if group_key in ANCHOR_SYNTH_GROUP_LABELS:
                         current_group = boundary_group
                 continue
 
@@ -1360,7 +1436,7 @@ def _synthesize_missing_room_groups(
 
     for raw_group in raw_groups:
         group_key = str(raw_group.get("group_key", "") or "")
-        if group_key not in CROSS_PAGE_SYNTH_GROUP_LABELS or group_key in existing_group_keys:
+        if group_key not in ANCHOR_SYNTH_GROUP_LABELS or group_key in existing_group_keys:
             continue
         labels = _raw_group_present_labels(group_key, raw_group.get("lines", []) or [])
         if not labels:
@@ -1391,12 +1467,18 @@ def _synthesize_missing_room_groups(
         owned_values = {parsing.normalize_space(str(row.get("value") or "")) for row in value_rows}
         _remove_owned_unassigned_text(room, owned_values)
         _extend_room_page_range(room, group["page_start"], group["page_end"])
-        diagnostics["raw_text_cross_page_groups"] += 1
-        diagnostics["raw_text_cross_page_pairs_filled"] += len(value_rows)
+        if group["page_start"] == group["page_end"]:
+            diagnostics["raw_text_anchor_synthesized_same_page_groups"] += 1
+            diagnostics["raw_text_anchor_synthesized_same_page_pairs_filled"] += len(value_rows)
+        else:
+            diagnostics["raw_text_anchor_synthesized_cross_page_groups"] += 1
+            diagnostics["raw_text_anchor_synthesized_cross_page_pairs_filled"] += len(value_rows)
+            diagnostics["raw_text_cross_page_groups"] += 1
+            diagnostics["raw_text_cross_page_pairs_filled"] += len(value_rows)
 
 
 def _raw_group_present_labels(group_key: str, lines: list[dict[str, Any]]) -> list[str]:
-    allowed = list(CROSS_PAGE_SYNTH_GROUP_LABELS.get(group_key, ()))
+    allowed = list(ANCHOR_SYNTH_GROUP_LABELS.get(group_key, ()))
     label_by_key = {_norm_label_key(label): label for label in allowed}
     specs = _label_token_specs(allowed)
     present: list[str] = []
@@ -1432,7 +1514,7 @@ def _synthetic_rows_from_raw_group(labels: list[str], raw_group: dict[str, Any])
             row_index=int(source["row_index"]),
             raw_rows=[source],
         )
-        row["source_method"] = CROSS_PAGE_SYNTH_SOURCE_METHOD
+        row["source_method"] = ANCHOR_SYNTH_SOURCE_METHOD
         rows.append(row)
     return rows
 
@@ -1457,6 +1539,9 @@ def _raw_text_source_record(line: dict[str, Any], label: str, value: str) -> dic
 
 
 def _display_group_label(group_key: str) -> str:
+    display = GROUP_BOUNDARY_DISPLAY_LABELS.get(_norm_label_key(group_key))
+    if display:
+        return display
     for label in KNOWN_GROUP_BOUNDARY_LABELS:
         if _norm_label_key(label) == group_key:
             return label.title() if label == label.lower() else label
