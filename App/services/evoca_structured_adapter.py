@@ -18,6 +18,17 @@ SKIPPED_SECTION_CODES = {"16", "18", "19", "21", "22"}
 MIXER_GROUPS = {"sink mixer", "tub mixer", "basin mixer"}
 IGNORED_APPLIANCE_GROUPS = {"hot water unit", "accessories"}
 NON_APPLIANCE_LABELS = {"hot water unit", "water filter", "insinkerator", "air-conditioning", "air conditioning"}
+SOURCE_DOCUMENT_METADATA_KEYS = {
+    "file_name",
+    "original_name",
+    "stored_name",
+    "path",
+    "source_pdf",
+    "role",
+    "file_role",
+    "mime_type",
+    "size_bytes",
+}
 
 MATERIAL_RETAIN_FIELDS = (
     "bench_tops_wall_run",
@@ -190,7 +201,11 @@ def _source_document_payload(
     source_file: str,
 ) -> dict[str, str]:
     if isinstance(source_document, dict):
-        payload = {str(key): _text(value) for key, value in source_document.items() if _text(value)}
+        payload = {
+            str(key): _text(value)
+            for key, value in source_document.items()
+            if key in SOURCE_DOCUMENT_METADATA_KEYS and _text(value)
+        }
     else:
         payload = {}
     payload.setdefault("file_name", _text(structured.get("document_name")) or source_file)

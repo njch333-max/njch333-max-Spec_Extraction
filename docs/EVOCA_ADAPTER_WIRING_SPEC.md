@@ -142,6 +142,9 @@ Every field mapped from structured JSON should preserve:
 Do not store Evoca provenance in Imperial-only names such as `v6_review_rows`.
 If row-level raw display is needed later, add a builder-neutral row surface or
 store provider-tagged rows with explicit `source_provider = evoca_structured_v0`.
+The production fast path must not copy loaded PDF `pages`, `text`, or `raw_text`
+into `source_documents`; keep only file-level metadata so hard-excluded sections
+cannot leak through snapshot metadata.
 
 ## Section 15 Cabinets Mapping
 

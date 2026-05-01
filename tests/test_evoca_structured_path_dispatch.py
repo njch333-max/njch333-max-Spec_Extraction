@@ -10,7 +10,13 @@ def _document() -> dict:
         "file_name": "evoca.pdf",
         "path": "evoca.pdf",
         "role": "spec",
-        "pages": [{"page_no": 1, "text": "15 CABINETS", "raw_text": "15 CABINETS"}],
+        "pages": [
+            {
+                "page_no": 1,
+                "text": "15 CABINETS\n16 ELECTRICAL / ALARM SYSTEM / CCTV / SOLAR PV SYSTEM\nAlarm System Daiken",
+                "raw_text": "15 CABINETS\n16 ELECTRICAL / ALARM SYSTEM / CCTV / SOLAR PV SYSTEM\nAlarm System Daiken",
+            }
+        ],
     }
 
 
@@ -144,6 +150,8 @@ def test_evoca_structured_fast_path_builds_snapshot_before_legacy_pipeline() -> 
     assert snapshot["analysis"]["openai_attempted"] is False
     assert snapshot["site_address"] == "Lot 1042 Rufous"
     assert snapshot["rooms"][0]["material_rows"][0]["provenance"]["source_provider"] == "evoca_structured_v0"
+    assert "pages" not in snapshot["source_documents"][0]
+    assert "16 ELECTRICAL" not in str(snapshot)
     assert "Daiken" not in str(snapshot)
     assert progress[0][0] == "evoca_structured"
     apply_layout.assert_not_called()

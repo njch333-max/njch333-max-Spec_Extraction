@@ -98,6 +98,44 @@ def _structured(sections: list[dict[str, object]]) -> dict[str, object]:
     }
 
 
+def test_source_document_payload_does_not_retain_loaded_page_text() -> None:
+    structured = _structured(
+        [
+            _section(
+                "15",
+                "15 CABINETS",
+                rooms=[
+                    _room(
+                        "Kitchen",
+                        [_group("Benchtops", [_row("Colour", "Statuario Zero")])],
+                    )
+                ],
+            )
+        ]
+    )
+
+    snapshot = build_evoca_snapshot_from_structured(
+        structured,
+        job_no="38148",
+        source_document={
+            "file_name": "evoca.pdf",
+            "path": "evoca.pdf",
+            "role": "spec",
+            "pages": [
+                {
+                    "page_no": 1,
+                    "text": "16 ELECTRICAL / ALARM SYSTEM / CCTV / SOLAR PV SYSTEM\nDaiken",
+                    "raw_text": "16 ELECTRICAL / ALARM SYSTEM / CCTV / SOLAR PV SYSTEM\nDaiken",
+                }
+            ],
+        },
+    )
+
+    assert "pages" not in snapshot.source_documents[0]
+    assert "Daiken" not in snapshot.model_dump_json()
+    assert "16 ELECTRICAL" not in snapshot.model_dump_json()
+
+
 def _fixture_path(pdf_id: str) -> Path:
     matches = sorted(FIXTURE_DIR.glob(f"*{pdf_id}*.json"))
     assert len(matches) == 1, f"{pdf_id}: expected one structured fixture, found {matches}"
