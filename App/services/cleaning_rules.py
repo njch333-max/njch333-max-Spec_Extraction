@@ -83,6 +83,11 @@ PARSER_STRATEGIES = [
         "description": "Use the v6 cell-aware extractor for Imperial spec PDFs.",
     },
     {
+        "key": "evoca_structured_v0",
+        "label": "Evoca Structured v0",
+        "description": "Use the standalone Evoca structured extractor and adapter for Evoca spec PDFs.",
+    },
+    {
         "key": "stable_hybrid",
         "label": "Stable Hybrid",
         "description": "Keep heuristic room structure and cleaning primary; let AI fill missing fields only.",

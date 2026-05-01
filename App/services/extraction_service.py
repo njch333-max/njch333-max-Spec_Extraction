@@ -17,11 +17,12 @@ from typing import Any, Callable
 from pypdf import PdfReader, PdfWriter
 
 from App.services import appliance_official
-from App.services import cleaning_rules, parsing, runtime
+from App.services import cleaning_rules, evoca_structured_adapter, evoca_structured_extractor, parsing, runtime
 
 
 ProgressCallback = Callable[[str, str], None] | None
 IMPERIAL_V6_PARSER_STRATEGY = "imperial_v6"
+EVOCA_STRUCTURED_PARSER_STRATEGY = "evoca_structured_v0"
 
 _DOCLING_CONVERTER: Any = None
 _DOCLING_CONVERTER_CLASS: Any = None
@@ -243,6 +244,10 @@ def _spec_openai_merge_enabled(job_no: str, source_kind: str) -> bool:
 def _is_imperial_builder_name(builder_name: str) -> bool:
     return _normalized_builder_key(builder_name) == "imperial"
 
+
+def _is_evoca_builder_name(builder_name: str) -> bool:
+    return _normalized_builder_key(builder_name) == "evoca"
+
 INVALID_ROOM_HEADING_TOKENS: tuple[str, ...] = (
     "manufacturer",
     "range",
@@ -306,6 +311,14 @@ def build_spec_snapshot(
         v6_snapshot = _build_imperial_v6_fast_snapshot(job, builder, raw_documents, rule_flags, progress_callback)
         if v6_snapshot is not None:
             return v6_snapshot
+    if (
+        runtime.SPEC_EVOCA_STRUCTURED_ENABLED
+        and _is_evoca_builder_name(str(builder.get("name", "") or ""))
+        and any(str(document.get("path") or "").strip() for document in raw_documents)
+    ):
+        evoca_snapshot = _build_evoca_structured_fast_snapshot(job, builder, raw_documents, rule_flags, progress_callback)
+        if evoca_snapshot is not None:
+            return evoca_snapshot
     documents = [
         {
             **document,
@@ -475,12 +488,102 @@ def _build_imperial_v6_fast_snapshot(
     return snapshot
 
 
+def _build_evoca_structured_fast_snapshot(
+    job: dict[str, Any],
+    builder: dict[str, Any],
+    documents: list[dict[str, object]],
+    rule_flags: Any,
+    progress_callback: ProgressCallback = None,
+) -> dict[str, Any] | None:
+    path_documents = [document for document in documents if str(document.get("path") or "").strip()]
+    if len(path_documents) != 1:
+        _report_progress(
+            progress_callback,
+            "evoca_structured_fallback",
+            f"Evoca structured path requires one source PDF; found {len(path_documents)}. Falling back to legacy Evoca pipeline.",
+        )
+        return None
+    document = path_documents[0]
+    source_path = str(document.get("path") or "")
+    _report_progress(progress_callback, "evoca_structured", "Running Evoca structured extractor")
+    try:
+        structured = evoca_structured_extractor.extract_evoca_pdf(source_path)
+        snapshot_model = evoca_structured_adapter.build_evoca_snapshot_from_structured(
+            structured,
+            job_no=str(job.get("job_no", "") or ""),
+            source_document=document,
+        )
+        snapshot = snapshot_model.model_dump()
+    except Exception as exc:
+        _report_progress(
+            progress_callback,
+            "evoca_structured_fallback",
+            f"Evoca structured path failed: {exc}; falling back to legacy Evoca pipeline",
+        )
+        return None
+    if not _snapshot_has_evoca_structured_evidence(snapshot):
+        _report_progress(
+            progress_callback,
+            "evoca_structured_fallback",
+            "Evoca structured path produced no source-backed evidence; falling back to legacy Evoca pipeline",
+        )
+        return None
+    snapshot = _enrich_snapshot_appliances(snapshot, progress_callback, rule_flags=rule_flags)
+    snapshot["generated_at"] = runtime.utc_now_iso()
+    snapshot["site_address"] = str(job.get("site_address", "") or "")
+    analysis = dict(snapshot.get("analysis") or {})
+    analysis.update(
+        {
+            "mode": EVOCA_STRUCTURED_PARSER_STRATEGY,
+            "parser_strategy": EVOCA_STRUCTURED_PARSER_STRATEGY,
+            "layout_attempted": True,
+            "layout_succeeded": True,
+            "layout_mode": EVOCA_STRUCTURED_PARSER_STRATEGY,
+            "layout_provider": "evoca_structured_extractor",
+            "layout_note": (
+                "Evoca structured fast path skipped legacy layout, Docling, heavy vision, "
+                "OpenAI merge, and builder polish."
+            ),
+            "docling_attempted": False,
+            "docling_succeeded": False,
+            "docling_pages": [],
+            "docling_note": "Skipped by Evoca structured fast path.",
+            "vision_attempted": False,
+            "vision_succeeded": False,
+            "vision_pages": [],
+            "vision_page_count": 0,
+            "vision_note": "Skipped by Evoca structured fast path.",
+            "openai_attempted": False,
+            "openai_succeeded": False,
+            "rule_flags": rule_flags,
+            "worker_pid": os.getpid(),
+            "app_build_id": runtime.APP_BUILD_ID,
+        }
+    )
+    snapshot["analysis"] = analysis
+    return snapshot
+
+
 def _snapshot_has_v6_material_rows(snapshot: dict[str, Any]) -> bool:
     return any(
         (provenance := row.get("provenance") if isinstance(row.get("provenance"), dict) else {}).get("source_provider") == "v6"
         or provenance.get("source_extractor") == "pdf_to_structured_json_v6"
         for room in snapshot.get("rooms", []) or []
         for row in room.get("material_rows", []) or []
+    )
+
+
+def _snapshot_has_evoca_structured_evidence(snapshot: dict[str, Any]) -> bool:
+    if snapshot.get("appliances") or snapshot.get("special_sections"):
+        return True
+    return any(
+        (provenance := row.get("provenance") if isinstance(row.get("provenance"), dict) else {}).get("source_provider")
+        == "evoca_structured_v0"
+        or provenance.get("source_extractor") == "evoca_structured_extractor"
+        for room in snapshot.get("rooms", []) or []
+        if isinstance(room, dict)
+        for row in room.get("material_rows", []) or []
+        if isinstance(row, dict)
     )
 
 

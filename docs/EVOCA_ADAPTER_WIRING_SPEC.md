@@ -1,6 +1,7 @@
 # Evoca Structured Adapter Wiring Spec
 
-Status: Draft adapter spec. No production wiring is implemented by this document.
+Status: Adapter implementation merged; production dispatch wiring is implemented
+behind `SPEC_EXTRACTION_ENABLE_EVOCA_STRUCTURED`.
 Created: 2026-05-01
 
 ## Purpose
@@ -11,7 +12,7 @@ The standalone Evoca parser now emits source-native JSON with this shape:
 section -> room -> group -> label/value rows
 ```
 
-This spec defines how a future adapter should map that JSON into the app's
+This spec defines how the adapter maps that JSON into the app's
 `SnapshotPayload` model without hiding parser mistakes or widening the parser
 scope behind the adapter.
 
@@ -68,15 +69,15 @@ Sections `16`, `18`, `19`, `21`, and `22` are parser boundaries only. The
 adapter must not reconstruct those sections from raw PDF text, `unstructured_pages`,
 page summaries, or diagnostics. For these sections, do not pull from raw PDF.
 
-## Proposed Module Boundary
+## Module Boundary
 
-Future implementation should use a separate adapter module, for example:
+The implementation uses a separate adapter module:
 
 ```text
 App/services/evoca_structured_adapter.py
 ```
 
-The adapter should expose pure mapping functions that can be tested with saved
+The adapter exposes pure mapping functions that can be tested with saved
 structured JSON artifacts before any runtime wiring:
 
 ```text
@@ -85,9 +86,10 @@ map_evoca_room(section, room) -> RoomRow
 map_evoca_appliances(section) -> list[ApplianceRow]
 ```
 
-Runtime dispatch, if later approved, should be a small wrapper around those pure
-functions. The first implementation should be tested offline against the nine
-validated PDFs before it is connected to live job parsing.
+Runtime dispatch is a small wrapper around those pure functions in
+`App/services/extraction_service.py`. It is attempted only when the website
+Builder record is `Evoca` and `SPEC_EXTRACTION_ENABLE_EVOCA_STRUCTURED` is on.
+PDF header text, logos, or visual styling must not trigger this path.
 
 ## Snapshot Metadata
 
@@ -103,8 +105,9 @@ analysis.vision_attempted = false
 analysis.openai_attempted = false
 ```
 
-If implementation introduces a feature flag, flag-off behavior must stay on the
-current production Evoca path with no behavior change.
+The feature flag is `SPEC_EXTRACTION_ENABLE_EVOCA_STRUCTURED`, defaulting on.
+Flag-off behavior stays on the current production Evoca legacy path with no
+behavior change.
 
 ## Room Identity And Order
 
@@ -234,7 +237,7 @@ wraps belong in the parser output; unsafe extras remain diagnostics.
 
 ## Acceptance Tests For Adapter Implementation
 
-Before runtime wiring, add offline tests that build `SnapshotPayload` objects
+Offline adapter tests build `SnapshotPayload` objects
 from tracked structured JSON fixtures for the nine validated PDFs:
 
 - EVOC447
@@ -284,6 +287,7 @@ source PDF, not just against an older webpage or snapshot.
 
 1. Build the pure adapter module and tests from saved structured JSON outputs.
 2. Validate adapter snapshots against the nine source PDFs and JSON artifacts.
-3. Only after approval, wire the adapter into runtime dispatch behind an explicit
-   Evoca structured path.
-4. Deploy and rerun the affected live Evoca job only after runtime wiring exists.
+3. Wire the adapter into runtime dispatch behind the explicit Evoca structured
+   path and rollback flag.
+4. Deploy and rerun the affected live Evoca job only after runtime wiring is
+   reviewed and merged.
