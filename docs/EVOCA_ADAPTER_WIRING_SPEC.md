@@ -1,7 +1,8 @@
 # Evoca Structured Adapter Wiring Spec
 
 Status: Adapter implementation merged; production dispatch wiring is implemented
-behind `SPEC_EXTRACTION_ENABLE_EVOCA_STRUCTURED`.
+behind `SPEC_EXTRACTION_ENABLE_EVOCA_STRUCTURED`, which defaults off until
+controlled rollout activation.
 Created: 2026-05-01
 
 ## Purpose
@@ -30,7 +31,8 @@ options. Do not rely on a paraphrase of that rule.
 
 ## Non-Goals
 
-- Do not edit production wiring in this spec pass.
+- Do not widen production wiring beyond the explicit dispatch gate described
+  here.
 - Do not change `extraction_service.py`, `_finalize_evoca_rooms()`, `runtime.py`,
   or `SnapshotPayload` until implementation is explicitly approved.
 - Do not re-parse raw PDF text in the adapter to recover skipped sections or
@@ -88,12 +90,13 @@ map_evoca_appliances(section) -> list[ApplianceRow]
 
 Runtime dispatch is a small wrapper around those pure functions in
 `App/services/extraction_service.py`. It is attempted only when the website
-Builder record is `Evoca` and `SPEC_EXTRACTION_ENABLE_EVOCA_STRUCTURED` is on.
+Builder record is `Evoca` and `SPEC_EXTRACTION_ENABLE_EVOCA_STRUCTURED` is
+explicitly enabled.
 PDF header text, logos, or visual styling must not trigger this path.
 
 ## Snapshot Metadata
 
-The future adapter should record that the structured path produced the snapshot:
+The structured path records that it produced the snapshot:
 
 ```text
 analysis.parser_strategy = evoca_structured_v0
@@ -105,9 +108,10 @@ analysis.vision_attempted = false
 analysis.openai_attempted = false
 ```
 
-The feature flag is `SPEC_EXTRACTION_ENABLE_EVOCA_STRUCTURED`, defaulting on.
+The feature flag is `SPEC_EXTRACTION_ENABLE_EVOCA_STRUCTURED`, defaulting off.
 Flag-off behavior stays on the current production Evoca legacy path with no
-behavior change.
+behavior change. Controlled rollout requires setting the flag to `1` in the
+target environment before rerunning Evoca jobs.
 
 ## Room Identity And Order
 
@@ -288,6 +292,7 @@ source PDF, not just against an older webpage or snapshot.
 1. Build the pure adapter module and tests from saved structured JSON outputs.
 2. Validate adapter snapshots against the nine source PDFs and JSON artifacts.
 3. Wire the adapter into runtime dispatch behind the explicit Evoca structured
-   path and rollback flag.
-4. Deploy and rerun the affected live Evoca job only after runtime wiring is
-   reviewed and merged.
+   path and rollback flag, defaulting off.
+4. Deploy with the flag off, then enable `SPEC_EXTRACTION_ENABLE_EVOCA_STRUCTURED=1`
+   only for controlled Evoca rollout verification before rerunning the affected
+   live Evoca job.
