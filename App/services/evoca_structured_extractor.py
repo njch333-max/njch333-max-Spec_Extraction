@@ -21,6 +21,7 @@ SECTION_TITLE_PATTERNS: tuple[tuple[str, str], ...] = (
     ("24", "24 GLASS SPLASHBACK"),
     ("25", "25 CARPET"),
 )
+EXCLUDED_SECTION_CODES: frozenset[str] = frozenset({"16", "18", "19", "21", "22"})
 
 ROOM_HEADINGS: dict[str, str] = dict(getattr(parsing, "EVOCA_ROOM_HEADINGS", {}))
 TERMINAL_GROUP_VALUES: frozenset[str] = frozenset(
@@ -230,6 +231,7 @@ def extract_evoca_pages(
             "page_no": page_no,
             "table_count": len(tables),
             "sections_detected": [],
+            "sections_skipped": [],
             "row_count": sum(len(table) for table in tables),
         }
         document["pages"].append(page_summary)
@@ -250,13 +252,18 @@ def extract_evoca_pages(
                 row = table[row_index]
                 section = detect_section_title(row)
                 if section:
+                    current_room = None
+                    current_group = None
+                    if _is_excluded_section(section):
+                        current_section = None
+                        page_summary["sections_skipped"].append(section["section_title"])
+                        row_index += 1
+                        continue
                     if current_section is not None and current_section.get("section_title") == section["section_title"]:
                         _extend_section_page(current_section, page_no)
                     else:
                         current_section = _new_section(section, page_no, len(document["sections"]) + 1)
                         document["sections"].append(current_section)
-                    current_room = None
-                    current_group = None
                     page_summary["sections_detected"].append(section["section_title"])
                     row_index += 1
                     continue
@@ -343,6 +350,10 @@ def detect_section_title(row: list[str]) -> dict[str, str] | None:
         if joined == title_upper or joined.startswith(title_upper):
             return {"section_code": code, "section_title": title}
     return None
+
+
+def _is_excluded_section(section: dict[str, str]) -> bool:
+    return section.get("section_code", "") in EXCLUDED_SECTION_CODES
 
 
 def detect_untracked_section_heading(row: list[str]) -> bool:
@@ -1388,7 +1399,7 @@ def _collect_raw_room_group_blocks(lookup: dict[int, dict[str, Any]]) -> dict[st
 
             section = detect_section_title([text])
             if section:
-                current_section = section["section_code"]
+                current_section = "" if _is_excluded_section(section) else section["section_code"]
                 current_room_key = ""
                 current_group = None
                 continue
@@ -2130,14 +2141,15 @@ def _apply_shift_override(
 
 def _dedupe_page_sections(document: dict[str, Any]) -> None:
     for page in document.get("pages", []) or []:
-        seen: set[str] = set()
-        unique: list[str] = []
-        for title in page.get("sections_detected", []) or []:
-            if title in seen:
-                continue
-            seen.add(title)
-            unique.append(title)
-        page["sections_detected"] = unique
+        for key in ("sections_detected", "sections_skipped"):
+            seen: set[str] = set()
+            unique: list[str] = []
+            for title in page.get(key, []) or []:
+                if title in seen:
+                    continue
+                seen.add(title)
+                unique.append(title)
+            page[key] = unique
 
 
 def _update_statistics(document: dict[str, Any]) -> None:

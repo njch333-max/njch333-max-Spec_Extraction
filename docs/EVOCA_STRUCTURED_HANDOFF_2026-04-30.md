@@ -84,6 +84,7 @@ section -> room -> group -> label/value rows
 ```
 
 - Exports QA Excel workbooks with `_summary` sheet, section tabs, room banners, anchor rows, row-type coloring, and terminal value styling.
+- Recognizes Evoca sections 16/18/19/21/22 as boundaries but intentionally skips them from standalone JSON and QA workbook output because those Electrical, Air-conditioning, Plumbing & Gas, Mirrors, and Window Furnishings sections are out of the current downstream review scope.
 - Current schema version remains:
 
 ```text
@@ -99,25 +100,31 @@ Current export command pattern:
 Latest EVOC447 output:
 
 ```text
-tmp\evoca_structured_38148\38148_-_EVOC447_Lot_1042_Rufous_-_COLOUR_SELECTION_DOCUMENT.json
-tmp\evoca_structured_38148\38148_-_EVOC447_Lot_1042_Rufous_-_COLOUR_SELECTION_DOCUMENT.xlsx
+tmp\evoca_structured_section_filter\38148_-_EVOC447_Lot_1042_Rufous_-_COLOUR_SELECTION_DOCUMENT.json
+tmp\evoca_structured_section_filter\38148_-_EVOC447_Lot_1042_Rufous_-_COLOUR_SELECTION_DOCUMENT.xlsx
 ```
 
 EVOC447 run result:
 
 ```text
-3.15s
-sections=11
+3.87s
+sections=6
 rooms=18
-groups=77
-rows=285
+groups=62
+rows=241
 diagnostics:
-  shift_override_groups=5
-  shift_overrides_applied=20
-  shift_clears_applied=9
+  shift_override_groups=4
+  shift_overrides_applied=14
+  shift_clears_applied=4
   anchor_value_groups=1
   anchor_values_promoted=1
   anchor_value_child_realignments=8
+  raw_text_fallback_groups=20
+  raw_text_fallback_pairs_filled=32
+  raw_text_anchor_synthesized_same_page_groups=0
+  raw_text_anchor_synthesized_same_page_pairs_filled=0
+  raw_text_anchor_synthesized_cross_page_groups=0
+  raw_text_anchor_synthesized_cross_page_pairs_filled=0
 ```
 
 ## Fixes Already Implemented

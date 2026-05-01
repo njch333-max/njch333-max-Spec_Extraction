@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -141,14 +142,14 @@ def test_evoca_structured_merges_multiline_anchor_value_without_child_labels() -
             _page(
                 12,
                 [
-                    ["16 ELECTRICAL / ALARM SYSTEM / CCTV / SOLAR PV SYSTEM", None, None, ""],
+                    ["17 APPLIANCES, ACCESSORIES & HOT WATER UNIT", None, None, ""],
                     [
                         "-",
-                        "Alarm System",
+                        "Hot Water Unit",
                         (
-                            "1 x Paradox MG5050 alarm system with 4 x PIRs, 1 x internal\n"
-                            "siren, 1 x external siren, 1 x Led\n"
-                            "Keypad, 1 x internet connection module"
+                            "Ariston Primos 280 Litre\n"
+                            "Heat Pump (Electric)\n"
+                            "With tempering valve"
                         ),
                         None,
                     ],
@@ -161,12 +162,72 @@ def test_evoca_structured_merges_multiline_anchor_value_without_child_labels() -
     rows = structured["sections"][0]["groups"][0]["rows"]
     assert [(row["label"], row["value"], bool(row.get("is_group_anchor"))) for row in rows] == [
         (
-            "Alarm System",
-            "1 x Paradox MG5050 alarm system with 4 x PIRs, 1 x internal siren, 1 x external siren, 1 x Led Keypad, 1 x internet connection module",
+            "Hot Water Unit",
+            "Ariston Primos 280 Litre Heat Pump (Electric) With tempering valve",
             True,
         )
     ]
     assert all(row["label"] != "Unassigned Source Text" for row in rows)
+
+
+def test_evoca_structured_skips_non_required_output_sections_without_leakage() -> None:
+    structured = evoca_structured_extractor.extract_evoca_pages(
+        [
+            _page(
+                1,
+                [
+                    ["16 ELECTRICAL / ALARM SYSTEM / CCTV / SOLAR PV SYSTEM", None, None, ""],
+                    ["-", "Alarm System", "Included", None],
+                    ["17 APPLIANCES, ACCESSORIES & HOT WATER UNIT", None, None, ""],
+                    ["-", "Hot Water Unit", "Ariston", None],
+                    ["18 AIR-CONDITIONING", None, None, ""],
+                    ["-", "Ducted Reverse Cycle", "Included", None],
+                ],
+            ),
+            _page(
+                2,
+                [
+                    ["19 PLUMBING & GAS", None, None, ""],
+                    ["-", "Gas Type", "Natural Gas", None],
+                    ["20 PLUMBING FIXTURES & TAPWARE", None, None, ""],
+                    ["", "Kitchen", None, None],
+                    ["-", "Sink\nModel", "Burazzo", None],
+                    ["21 MIRRORS", None, None, ""],
+                    ["", "Bathroom", None, None],
+                    ["-", "Mirrors\nType", "Polished edge", None],
+                ],
+            ),
+            _page(
+                3,
+                [
+                    ["22 WINDOW FURNISHINGS", None, None, ""],
+                    ["-", "Vertical / Roller Blinds\nType", "Roller", None],
+                    ["23 TILING / HARD FLOORING", None, None, ""],
+                    ["-", "Main Floor Tile\nType", "Ceramic", None],
+                ],
+            ),
+        ],
+        source_pdf="evoca.pdf",
+    )
+
+    assert [section["section_code"] for section in structured["sections"]] == ["17", "20", "23"]
+    output_json = json.dumps(structured["sections"])
+    for excluded_text in (
+        "Alarm System",
+        "Ducted Reverse Cycle",
+        "Gas Type",
+        "Mirrors",
+        "Vertical / Roller Blinds",
+    ):
+        assert excluded_text not in output_json
+    skipped = [title for page in structured["pages"] for title in page["sections_skipped"]]
+    assert skipped == [
+        "16 ELECTRICAL / ALARM SYSTEM / CCTV / SOLAR PV SYSTEM",
+        "18 AIR-CONDITIONING",
+        "19 PLUMBING & GAS",
+        "21 MIRRORS",
+        "22 WINDOW FURNISHINGS",
+    ]
 
 
 def test_evoca_structured_carries_section_across_pages() -> None:
@@ -951,8 +1012,8 @@ def test_evoca_structured_appends_extent_continuation_without_business_label() -
             _page(
                 15,
                 [
-                    ["22 WINDOW FURNISHINGS", None, None],
-                    ["-", "Vertical / Roller Blinds\nType\nColour\nFabric\nExtent", "Roller"],
+                    ["23 TILING / HARD FLOORING", None, None],
+                    ["-", "Main Floor Tile\nType\nColour\nFabric\nExtent", "Roller"],
                     [None, None, "Chalk"],
                     [
                         None,

@@ -30,6 +30,9 @@ This is intentionally different from Imperial v6's five-column material row mode
 ## Section
 
 Each section corresponds to a visible numbered Evoca heading such as `15 CABINETS` or `20 PLUMBING FIXTURES & TAPWARE`.
+The standalone output currently keeps only sections needed for downstream review:
+`15 CABINETS`, `17 APPLIANCES, ACCESSORIES & HOT WATER UNIT`, `20 PLUMBING FIXTURES & TAPWARE`, `23 TILING / HARD FLOORING`, `24 GLASS SPLASHBACK`, and `25 CARPET`.
+Sections `16 ELECTRICAL / ALARM SYSTEM / CCTV / SOLAR PV SYSTEM`, `18 AIR-CONDITIONING`, `19 PLUMBING & GAS`, `21 MIRRORS`, and `22 WINDOW FURNISHINGS` are still recognized as boundaries, but their rows are skipped and are not emitted as JSON sections or workbook sheets.
 
 ```json
 {
@@ -160,6 +163,7 @@ Section detection:
 - Known section titles are matched from table text.
 - Current section carries forward across later pages until another section title is encountered.
 - Mixed pages can contain more than one section. The parser switches section at the visible heading row.
+- Excluded section titles reset the current output section and are recorded in page-level `sections_skipped`; their rows must not leak into the previous or next included section.
 
 Room detection:
 
@@ -192,7 +196,7 @@ Color and visual styling:
 
 ## Excel QA Workbook
 
-`tools/evoca_structured_export.py` writes one workbook per source PDF. Each detected section gets a sheet when possible.
+`tools/evoca_structured_export.py` writes one workbook per source PDF. Each emitted section gets a sheet when possible; intentionally skipped sections do not get workbook sheets.
 
 Columns:
 

@@ -241,6 +241,7 @@ Deliver an English-only web application called `Spec_Extraction` for cabinet pro
   - `Simonds`: `job 19`
   - `Evoca`: `job 39`
 - The standalone Evoca structured parser spike is not part of production snapshot generation yet. Current EVOC447/467/471/473/482/436/449/479/480 work fixes source-native JSON/QA workbook behavior only, including room-note boundaries, group-bounded text rescue, group-bounded raw-text fallback for values missed by both table and text-grid extraction, safe handling of table overflow text without emitting fake `Continuation` business labels, narrow raw-text anchor synthesis for table-dropped Evoca group anchors with separate same-page and cross-page diagnostics, extended terminal group anchors such as `Not Applicable - by owner after handover`, raw-text cursor alignment across repeated terminal/skipped groups, preservation of label-like product wording inside value columns, Drawers `Standard` / `Pot` / `Bin` wrap pairing, no-dash empty-value group headings such as EVOC436 `Bathroom / Shower`, and no-child-label multiline group anchors such as EVOC479 `Alarm System`.
+- The standalone Evoca parser intentionally filters sections `16 ELECTRICAL / ALARM SYSTEM / CCTV / SOLAR PV SYSTEM`, `18 AIR-CONDITIONING`, `19 PLUMBING & GAS`, `21 MIRRORS`, and `22 WINDOW FURNISHINGS` from JSON and QA workbook output while still treating their headings as hard boundaries.
 
 ### 4.6 Export
 - Export reviewed data to:
