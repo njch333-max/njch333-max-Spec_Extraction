@@ -15,6 +15,18 @@ This spec defines how a future adapter should map that JSON into the app's
 `SnapshotPayload` model without hiding parser mistakes or widening the parser
 scope behind the adapter.
 
+## Required Reading
+
+Before writing or reviewing adapter implementation, read these files directly:
+
+- `docs/EVOCA_STRUCTURED_SCHEMA_v0.md`
+- `docs/EVOCA_TYPE_LABEL_SEMANTIC_NOTE.md`
+- `docs/EVOCA_STRUCTURED_HANDOFF_2026-04-30.md`
+
+`docs/EVOCA_TYPE_LABEL_SEMANTIC_NOTE.md` is the canonical reference for the
+overloaded `Type` label, including per-PDF examples and the allowed mapping
+options. Do not rely on a paraphrase of that rule.
+
 ## Non-Goals
 
 - Do not edit production wiring in this spec pass.
@@ -22,8 +34,9 @@ scope behind the adapter.
   or `SnapshotPayload` until implementation is explicitly approved.
 - Do not re-parse raw PDF text in the adapter to recover skipped sections or
   patch source-native JSON values.
-- Do not normalize away source wording in `evoca_structured_v0`; if the JSON is
-  wrong, fix `App/services/evoca_structured_extractor.py` first.
+- Do not normalize, clean up, deduplicate, or interpret source-native business
+  values in the adapter layer. If the JSON is wrong, fix
+  `App/services/evoca_structured_extractor.py` first.
 - Do not use PDF header text, logos, or visual styling to decide builder routing.
   The website job's Builder record remains authoritative.
 
@@ -53,7 +66,7 @@ Recognized output sections are:
 
 Sections `16`, `18`, `19`, `21`, and `22` are parser boundaries only. The
 adapter must not reconstruct those sections from raw PDF text, `unstructured_pages`,
-page summaries, or diagnostics.
+page summaries, or diagnostics. For these sections, do not pull from raw PDF.
 
 ## Proposed Module Boundary
 
@@ -133,7 +146,7 @@ It must not map generic child labels such as `Colour`, `Type`, `Model`, or
 |---|---|---|---|
 | `Benchtops` | `Manufacturer`, `Colour`, `Edge Profile` | `bench_tops_wall_run` or `bench_tops_other` | Kitchen wall-run values stay separate from island values. Non-kitchen benchtops can use `bench_tops_other`. |
 | `Benchtops` | `Island Colour`, `Island Edge Profile`, `Waterfall End to Island` | `bench_tops_island` | Resolve `As Above` only inside the same room/group. |
-| `Underbench`, `Underbench including Island` | manufacturer/colour/finish/profile rows | `door_colours_base`, optional `door_colours_island` | Keep source wording lightly cleaned. |
+| `Underbench`, `Underbench including Island` | manufacturer/colour/finish/profile rows | `door_colours_base`, optional `door_colours_island` | Keep source wording verbatim. The adapter may at most trim leading/trailing whitespace for empty checks; it must not strip product codes, normalize spelling, collapse newlines, or transform Unicode characters. |
 | `Overhead Cupboards` | manufacturer/colour/finish/profile rows | `door_colours_overheads` | Preserve explicit overhead evidence with `has_explicit_overheads = true`. |
 | `Pantry Doors`, `Tall Cupboards` | manufacturer/colour/finish/profile rows | `door_colours_tall` | Do not collapse tall/pantry evidence into base doors. |
 | cabinetry groups | `Handles` | `handles` | Merge only same-room handle values. Do not use helper-rendered text as a source. |
@@ -155,8 +168,11 @@ Adapter rules:
 - Ignore hot water, water filter, air-conditioning, alarm/CCTV, and other
   non-appliance rows as appliance rows.
 - Placeholder values such as `As Above`, `By Client`, `N/A - By others`, and
-  `N/A CLIENT TO CHECK` may be deduplicated only when the same source section
-  already contains a concrete model for that appliance type.
+  `N/A CLIENT TO CHECK` must not be dropped or deduplicated in the adapter. If
+  the same source group emits both a placeholder and a concrete model for one
+  appliance type, the concrete model may win the canonical `ApplianceRow` make
+  or model fields, but the placeholder must still be retained verbatim as source
+  provenance or associated source evidence on that row.
 - Official product/spec/manual URL enrichment remains a separate existing stage.
 
 ## Section 20 Plumbing Fixtures And Tapware Mapping
@@ -167,12 +183,14 @@ Map plumbing rows by parent group before child label:
 |---|---|---|
 | `Sink`, `Tub` | anchor/model/product rows plus fixture `Type` as mounting/style enum | `sink_info` |
 | `Basin` | anchor/model/product rows plus fixture `Type` as mounting/style enum | `basin_info` |
-| `Sink Mixer`, `Tub Mixer`, `Basin Mixer` | child `Type` is product/model text, not an enum | `tap_info` |
+| `Sink Mixer`, `Tub Mixer`, `Basin Mixer` | child `Type` is product/model text, not an enum; see `docs/EVOCA_TYPE_LABEL_SEMANTIC_NOTE.md` | `tap_info` |
 
 The `Type` label is overloaded in Evoca source PDFs. Mixer-class parent groups
 route `Type` to product/model text. Fixture-class parent groups route `Type`
 only to mounting/style when the value matches a known enum-like vocabulary such
-as `Overmount` or `Undermount`.
+as `Overmount` or `Undermount`. The detailed rule lives in
+`docs/EVOCA_TYPE_LABEL_SEMANTIC_NOTE.md` and must be followed by path, not by
+memory or paraphrase.
 
 Wet-area plumbing rows that are not `Sink`, `Basin`, `Sink Mixer`, or
 `Basin Mixer` do not retain a room card by themselves. Fixture rows may enrich a
@@ -230,11 +248,22 @@ from structured JSON for the nine validated PDFs:
 Minimum assertions:
 
 - `schema_version = evoca_structured_v0` is required.
+- For each of the nine validated PDFs, every non-diagnostic business row value
+  in the structured JSON must appear verbatim in the resulting
+  `SnapshotPayload`, either as a complete canonical field value, an `other_items`
+  value, or provenance evidence. No string transforms. Test with byte-for-byte
+  comparison of value atoms before any display-format composition.
 - Sections `16`, `18`, `19`, `21`, and `22` produce no snapshot rows.
 - No snapshot field, row label, or `other_items` label is `Continuation`.
 - EVOC447 mixer-class `Basin Mixer / Type` maps to `tap_info` product text, not
   basin mounting type.
 - Fixture-class `Basin / Type = Overmount` stays with `basin_info`.
+- EVOC447 Bathroom and Ensuite `Toilet Suite` rows must contain the full PDF
+  string `Alora Gloss White Wall Faced Toilet Suite`, not the Bug-11-era
+  truncated `Alora Gloss White Wall Faced`. The same rule applies to any product
+  name in retained sections that contains its own group label as a substring.
+- EVOC473 cross-page raw-text synthesis preserves `Powder / Benchtops` and
+  `Ensuite 2` / `Ensuite 5` `Basin Mixer` source-backed rows with page refs.
 - EVOC449 `Underbench` and `Accessories & Toilet Suite` synthesized groups map
   from source-backed rows and preserve page refs.
 - EVOC482 `Bathroom / Underbench` is present as source-backed cabinetry evidence.
