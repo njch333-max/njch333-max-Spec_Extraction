@@ -16,7 +16,6 @@ INCLUDED_SECTION_CODES = {"15", "17", "20", "23", "24", "25"}
 SKIPPED_SECTION_CODES = {"16", "18", "19", "21", "22"}
 
 MIXER_GROUPS = {"sink mixer", "tub mixer", "basin mixer"}
-FIXTURE_GROUPS = {"sink", "tub", "basin"}
 IGNORED_APPLIANCE_GROUPS = {"hot water unit", "accessories"}
 NON_APPLIANCE_LABELS = {"hot water unit", "water filter", "insinkerator", "air-conditioning", "air conditioning"}
 
@@ -341,7 +340,7 @@ def _apply_cabinetry_group(room: RoomRow, group: dict[str, Any], group_key: str)
             room.door_colours_base,
             _format_labeled_values(group, ("Manufacturer", "Colour", "Colour & Finish", "Profile", "Finish")),
         )
-        room.has_explicit_base = bool(room.door_colours_base)
+        room.has_explicit_base = True
         _append_group_values_to_list(room.handles, group, ("Handles", "Door Handle", "Drawer Handle", "Pantry Door Handle", "Bin & Pot Drawers Handle"))
         _append_group_values_to_list(room.toe_kick, group, ("Kickboard", "Kicker"))
         return
@@ -350,7 +349,7 @@ def _apply_cabinetry_group(room: RoomRow, group: dict[str, Any], group_key: str)
             room.door_colours_overheads,
             _format_labeled_values(group, ("Manufacturer", "Colour", "Colour & Finish", "Profile", "Finish")),
         )
-        room.has_explicit_overheads = bool(room.door_colours_overheads)
+        room.has_explicit_overheads = True
         _append_group_values_to_list(room.handles, group, ("Handles", "Door Handle", "Drawer Handle"))
         return
     if group_key in {"pantry doors", "tall cupboards", "tall cupboard"}:
@@ -358,7 +357,7 @@ def _apply_cabinetry_group(room: RoomRow, group: dict[str, Any], group_key: str)
             room.door_colours_tall,
             _format_labeled_values(group, ("Manufacturer", "Colour", "Colour & Finish", "Profile", "Finish")),
         )
-        room.has_explicit_tall = bool(room.door_colours_tall)
+        room.has_explicit_tall = True
         _append_group_values_to_list(room.handles, group, ("Handles", "Door Handle", "Drawer Handle", "Pantry Door Handle"))
         _append_group_values_to_list(room.toe_kick, group, ("Kickboard", "Kicker"))
         return
@@ -407,8 +406,6 @@ def _format_labeled_values(group: dict[str, Any], labels: tuple[str, ...] | None
         value = _text(row.get("value"))
         if labels is not None and _key(label) not in wanted:
             continue
-        if _is_terminal_value(value):
-            continue
         if label and _key(label) != _key(_text(group.get("group_label"))):
             lines.append(f"{label}: {value}")
         else:
@@ -423,7 +420,7 @@ def _append_group_values_to_list(target: list[str], group: dict[str, Any], label
         if labels is not None and _key(label) not in wanted:
             continue
         value = _text(row.get("value"))
-        if not value or _is_terminal_value(value):
+        if not value:
             continue
         if value not in target:
             target.append(value)

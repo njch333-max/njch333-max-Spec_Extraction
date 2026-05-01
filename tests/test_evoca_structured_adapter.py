@@ -1,8 +1,27 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from App.services.evoca_structured_adapter import build_evoca_snapshot_from_structured
+
+
+FIXTURE_DIR = Path(__file__).parent / "fixtures" / "evoca_structured_section_filter"
+VALIDATED_PDF_IDS = (
+    "EVOC447",
+    "EVOC467",
+    "EVOC473",
+    "EVOC471",
+    "EVOC482",
+    "EVOC436",
+    "EVOC449",
+    "EVOC479",
+    "EVOC480",
+)
+INCLUDED_SECTION_CODES = {"15", "17", "20", "23", "24", "25"}
+SKIPPED_SECTION_CODES = {"16", "18", "19", "21", "22"}
 
 
 def _row(
@@ -79,6 +98,21 @@ def _structured(sections: list[dict[str, object]]) -> dict[str, object]:
     }
 
 
+def _fixture_path(pdf_id: str) -> Path:
+    matches = sorted(FIXTURE_DIR.glob(f"*{pdf_id}*.json"))
+    assert len(matches) == 1, f"{pdf_id}: expected one structured fixture, found {matches}"
+    return matches[0]
+
+
+def _section_code(section: dict[str, object]) -> str:
+    code = str(section.get("section_code") or "").strip()
+    if code:
+        return code
+    title = str(section.get("section_title") or "").strip()
+    first = title.split(maxsplit=1)[0] if title else ""
+    return first if first.isdigit() else ""
+
+
 def _snapshot_values(snapshot) -> set[str]:
     values: set[str] = set()
     for room in snapshot.rooms:
@@ -119,6 +153,9 @@ def _snapshot_values(snapshot) -> set[str]:
 def _business_values(structured: dict[str, object]) -> set[str]:
     values: set[str] = set()
     for section in structured.get("sections", []):
+        section_code = _section_code(section)
+        if section_code in SKIPPED_SECTION_CODES or section_code not in INCLUDED_SECTION_CODES:
+            continue
         for room in section.get("rooms", []):
             for group in room.get("groups", []):
                 for row in group.get("rows", []):
@@ -129,6 +166,23 @@ def _business_values(structured: dict[str, object]) -> set[str]:
                 if not row.get("is_diagnostic") and row.get("value"):
                     values.add(str(row["value"]))
     return values
+
+
+def _continuation_labels(snapshot) -> list[str]:
+    labels: list[str] = []
+    for room in snapshot.rooms:
+        for material_row in room.material_rows:
+            labels.extend(
+                str(material_row.get(field_name) or "")
+                for field_name in ("label", "area_or_item", "group_label")
+            )
+        labels.extend(str(item.get("label") or "") for item in room.other_items)
+    for special in snapshot.special_sections:
+        labels.extend(str(field_name) for field_name in special.fields)
+        labels.append(str(special.original_section_label or ""))
+    for appliance in snapshot.appliances:
+        labels.append(str(appliance.appliance_type or ""))
+    return [label for label in labels if "Continuation" in label]
 
 
 def test_evoca_adapter_requires_evoca_structured_schema() -> None:
@@ -278,6 +332,20 @@ def test_evoca_adapter_round_trips_business_values_verbatim() -> None:
     assert "N/A CLIENT TO CHECK" in _snapshot_values(snapshot)
 
 
+@pytest.mark.parametrize("pdf_id", VALIDATED_PDF_IDS)
+def test_evoca_adapter_round_trips_validated_pdf_json(pdf_id: str) -> None:
+    path = _fixture_path(pdf_id)
+    structured = json.loads(path.read_text(encoding="utf-8"))
+
+    snapshot = build_evoca_snapshot_from_structured(structured, job_no=pdf_id, source_document=str(path))
+
+    missing = _business_values(structured) - _snapshot_values(snapshot)
+    assert not missing, f"{pdf_id}: business values missing from snapshot: {sorted(missing)[:10]}"
+    assert _continuation_labels(snapshot) == []
+    skipped_keys = tuple(f"evoca_{section_code}_" for section_code in SKIPPED_SECTION_CODES)
+    assert not any(special.section_key.startswith(skipped_keys) for special in snapshot.special_sections)
+
+
 def test_evoca_adapter_does_not_reconstruct_skipped_sections() -> None:
     structured = _structured(
         [
@@ -390,6 +458,35 @@ def test_evoca_adapter_preserves_cross_page_synthesis_rows_with_page_refs() -> N
     ensuite_2 = next(room for room in snapshot.rooms if room.room_key == "ensuite_2")
     assert any(row["value"] == "Polar" and row["page_refs"] == "12" for row in powder.material_rows)
     assert any(row["value"] == "Spin Gun Metal Tall Basin Mixer (SP110-GM)" and row["page_refs"] == "14" for row in ensuite_2.material_rows)
+
+
+def test_evoca_adapter_routes_terminal_values_without_retaining_by_them() -> None:
+    structured = _structured(
+        [
+            _section(
+                "15",
+                "15 CABINETS",
+                rooms=[
+                    _room(
+                        "Kitchen",
+                        [
+                            _group("Benchtops", [_row("Manufacturer", "Quantum Quartz")]),
+                            _group(
+                                "Overhead Cupboards",
+                                [_row("Colour & Finish", "Not Applicable - by owner after handover")],
+                            ),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    snapshot = build_evoca_snapshot_from_structured(structured, "38148")
+
+    kitchen = snapshot.rooms[0]
+    assert kitchen.has_explicit_overheads is True
+    assert "Colour & Finish: Not Applicable - by owner after handover" in kitchen.door_colours_overheads
 
 
 def test_evoca_adapter_drops_fixture_only_rooms_but_keeps_evidence() -> None:

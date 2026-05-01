@@ -154,8 +154,10 @@ It must not map generic child labels such as `Colour`, `Type`, `Model`, or
 | `Drawers` | `Standard`, `Pot`, `Bin` | `other_items` unless a later field is approved | These are source rows, but current `RoomRow` has no detailed drawer-material field. |
 
 Terminal anchor values such as `Not Applicable - by owner after handover` should
-be preserved as source evidence but should not create material-retained rooms by
-themselves.
+still route verbatim into their canonical group field when that group is mapped.
+They must not create material-retained rooms by themselves; room retention must
+continue to check for non-terminal material evidence. Display suppression, if
+needed later, belongs outside this adapter.
 
 ## Section 17 Appliances Mapping
 
@@ -233,7 +235,7 @@ wraps belong in the parser output; unsafe extras remain diagnostics.
 ## Acceptance Tests For Adapter Implementation
 
 Before runtime wiring, add offline tests that build `SnapshotPayload` objects
-from structured JSON for the nine validated PDFs:
+from tracked structured JSON fixtures for the nine validated PDFs:
 
 - EVOC447
 - EVOC467
@@ -253,7 +255,9 @@ Minimum assertions:
   `SnapshotPayload`, either as a complete canonical field value, an `other_items`
   value, or provenance evidence. No string transforms. Test with byte-for-byte
   comparison of value atoms before any display-format composition.
-- Sections `16`, `18`, `19`, `21`, and `22` produce no snapshot rows.
+- Sections `16`, `18`, `19`, `21`, and `22` are hard exclusions: acceptance
+  round-trip tests must ignore their values, and the adapter must produce no
+  snapshot rows, provenance evidence, appliances, or special sections from them.
 - No snapshot field, row label, or `other_items` label is `Continuation`.
 - EVOC447 mixer-class `Basin Mixer / Type` maps to `tap_info` product text, not
   basin mounting type.
