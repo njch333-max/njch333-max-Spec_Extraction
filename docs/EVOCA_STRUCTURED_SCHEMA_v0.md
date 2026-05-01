@@ -30,6 +30,9 @@ This is intentionally different from Imperial v6's five-column material row mode
 ## Section
 
 Each section corresponds to a visible numbered Evoca heading such as `15 CABINETS` or `20 PLUMBING FIXTURES & TAPWARE`.
+The standalone output currently keeps only sections needed for downstream review:
+`15 CABINETS`, `17 APPLIANCES, ACCESSORIES & HOT WATER UNIT`, `20 PLUMBING FIXTURES & TAPWARE`, `23 TILING / HARD FLOORING`, `24 GLASS SPLASHBACK`, and `25 CARPET`.
+Sections `16 ELECTRICAL / ALARM SYSTEM / CCTV / SOLAR PV SYSTEM`, `18 AIR-CONDITIONING`, `19 PLUMBING & GAS`, `21 MIRRORS`, and `22 WINDOW FURNISHINGS` are still recognized as boundaries, but their rows are skipped and are not emitted as JSON sections or workbook sheets.
 
 ```json
 {
@@ -109,6 +112,16 @@ Rows preserve the parsed label/value pair and the raw table evidence used to der
 ```
 
 `Not Applicable`, `#N/A`, blank values, and continuation values are intentionally preserved. The raw parser layer must not suppress them.
+The parser must not emit a literal business label named `Continuation`. Source-backed overflow text is either appended to the owning prior row when the PDF evidence supports that ownership, or preserved as a diagnostic row:
+
+```json
+{
+  "label": "Unassigned Source Text",
+  "value": "WC",
+  "is_diagnostic": true,
+  "source_method": "pdfplumber_table"
+}
+```
 
 Rows whose value is filled from the secondary text-aligned table pass use:
 
@@ -116,7 +129,32 @@ Rows whose value is filled from the secondary text-aligned table pass use:
 "source_method": "pdfplumber_text_rescue"
 ```
 
+Rows whose value is filled from the bounded raw-text word layer use:
+
+```json
+"source_method": "pdfplumber_raw_text_fallback"
+```
+
+Rows that belong to a group synthesized from exact raw-text anchor evidence use:
+
+```json
+"source_method": "pdfplumber_raw_text_anchor_synthesis"
+```
+
 The rescue pass only fills empty parser values and leaves existing table-derived values intact.
+
+When the visible group heading itself has a value, the parser promotes that value to a group anchor row:
+
+```json
+{
+  "label": "Overhead Cupboards",
+  "value": "* Overhead Cupboard above Oven to be Push to Open",
+  "is_group_anchor": true,
+  "source_method": "pdfplumber_text_rescue"
+}
+```
+
+Child rows remain row-local beneath that anchor, for example `Manufacturer`, `Colour & Finish`, and `Handles`.
 
 ## Boundary Rules
 
@@ -125,20 +163,31 @@ Section detection:
 - Known section titles are matched from table text.
 - Current section carries forward across later pages until another section title is encountered.
 - Mixed pages can contain more than one section. The parser switches section at the visible heading row.
+- Excluded section titles reset the current output section and are recorded in page-level `sections_skipped`; their rows must not leak into the previous or next included section.
 
 Room detection:
 
 - A room boundary is a known Evoca room label in the second cell with no meaningful value cell.
 - The parser does not treat room boundaries as material rows.
+- Single-line room notes before a known group boundary remain room notes. For example, `No shelf to cupboard underneath sink` must not become a parent group that swallows the following `Benchtops` group.
 
 Group detection:
 
 - A group boundary is a row whose first cell is `-` and whose second cell has a label.
 - Child labels come from the remaining lines in the group label cell.
 - Values come from the group value cell plus following continuation rows until the next section, room, or group boundary.
-- Some Evoca rows visually start a new group without a leading `-`, for example `Overhead Cupboards` under cabinets. v0 detects these as unanchored groups when the label cell has more lines than the value cell.
-- Terminal group values such as `Not Applicable`, `Not Included`, `Not Required`, `N/A`, `#N/A`, and `TBC` apply to the group anchor row. Child property rows remain present with blank values so the Excel QA workbook stays close to the source PDF.
+- If a group has no child labels and its value cell wraps across multiple lines, the wrapped lines belong to the group anchor value and must be merged into one `is_group_anchor` row rather than emitted as diagnostics.
+- Extra value lines must not become a literal `Continuation` business label. Known source-backed wraps such as `Extent` second lines are appended to the prior row; unsafe extras remain `Unassigned Source Text` diagnostics and are ignored by text rescue / shift override passes.
+- `Drawers` may appear as a single group label with multiple wrapped value lines followed by label-only continuation rows such as `Standard`, `Pot`, and `Bin`. In that shape, those label-only rows are paired to the wrapped values as child labels instead of becoming diagnostics.
+- Some Evoca rows visually start a new group without a leading `-`, for example `Overhead Cupboards` under cabinets or `Shower` after a non-terminal `Bath Mixer / Spout`. v0 detects these as unanchored groups when the label cell starts with a known group label and carries child labels, even when the value cell is empty and the values appear on following rows.
+- Terminal group values such as `Not Applicable`, `Not Included`, `Not Required`, `N/A`, `#N/A`, and `TBC` apply to the group anchor row. Narrow source-native extensions also stay on the group anchor, for example `Not Applicable - by owner after handover` and exact `Client to supply & install after handover`. Child property rows remain present with blank values so the Excel QA workbook stays close to the source PDF.
+- Non-terminal group-level values are detected from the secondary text-grid lookup when `group_label -> value` exists on the same source row. The group value becomes an `is_group_anchor` row and child property rows are realigned from the text-grid lookup.
 - The secondary rescue lookup uses `pdfplumber` with line-based vertical boundaries and text-based horizontal boundaries. It is a value backfill, not a new section/room detector.
+- When the text-grid pass exposes group headings, rescue candidates are bounded to the matching group block before falling back to page-wide lookup. Generic labels such as `Model`, `Type`, `Location`, `Handles`, and `Colour` must not be reused across later groups on the same page.
+- If both the table pass and text-grid pass miss a value, the raw-text fallback may fill the blank row only inside that group bbox. It matches exact current-group labels, prefers same-line values, may use the immediate next line only when that line is not another current-group label, preserves label-like product wording when it appears in the value column, and rejects footer noise such as `Page ... Client Initials`.
+- If the table layer drops a group anchor, the raw-text anchor synthesis pass may synthesize a missing group only from exact known Evoca group labels and exact known child labels. Current allowed synthesis is narrow: `Accessories`, `Accessories & Toilet Suite`, `Basin Mixer`, `Benchtops`, `Underbench`, and `Underbench including Island`.
+- When anchor synthesis takes ownership of values previously emitted as same-room notes or diagnostics, those stale note/diagnostic rows are removed to avoid duplicate business data.
+- Diagnostics include `raw_text_fallback_groups`, `raw_text_fallback_pairs_filled`, `raw_text_anchor_synthesized_same_page_groups`, `raw_text_anchor_synthesized_same_page_pairs_filled`, `raw_text_anchor_synthesized_cross_page_groups`, `raw_text_anchor_synthesized_cross_page_pairs_filled`, and legacy cross-page counters so QA can see when the raw-text layers changed the artifact.
 
 Color and visual styling:
 
@@ -147,7 +196,7 @@ Color and visual styling:
 
 ## Excel QA Workbook
 
-`tools/evoca_structured_export.py` writes one workbook per source PDF. Each detected section gets a sheet when possible.
+`tools/evoca_structured_export.py` writes one workbook per source PDF. Each emitted section gets a sheet when possible; intentionally skipped sections do not get workbook sheets.
 
 Columns:
 

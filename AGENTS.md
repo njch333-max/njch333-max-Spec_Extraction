@@ -29,6 +29,9 @@ If a change affects user-visible behavior, architecture, storage, deployment, wo
 - Git helper tools live under `tools/`
 - Project docs live at the project root
 
+## Collaboration Preference
+- Use Chinese by default when communicating with Jason in chat. This preference applies to assistant responses only; keep application UI, exports, code identifiers, and project documentation in English unless Jason explicitly asks otherwise.
+
 ## Working Rules
 1. Keep the web UI in English only.
 2. Preserve the canonical extraction schema unless the docs are updated together.
@@ -61,6 +64,17 @@ If a change affects user-visible behavior, architecture, storage, deployment, wo
       - grouped-row/property-row schedules: table/grid-first so `Manufacturer / Finish / Profile / Colour / Model / Supplier` are treated as columns before mapping
     - `Evoca`
       - finishes/flooring/plumbing/appliance schedules: table/grid-first, then room-local mapping
+      - standalone `evoca_structured_extractor.py` work stays disconnected from production snapshot generation until explicitly approved; wrong source-native JSON values must be fixed in the parser, not hidden in a downstream adapter.
+      - standalone Evoca overflow values must not be emitted as a literal `Continuation` business label; append only source-backed wraps and otherwise preserve unsafe extras as diagnostics.
+      - standalone Evoca anchor recovery may synthesize only source-backed missing groups from exact raw-text group and child-label evidence; keep it narrow and observable with separate same-page and cross-page diagnostics.
+      - bounded raw-text fallback may fill only blank row-local values inside the current group bbox; it must not overwrite table/text-grid values or borrow generic labels across groups.
+      - terminal Evoca group values, including narrow source-native extensions such as `Not Applicable - by owner after handover`, belong on `is_group_anchor` rows with child rows left blank.
+      - raw-text fallback cursors must still advance through terminal or promoted-anchor groups so later repeated groups do not consume stale blocks.
+      - raw-text fallback must not truncate value-column product text merely because the product contains words that also appear as current-group labels.
+      - Evoca `Drawers` rows can express `Standard`, `Pot`, and `Bin` as label-only continuation rows after a wrapped value cell; pair those labels to the wrapped values and keep repeated Drawers groups bounded.
+      - Evoca no-dash group headings with an empty value cell can still be true groups when the label cell starts with a known group label and lists child labels; split them instead of letting the previous non-terminal group swallow the rows.
+      - Evoca group anchors with no child labels may have multiline wrapped values; merge those value lines into the anchor row instead of emitting the tail as `Unassigned Source Text`.
+      - Standalone Evoca output intentionally skips sections 16/18/19/21/22, while still recognizing those headings as hard boundaries so excluded rows cannot leak into included sections.
     - `Clarendon`
       - `Drawings and Colours / Colour Schedule`: heuristic-grid-first, not Vision-first
       - AFC/supplement `sinkware / appliances / flooring`: table/grid-first without default Vision
