@@ -2152,6 +2152,7 @@ def _format_evoca_structured_room_display(row: dict[str, Any]) -> dict[str, Any]
         formatted[field_name] = _evoca_structured_format_labeled_value(formatted.get(field_name, ""), "fixture")
     for field_name in ("splashback", "flooring", "floating_shelf", "shelf", "bulkheads"):
         formatted[field_name] = "" if _evoca_structured_is_terminal_value(formatted.get(field_name, "")) else _display_value(formatted.get(field_name, ""))
+    formatted["evidence_snippet"] = _evoca_structured_format_labeled_value(formatted.get("evidence_snippet", ""), "evidence")
     formatted["accessories"] = [
         value
         for value in (_display_value(item) for item in formatted.get("accessories", []) or [])

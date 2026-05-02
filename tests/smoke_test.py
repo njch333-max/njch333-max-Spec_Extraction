@@ -4183,6 +4183,7 @@ Front Loader - standard 700mm size - LG Tower
                         "sink_info": "Model: Burazzo 750mm Stainless Steel Double Bowl Sink (BU754522D) ($150)\nType: Undermount\nAccessories: Not Applicable",
                         "tap_info": "Type: Vito Bertoni Alfie Pull-Out Sink Mixer in Brushed Nickel (85972LF)\nLocation: Centre of Sink",
                         "splashback": "Not Applicable",
+                        "evidence_snippet": "Manufacturer: Quantum Quartz",
                     },
                     {
                         "room_key": "study_desk",
@@ -4200,6 +4201,7 @@ Front Loader - standard 700mm size - LG Tower
         self.assertEqual(flattened["kitchen"]["sink_info"], "Burazzo 750mm Stainless Steel Double Bowl Sink (BU754522D) ($150) - Undermount")
         self.assertEqual(flattened["kitchen"]["tap_info"], "Vito Bertoni Alfie Pull-Out Sink Mixer in Brushed Nickel (85972LF) - Centre of Sink")
         self.assertEqual(flattened["kitchen"]["splashback"], "")
+        self.assertEqual(flattened["kitchen"]["evidence_snippet"], "Quantum Quartz")
         self.assertEqual(flattened["study_desk"]["bench_tops_other"], "Polytec - Liguarian Wallnut Woodmatt - 10/10 Radius")
 
     def test_flatten_special_sections_hides_evoca_structured_raw_evidence(self) -> None:
