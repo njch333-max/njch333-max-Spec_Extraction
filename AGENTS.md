@@ -71,6 +71,7 @@ If a change affects user-visible behavior, architecture, storage, deployment, wo
       - terminal Evoca group values, including narrow source-native extensions such as `Not Applicable - by owner after handover`, belong on `is_group_anchor` rows with child rows left blank.
       - raw-text fallback cursors must still advance through terminal or promoted-anchor groups so later repeated groups do not consume stale blocks.
       - raw-text fallback must not truncate value-column product text merely because the product contains words that also appear as current-group labels.
+      - Evoca label-cell repair may split same-line child label/value text such as `Model Burazzo ...` or `Type Undermount` back into row-local `label` / `value` pairs before adapter mapping.
       - Evoca `Drawers` rows can express `Standard`, `Pot`, and `Bin` as label-only continuation rows after a wrapped value cell; pair those labels to the wrapped values and keep repeated Drawers groups bounded.
       - Evoca no-dash group headings with an empty value cell can still be true groups when the label cell starts with a known group label and lists child labels; split them instead of letting the previous non-terminal group swallow the rows.
       - Evoca group anchors with no child labels may have multiline wrapped values; merge those value lines into the anchor row instead of emitting the tail as `Unassigned Source Text`.

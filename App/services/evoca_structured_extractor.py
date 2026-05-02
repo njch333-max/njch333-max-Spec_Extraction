@@ -55,6 +55,37 @@ UNASSIGNED_SOURCE_TEXT_LABEL = "Unassigned Source Text"
 APPEND_EXTRA_VALUE_LABEL_KEYS: frozenset[str] = frozenset({"extent"})
 ANCHOR_SYNTH_SOURCE_METHOD = "pdfplumber_raw_text_anchor_synthesis"
 DRAWERS_CHILD_LABEL_KEYS: frozenset[str] = frozenset({"standard", "pot", "bin"})
+INLINE_LABEL_VALUE_LABELS: tuple[str, ...] = (
+    "Bin & Pot Drawers Handle",
+    "Waterfall End to Island",
+    "Island Edge Profile",
+    "Shower Screen Colour",
+    "Shower Rail / Rose",
+    "Manufacturer & Model",
+    "Pantry Door Handle",
+    "Toilet Roll Holder",
+    "Colour & Finish",
+    "Hand Towel Rail",
+    "Drawer Handle",
+    "Shaving Cabinets",
+    "Island Colour",
+    "Door Handle",
+    "Edge Profile",
+    "Floor Waste",
+    "Shower Screen",
+    "Toilet Suite",
+    "Accessories",
+    "Manufacturer",
+    "Towel Rail",
+    "Robe Hook",
+    "Location",
+    "Handles",
+    "Colour",
+    "Finish",
+    "Mixer",
+    "Model",
+    "Type",
+)
 ANCHOR_SYNTH_GROUP_LABELS: dict[str, tuple[str, ...]] = {
     "accessories & toilet suite": (
         "Robe Hook",
@@ -564,6 +595,7 @@ def _consume_group(
         next_index += 1
 
     values = _coalesce_wrapped_value_lines(group_label, child_labels, values)
+    child_labels, values = _split_inline_label_values(child_labels, values)
     group = {
         "group_label": group_label,
         "page_start": page_no,
@@ -630,6 +662,7 @@ def _consume_unanchored_parent_group(
         next_index += 1
 
     values = _coalesce_wrapped_value_lines(group_label, labels, values)
+    labels, values = _split_inline_label_values(labels, values)
     group = {
         "group_label": group_label,
         "page_start": page_no,
@@ -691,6 +724,7 @@ def _consume_unanchored_group(
         next_index += 1
 
     values = _coalesce_wrapped_value_lines(group_label, child_labels, values)
+    child_labels, values = _split_inline_label_values(child_labels, values)
     group = {
         "group_label": group_label,
         "page_start": page_no,
@@ -829,6 +863,50 @@ def _coalesce_wrapped_value_lines(group_label: str, labels: list[str], values: l
             continue
         index += 1
     return cleaned_values
+
+
+def _split_inline_label_values(labels: list[str], values: list[str]) -> tuple[list[str], list[str]]:
+    cleaned_labels = [_clean_label(label) for label in labels if _clean_label(label)]
+    cleaned_values = [parsing.normalize_space(value) for value in values if parsing.normalize_space(value)]
+    if not cleaned_labels:
+        return cleaned_labels, cleaned_values
+
+    split_labels: list[str] = []
+    inline_values: list[str] = []
+    changed = False
+    for label in cleaned_labels:
+        property_label, value = _split_inline_label_value(label)
+        split_labels.append(property_label)
+        inline_values.append(value)
+        changed = changed or bool(value)
+    if not changed:
+        return cleaned_labels, cleaned_values
+
+    remaining_values = list(cleaned_values)
+    split_values: list[str] = []
+    for value in inline_values:
+        if value:
+            if remaining_values and _norm_label_key(remaining_values[0]) == _norm_label_key(value):
+                remaining_values.pop(0)
+            split_values.append(value)
+            continue
+        split_values.append(remaining_values.pop(0) if remaining_values else "")
+    split_values.extend(remaining_values)
+    return split_labels, split_values
+
+
+def _split_inline_label_value(label: str) -> tuple[str, str]:
+    cleaned = parsing.normalize_space(label)
+    lowered = cleaned.lower()
+    for property_label in INLINE_LABEL_VALUE_LABELS:
+        property_key = property_label.lower()
+        if lowered == property_key:
+            return property_label, ""
+        if lowered.startswith(property_key + " "):
+            value = parsing.normalize_space(cleaned[len(property_label) :])
+            if value:
+                return property_label, value
+    return cleaned, ""
 
 
 def _looks_like_wrapped_product_line(current: str, next_value: str) -> bool:

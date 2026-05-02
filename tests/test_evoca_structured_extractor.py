@@ -64,6 +64,38 @@ def test_evoca_structured_extracts_section_room_group_rows() -> None:
     ]
 
 
+def test_evoca_structured_splits_inline_child_label_values() -> None:
+    structured = evoca_structured_extractor.extract_evoca_pages(
+        [
+            _page(
+                12,
+                [
+                    ["20 PLUMBING FIXTURES & TAPWARE", None, None, ""],
+                    ["", "Kitchen", None, None],
+                    [
+                        "-",
+                        "Sink\n"
+                        "Model Burazzo 750mm Stainless Steel Double Bowl Sink (BU754522D) ($185)\n"
+                        "Type Undermount\n"
+                        "Accessories Not Applicable",
+                        "",
+                        None,
+                    ],
+                    ["", "", "Burazzo 750mm Stainless Steel Double Bowl Sink (BU754522D) ($185)", None],
+                ],
+            )
+        ],
+        source_pdf="evoca.pdf",
+    )
+
+    group = structured["sections"][0]["rooms"][0]["groups"][0]
+    assert [(row["label"], row["value"]) for row in group["rows"]] == [
+        ("Model", "Burazzo 750mm Stainless Steel Double Bowl Sink (BU754522D) ($185)"),
+        ("Type", "Undermount"),
+        ("Accessories", "Not Applicable"),
+    ]
+
+
 def test_evoca_structured_preserves_not_applicable_rows() -> None:
     structured = evoca_structured_extractor.extract_evoca_pages(
         [
