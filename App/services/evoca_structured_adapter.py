@@ -341,7 +341,7 @@ def _apply_room_group_mapping(room: RoomRow, section_code: str, group: dict[str,
 
 def _apply_cabinetry_group(room: RoomRow, group: dict[str, Any], group_key: str) -> None:
     if group_key == "benchtops":
-        wall_run = _format_labeled_values(group, ("Manufacturer", "Colour", "Edge Profile"))
+        wall_run = _format_labeled_values(group, ("Manufacturer", "Colour", "Colour & Finish", "Finish", "Edge Profile"))
         island = _format_labeled_values(group, ("Island Colour", "Island Edge Profile", "Waterfall End to Island"))
         if room.room_key == "kitchen":
             room.bench_tops_wall_run = _append_text(room.bench_tops_wall_run, wall_run)

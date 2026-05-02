@@ -154,7 +154,7 @@ It must not map generic child labels such as `Colour`, `Type`, `Model`, or
 
 | Source group | Source labels | Snapshot target | Notes |
 |---|---|---|---|
-| `Benchtops` | `Manufacturer`, `Colour`, `Edge Profile` | `bench_tops_wall_run` or `bench_tops_other` | Kitchen wall-run values stay separate from island values. Non-kitchen benchtops can use `bench_tops_other`. |
+| `Benchtops` | `Manufacturer`, `Colour`, `Colour & Finish`, `Finish`, `Edge Profile` | `bench_tops_wall_run` or `bench_tops_other` | Kitchen wall-run values stay separate from island values. Non-kitchen benchtops can use `bench_tops_other`; Study Desk `Colour & Finish` values must appear in the canonical bench-top field as well as row provenance. |
 | `Benchtops` | `Island Colour`, `Island Edge Profile`, `Waterfall End to Island` | `bench_tops_island` | Resolve `As Above` only inside the same room/group. |
 | `Underbench`, `Underbench including Island` | manufacturer/colour/finish/profile rows | `door_colours_base`, optional `door_colours_island` | Keep source wording verbatim. The adapter may at most trim leading/trailing whitespace for empty checks; it must not strip product codes, normalize spelling, collapse newlines, or transform Unicode characters. |
 | `Overhead Cupboards` | manufacturer/colour/finish/profile rows | `door_colours_overheads` | Preserve explicit overhead evidence with `has_explicit_overheads = true`. |

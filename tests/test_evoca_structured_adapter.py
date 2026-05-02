@@ -527,6 +527,42 @@ def test_evoca_adapter_routes_terminal_values_without_retaining_by_them() -> Non
     assert "Colour & Finish: Not Applicable - by owner after handover" in kitchen.door_colours_overheads
 
 
+def test_evoca_adapter_keeps_benchtop_colour_finish_in_canonical_field() -> None:
+    structured = _structured(
+        [
+            _section(
+                "15",
+                "15 CABINETS",
+                rooms=[
+                    _room(
+                        "Study Desk",
+                        [
+                            _group(
+                                "Benchtops",
+                                [
+                                    _row("Manufacturer", "Polytec", page_no=10),
+                                    _row("Colour & Finish", "Liguarian Wallnut Woodmatt", page_no=10),
+                                    _row("Edge Profile", "10/10 Radius", page_no=10),
+                                ],
+                                page_start=10,
+                            )
+                        ],
+                        page_start=10,
+                    )
+                ],
+            )
+        ]
+    )
+
+    snapshot = build_evoca_snapshot_from_structured(structured, "38148")
+
+    study = snapshot.rooms[0]
+    assert study.room_key == "study_desk"
+    assert "Manufacturer: Polytec" in study.bench_tops_other
+    assert "Colour & Finish: Liguarian Wallnut Woodmatt" in study.bench_tops_other
+    assert "Edge Profile: 10/10 Radius" in study.bench_tops_other
+
+
 def test_evoca_adapter_drops_fixture_only_rooms_but_keeps_evidence() -> None:
     structured = _structured(
         [
