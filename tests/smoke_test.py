@@ -4201,6 +4201,7 @@ Front Loader - standard 700mm size - LG Tower
                         "has_explicit_overheads": True,
                         "sink_info": "Model: Burazzo 750mm Stainless Steel Double Bowl Sink (BU754522D) ($150)\nType: Undermount\nAccessories: Not Applicable",
                         "tap_info": "Type: Vito Bertoni Alfie Pull-Out Sink Mixer in Brushed Nickel (85972LF)\nLocation: Centre of Sink",
+                        "handles": ["Not Applicable - Finger Pulls to Kitchen", "Not Applicable", "Finger Grip"],
                         "accessories": [
                             "Spin Brushed Brass 600mm Double Towel Rail (SP68-600-BB)",
                             "Kirra Rimless Close Coupled Toilet Suite Gloss White (KIR1-W)",
@@ -4217,7 +4218,7 @@ Front Loader - standard 700mm size - LG Tower
                         "room_key": "laundry",
                         "original_room_label": "Laundry",
                         "sink_info": "Model: Burazzo 650mm Gun Metal Single Bowl Sink (BU654520S-GM) ($370)\nType: #N/A",
-                        "handles": ["7298-128-TG", "Vertical", "#N/A", "Finger Grip"],
+                        "handles": ["Client to supply & install after handover", "#N/A", "Finger Grip"],
                     },
                 ],
             }
@@ -4229,6 +4230,7 @@ Front Loader - standard 700mm size - LG Tower
         self.assertEqual(flattened["kitchen"]["door_colours_base"], "Polytec - Aston White Matte")
         self.assertEqual(flattened["kitchen"]["sink_info"], "Burazzo 750mm Stainless Steel Double Bowl Sink (BU754522D) ($150) - Undermount")
         self.assertEqual(flattened["kitchen"]["tap_info"], "Vito Bertoni Alfie Pull-Out Sink Mixer in Brushed Nickel (85972LF) - Centre of Sink")
+        self.assertEqual(flattened["kitchen"]["handles"], "Finger Pulls to Kitchen | Finger Grip")
         self.assertEqual(flattened["kitchen"]["accessories"], [])
         self.assertEqual(flattened["kitchen"]["splashback"], "100mm x 300mm, 300mm x 300mm, 300mm x 600mm & 450mm x 450mm")
         self.assertEqual(flattened["kitchen"]["flooring"], "Evo Hybrid (1842mm x 230mm x 7mm) - Sandy Oak")
@@ -4236,7 +4238,7 @@ Front Loader - standard 700mm size - LG Tower
         self.assertEqual(flattened["study_desk"]["bench_tops_other"], "Polytec - Liguarian Wallnut Woodmatt - 10/10 Radius")
         self.assertEqual(flattened["study_desk"]["flooring"], "")
         self.assertEqual(flattened["laundry"]["sink_info"], "Burazzo 650mm Gun Metal Single Bowl Sink (BU654520S-GM) ($370)")
-        self.assertEqual(flattened["laundry"]["handles"], "7298-128-TG | Vertical | Finger Grip")
+        self.assertEqual(flattened["laundry"]["handles"], "Client to supply & install after handover | Finger Grip")
 
     def test_flatten_special_sections_hides_evoca_structured_raw_evidence(self) -> None:
         self.assertEqual(

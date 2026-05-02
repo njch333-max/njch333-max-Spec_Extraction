@@ -181,7 +181,10 @@ formatting is a presentation-only layer and must not mutate stored
 `special_sections` evidence cards should stay hidden on Spec List pages unless a
 debug view is added later. Evoca structured Spec List display should also hide
 wet-area Section 20 accessory/shower/bath/toilet rows that are too incomplete to
-be useful as canonical room accessories.
+be useful as canonical room accessories. Handle display may remove exact
+terminal markers such as `#N/A` and `Not Applicable`, but it must retain
+source-backed handle decisions such as `Client to supply & install after
+handover` and suffixes like `Finger Pulls to Kitchen`.
 
 ## Section 17 Appliances Mapping
 

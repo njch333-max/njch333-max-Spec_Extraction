@@ -2152,7 +2152,7 @@ def _format_evoca_structured_room_display(row: dict[str, Any], finish_display: d
     for field_name in ("sink_info", "basin_info", "tap_info"):
         formatted[field_name] = _evoca_structured_format_labeled_value(formatted.get(field_name, ""), "fixture")
     for field_name in ("handles",):
-        formatted[field_name] = _evoca_structured_format_labeled_value(formatted.get(field_name, ""), "evidence")
+        formatted[field_name] = _evoca_structured_format_handles(formatted.get(field_name, ""))
     for field_name in ("splashback", "flooring", "floating_shelf", "shelf", "bulkheads"):
         formatted[field_name] = "" if _evoca_structured_is_terminal_value(formatted.get(field_name, "")) else _display_value(formatted.get(field_name, ""))
     room_key = parsing.normalize_room_key(_display_value(formatted.get("room_key", "")))
@@ -2305,6 +2305,27 @@ def _evoca_structured_format_fixture(fields: dict[str, str]) -> str:
     if values:
         return _evoca_structured_join_unique(values)
     return _evoca_structured_join_unique(value for value in fields.values() if value and not _evoca_structured_is_terminal_value(value))
+
+
+def _evoca_structured_format_handles(value: Any) -> str:
+    text = _display_value(value).strip()
+    if not text:
+        return ""
+    parts: list[str] = []
+    for segment in re.split(r"\s+\|\s+", text):
+        cleaned = parsing.normalize_space(segment)
+        lowered = cleaned.lower()
+        if lowered in {"", "-", "n/a", "na", "#n/a", "#na", "not applicable", "not included"}:
+            continue
+        prefixed_match = re.match(r"(?i)^(?:not applicable|not included)\s*-\s*(?P<body>.+)$", cleaned)
+        if prefixed_match:
+            body = parsing.normalize_space(prefixed_match.group("body"))
+            if not re.search(r"(?i)\b(?:finger|handle|pull|client|owner|supply|install)\b", body):
+                continue
+            cleaned = body
+        if cleaned and cleaned not in parts:
+            parts.append(cleaned)
+    return " | ".join(parts)
 
 
 def _evoca_structured_first_field(fields: dict[str, str], *labels: str) -> str:
