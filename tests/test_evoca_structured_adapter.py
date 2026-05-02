@@ -297,6 +297,83 @@ def test_evoca_adapter_routes_type_by_parent_group() -> None:
     assert bathroom.v6_review_rows == []
 
 
+def test_evoca_adapter_uses_cabinet_section_soft_close_note() -> None:
+    structured = _structured(
+        [
+            _section(
+                "15",
+                "15 CABINETS",
+                rooms=[
+                    _room(
+                        "Kitchen",
+                        [
+                            _group(
+                                "Benchtops",
+                                [
+                                    _row("Manufacturer", "Quantum Quartz", page_no=9),
+                                    _row("Colour", "Ambra", page_no=9),
+                                ],
+                                page_start=9,
+                            )
+                        ],
+                        page_start=9,
+                    )
+                ],
+            )
+        ]
+    )
+    structured["sections"][0]["notes"] = [
+        _row(
+            "Section Note",
+            "All Cabinets include Soft Close Hinges & Runners, lined internally with White Melamine.",
+            page_no=9,
+        )
+    ]
+
+    snapshot = build_evoca_snapshot_from_structured(structured, "38337")
+
+    kitchen = snapshot.rooms[0]
+    assert kitchen.drawers_soft_close == "Soft Close"
+    assert kitchen.hinges_soft_close == "Soft Close"
+
+
+def test_evoca_adapter_does_not_map_section20_accessories_to_room_accessories() -> None:
+    structured = _structured(
+        [
+            _section(
+                "15",
+                "15 CABINETS",
+                rooms=[_room("Bathroom", [_group("Underbench", [_row("Manufacturer", "Polytec"), _row("Colour & Finish", "Tasmanian Oak Matt")])])],
+            ),
+            _section(
+                "20",
+                "20 PLUMBING FIXTURES & TAPWARE",
+                rooms=[
+                    _room(
+                        "Bathroom",
+                        [
+                            _group("Basin", [_row("Model", "Byron Bench Mount Gloss White"), _row("Type", "Overmount")]),
+                            _group("Basin Mixer", [_row("Type", "Spin Brushed Brass Tall Basin Mixer"), _row("Location", "Centre of Basin")]),
+                            _group("Shower", [_row("Shower Screen", "Semi-frameless with Clear Toughened Glass")]),
+                            _group("Accessories", [_row("Toilet Suite", "Kirra Rimless Close Coupled Toilet Suite Gloss White")]),
+                        ],
+                    )
+                ],
+                order=2,
+            ),
+        ]
+    )
+
+    snapshot = build_evoca_snapshot_from_structured(structured, "38337")
+
+    bathroom = snapshot.rooms[0]
+    assert "Byron Bench Mount Gloss White" in bathroom.basin_info
+    assert "Spin Brushed Brass Tall Basin Mixer" in bathroom.tap_info
+    assert bathroom.accessories == []
+    assert any(row.get("value") == "Semi-frameless with Clear Toughened Glass" for row in bathroom.material_rows)
+    assert any(row.get("value") == "Kirra Rimless Close Coupled Toilet Suite Gloss White" for row in bathroom.material_rows)
+
+
 def test_evoca_adapter_round_trips_business_values_verbatim() -> None:
     structured = _structured(
         [
@@ -561,6 +638,17 @@ def test_evoca_adapter_keeps_benchtop_colour_finish_in_canonical_field() -> None
     assert "Manufacturer: Polytec" in study.bench_tops_other
     assert "Colour & Finish: Liguarian Wallnut Woodmatt" in study.bench_tops_other
     assert "Edge Profile: 10/10 Radius" in study.bench_tops_other
+
+
+def test_evoca_adapter_evoc479_fixture_extracts_soft_close_from_section_note() -> None:
+    path = _fixture_path("EVOC479")
+    structured = json.loads(path.read_text(encoding="utf-8"))
+
+    snapshot = build_evoca_snapshot_from_structured(structured, job_no="EVOC479", source_document=str(path))
+
+    assert snapshot.rooms
+    assert {room.drawers_soft_close for room in snapshot.rooms} == {"Soft Close"}
+    assert {room.hinges_soft_close for room in snapshot.rooms} == {"Soft Close"}
 
 
 def test_evoca_adapter_drops_fixture_only_rooms_but_keeps_evidence() -> None:

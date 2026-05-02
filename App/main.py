@@ -2162,11 +2162,7 @@ def _format_evoca_structured_room_display(row: dict[str, Any], finish_display: d
     if not formatted.get("splashback") and room_key in {"kitchen", "laundry"}:
         formatted["splashback"] = finish_display.get("kitchen_laundry_splashback", "")
     formatted["evidence_snippet"] = _evoca_structured_format_labeled_value(formatted.get("evidence_snippet", ""), "evidence")
-    formatted["accessories"] = [
-        value
-        for value in (_display_value(item) for item in formatted.get("accessories", []) or [])
-        if value and not _evoca_structured_is_terminal_value(value)
-    ]
+    formatted["accessories"] = []
     formatted["show_door_colours_overheads"] = bool(formatted.get("door_colours_overheads")) and bool(row.get("show_door_colours_overheads"))
     formatted["show_door_colours_base"] = bool(formatted.get("door_colours_base"))
     formatted["show_door_colours_island"] = bool(formatted.get("door_colours_island")) and bool(row.get("show_door_colours_island"))

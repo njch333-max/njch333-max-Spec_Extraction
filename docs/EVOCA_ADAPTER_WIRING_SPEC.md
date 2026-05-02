@@ -162,6 +162,7 @@ It must not map generic child labels such as `Colour`, `Type`, `Model`, or
 | cabinetry groups | `Handles` | `handles` | Merge only same-room handle values. Do not use helper-rendered text as a source. |
 | cabinetry groups | `Kickboard`, `Kicker`, toe-kick-like labels | `toe_kick` | Keep room-local only. |
 | `Drawers` | `Standard`, `Pot`, `Bin` | `other_items` unless a later field is approved | These are source rows, but current `RoomRow` has no detailed drawer-material field. |
+| Section 15 notes | source-backed soft-close wording such as `All Cabinets include Soft Close Hinges & Runners` | `drawers_soft_close`, `hinges_soft_close` | Apply to retained cabinet rooms when the note explicitly mentions soft close and hinges/runners. |
 
 Terminal anchor values such as `Not Applicable - by owner after handover` should
 still route verbatim into their canonical group field when that group is mapped.
@@ -178,7 +179,9 @@ visible flooring and splashback rows from included finish sections. This
 formatting is a presentation-only layer and must not mutate stored
 `SnapshotPayload` values, `material_rows`, or provenance. Evoca structured raw
 `special_sections` evidence cards should stay hidden on Spec List pages unless a
-debug view is added later.
+debug view is added later. Evoca structured Spec List display should also hide
+wet-area Section 20 accessory/shower/bath/toilet rows that are too incomplete to
+be useful as canonical room accessories.
 
 ## Section 17 Appliances Mapping
 
@@ -215,9 +218,12 @@ as `Overmount` or `Undermount`. The detailed rule lives in
 `docs/EVOCA_TYPE_LABEL_SEMANTIC_NOTE.md` and must be followed by path, not by
 memory or paraphrase.
 
-Wet-area plumbing rows that are not `Sink`, `Basin`, `Sink Mixer`, or
-`Basin Mixer` do not retain a room card by themselves. Fixture rows may enrich a
-room that already survives on material/joinery evidence.
+Wet-area plumbing rows that are not `Sink`, `Tub`, `Basin`, `Sink Mixer`,
+`Tub Mixer`, or `Basin Mixer` do not retain a room card by themselves and should
+not map to canonical `room.accessories`. They may remain as hidden
+`material_rows` / provenance evidence, but user-facing room rows should suppress
+incomplete accessories, shower, bath, toilet-suite, towel-rail, and floor-waste
+values.
 
 ## Sections 23, 24, And 25 Finishes Mapping
 

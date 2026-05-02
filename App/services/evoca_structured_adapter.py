@@ -141,6 +141,9 @@ def map_evoca_room(section: dict[str, Any], room: dict[str, Any], source_file: s
         mapped.material_rows.extend(material_rows)
         _apply_room_group_mapping(mapped, _section_code(section), group)
 
+    if _section_code(section) == "15":
+        _apply_cabinetry_section_notes(mapped, section)
+
     mapped.evidence_snippet = _first_evidence_snippet(mapped.material_rows)
     return mapped
 
@@ -381,6 +384,31 @@ def _apply_cabinetry_group(room: RoomRow, group: dict[str, Any], group_key: str)
             room.other_items.append({"label": _source_area_label(_text(group.get("group_label")), _text(row.get("label"))), "value": _text(row.get("value"))})
 
 
+def _apply_cabinetry_section_notes(room: RoomRow, section: dict[str, Any]) -> None:
+    note_text = "\n".join(
+        _text(note.get("value"))
+        for note in section.get("notes") or []
+        if isinstance(note, dict) and _text(note.get("value"))
+    )
+    if not note_text:
+        return
+    drawers_value = _soft_close_from_note(note_text, ("drawer", "runner", "runners"))
+    hinges_value = _soft_close_from_note(note_text, ("hinge", "hinges"))
+    if drawers_value and not room.drawers_soft_close:
+        room.drawers_soft_close = drawers_value
+    if hinges_value and not room.hinges_soft_close:
+        room.hinges_soft_close = hinges_value
+
+
+def _soft_close_from_note(text: str, keywords: tuple[str, ...]) -> str:
+    normalized = re.sub(r"\s+", " ", _text(text)).strip().lower()
+    if "soft close" not in normalized or not any(keyword in normalized for keyword in keywords):
+        return ""
+    if re.search(r"\b(?:not|no|without)\s+soft\s+close\b", normalized):
+        return "Not Soft Close"
+    return "Soft Close"
+
+
 def _apply_plumbing_group(room: RoomRow, group: dict[str, Any], group_key: str) -> None:
     if group_key in {"sink", "tub"}:
         room.sink_info = _append_text(room.sink_info, _format_labeled_values(group))
@@ -391,8 +419,9 @@ def _apply_plumbing_group(room: RoomRow, group: dict[str, Any], group_key: str) 
     if group_key in MIXER_GROUPS:
         room.tap_info = _append_text(room.tap_info, _format_labeled_values(group))
         return
-    if "accessories" in group_key or group_key in {"shower", "bath", "bath mixer spout", "bath mixer / spout"}:
-        _append_group_values_to_list(room.accessories, group)
+    # Section 20 wet-area accessories, showers, baths, toilet suites, and floor
+    # wastes are kept only as hidden source evidence in material_rows. They are
+    # too incomplete to display as canonical room accessories.
 
 
 def _apply_finish_section_enrichment(room_candidates: dict[str, RoomRow], section: dict[str, Any]) -> None:
@@ -482,6 +511,9 @@ def _merge_room_candidate(candidates: dict[str, RoomRow], incoming: RoomRow) -> 
                 current.append(item)
     for bool_field in ("has_explicit_overheads", "has_explicit_base", "has_explicit_tall", "has_explicit_island", "has_explicit_bar_back"):
         setattr(existing, bool_field, bool(getattr(existing, bool_field) or getattr(incoming, bool_field)))
+    for field_name in ("drawers_soft_close", "hinges_soft_close"):
+        if not getattr(existing, field_name) and getattr(incoming, field_name):
+            setattr(existing, field_name, getattr(incoming, field_name))
 
 
 def _room_has_true_material_evidence(room: RoomRow) -> bool:

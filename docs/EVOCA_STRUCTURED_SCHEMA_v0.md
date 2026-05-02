@@ -225,10 +225,11 @@ Before this schema is wired into `build_spec_snapshot()`, the current Evoca fina
 | `door_colours_tall` | `Pantry Doors` mapping | `15 CABINETS -> room -> Pantry Doors` | Preserve kickboard separately |
 | `toe_kick` | Underbench/Pantry `Kickboard` | `15 CABINETS -> room -> Underbench/Pantry Doors` | Apply material cleanup later |
 | `handles` | Underbench/Overheads/Pantry handle rows | same group rows | Existing handle merge rules must be re-derived |
-| `drawers_soft_close` / `hinges_soft_close` | global Evoca soft-close note | section notes / raw page text | May remain raw-text derived in adapter |
+| `drawers_soft_close` / `hinges_soft_close` | global Evoca soft-close note | `15 CABINETS -> notes[]` source-backed soft-close text | Adapter derives `Soft Close` / `Not Soft Close` only from explicit section-note wording |
 | `sink_info` | plumbing table/text recovery | `20 PLUMBING -> room -> Sink/Tub` | Room-family mapping belongs in adapter |
 | `basin_info` | plumbing table/text recovery | `20 PLUMBING -> room -> Basin` | Do not emit wet-area fixture noise as room-retention evidence |
 | `tap_info` | plumbing table/text recovery | `20 PLUMBING -> room -> Sink Mixer/Tub Mixer/Basin Mixer` | Keep location row local |
+| Section 20 wet-area accessories | room plumbing groups such as `Accessories`, `Shower`, `Bath`, toilet-suite, towel-rail, and floor-waste rows | `material_rows` / provenance only | Do not render as canonical room accessories in Evoca structured Spec List output |
 | `flooring` | text-block extraction | `23 TILING / HARD FLOORING` groups | v0 can keep current text-block fallback |
 | `splashback` | text-block extraction | `23 TILING / HARD FLOORING` / `24 GLASS SPLASHBACK` | Keep raw evidence visible |
 | `appliances` | appliance table/text recovery | `17 APPLIANCES -> Appliances` | Official lookup remains separate enrichment |

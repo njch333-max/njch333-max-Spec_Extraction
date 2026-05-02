@@ -4201,6 +4201,10 @@ Front Loader - standard 700mm size - LG Tower
                         "has_explicit_overheads": True,
                         "sink_info": "Model: Burazzo 750mm Stainless Steel Double Bowl Sink (BU754522D) ($150)\nType: Undermount\nAccessories: Not Applicable",
                         "tap_info": "Type: Vito Bertoni Alfie Pull-Out Sink Mixer in Brushed Nickel (85972LF)\nLocation: Centre of Sink",
+                        "accessories": [
+                            "Spin Brushed Brass 600mm Double Towel Rail (SP68-600-BB)",
+                            "Kirra Rimless Close Coupled Toilet Suite Gloss White (KIR1-W)",
+                        ],
                         "splashback": "Not Applicable",
                         "evidence_snippet": "Manufacturer: Quantum Quartz",
                     },
@@ -4219,6 +4223,7 @@ Front Loader - standard 700mm size - LG Tower
         self.assertEqual(flattened["kitchen"]["door_colours_base"], "Polytec - Aston White Matte")
         self.assertEqual(flattened["kitchen"]["sink_info"], "Burazzo 750mm Stainless Steel Double Bowl Sink (BU754522D) ($150) - Undermount")
         self.assertEqual(flattened["kitchen"]["tap_info"], "Vito Bertoni Alfie Pull-Out Sink Mixer in Brushed Nickel (85972LF) - Centre of Sink")
+        self.assertEqual(flattened["kitchen"]["accessories"], [])
         self.assertEqual(flattened["kitchen"]["splashback"], "100mm x 300mm, 300mm x 300mm, 300mm x 600mm & 450mm x 450mm")
         self.assertEqual(flattened["kitchen"]["flooring"], "Evo Hybrid (1842mm x 230mm x 7mm) - Sandy Oak")
         self.assertEqual(flattened["kitchen"]["evidence_snippet"], "Quantum Quartz")
