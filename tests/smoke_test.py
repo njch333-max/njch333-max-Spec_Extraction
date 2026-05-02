@@ -22,7 +22,7 @@ os.environ["SPEC_EXTRACTION_ENABLE_OPENAI_VISION"] = "0"
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 
-from App.main import _build_material_summary, _flatten_imperial_material_rows, _flatten_rooms, _format_brisbane_time, _format_run_duration, _run_duration_display, app
+from App.main import _build_material_summary, _flatten_imperial_material_rows, _flatten_rooms, _flatten_special_sections, _format_brisbane_time, _format_run_duration, _run_duration_display, app
 from App.services import cleaning_rules, extraction_service, parsing as parsing_module, store
 from App.services import appliance_official
 from App.services.appliance_official import _build_direct_product_candidates, _extract_size_from_text, _primary_model_token
@@ -4165,6 +4165,75 @@ Front Loader - standard 700mm size - LG Tower
         )
         self.assertEqual(rows[0]["feature_colour"], "Polytec Perugian Walnut Woodmatt")
         self.assertTrue(rows[0]["show_feature_colour"])
+
+    def test_flatten_rooms_formats_evoca_structured_values_for_display(self) -> None:
+        rows = _flatten_rooms(
+            {
+                "builder_name": "Evoca",
+                "analysis": {"parser_strategy": "evoca_structured_v0"},
+                "rooms": [
+                    {
+                        "room_key": "kitchen",
+                        "original_room_label": "Kitchen",
+                        "bench_tops_wall_run": "Manufacturer: Quantum Quartz\nColour: Statuario Zero\nEdge Profile: 20mm Arissed",
+                        "bench_tops_island": "Island Colour: As Above\nIsland Edge Profile: 20mm Arissed\nWaterfall End to Island: 20mm Arissed",
+                        "door_colours_base": "Manufacturer: Polytec\nColour & Finish: Aston White Matte",
+                        "door_colours_overheads": "Manufacturer: Polytec\nColour & Finish: Aston White Matte",
+                        "has_explicit_overheads": True,
+                        "sink_info": "Model: Burazzo 750mm Stainless Steel Double Bowl Sink (BU754522D) ($150)\nType: Undermount\nAccessories: Not Applicable",
+                        "tap_info": "Type: Vito Bertoni Alfie Pull-Out Sink Mixer in Brushed Nickel (85972LF)\nLocation: Centre of Sink",
+                        "splashback": "Not Applicable",
+                    },
+                    {
+                        "room_key": "study_desk",
+                        "original_room_label": "Study Desk",
+                        "bench_tops_other": "Manufacturer: Polytec\nColour & Finish: Liguarian Wallnut Woodmatt\nEdge Profile: 10/10 Radius",
+                    },
+                ],
+            }
+        )
+        flattened = {row["room_key"]: row for row in rows}
+
+        self.assertEqual(flattened["kitchen"]["bench_tops_wall_run"], "20mm Quantum Quartz - Statuario Zero - Arissed")
+        self.assertEqual(flattened["kitchen"]["bench_tops_island"], "As Above - 20mm Arissed")
+        self.assertEqual(flattened["kitchen"]["door_colours_base"], "Polytec - Aston White Matte")
+        self.assertEqual(flattened["kitchen"]["sink_info"], "Burazzo 750mm Stainless Steel Double Bowl Sink (BU754522D) ($150) - Undermount")
+        self.assertEqual(flattened["kitchen"]["tap_info"], "Vito Bertoni Alfie Pull-Out Sink Mixer in Brushed Nickel (85972LF) - Centre of Sink")
+        self.assertEqual(flattened["kitchen"]["splashback"], "")
+        self.assertEqual(flattened["study_desk"]["bench_tops_other"], "Polytec - Liguarian Wallnut Woodmatt - 10/10 Radius")
+
+    def test_flatten_special_sections_hides_evoca_structured_raw_evidence(self) -> None:
+        self.assertEqual(
+            _flatten_special_sections(
+                {
+                    "builder_name": "Evoca",
+                    "analysis": {"parser_strategy": "evoca_structured_v0"},
+                    "special_sections": [
+                        {
+                            "section_key": "evoca_unretained_powder",
+                            "original_section_label": "Unretained Evoca source rows / Powder",
+                            "fields": {"Powder / Basin": "Not Applicable"},
+                        }
+                    ],
+                }
+            ),
+            [],
+        )
+        self.assertEqual(
+            _flatten_special_sections(
+                {
+                    "builder_name": "Clarendon",
+                    "special_sections": [
+                        {
+                            "section_key": "general",
+                            "original_section_label": "General",
+                            "fields": {"Note": "Keep"},
+                        }
+                    ],
+                }
+            )[0]["fields"][0],
+            {"key": "Note", "value": "Keep"},
+        )
 
     def test_flatten_rooms_preserves_imperial_room_order_and_material_rows(self) -> None:
         rows = _flatten_rooms(

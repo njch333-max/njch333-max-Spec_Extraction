@@ -693,6 +693,7 @@ def _flatten_rooms(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     ):
         return _flatten_imperial_rooms(snapshot)
     rows: list[dict[str, Any]] = []
+    evoca_structured_display = _is_evoca_structured_snapshot(snapshot)
     for row in snapshot.get("rooms", []):
         if not isinstance(row, dict):
             continue
@@ -702,8 +703,7 @@ def _flatten_rooms(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
         room_key_normalized = parsing.normalize_room_key(room_key)
         has_explicit_overheads = bool(row.get("has_explicit_overheads", False))
         show_split_benchtops = room_key_normalized == "kitchen" and bool(benchtop_groups["bench_tops_wall_run"] or benchtop_groups["bench_tops_island"])
-        rows.append(
-            {
+        flattened = {
                 "room_key": room_key,
                 "original_room_label": _display_value(row.get("original_room_label", "")),
                 "bench_tops": _display_value(row.get("bench_tops", [])),
@@ -753,7 +753,9 @@ def _flatten_rooms(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
                 "evidence_snippet": _display_value(row.get("evidence_snippet", "")),
                 "confidence": _display_value(row.get("confidence", "")),
             }
-        )
+        if evoca_structured_display:
+            flattened = _format_evoca_structured_room_display(flattened)
+        rows.append(flattened)
     return _sort_room_rows_by_priority(rows)
 
 
@@ -2032,6 +2034,8 @@ def _normalize_room_priority_title(value: str) -> str:
 
 
 def _flatten_special_sections(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    if _is_evoca_structured_snapshot(snapshot):
+        return []
     rows: list[dict[str, Any]] = []
     for row in snapshot.get("special_sections", []):
         if not isinstance(row, dict):
@@ -2107,6 +2111,174 @@ def _display_value(value: Any) -> str:
         except TypeError:
             return str(value)
     return str(value)
+
+
+def _is_evoca_structured_snapshot(snapshot: dict[str, Any]) -> bool:
+    analysis = snapshot.get("analysis") if isinstance(snapshot.get("analysis"), dict) else {}
+    if _display_value(analysis.get("parser_strategy", "")) == "evoca_structured_v0":
+        return True
+    for document in snapshot.get("source_documents", []) or []:
+        if isinstance(document, dict) and _display_value(document.get("source_provider", "")) == "evoca_structured_v0":
+            return True
+    for room in snapshot.get("rooms", []) or []:
+        if not isinstance(room, dict):
+            continue
+        for material_row in room.get("material_rows", []) or []:
+            if not isinstance(material_row, dict):
+                continue
+            provenance = material_row.get("provenance") if isinstance(material_row.get("provenance"), dict) else {}
+            if _display_value(material_row.get("source_provider", "")) == "evoca_structured_v0":
+                return True
+            if _display_value(provenance.get("source_provider", "")) == "evoca_structured_v0":
+                return True
+    return False
+
+
+def _format_evoca_structured_room_display(row: dict[str, Any]) -> dict[str, Any]:
+    formatted = dict(row)
+    for field_name in ("bench_tops", "bench_tops_wall_run", "bench_tops_island", "bench_tops_other"):
+        formatted[field_name] = _evoca_structured_format_labeled_value(formatted.get(field_name, ""), "benchtop")
+    for field_name in (
+        "door_panel_colours",
+        "door_colours_overheads",
+        "door_colours_base",
+        "door_colours_tall",
+        "door_colours_island",
+        "door_colours_bar_back",
+        "feature_colour",
+    ):
+        formatted[field_name] = _evoca_structured_format_labeled_value(formatted.get(field_name, ""), "door_colour")
+    for field_name in ("sink_info", "basin_info", "tap_info"):
+        formatted[field_name] = _evoca_structured_format_labeled_value(formatted.get(field_name, ""), "fixture")
+    for field_name in ("splashback", "flooring", "floating_shelf", "shelf", "bulkheads"):
+        formatted[field_name] = "" if _evoca_structured_is_terminal_value(formatted.get(field_name, "")) else _display_value(formatted.get(field_name, ""))
+    formatted["accessories"] = [
+        value
+        for value in (_display_value(item) for item in formatted.get("accessories", []) or [])
+        if value and not _evoca_structured_is_terminal_value(value)
+    ]
+    formatted["show_door_colours_overheads"] = bool(formatted.get("door_colours_overheads")) and bool(row.get("show_door_colours_overheads"))
+    formatted["show_door_colours_base"] = bool(formatted.get("door_colours_base"))
+    formatted["show_door_colours_island"] = bool(formatted.get("door_colours_island")) and bool(row.get("show_door_colours_island"))
+    formatted["show_door_colours_bar_back"] = bool(formatted.get("door_colours_bar_back")) and bool(row.get("show_door_colours_bar_back"))
+    formatted["show_feature_colour"] = bool(formatted.get("feature_colour"))
+    formatted["show_split_benchtops"] = bool(row.get("show_split_benchtops")) and bool(
+        formatted.get("bench_tops_wall_run") or formatted.get("bench_tops_island")
+    )
+    return formatted
+
+
+def _evoca_structured_format_labeled_value(value: Any, value_kind: str) -> str:
+    text = _display_value(value).strip()
+    if not text or _evoca_structured_is_terminal_value(text):
+        return ""
+    fields = _evoca_structured_labeled_fields(text)
+    if fields:
+        if value_kind == "benchtop":
+            return _evoca_structured_format_benchtop(fields)
+        if value_kind == "door_colour":
+            return _evoca_structured_format_door_colour(fields)
+        if value_kind == "fixture":
+            return _evoca_structured_format_fixture(fields)
+        return " - ".join(value for value in fields.values() if value and not _evoca_structured_is_terminal_value(value))
+    segments = [segment.strip() for segment in re.split(r"\s+\|\s+", text) if segment.strip()]
+    if len(segments) > 1:
+        return " | ".join(
+            formatted
+            for segment in segments
+            if (formatted := _evoca_structured_format_labeled_value(segment, value_kind))
+        )
+    return text
+
+
+def _evoca_structured_labeled_fields(text: str) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for line in re.split(r"[\r\n]+|\s+\|\s+", text):
+        if ":" not in line:
+            continue
+        label, raw_value = line.split(":", 1)
+        key = parsing.normalize_space(label).lower()
+        value = parsing.normalize_space(raw_value)
+        if key and value:
+            fields[key] = value
+    return fields
+
+
+def _evoca_structured_format_benchtop(fields: dict[str, str]) -> str:
+    manufacturer = _evoca_structured_first_field(fields, "manufacturer")
+    colour = _evoca_structured_first_field(fields, "colour & finish", "colour", "finish", "island colour")
+    edge = _evoca_structured_first_field(fields, "edge profile", "island edge profile")
+    waterfall = _evoca_structured_first_field(fields, "waterfall end to island")
+    thickness = ""
+    edge_display = edge
+    edge_match = re.match(r"(?i)^\s*(\d+\s*mm)\s+(.+)$", edge)
+    if edge_match:
+        thickness = parsing.normalize_space(edge_match.group(1))
+        edge_display = parsing.normalize_space(edge_match.group(2))
+    first = " ".join(part for part in (thickness, manufacturer) if part).strip() if manufacturer else ""
+    if not manufacturer and edge:
+        edge_display = edge
+    parts = [part for part in (first, colour, edge_display) if part and not _evoca_structured_is_terminal_value(part)]
+    if not parts and edge:
+        parts.append(edge)
+    if waterfall and waterfall != edge and not _evoca_structured_is_terminal_value(waterfall):
+        parts.append(waterfall)
+    return _evoca_structured_join_unique(parts)
+
+
+def _evoca_structured_format_door_colour(fields: dict[str, str]) -> str:
+    parts = [
+        _evoca_structured_first_field(fields, "manufacturer"),
+        _evoca_structured_first_field(fields, "colour & finish", "colour", "finish"),
+        _evoca_structured_first_field(fields, "profile", "edge profile"),
+    ]
+    return _evoca_structured_join_unique(part for part in parts if part and not _evoca_structured_is_terminal_value(part))
+
+
+def _evoca_structured_format_fixture(fields: dict[str, str]) -> str:
+    preferred_labels = (
+        "model",
+        "type",
+        "location",
+        "mounting",
+        "colour",
+        "finish",
+        "accessories",
+    )
+    values = [
+        value
+        for label in preferred_labels
+        if (value := _evoca_structured_first_field(fields, label)) and not _evoca_structured_is_terminal_value(value)
+    ]
+    if values:
+        return _evoca_structured_join_unique(values)
+    return _evoca_structured_join_unique(value for value in fields.values() if value and not _evoca_structured_is_terminal_value(value))
+
+
+def _evoca_structured_first_field(fields: dict[str, str], *labels: str) -> str:
+    for label in labels:
+        value = fields.get(label.lower(), "")
+        if value:
+            return value
+    return ""
+
+
+def _evoca_structured_join_unique(values: Any) -> str:
+    parts: list[str] = []
+    for value in values:
+        text = _display_value(value).strip()
+        if text and text not in parts:
+            parts.append(text)
+    return " - ".join(parts)
+
+
+def _evoca_structured_is_terminal_value(value: Any) -> bool:
+    text = parsing.normalize_space(_display_value(value)).lower()
+    if not text:
+        return True
+    return text in {"-", "n/a", "na", "not applicable", "not included"} or text.startswith(
+        ("not applicable -", "not included -", "n/a -", "by client", "client to")
+    )
 
 
 def _split_room_door_groups(row: dict[str, Any]) -> dict[str, str]:
