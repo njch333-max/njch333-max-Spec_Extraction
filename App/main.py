@@ -694,6 +694,7 @@ def _flatten_rooms(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
         return _flatten_imperial_rooms(snapshot)
     rows: list[dict[str, Any]] = []
     evoca_structured_display = _is_evoca_structured_snapshot(snapshot)
+    evoca_finish_display = _evoca_structured_finish_display(snapshot) if evoca_structured_display else {}
     for row in snapshot.get("rooms", []):
         if not isinstance(row, dict):
             continue
@@ -752,9 +753,9 @@ def _flatten_rooms(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
                 "page_refs": _display_value(row.get("page_refs", "")),
                 "evidence_snippet": _display_value(row.get("evidence_snippet", "")),
                 "confidence": _display_value(row.get("confidence", "")),
-            }
+        }
         if evoca_structured_display:
-            flattened = _format_evoca_structured_room_display(flattened)
+            flattened = _format_evoca_structured_room_display(flattened, evoca_finish_display)
         rows.append(flattened)
     return _sort_room_rows_by_priority(rows)
 
@@ -2134,7 +2135,7 @@ def _is_evoca_structured_snapshot(snapshot: dict[str, Any]) -> bool:
     return False
 
 
-def _format_evoca_structured_room_display(row: dict[str, Any]) -> dict[str, Any]:
+def _format_evoca_structured_room_display(row: dict[str, Any], finish_display: dict[str, str]) -> dict[str, Any]:
     formatted = dict(row)
     for field_name in ("bench_tops", "bench_tops_wall_run", "bench_tops_island", "bench_tops_other"):
         formatted[field_name] = _evoca_structured_format_labeled_value(formatted.get(field_name, ""), "benchtop")
@@ -2152,6 +2153,14 @@ def _format_evoca_structured_room_display(row: dict[str, Any]) -> dict[str, Any]
         formatted[field_name] = _evoca_structured_format_labeled_value(formatted.get(field_name, ""), "fixture")
     for field_name in ("splashback", "flooring", "floating_shelf", "shelf", "bulkheads"):
         formatted[field_name] = "" if _evoca_structured_is_terminal_value(formatted.get(field_name, "")) else _display_value(formatted.get(field_name, ""))
+    room_key = parsing.normalize_room_key(_display_value(formatted.get("room_key", "")))
+    if not formatted.get("flooring"):
+        if room_key in {"kitchen", "butlers", "laundry"}:
+            formatted["flooring"] = finish_display.get("hybrid_flooring", "") or finish_display.get("tile_flooring", "")
+        elif room_key in {"bathroom", "ensuite", "powder"}:
+            formatted["flooring"] = finish_display.get("tile_flooring", "")
+    if not formatted.get("splashback") and room_key in {"kitchen", "laundry"}:
+        formatted["splashback"] = finish_display.get("kitchen_laundry_splashback", "")
     formatted["evidence_snippet"] = _evoca_structured_format_labeled_value(formatted.get("evidence_snippet", ""), "evidence")
     formatted["accessories"] = [
         value
@@ -2167,6 +2176,50 @@ def _format_evoca_structured_room_display(row: dict[str, Any]) -> dict[str, Any]
         formatted.get("bench_tops_wall_run") or formatted.get("bench_tops_island")
     )
     return formatted
+
+
+def _evoca_structured_finish_display(snapshot: dict[str, Any]) -> dict[str, str]:
+    special_fields: dict[str, str] = {}
+    for section in snapshot.get("special_sections", []) or []:
+        if not isinstance(section, dict):
+            continue
+        section_key = _display_value(section.get("section_key", ""))
+        if not section_key.startswith("evoca_23_") and not section_key.startswith("evoca_24_") and not section_key.startswith("evoca_25_"):
+            continue
+        fields = section.get("fields") if isinstance(section.get("fields"), dict) else {}
+        for key, value in fields.items():
+            text = _display_value(value)
+            if text and not _evoca_structured_is_terminal_value(text):
+                special_fields[_display_value(key)] = text
+
+    hybrid_flooring = _evoca_structured_join_unique(
+        part
+        for part in (
+            _evoca_structured_special_field(special_fields, "Vinyl, Hybrid or Timber / Type"),
+            _evoca_structured_special_field(special_fields, "Vinyl, Hybrid or Timber / Colour"),
+        )
+        if part
+    )
+    tile_flooring = _evoca_structured_join_unique(
+        part
+        for part in (
+            _evoca_structured_special_field(special_fields, "Supplier"),
+            _evoca_structured_special_field(special_fields, "Supplier / Tile Range"),
+            _evoca_structured_special_field(special_fields, "Supplier / Floor Tile Type"),
+            _evoca_structured_special_field(special_fields, "Supplier / Standard Floor Tile Size"),
+        )
+        if part
+    )
+    kitchen_laundry_splashback = _evoca_structured_special_field(special_fields, "Supplier / Kitchen & Laundry Splashback")
+    return {
+        "hybrid_flooring": hybrid_flooring,
+        "tile_flooring": tile_flooring,
+        "kitchen_laundry_splashback": kitchen_laundry_splashback,
+    }
+
+
+def _evoca_structured_special_field(fields: dict[str, str], key: str) -> str:
+    return fields.get(key, "")
 
 
 def _evoca_structured_format_labeled_value(value: Any, value_kind: str) -> str:

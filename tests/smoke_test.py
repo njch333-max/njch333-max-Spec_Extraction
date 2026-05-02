@@ -4171,6 +4171,25 @@ Front Loader - standard 700mm size - LG Tower
             {
                 "builder_name": "Evoca",
                 "analysis": {"parser_strategy": "evoca_structured_v0"},
+                "special_sections": [
+                    {
+                        "section_key": "evoca_23_supplier",
+                        "fields": {
+                            "Supplier": "Beaumont Tiles",
+                            "Supplier / Tile Range": "Omniform (Floor & Wall), Casper White (Wall), Subway (Kitchen, & Laundry Splashback)",
+                            "Supplier / Floor Tile Type": "Pressed-edge",
+                            "Supplier / Standard Floor Tile Size": "300mm x 300mm OR 450mm x 450mm",
+                            "Supplier / Kitchen & Laundry Splashback": "100mm x 300mm, 300mm x 300mm, 300mm x 600mm & 450mm x 450mm",
+                        },
+                    },
+                    {
+                        "section_key": "evoca_23_vinyl hybrid or timber",
+                        "fields": {
+                            "Vinyl, Hybrid or Timber / Type": "Evo Hybrid (1842mm x 230mm x 7mm)",
+                            "Vinyl, Hybrid or Timber / Colour": "Sandy Oak",
+                        },
+                    },
+                ],
                 "rooms": [
                     {
                         "room_key": "kitchen",
@@ -4200,9 +4219,11 @@ Front Loader - standard 700mm size - LG Tower
         self.assertEqual(flattened["kitchen"]["door_colours_base"], "Polytec - Aston White Matte")
         self.assertEqual(flattened["kitchen"]["sink_info"], "Burazzo 750mm Stainless Steel Double Bowl Sink (BU754522D) ($150) - Undermount")
         self.assertEqual(flattened["kitchen"]["tap_info"], "Vito Bertoni Alfie Pull-Out Sink Mixer in Brushed Nickel (85972LF) - Centre of Sink")
-        self.assertEqual(flattened["kitchen"]["splashback"], "")
+        self.assertEqual(flattened["kitchen"]["splashback"], "100mm x 300mm, 300mm x 300mm, 300mm x 600mm & 450mm x 450mm")
+        self.assertEqual(flattened["kitchen"]["flooring"], "Evo Hybrid (1842mm x 230mm x 7mm) - Sandy Oak")
         self.assertEqual(flattened["kitchen"]["evidence_snippet"], "Quantum Quartz")
         self.assertEqual(flattened["study_desk"]["bench_tops_other"], "Polytec - Liguarian Wallnut Woodmatt - 10/10 Radius")
+        self.assertEqual(flattened["study_desk"]["flooring"], "")
 
     def test_flatten_special_sections_hides_evoca_structured_raw_evidence(self) -> None:
         self.assertEqual(

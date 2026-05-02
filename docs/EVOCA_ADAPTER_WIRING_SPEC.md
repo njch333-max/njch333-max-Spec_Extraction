@@ -173,10 +173,12 @@ needed later, belongs outside this adapter.
 
 The user-facing Spec List may format Evoca structured canonical values for
 legacy-style readability, for example displaying `Manufacturer`, `Colour &
-Finish`, and `Edge Profile` lines as a compact room value. This formatting is a
-presentation-only layer and must not mutate stored `SnapshotPayload` values,
-`material_rows`, or provenance. Evoca structured raw `special_sections` evidence
-cards should stay hidden on Spec List pages unless a debug view is added later.
+Finish`, and `Edge Profile` lines as a compact room value. It may also derive
+visible flooring and splashback rows from included finish sections. This
+formatting is a presentation-only layer and must not mutate stored
+`SnapshotPayload` values, `material_rows`, or provenance. Evoca structured raw
+`special_sections` evidence cards should stay hidden on Spec List pages unless a
+debug view is added later.
 
 ## Section 17 Appliances Mapping
 
