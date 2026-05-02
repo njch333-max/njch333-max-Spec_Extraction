@@ -4213,6 +4213,12 @@ Front Loader - standard 700mm size - LG Tower
                         "original_room_label": "Study Desk",
                         "bench_tops_other": "Manufacturer: Polytec\nColour & Finish: Liguarian Wallnut Woodmatt\nEdge Profile: 10/10 Radius",
                     },
+                    {
+                        "room_key": "laundry",
+                        "original_room_label": "Laundry",
+                        "sink_info": "Model: Burazzo 650mm Gun Metal Single Bowl Sink (BU654520S-GM) ($370)\nType: #N/A",
+                        "handles": ["7298-128-TG", "Vertical", "#N/A", "Finger Grip"],
+                    },
                 ],
             }
         )
@@ -4229,6 +4235,8 @@ Front Loader - standard 700mm size - LG Tower
         self.assertEqual(flattened["kitchen"]["evidence_snippet"], "Quantum Quartz")
         self.assertEqual(flattened["study_desk"]["bench_tops_other"], "Polytec - Liguarian Wallnut Woodmatt - 10/10 Radius")
         self.assertEqual(flattened["study_desk"]["flooring"], "")
+        self.assertEqual(flattened["laundry"]["sink_info"], "Burazzo 650mm Gun Metal Single Bowl Sink (BU654520S-GM) ($370)")
+        self.assertEqual(flattened["laundry"]["handles"], "7298-128-TG | Vertical | Finger Grip")
 
     def test_flatten_special_sections_hides_evoca_structured_raw_evidence(self) -> None:
         self.assertEqual(

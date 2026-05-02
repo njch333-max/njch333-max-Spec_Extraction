@@ -2151,6 +2151,8 @@ def _format_evoca_structured_room_display(row: dict[str, Any], finish_display: d
         formatted[field_name] = _evoca_structured_format_labeled_value(formatted.get(field_name, ""), "door_colour")
     for field_name in ("sink_info", "basin_info", "tap_info"):
         formatted[field_name] = _evoca_structured_format_labeled_value(formatted.get(field_name, ""), "fixture")
+    for field_name in ("handles",):
+        formatted[field_name] = _evoca_structured_format_labeled_value(formatted.get(field_name, ""), "evidence")
     for field_name in ("splashback", "flooring", "floating_shelf", "shelf", "bulkheads"):
         formatted[field_name] = "" if _evoca_structured_is_terminal_value(formatted.get(field_name, "")) else _display_value(formatted.get(field_name, ""))
     room_key = parsing.normalize_room_key(_display_value(formatted.get("room_key", "")))
@@ -2326,7 +2328,7 @@ def _evoca_structured_is_terminal_value(value: Any) -> bool:
     text = parsing.normalize_space(_display_value(value)).lower()
     if not text:
         return True
-    return text in {"-", "n/a", "na", "not applicable", "not included"} or text.startswith(
+    return text in {"-", "n/a", "na", "#n/a", "#na", "not applicable", "not included"} or text.startswith(
         ("not applicable -", "not included -", "n/a -", "by client", "client to")
     )
 
