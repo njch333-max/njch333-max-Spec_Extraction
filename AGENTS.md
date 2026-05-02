@@ -69,6 +69,7 @@ If a change affects user-visible behavior, architecture, storage, deployment, wo
       - standalone Evoca anchor recovery may synthesize only source-backed missing groups from exact raw-text group and child-label evidence; keep it narrow and observable with separate same-page and cross-page diagnostics.
       - bounded raw-text fallback may fill only blank row-local values inside the current group bbox; it must not overwrite table/text-grid values or borrow generic labels across groups.
       - terminal Evoca group values, including narrow source-native extensions such as `Not Applicable - by owner after handover`, belong on `is_group_anchor` rows with child rows left blank.
+      - Evoca terminal group anchors must block shifted child-value assignment; if `Benchtops` is `Not Applicable`, later table/text values must not populate its `Manufacturer`, `Colour`, or `Edge Profile` child rows.
       - raw-text fallback cursors must still advance through terminal or promoted-anchor groups so later repeated groups do not consume stale blocks.
       - raw-text fallback must not truncate value-column product text merely because the product contains words that also appear as current-group labels.
       - Evoca label-cell repair may split same-line child label/value text such as `Model Burazzo ...` or `Type Undermount` back into row-local `label` / `value` pairs before adapter mapping.

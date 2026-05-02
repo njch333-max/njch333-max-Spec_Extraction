@@ -2289,6 +2289,7 @@ def _evoca_structured_format_door_colour(fields: dict[str, str]) -> str:
 
 def _evoca_structured_format_fixture(fields: dict[str, str]) -> str:
     preferred_labels = (
+        "manufacturer & model",
         "model",
         "type",
         "location",

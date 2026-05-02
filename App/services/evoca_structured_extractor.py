@@ -760,7 +760,12 @@ def _build_group_rows(
     cleaned_labels = [_clean_label(label) for label in labels if _clean_label(label)]
     cleaned_values = [parsing.normalize_space(value) for value in values if parsing.normalize_space(value)]
     all_labels = [group_label, *cleaned_labels]
-    if len(all_labels) >= 2 and len(cleaned_values) == 1 and _is_terminal_group_value(cleaned_values[0]):
+    if (
+        len(all_labels) >= 2
+        and cleaned_values
+        and _is_terminal_group_value(cleaned_values[0])
+        and _norm_label_key(group_label) != "appliances"
+    ):
         for index, label in enumerate(all_labels):
             rows.append(
                 _structured_row(

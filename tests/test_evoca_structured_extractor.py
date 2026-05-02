@@ -145,6 +145,32 @@ def test_evoca_structured_promotes_extended_terminal_group_value() -> None:
     ]
 
 
+def test_evoca_structured_terminal_group_value_blocks_shifted_child_values() -> None:
+    structured = evoca_structured_extractor.extract_evoca_pages(
+        [
+            _page(
+                9,
+                [
+                    ["15 CABINETS", None, None, ""],
+                    ["", "Bathroom", None, None],
+                    ["-", "Benchtops\nManufacturer\nColour\nEdge Profile", "Not Applicable", None],
+                    [None, None, "Polytec", None],
+                    [None, None, "Taupe", None],
+                ],
+            )
+        ],
+        source_pdf="evoca.pdf",
+    )
+
+    rows = structured["sections"][0]["rooms"][0]["groups"][0]["rows"]
+    assert [(row["label"], row["value"], bool(row.get("is_group_anchor"))) for row in rows] == [
+        ("Benchtops", "Not Applicable", True),
+        ("Manufacturer", "", False),
+        ("Colour", "", False),
+        ("Edge Profile", "", False),
+    ]
+
+
 def test_evoca_structured_promotes_client_supply_group_terminal_value() -> None:
     structured = evoca_structured_extractor.extract_evoca_pages(
         [

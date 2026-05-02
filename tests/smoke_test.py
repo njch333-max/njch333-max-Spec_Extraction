@@ -4220,6 +4220,11 @@ Front Loader - standard 700mm size - LG Tower
                         "sink_info": "Model: Burazzo 650mm Gun Metal Single Bowl Sink (BU654520S-GM) ($370)\nType: #N/A",
                         "handles": ["Client to supply & install after handover", "#N/A", "Finger Grip"],
                     },
+                    {
+                        "room_key": "powder",
+                        "original_room_label": "Powder",
+                        "basin_info": "Manufacturer & Model: Omega Square Bench Mount Gloss White (FL238-W) with Overflow\nType: Overmount",
+                    },
                 ],
             }
         )
@@ -4239,6 +4244,7 @@ Front Loader - standard 700mm size - LG Tower
         self.assertEqual(flattened["study_desk"]["flooring"], "")
         self.assertEqual(flattened["laundry"]["sink_info"], "Burazzo 650mm Gun Metal Single Bowl Sink (BU654520S-GM) ($370)")
         self.assertEqual(flattened["laundry"]["handles"], "Client to supply & install after handover | Finger Grip")
+        self.assertEqual(flattened["powder"]["basin_info"], "Omega Square Bench Mount Gloss White (FL238-W) with Overflow - Overmount")
 
     def test_flatten_special_sections_hides_evoca_structured_raw_evidence(self) -> None:
         self.assertEqual(
