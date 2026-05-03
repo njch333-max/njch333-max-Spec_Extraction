@@ -32,6 +32,19 @@ not inside the repository checkout. The filenames must contain these IDs:
 - `EVOC479`
 - `EVOC480`
 
+The helper script can validate the private folder and configure the runner after
+you create a short-lived GitHub runner registration token:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\setup_github_evoca_runner.ps1 `
+  -RegistrationToken "<token from GitHub>" `
+  -PdfDir "C:\SpecExtraction\EvocaRealPdfs" `
+  -InstallService
+```
+
+Use `-ValidateOnly` to check the private PDF folder without downloading or
+registering a runner.
+
 ## Repository Variables
 
 Set these GitHub repository variables:
