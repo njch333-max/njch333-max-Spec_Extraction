@@ -41,7 +41,10 @@ def build_spec_list_excel(job_no: str, snapshot: dict[str, Any]) -> str:
     dirs = ensure_job_dirs(job_no)
     stamp = utc_now_iso().replace(":", "").replace("-", "")
     excel_path = dirs["export_dir"] / f"{safe_filename(job_no)}_spec_list_{stamp}.xlsx"
-    _write_review_excel(excel_path, job_no, snapshot)
+    if _is_evoca_structured_snapshot(snapshot):
+        _write_evoca_structured_review_excel(excel_path, job_no, snapshot)
+    else:
+        _write_review_excel(excel_path, job_no, snapshot)
     return str(excel_path)
 
 
@@ -62,6 +65,371 @@ def _write_review_excel(path: Path, job_no: str, snapshot: dict[str, Any]) -> No
         _write_material_summary(ws_material, material_summary_rows)
 
     wb.save(path)
+
+
+EVOCA_WORKBOOK_HEADERS = ["Page", "Order", "Room", "Group", "Label", "Value", "Anchor", "Source Text"]
+EVOCA_ROOM_FILL = PatternFill("solid", start_color="DCE6F1")
+EVOCA_GROUP_FILL = PatternFill("solid", start_color="F2F2F2")
+EVOCA_ANCHOR_FILL = PatternFill("solid", start_color="FFF2CC")
+EVOCA_NOTE_FILL = PatternFill("solid", start_color="FCE4D6")
+EVOCA_TERMINAL_FONT = Font(name="Arial", italic=True, color="888888", size=10)
+EVOCA_ANCHOR_FONT = Font(name="Arial", bold=True, color="996600", size=10)
+
+
+def _is_evoca_structured_snapshot(snapshot: dict[str, Any]) -> bool:
+    analysis = snapshot.get("analysis") if isinstance(snapshot.get("analysis"), dict) else {}
+    if _display_value(analysis.get("parser_strategy", "")) == "evoca_structured_v0":
+        return True
+    for room in _mapping_rows(snapshot.get("rooms", [])):
+        for row in _mapping_rows(room.get("material_rows", [])):
+            if _display_value(row.get("source_provider", "")) == "evoca_structured_v0":
+                return True
+    return False
+
+
+def _write_evoca_structured_review_excel(path: Path, job_no: str, snapshot: dict[str, Any]) -> None:
+    rows = _evoca_structured_export_rows(snapshot)
+    sections = _evoca_rows_by_section(rows)
+    used_sheet_names = {"Summary"}
+    section_sheets: list[tuple[tuple[str, str], list[dict[str, Any]], str]] = []
+    for section_key, section_rows in sections:
+        section_sheets.append((section_key, section_rows, _unique_excel_sheet_name(_evoca_section_sheet_name(section_key), used_sheet_names)))
+
+    wb = Workbook()
+    summary = wb.active
+    summary.title = "Summary"
+    _write_evoca_summary(summary, job_no, snapshot, section_sheets, rows)
+
+    for _section_key, section_rows, sheet_name in section_sheets:
+        ws = wb.create_sheet(sheet_name)
+        _write_evoca_section_sheet(ws, section_rows)
+
+    wb.save(path)
+
+
+def _write_evoca_summary(
+    ws: Any,
+    job_no: str,
+    snapshot: dict[str, Any],
+    sections: list[tuple[tuple[str, str], list[dict[str, Any]], str]],
+    rows: list[dict[str, Any]],
+) -> None:
+    display_job_no = _display_value(snapshot.get("job_no", "")) or job_no
+    analysis = snapshot.get("analysis") if isinstance(snapshot.get("analysis"), dict) else {}
+    ws.append([f"Job {display_job_no} - Evoca structured source rows"])
+    ws["A1"].font = Font(name="Arial", bold=True, size=14)
+    ws.append([_source_pdf_name(snapshot)])
+    ws["A2"].font = Font(name="Arial", italic=True, size=10, color="595959")
+    ws.append([])
+    metrics = [
+        ("Parser strategy", _display_value(analysis.get("parser_strategy", ""))),
+        ("Rooms", len(_mapping_rows(snapshot.get("rooms", [])))),
+        ("Appliances", len(_mapping_rows(snapshot.get("appliances", [])))),
+        ("Source row count", len(rows)),
+        ("Source sections", len(sections)),
+        ("Hard-excluded sections", "16, 18, 19, 21, 22"),
+    ]
+    for label, value in metrics:
+        ws.append([label, value])
+        row = ws[ws.max_row]
+        row[0].font = Font(name="Arial", bold=True, size=10)
+        row[0].fill = SUMMARY_BG
+        row[0].alignment = Alignment(horizontal="left")
+        row[1].alignment = Alignment(horizontal="left")
+    ws.append([])
+    ws.append(["Section #", "Title", "Sheet", "Pages", "Rows", "Anchors"])
+    _style_header(ws[ws.max_row])
+    for section_key, section_rows, sheet_name in sections:
+        code, title = section_key
+        pages = sorted({page for row in section_rows for page in _extract_page_numbers(row.get("page", ""))})
+        ws.append(
+            [
+                code,
+                _evoca_section_title_without_code(code, title),
+                sheet_name,
+                _display_page_list(pages),
+                len(section_rows),
+                sum(1 for row in section_rows if row.get("is_anchor")),
+            ]
+        )
+        _style_body(ws[ws.max_row])
+    _set_column_widths(ws, [14, 38, 30, 14, 10, 10])
+    ws.freeze_panes = "A11"
+
+
+def _write_evoca_section_sheet(ws: Any, rows: list[dict[str, Any]]) -> None:
+    ws.append(EVOCA_WORKBOOK_HEADERS)
+    _style_header(ws[1])
+    for column_index, width in enumerate([8, 8, 24, 30, 32, 52, 10, 68], start=1):
+        ws.column_dimensions[get_column_letter(column_index)].width = width
+    ws.freeze_panes = "A2"
+
+    current_room: str | None = None
+    for row in rows:
+        room = _display_value(row.get("room", ""))
+        if room and room != current_room:
+            _append_evoca_room_banner(ws, room)
+            current_room = room
+        ws.append(
+            [
+                row.get("page", ""),
+                row.get("order", ""),
+                room,
+                row.get("group", ""),
+                row.get("label", ""),
+                row.get("value", ""),
+                "ANCHOR" if row.get("is_anchor") else "",
+                row.get("source_text", ""),
+            ]
+        )
+        _style_evoca_source_row(ws[ws.max_row], row)
+
+
+def _append_evoca_room_banner(ws: Any, room: str) -> None:
+    ws.append([f"room: {room}"])
+    row_index = ws.max_row
+    ws.merge_cells(start_row=row_index, start_column=1, end_row=row_index, end_column=len(EVOCA_WORKBOOK_HEADERS))
+    for cell in ws[row_index]:
+        cell.font = Font(name="Arial", bold=True, size=10)
+        cell.fill = EVOCA_ROOM_FILL
+        cell.alignment = Alignment(horizontal="left", vertical="center")
+        cell.border = BORDER
+
+
+def _style_evoca_source_row(cells: Any, row: dict[str, Any]) -> None:
+    fill = EVOCA_NOTE_FILL if row.get("is_diagnostic") else EVOCA_ANCHOR_FILL if row.get("is_anchor") else EVOCA_GROUP_FILL
+    for cell in cells:
+        cell.font = BODY_FONT
+        cell.fill = fill
+        cell.alignment = WRAP
+        cell.border = BORDER
+    if row.get("is_anchor"):
+        cells[6].font = EVOCA_ANCHOR_FONT
+    if _evoca_is_terminal_display_value(row.get("value", "")):
+        cells[5].font = EVOCA_TERMINAL_FONT
+
+
+def _evoca_structured_export_rows(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen_signatures: set[tuple[str, str, str, str, str, str]] = set()
+    for room in _ordered_rooms(snapshot.get("rooms", [])):
+        room_label = _room_label(room)
+        for material_row in _ordered_material_rows(room.get("material_rows", [])):
+            if _display_value(material_row.get("source_provider", "")) != "evoca_structured_v0":
+                continue
+            export_row = _evoca_source_row_from_material_row(material_row, room_label)
+            rows.append(export_row)
+            seen_signatures.add(_evoca_source_row_signature(export_row))
+    for section_row in _mapping_rows(snapshot.get("special_sections", [])):
+        for export_row in _evoca_source_rows_from_special_section(section_row):
+            signature = _evoca_source_row_signature(export_row)
+            if signature in seen_signatures:
+                continue
+            rows.append(export_row)
+            seen_signatures.add(signature)
+    if not any(_display_value(row.get("section_code", "")) == "17" for row in rows):
+        for appliance in _mapping_rows(snapshot.get("appliances", [])):
+            export_row = _evoca_source_row_from_appliance(appliance)
+            signature = _evoca_source_row_signature(export_row)
+            if signature in seen_signatures:
+                continue
+            rows.append(export_row)
+            seen_signatures.add(signature)
+    return sorted(rows, key=_evoca_source_row_sort_key)
+
+
+def _evoca_source_row_from_material_row(row: dict[str, Any], room_label: str) -> dict[str, Any]:
+    provenance = row.get("provenance") if isinstance(row.get("provenance"), dict) else {}
+    section_code = _display_value(row.get("section_code", "")) or _display_value(provenance.get("section_code", ""))
+    section_title = _display_value(row.get("section_title", "")) or _display_value(provenance.get("section_title", ""))
+    group = _display_value(row.get("group_label", "")) or _display_value(provenance.get("group_label", ""))
+    label = _display_value(row.get("label", "")) or _display_value(provenance.get("child_label", ""))
+    value = _display_value(row.get("value", "")) or _display_value(row.get("specs_or_description", ""))
+    page = _page_display(row)
+    return {
+        "section_code": section_code,
+        "section_title": section_title,
+        "page": page,
+        "page_sort": _first_page_number(page),
+        "order": _safe_int(row.get("row_order")) or _safe_int(provenance.get("row_order")) or 0,
+        "room": room_label or _display_value(row.get("room_label", "")) or _display_value(provenance.get("room_label", "")),
+        "group": group,
+        "label": label,
+        "value": value,
+        "is_anchor": bool(row.get("is_group_anchor")),
+        "is_diagnostic": bool(row.get("is_diagnostic")),
+        "source_text": _evoca_source_text(group, label, value, bool(row.get("is_group_anchor"))),
+    }
+
+
+def _evoca_source_row_from_appliance(appliance: dict[str, Any]) -> dict[str, Any]:
+    appliance_type = _display_value(appliance.get("appliance_type", "")) or "Appliance"
+    value = _join_parts(
+        [
+            _display_value(appliance.get("make", "")),
+            _display_value(appliance.get("model_no", "")),
+            _display_value(appliance.get("overall_size", "")),
+            _display_value(appliance.get("product_url", "") or appliance.get("website_url", "")),
+        ]
+    )
+    page = _page_display(appliance)
+    return {
+        "section_code": "17",
+        "section_title": "17 APPLIANCES, ACCESSORIES & HOT WATER UNIT",
+        "page": page,
+        "page_sort": _first_page_number(page),
+        "order": 0,
+        "room": "",
+        "group": "Appliances",
+        "label": appliance_type,
+        "value": value,
+        "is_anchor": False,
+        "is_diagnostic": False,
+        "source_text": _evoca_source_text("Appliances", appliance_type, value, False),
+    }
+
+
+def _evoca_source_rows_from_special_section(section_row: dict[str, Any]) -> list[dict[str, Any]]:
+    fields = section_row.get("fields")
+    if not isinstance(fields, dict) or not fields:
+        return []
+    section_code, section_title, group_label = _evoca_special_section_parts(section_row)
+    if not section_code:
+        return []
+    page = _page_display(section_row)
+    rows: list[dict[str, Any]] = []
+    for order, (field_name, field_value) in enumerate(fields.items(), start=1):
+        group, label = _evoca_field_group_and_label(field_name, group_label)
+        value = _display_value(field_value)
+        rows.append(
+            {
+                "section_code": section_code,
+                "section_title": section_title,
+                "page": page,
+                "page_sort": _first_page_number(page),
+                "order": order,
+                "room": "",
+                "group": group,
+                "label": label,
+                "value": value,
+                "is_anchor": False,
+                "is_diagnostic": False,
+                "source_text": _evoca_source_text(group, label, value, False),
+            }
+        )
+    return rows
+
+
+def _evoca_special_section_parts(section_row: dict[str, Any]) -> tuple[str, str, str]:
+    original = _display_value(section_row.get("original_section_label", ""))
+    section_title = original
+    group_label = ""
+    if " / " in original:
+        section_title, group_label = [part.strip() for part in original.split(" / ", 1)]
+    section_code = ""
+    match = re.search(r"\bevoca_(\d{1,2})_", _display_value(section_row.get("section_key", "")), flags=re.IGNORECASE)
+    if match:
+        section_code = match.group(1)
+    if not section_code:
+        title_match = re.match(r"\s*(\d{1,2})\b", section_title)
+        section_code = title_match.group(1) if title_match else ""
+    return section_code, section_title, group_label
+
+
+def _evoca_field_group_and_label(field_name: Any, default_group: str) -> tuple[str, str]:
+    text = _display_value(field_name)
+    if " / " in text:
+        group, label = [part.strip() for part in text.split(" / ", 1)]
+        return group or default_group, label
+    return default_group, text
+
+
+def _evoca_source_row_signature(row: dict[str, Any]) -> tuple[str, str, str, str, str, str]:
+    return (
+        _display_value(row.get("section_code", "")),
+        _display_value(row.get("page", "")),
+        _display_value(row.get("room", "")).lower(),
+        _display_value(row.get("group", "")).lower(),
+        _display_value(row.get("label", "")).lower(),
+        _display_value(row.get("value", "")).lower(),
+    )
+
+
+def _evoca_rows_by_section(rows: list[dict[str, Any]]) -> list[tuple[tuple[str, str], list[dict[str, Any]]]]:
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        key = (_display_value(row.get("section_code", "")), _display_value(row.get("section_title", "")) or "Evoca")
+        grouped.setdefault(key, []).append(row)
+    return sorted(grouped.items(), key=lambda item: (_safe_int(item[0][0]) is None, _safe_int(item[0][0]) or 999, item[0][1]))
+
+
+def _evoca_source_row_sort_key(row: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        _safe_int(row.get("section_code")) is None,
+        _safe_int(row.get("section_code")) or 999,
+        _safe_int(row.get("page_sort")) or 9999,
+        _display_value(row.get("room", "")).upper(),
+        _safe_int(row.get("order")) or 0,
+        _display_value(row.get("group", "")).upper(),
+        _display_value(row.get("label", "")).upper(),
+    )
+
+
+def _evoca_source_text(group: str, label: str, value: str, is_anchor: bool) -> str:
+    label_text = _display_value(label)
+    value_text = _display_value(value)
+    if is_anchor:
+        group_text = _display_value(group)
+        return f"{group_text}: {value_text}" if value_text else f"- {group_text}".strip()
+    if label_text and value_text:
+        return f"{label_text}: {value_text}"
+    return label_text or value_text
+
+
+def _evoca_section_sheet_name(section_key: tuple[str, str]) -> str:
+    code, title = section_key
+    title_without_code = _evoca_section_title_without_code(code, title)
+    base = f"{code}_{title_without_code}" if code else title_without_code
+    return _sheet_name(base) or "Evoca"
+
+
+def _evoca_section_title_without_code(code: str, title: str) -> str:
+    text = _display_value(title)
+    if code:
+        text = re.sub(rf"^\s*{re.escape(str(code))}\s+", "", text, flags=re.IGNORECASE)
+    return text or "Evoca"
+
+
+def _unique_excel_sheet_name(value: str, used: set[str]) -> str:
+    base = _sheet_name(value) or "Sheet"
+    candidate = base[:31]
+    suffix = 2
+    while candidate in used:
+        tail = f"_{suffix}"
+        candidate = f"{base[:31 - len(tail)]}{tail}"
+        suffix += 1
+    used.add(candidate)
+    return candidate
+
+
+def _sheet_name(value: Any) -> str:
+    text = re.sub(r"[\\/?*\[\]:]+", "_", _display_value(value))
+    text = re.sub(r"\s+", "_", text).strip("._ ")
+    return text[:31]
+
+
+def _first_page_number(value: Any) -> int:
+    pages = _extract_page_numbers(value)
+    return pages[0] if pages else 0
+
+
+def _display_page_list(pages: list[int]) -> str:
+    return ", ".join(str(page) for page in pages)
+
+
+def _evoca_is_terminal_display_value(value: Any) -> bool:
+    text = _display_value(value).strip(" -;,").lower()
+    return text in {"not applicable", "not included", "not required", "n/a", "na", "#n/a", "#na", "tbc"}
 
 
 def _write_review_summary(ws: Any, job_no: str, snapshot: dict[str, Any], counts: dict[str, Any]) -> None:
