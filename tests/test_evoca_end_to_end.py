@@ -92,13 +92,22 @@ def _pdf_fixture_dir() -> Path:
     return Path(__file__).parent / "fixtures" / "evoca_real_pdfs"
 
 
+def _require_private_pdfs() -> bool:
+    return os.environ.get("EVOCA_E2E_REQUIRE_PDFS", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _pdf_path(pdf_id: str) -> Path:
     fixture_dir = _pdf_fixture_dir()
     matches = sorted(fixture_dir.rglob(f"*{pdf_id}*.pdf")) if fixture_dir.exists() else []
     if not matches:
-        pytest.skip(
+        message = (
             f"{pdf_id}: private real-PDF fixture not found under {fixture_dir}. "
             "Set EVOCA_E2E_PDF_DIR to run the real Evoca PDF e2e suite."
+        )
+        if _require_private_pdfs():
+            pytest.fail(message)
+        pytest.skip(
+            message
         )
     if len(matches) > 1:
         pytest.fail(f"{pdf_id}: expected one private PDF fixture, found {matches}")
