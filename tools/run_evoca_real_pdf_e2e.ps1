@@ -26,6 +26,7 @@ if (-not $resolvedPdfDir) {
 }
 
 $expectedPdfIds = @(
+    'EVOC434',
     'EVOC447',
     'EVOC467',
     'EVOC473',

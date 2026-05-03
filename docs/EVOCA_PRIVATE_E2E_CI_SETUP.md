@@ -6,7 +6,7 @@ fixtures from a local folder on that runner.
 
 ## Why self-hosted
 
-GitHub repository secrets are too small for a nine-PDF fixture archive, and
+GitHub repository secrets are too small for the private PDF fixture archive, and
 committing an encrypted PDF archive still puts customer files into repository
 history. A self-hosted runner keeps the PDFs outside git and outside GitHub
 artifact storage while still letting GitHub trigger the test.
@@ -19,9 +19,11 @@ Register a Windows self-hosted GitHub Actions runner with these labels:
 - `Windows`
 - `evoca-fixtures`
 
-On that runner, place the nine validated Evoca PDFs in a private folder that is
-not inside the repository checkout. The filenames must contain these IDs:
+On that runner, place the validated Evoca PDFs plus the EVOC434 hard-exclusion
+numbering-variant regression sample in a private folder that is not inside the
+repository checkout. The filenames must contain these IDs:
 
+- `EVOC434`
 - `EVOC447`
 - `EVOC467`
 - `EVOC473`
@@ -64,8 +66,8 @@ Otherwise the private e2e job may wait for a matching runner.
   allowed to skip there because no private PDFs are available.
 - `evoca-real-pdf-e2e`: runs only when `EVOCA_E2E_ENABLED=1`, uses the
   self-hosted `evoca-fixtures` runner, and calls
-  `tools/run_evoca_real_pdf_e2e.ps1` in gating mode. Missing any one of the nine
-  PDFs fails the job.
+  `tools/run_evoca_real_pdf_e2e.ps1` in gating mode. Missing any one of the
+  required PDFs fails the job.
 
 ## Local Equivalent
 

@@ -13,7 +13,9 @@ SECTION_TITLE_PATTERNS: tuple[tuple[str, str], ...] = (
     ("16", "16 ELECTRICAL / ALARM SYSTEM / CCTV / SOLAR PV SYSTEM"),
     ("17", "17 APPLIANCES, ACCESSORIES & HOT WATER UNIT"),
     ("18", "18 AIR-CONDITIONING"),
+    ("18", "18 PLUMBING & GAS"),
     ("19", "19 PLUMBING & GAS"),
+    ("19", "19 AIR-CONDITIONING"),
     ("20", "20 PLUMBING FIXTURES & TAPWARE"),
     ("21", "21 MIRRORS"),
     ("22", "22 WINDOW FURNISHINGS"),
@@ -300,6 +302,7 @@ def extract_evoca_pages(
                     continue
 
                 if detect_untracked_section_heading(row):
+                    current_section = None
                     current_room = None
                     current_group = None
                     row_index += 1

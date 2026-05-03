@@ -13,6 +13,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $expectedPdfIds = @(
+    'EVOC434',
     'EVOC447',
     'EVOC467',
     'EVOC473',

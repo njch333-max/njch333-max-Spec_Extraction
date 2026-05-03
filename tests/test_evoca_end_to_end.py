@@ -14,6 +14,7 @@ from App.services.evoca_structured_adapter import build_evoca_snapshot_from_stru
 
 
 VALIDATED_PDF_IDS = (
+    "EVOC434",
     "EVOC447",
     "EVOC467",
     "EVOC473",
@@ -35,7 +36,9 @@ HARD_EXCLUSION_PHRASES = (
     "CCTV",
     "SOLAR PV",
     "18 AIR-CONDITIONING",
+    "18 PLUMBING & GAS",
     "19 PLUMBING & GAS",
+    "19 AIR-CONDITIONING",
     "21 MIRRORS",
     "22 WINDOW FURNISHINGS",
     "Daiken",
@@ -46,6 +49,11 @@ HARD_EXCLUSION_PHRASES = (
 )
 
 EXPECTED_SNAPSHOT_CONTAINS: dict[str, tuple[str, ...]] = {
+    "EVOC434": (
+        "Caesarstone",
+        "Pure White",
+        "Black Matt- Venette finish",
+    ),
     "EVOC447": (
         "Alder 54082 Brushed Nickel",
         "Alora Gloss White Wall Faced Toilet Suite",
@@ -67,6 +75,11 @@ EXPECTED_SNAPSHOT_CONTAINS: dict[str, tuple[str, ...]] = {
 }
 
 EXPECTED_DISPLAY_CONTAINS: dict[str, tuple[str, ...]] = {
+    "EVOC434": (
+        "Rocher 540mm Granite Single Bowl Sink (ROCH540-B) ($185) - Undermount",
+        "Zara Matte Black Pull-Out (ZA120-MB) - Centre of Sink",
+        "Eden Bench Mount Matte White (FL135-M) ($100 Per Basin) - Overmount",
+    ),
     "EVOC449": (
         "Burazzo 750mm Stainless Steel Double Bowl Sink (BU754522D) ($185) - Undermount",
         "Zara Chrome Pull-Out (ZA120-CH)",

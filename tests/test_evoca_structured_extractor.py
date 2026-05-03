@@ -288,6 +288,58 @@ def test_evoca_structured_skips_non_required_output_sections_without_leakage() -
     ]
 
 
+def test_evoca_structured_skips_excluded_numbering_variants_without_leakage() -> None:
+    structured = evoca_structured_extractor.extract_evoca_pages(
+        [
+            _page(
+                1,
+                [
+                    ["17 APPLIANCES, ACCESSORIES & HOT WATER UNIT", None, None, ""],
+                    ["-", "Hot Water Unit", "Ariston", None],
+                    ["18 PLUMBING & GAS", None, None, ""],
+                    ["-", "Gas Type", "Natural Gas", None],
+                    ["19 AIR-CONDITIONING", None, None, ""],
+                    ["-", "Ducted Reverse Cycle\nManufacturer\nVent Type", "Daiken - 12.5Kw\nPaltec Round", None],
+                    ["20 PLUMBING FIXTURES & TAPWARE", None, None, ""],
+                    ["", "Kitchen", None, None],
+                    ["-", "Sink\nModel", "Burazzo", None],
+                ],
+            )
+        ],
+        source_pdf="evoca.pdf",
+    )
+
+    assert [section["section_code"] for section in structured["sections"]] == ["17", "20"]
+    output_json = json.dumps(structured["sections"])
+    for excluded_text in ("Gas Type", "Natural Gas", "Ducted Reverse Cycle", "Daiken", "Paltec"):
+        assert excluded_text not in output_json
+    skipped = [title for page in structured["pages"] for title in page["sections_skipped"]]
+    assert skipped == ["18 PLUMBING & GAS", "19 AIR-CONDITIONING"]
+
+
+def test_evoca_structured_untracked_section_heading_clears_current_section() -> None:
+    structured = evoca_structured_extractor.extract_evoca_pages(
+        [
+            _page(
+                1,
+                [
+                    ["17 APPLIANCES, ACCESSORIES & HOT WATER UNIT", None, None, ""],
+                    ["-", "Hot Water Unit", "Ariston", None],
+                    ["30 CUSTOM NON REQUIRED SECTION", None, None, ""],
+                    ["-", "Unsafe Group", "Should Not Leak", None],
+                    ["20 PLUMBING FIXTURES & TAPWARE", None, None, ""],
+                    ["", "Kitchen", None, None],
+                    ["-", "Sink\nModel", "Burazzo", None],
+                ],
+            )
+        ],
+        source_pdf="evoca.pdf",
+    )
+
+    assert [section["section_code"] for section in structured["sections"]] == ["17", "20"]
+    assert "Should Not Leak" not in json.dumps(structured["sections"])
+
+
 def test_evoca_structured_carries_section_across_pages() -> None:
     structured = evoca_structured_extractor.extract_evoca_pages(
         [
