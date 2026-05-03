@@ -146,6 +146,7 @@
   - only `Basin`, `Basin Mixer`, room-local flooring, and joinery/material fields are allowed to survive on final Yellowwood vanity room cards
   - the Yellowwood finalizer keeps `Kitchen` wall-run / island / other benchtops separate, preserves `Overhead Cupboards`, treats `*To Bulkhead*` text as a note instead of a bulkhead material value, and rehydrates kitchen sink/tap from plumbing overlays when needed
   - non-wet-area `FLOORING` pages and wet-area `TILING SCHEDULE` pages enrich retained room cards as room-local flooring overlays, while contents-page flooring text is excluded from `others.flooring_notes`
+  - the next Yellowwood dedicated-parser cycle should use the Evoca structured path as the staged process model, not as a direct business-rule template: start with a standalone source-native extractor/schema and private real-PDF e2e tests, then write an adapter spec and pure adapter, and only later discuss controlled production wiring or per-run Job Workspace controls
 13. For Imperial-only spec runs, apply a title-driven section parser before the generic cleanup stages:
   - use the page-top `... JOINERY SELECTION SHEET` title as the authoritative section start
   - use the currently extractable title body as the authoritative room label, preserving values such as `WALK-BEHIND PANTRY`, `BENCH SEAT`, or `OFFICE` without shorthand aliases
