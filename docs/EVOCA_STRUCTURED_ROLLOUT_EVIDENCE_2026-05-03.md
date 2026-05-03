@@ -34,6 +34,25 @@ which covers the observed excluded-heading numbering variant:
 
 Customer PDFs remain outside git under the ignored private fixture folder.
 
+## Exporter Reference
+
+Current production Raw Snapshot Excel export for Evoca structured snapshots is
+implemented in `App/services/export_service.py` and runs from stored
+`raw_spec` snapshot provenance. It does not re-run the PDF parser.
+
+The older Claude-spike standalone QA workbook exporter is still present as an
+untracked local reference file:
+
+```text
+tools/evoca_structured_export_claude.py
+```
+
+That helper reads JSON produced by
+`tools/evoca_structured_extractor_claude.py` or runs that extractor directly
+from a PDF, then writes a section-tab workbook for manual parser QA. Treat it
+as historical/reference code only unless Jason explicitly asks to preserve or
+promote it.
+
 ## Production Audit Summary
 
 Live DB audited: `/var/lib/spec-extraction/spec_extraction.sqlite3`
