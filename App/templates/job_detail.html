@@ -20,7 +20,11 @@
       <input type="hidden" name="file_role" value="spec">
       <input type="file" name="files" accept=".pdf,.docx" multiple required onchange="if (this.files.length) this.form.requestSubmit();">
     </form>
+    {% if is_evoca_job %}
+    <p class="muted">Choose one or more spec files to upload immediately, then choose the Evoca parser profile for this run.</p>
+    {% else %}
     <p class="muted">Choose one or more spec files to upload immediately, then click Parse Spec Files to start a worker run.</p>
+    {% endif %}
     <div class="table-wrap">
       <table class="table-cardify">
         <thead><tr><th>No.</th><th>Name</th><th>Uploaded</th><th>Actions</th></tr></thead>
@@ -44,11 +48,26 @@
         </tbody>
       </table>
     </div>
+    {% if is_evoca_job %}
+    <div class="inline-form">
+      <form method="post" action="/jobs/{{ job.id }}/runs/start" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="run_kind" value="spec_evoca_structured">
+        <button type="submit" class="primary-button">Evoca Structured</button>
+      </form>
+      <form method="post" action="/jobs/{{ job.id }}/runs/start" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="run_kind" value="spec_heuristic_only">
+        <button type="submit" class="ghost-button">Heuristic Only</button>
+      </form>
+    </div>
+    {% else %}
     <form method="post" action="/jobs/{{ job.id }}/runs/start" class="inline-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="run_kind" value="spec">
       <button type="submit" class="primary-button">Parse Spec Files</button>
     </form>
+    {% endif %}
   </article>
 
   <article class="card">

@@ -35,6 +35,7 @@ from App.services.runtime import (
 
 
 app = FastAPI(title="Spec Extraction", version="0.1.0")
+SPEC_RUN_KINDS = {"spec", "spec_evoca_structured", "spec_heuristic_only"}
 app.add_middleware(
     SessionMiddleware,
     secret_key=SECRET_KEY,
@@ -300,6 +301,7 @@ def job_detail_page(request: Request, job_id: int):
             job=job,
             job_site_address=_job_site_address(raw_snapshot_row["data"] if raw_snapshot_row else None, drawing_snapshot_row["data"] if drawing_snapshot_row else None),
             builder=builder,
+            is_evoca_job=_is_evoca_job(builder),
             spec_files=spec_files,
             drawing_files=drawing_files,
             runs=runs,
@@ -343,7 +345,7 @@ def spec_list_page(request: Request, job_id: int):
         return RedirectResponse("/jobs", status_code=303)
     raw_snapshot_row = store.get_snapshot(job_id, "raw_spec")
     raw_snapshot = raw_snapshot_row["data"] if raw_snapshot_row else None
-    latest_spec_run = _latest_completed_run(store.list_runs(job_id), "spec")
+    latest_spec_run = _latest_completed_spec_run(store.list_runs(job_id))
     return _spec_list_template_response(
         request,
         job=job,
@@ -360,7 +362,7 @@ def historical_spec_list_page(request: Request, job_id: int, run_id: int):
     if not job:
         return RedirectResponse("/jobs", status_code=303)
     run = store.get_job_run(job_id, run_id)
-    if not run or str(run.get("run_kind", "")) != "spec" or str(run.get("status", "")) != "succeeded":
+    if not run or str(run.get("run_kind", "")) not in SPEC_RUN_KINDS or str(run.get("status", "")) != "succeeded":
         _set_flash(request, "error", "Historical spec result not found for that run.")
         return RedirectResponse(f"/jobs/{job_id}", status_code=303)
     payload_text = str(run.get("result_json", "") or "").strip()
@@ -482,9 +484,16 @@ async def start_run_action(request: Request, job_id: int, run_kind: str = Form(.
     if not job:
         _set_flash(request, "error", "Job not found.")
         return RedirectResponse("/jobs", status_code=303)
+    builder = store.get_builder(int(job["builder_id"]))
+    if not builder:
+        _set_flash(request, "error", "Builder not found.")
+        return RedirectResponse("/jobs", status_code=303)
     file_role = _run_file_role(run_kind)
     if not file_role:
         _set_flash(request, "error", "Unsupported parse request.")
+        return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+    if run_kind in {"spec_evoca_structured", "spec_heuristic_only"} and not _is_evoca_job(builder):
+        _set_flash(request, "error", "Evoca parser profiles are only available for Evoca jobs.")
         return RedirectResponse(f"/jobs/{job_id}", status_code=303)
     if not store.list_job_files(job_id, file_role):
         _set_flash(request, "error", f"Upload at least one {file_role} file before parsing.")
@@ -646,6 +655,13 @@ def _run_duration_display(run: dict[str, Any] | None, now: datetime | None = Non
 def _latest_completed_run(runs: list[dict[str, Any]], run_kind: str) -> dict[str, Any] | None:
     for run in runs:
         if str(run.get("run_kind", "")) == run_kind and str(run.get("status", "")) == "succeeded":
+            return run
+    return None
+
+
+def _latest_completed_spec_run(runs: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for run in runs:
+        if str(run.get("run_kind", "")) in SPEC_RUN_KINDS and str(run.get("status", "")) == "succeeded":
             return run
     return None
 
@@ -2566,18 +2582,29 @@ def _list_export_files(export_dir: Path) -> list[dict[str, Any]]:
 
 
 def _run_file_role(run_kind: str) -> str | None:
-    if run_kind == "spec":
+    if run_kind in SPEC_RUN_KINDS:
         return "spec"
     if run_kind == "drawing":
         return "drawing"
     return None
 
 
+def _is_evoca_job(builder: dict[str, Any] | None) -> bool:
+    if not builder:
+        return False
+    return str(builder.get("name", "") or "").strip().lower() == "evoca"
+
+
 def _present_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for run in runs:
         row = dict(run)
-        row["kind_label"] = {"spec": "Spec Parse", "drawing": "Drawing Parse"}.get(str(run.get("run_kind", "")), str(run.get("run_kind", "")))
+        row["kind_label"] = {
+            "spec": "Spec Parse",
+            "spec_evoca_structured": "Evoca Structured",
+            "spec_heuristic_only": "Heuristic Only",
+            "drawing": "Drawing Parse",
+        }.get(str(run.get("run_kind", "")), str(run.get("run_kind", "")))
         row["status_label"] = {
             "queued": "Queued",
             "running": "Parsing",
@@ -2631,7 +2658,7 @@ def _present_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             row["worker_build_display"] = "Not claimed yet"
         row["duration_display"] = _run_duration_display(run)
         row["can_open_result"] = (
-            str(run.get("run_kind", "")) == "spec"
+            str(run.get("run_kind", "")) in SPEC_RUN_KINDS
             and str(run.get("status", "")) == "succeeded"
             and bool(str(run.get("result_json", "") or "").strip())
             and int(run.get("id", 0) or 0) > 0

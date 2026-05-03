@@ -214,6 +214,55 @@ def test_evoca_structured_flag_off_uses_legacy_pipeline() -> None:
     apply_layout.assert_called_once()
 
 
+def test_evoca_structured_mode_forces_fast_path_when_flag_off() -> None:
+    document = _document()
+    with (
+        mock.patch.object(extraction_service.runtime, "SPEC_EVOCA_STRUCTURED_ENABLED", False),
+        mock.patch("App.services.extraction_service._load_documents", return_value=[document]),
+        mock.patch("App.services.extraction_service.evoca_structured_extractor.extract_evoca_pdf", return_value=_structured_payload()) as extract_evoca,
+        mock.patch("App.services.extraction_service._enrich_snapshot_appliances", side_effect=lambda payload, *_args, **_kwargs: payload),
+        mock.patch("App.services.extraction_service._apply_layout_pipeline") as apply_layout,
+    ):
+        snapshot = extraction_service.build_spec_snapshot(
+            job={"job_no": "38148"},
+            builder={"name": "Evoca"},
+            files=[{"path": "evoca.pdf", "original_name": "evoca.pdf"}],
+            template_files=[],
+            evoca_structured_mode="structured",
+        )
+
+    assert snapshot["analysis"]["parser_strategy"] == "evoca_structured_v0"
+    extract_evoca.assert_called_once_with("evoca.pdf")
+    apply_layout.assert_not_called()
+
+
+def test_evoca_heuristic_mode_suppresses_fast_path_when_flag_on() -> None:
+    document = _document()
+    with (
+        mock.patch.object(extraction_service.runtime, "SPEC_EVOCA_STRUCTURED_ENABLED", True),
+        mock.patch("App.services.extraction_service._load_documents", return_value=[document]),
+        mock.patch("App.services.extraction_service.evoca_structured_extractor.extract_evoca_pdf") as extract_evoca,
+        mock.patch("App.services.extraction_service._apply_layout_pipeline", return_value=([document], _vision_meta())) as apply_layout,
+        mock.patch("App.services.extraction_service.parsing.parse_documents", return_value=_legacy_snapshot()),
+        mock.patch("App.services.extraction_service._try_openai", return_value=(None, {"mode": "heuristic_only", "parser_strategy": "global_conservative"})),
+        mock.patch("App.services.extraction_service.parsing.enrich_snapshot_rooms", side_effect=lambda payload, *_args, **_kwargs: payload),
+        mock.patch("App.services.extraction_service._stabilize_snapshot_layout", side_effect=lambda payload, **_kwargs: payload),
+        mock.patch("App.services.extraction_service._apply_builder_specific_polish", side_effect=lambda payload, *_args, **_kwargs: payload),
+        mock.patch("App.services.extraction_service._enrich_snapshot_appliances", side_effect=lambda payload, *_args, **_kwargs: payload),
+    ):
+        snapshot = extraction_service.build_spec_snapshot(
+            job={"job_no": "38148"},
+            builder={"name": "Evoca"},
+            files=[{"path": "evoca.pdf", "original_name": "evoca.pdf"}],
+            template_files=[],
+            evoca_structured_mode="heuristic",
+        )
+
+    assert snapshot["analysis"]["parser_strategy"] == "global_conservative"
+    extract_evoca.assert_not_called()
+    apply_layout.assert_called_once()
+
+
 def test_evoca_structured_multi_pdf_falls_back_to_legacy_pipeline() -> None:
     documents = [
         _document(),

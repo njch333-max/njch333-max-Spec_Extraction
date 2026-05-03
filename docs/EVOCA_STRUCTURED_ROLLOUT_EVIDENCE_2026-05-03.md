@@ -170,18 +170,23 @@ during controlled rollout:
 
 ## Rollout Recommendation
 
-The structured path is strong enough for a controlled default-on trial only if
-rollback remains explicit:
+The structured path is strong enough for broader use, but the safer operator
+workflow is now per-run selection in Job Workspace instead of immediately
+flipping the global default.
+
+The global rollback switch remains:
 
 ```text
 SPEC_EXTRACTION_ENABLE_EVOCA_STRUCTURED=0
 ```
 
-is still the immediate rollback switch.
+and `Heuristic Only` is also available as a per-run fallback for Evoca jobs.
 
 Recommended next step:
 
-1. Flip the default flag to ON in a small isolated change.
-2. Deploy, watch the first new Evoca job, and keep a 24-hour rollback window.
-3. Do not remove the flag until at least one week of clean Evoca production
-   runs has accumulated.
+1. Use `Evoca Structured` as the normal Evoca run button in Job Workspace.
+2. Use `Heuristic Only` only for rollback comparison or urgent fallback.
+3. Keep `SPEC_EXTRACTION_ENABLE_EVOCA_STRUCTURED=0` until the per-run workflow
+   has been used cleanly on live jobs.
+4. Do not remove either fallback path until at least one week of clean Evoca
+   production runs has accumulated.

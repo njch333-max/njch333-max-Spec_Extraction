@@ -303,16 +303,23 @@ def build_spec_snapshot(
     files: list[dict[str, Any]],
     template_files: list[dict[str, Any]],
     progress_callback: ProgressCallback = None,
+    evoca_structured_mode: str = "auto",
 ) -> dict[str, Any]:
     rule_flags = cleaning_rules.global_rule_flags()
     parser_strategy = cleaning_rules.global_parser_strategy()
     raw_documents = _load_documents(files, role="spec")
+    evoca_mode = str(evoca_structured_mode or "auto").strip().lower()
+    evoca_structured_enabled = runtime.SPEC_EVOCA_STRUCTURED_ENABLED
+    if evoca_mode == "structured":
+        evoca_structured_enabled = True
+    elif evoca_mode == "heuristic":
+        evoca_structured_enabled = False
     if parsing.USE_V6_IMPERIAL_EXTRACTOR and _is_imperial_builder_name(str(builder.get("name", "") or "")) and any(str(document.get("path") or "").strip() for document in raw_documents):
         v6_snapshot = _build_imperial_v6_fast_snapshot(job, builder, raw_documents, rule_flags, progress_callback)
         if v6_snapshot is not None:
             return v6_snapshot
     if (
-        runtime.SPEC_EVOCA_STRUCTURED_ENABLED
+        evoca_structured_enabled
         and _is_evoca_builder_name(str(builder.get("name", "") or ""))
         and any(str(document.get("path") or "").strip() for document in raw_documents)
     ):

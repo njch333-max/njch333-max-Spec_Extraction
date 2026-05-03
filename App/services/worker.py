@@ -16,6 +16,8 @@ from App.services.runtime import APP_BUILD_ID, ensure_builder_dir, ensure_job_di
 WORKER_PID = os.getpid()
 WORKER_TOKEN = f"{WORKER_PID}-{secrets.token_hex(8)}"
 
+SPEC_RUN_KINDS = {"spec", "spec_evoca_structured", "spec_heuristic_only"}
+
 
 def run_worker_loop(poll_seconds: int = 3) -> None:
     atexit.register(store.release_worker_lease, WORKER_TOKEN)
@@ -46,22 +48,28 @@ def process_run(run: dict[str, Any]) -> None:
         store.update_run_runtime_metadata(run_id, parser_strategy, WORKER_PID, APP_BUILD_ID)
         store.update_run_progress(run_id, "loading", "Loading files from job folders", worker_token=WORKER_TOKEN)
         job_dirs = ensure_job_dirs(job["job_no"])
-        if run["run_kind"] == "spec":
+        run_kind = str(run.get("run_kind", "") or "")
+        if run_kind in SPEC_RUN_KINDS:
             spec_files = _attach_paths(job_dirs["spec_dir"], store.list_job_files(int(job["id"]), "spec"))
             template_dir = ensure_builder_dir(builder["slug"])
             template_files = _attach_paths(template_dir, store.list_builder_templates(int(builder["id"])))
+            evoca_structured_mode = {
+                "spec_evoca_structured": "structured",
+                "spec_heuristic_only": "heuristic",
+            }.get(run_kind, "auto")
             snapshot = build_spec_snapshot(
                 job=job,
                 builder=builder,
                 files=spec_files,
                 template_files=template_files,
                 progress_callback=lambda stage, message: store.update_run_progress(run_id, stage, message, worker_token=WORKER_TOKEN),
+                evoca_structured_mode=evoca_structured_mode,
             )
             snapshot_strategy = str((snapshot.get("analysis") or {}).get("parser_strategy") or parser_strategy)
             if snapshot_strategy != parser_strategy:
                 store.update_run_runtime_metadata(run_id, snapshot_strategy, WORKER_PID, APP_BUILD_ID)
             store.upsert_snapshot(int(job["id"]), "raw_spec", snapshot)
-        else:
+        elif run_kind == "drawing":
             drawing_files = _attach_paths(job_dirs["drawing_dir"], store.list_job_files(int(job["id"]), "drawing"))
             snapshot = build_drawing_snapshot(
                 job=job,
@@ -70,6 +78,9 @@ def process_run(run: dict[str, Any]) -> None:
                 progress_callback=lambda stage, message: store.update_run_progress(run_id, stage, message, worker_token=WORKER_TOKEN),
             )
             store.upsert_snapshot(int(job["id"]), "drawing", snapshot)
+        else:
+            store.mark_run_failed(int(run["id"]), int(run["job_id"]), f"Unsupported run kind: {run_kind}", worker_token=WORKER_TOKEN)
+            return
         store.update_run_progress(run_id, "saving", "Saving snapshot to SQLite", worker_token=WORKER_TOKEN)
         store.mark_run_succeeded(int(run["id"]), int(job["id"]), snapshot, worker_token=WORKER_TOKEN)
     except Exception as exc:
