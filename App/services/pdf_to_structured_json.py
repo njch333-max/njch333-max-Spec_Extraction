@@ -26,6 +26,53 @@ FOOTER_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+# Known AREA labels on Imperial APPLIANCES pages. Used as a whitelist for
+# the titled-page template recovery pass to avoid accepting stray text
+# clusters as new rows. Keep upper-cased + canonical-spaced.
+_APPLIANCE_AREA_WHITELIST = frozenset({
+    "OVEN",
+    "COOKTOP",
+    "DISHWASHER",
+    "RANGEHOOD",
+    "RANGE HOOD",
+    "MICROWAVE",
+    "FRIDGE",
+    "BAR FRIDGE",
+    "FREEZER",
+    "WINE FRIDGE",
+    "COFFEE MACHINE",
+    "STEAM OVEN",
+    "WARMING DRAWER",
+})
+
+
+def _appliance_recovery_area_accepted(area, existing_areas):
+    """
+    Decide whether an anchor-template-recovery item on an APPLIANCES page
+    should be appended to the section.
+
+    Accepts only if the AREA label (case-insensitive, surrounding whitespace
+    stripped) is in _APPLIANCE_AREA_WHITELIST AND not already present in
+    existing_areas (already upper-cased strip).
+
+    Kept as a tiny pure function so the whitelist + dedup branch is unit
+    testable without standing up a synthetic PDF.
+    """
+    if not area:
+        return False
+    area_key = re.sub(r"\s+", " ", area.strip().upper())
+    if not area_key:
+        return False
+    existing_keys = {
+        re.sub(r"\s+", " ", str(item).strip().upper())
+        for item in existing_areas
+        if item
+    }
+    if area_key in existing_keys:
+        return False
+    return area_key in _APPLIANCE_AREA_WHITELIST
+
+
 def page_has_footer(page):
     text = page.extract_text() or ""
     return bool(FOOTER_RE.search(text))
@@ -161,6 +208,9 @@ def detect_merges(table, x_edges, y_edges, h_segs):
 
 # ---------- Page identity ----------
 
+_ROW_LABEL_SINKWARE_TAPWARE_RE = re.compile(r"^(?:SINKWARE|TAPWARE)\s*\([^)]+\)")
+
+
 def extract_page_title(page):
     words = page.extract_words(keep_blank_chars=False)
     lines_by_y = {}
@@ -171,7 +221,13 @@ def extract_page_title(page):
     for y_key in sorted(lines_by_y):
         words_at_y = sorted(lines_by_y[y_key], key=lambda w: w["x0"])
         line_text = " ".join(w["text"] for w in words_at_y)
-        up = line_text.upper()
+        up = line_text.upper().strip()
+        # Skip lines like "SINKWARE (KITCHEN) ..." / "TAPWARE (KITCHEN) ..." -
+        # those are AREA-column row labels, not section titles. Without this
+        # guard, page 8 of Imperial sign-off sheets ("TAPWARE (KITCHEN) ...")
+        # gets mistaken for a section title and the row is lost.
+        if _ROW_LABEL_SINKWARE_TAPWARE_RE.match(up):
+            continue
         if any(kw in up for kw in (
             "SELECTION SHEET", "APPLIANCES", "SINKWARE & TAPWARE",
             "SINKWARE", "TAPWARE"
@@ -795,6 +851,40 @@ def extract_pdf(pdf_path):
                                 page_record["items"].append(split_record)
                                 current_section["items"].append(split_record)
 
+                # Recovery pass - APPLIANCES only.
+                # Imperial appliance pages sometimes draw the row separator
+                # only inside the data-column band (not full page width),
+                # which smart_filter_y_edges skips. The grid then misses
+                # those rows. We re-run anchor-based template extraction on
+                # the same page and accept only known appliance AREA labels,
+                # to keep this fix from accidentally adding rows on
+                # joinery / material pages.
+                if (
+                    current_template is not None
+                    and (page_title or "").strip().upper() == "APPLIANCES"
+                ):
+                    recovery_items, _ = extract_continuation_with_template(
+                        page, current_template, last_area, y_edges
+                    )
+                    existing_areas = {
+                        (it.get("area") or "").strip().upper()
+                        for it in page_record["items"]
+                        if it.get("area")
+                    }
+                    for it in recovery_items:
+                        area_raw = (it.get("area") or "").strip()
+                        if not _appliance_recovery_area_accepted(area_raw, existing_areas):
+                            continue
+                        area_key = area_raw.upper()
+                        src = it.get("_source") or {}
+                        src["method"] = "titled_template_recovery"
+                        src["page"] = page_num
+                        it["_source"] = src
+                        page_record["items"].append(it)
+                        current_section["items"].append(it)
+                        existing_areas.add(area_key)
+                        last_area = area_raw or last_area
+
             # =================================================================
             # CASE 2: This page is a continuation (no title)
             # → use template-based extraction; ignore the page's own grid columns
@@ -834,7 +924,10 @@ def main():
     pdf_path = sys.argv[1]
     out_path = sys.argv[2]
     result = extract_pdf(pdf_path)
-    Path(out_path).write_text(json.dumps(result, indent=2, ensure_ascii=False))
+    Path(out_path).write_text(
+        json.dumps(result, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
     total_items = sum(len(s["items"]) for s in result["sections"])
     print(f"Extracted {len(result['pages'])} pages, {len(result['sections'])} sections, {total_items} items.")
     for s in result["sections"]:
