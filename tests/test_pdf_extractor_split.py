@@ -4,8 +4,10 @@ from copy import deepcopy
 
 from App.services.pdf_to_structured_json import (
     _coalesce_single_area_multisupplier_specs,
+    _repair_wrapped_cabinetry_colour_record,
     _should_add_missing_row_separator_review_hint,
     _split_review_hint_record,
+    assign_word_to_column,
 )
 
 
@@ -89,8 +91,51 @@ def test_split_review_hint_record_ignores_blank_lines_when_splitting():
     assert [row["supplier"] for row in result] == ["Supplier A", "Supplier B", "Supplier C"]
 
 
+def test_split_review_hint_record_keeps_wrapped_base_cabinetry_colour_label():
+    record = {
+        "area": "BASE CABINETRY COLOUR\nINCLUDES SINGLE CABINET ON BAR\nBACK AREA",
+        "specs": "Polytec\nClassic White\nMatt",
+        "supplier": "Polytec",
+        "_review_hint": (
+            "AREA contains multiple line items and SPECS has matching line count. "
+            "Source PDF may be missing a row separator."
+        ),
+        "_source": {"page": 2, "row_index": "row_1", "method": "template_anchor"},
+    }
+
+    result = _split_review_hint_record(deepcopy(record), "text_split")
+
+    assert len(result) == 1
+    assert result[0]["area"] == "BASE CABINETRY COLOUR\nINCLUDES SINGLE CABINET ON BAR\nBACK AREA"
+    assert result[0]["specs"] == "Polytec\nClassic White\nMatt"
+    assert result[0]["supplier"] == "Polytec"
+
+
+def test_repair_wrapped_base_cabinetry_colour_record_moves_tail_to_notes():
+    record = {
+        "area": "BASE CABINETRY COLOUR\nINCLUDES SINGLE CABINET ON BAR\nBACK AREA",
+        "specs": "Polytec\nClassic White\nMatt",
+        "supplier": "Polytec",
+        "notes": "",
+    }
+
+    result = _repair_wrapped_cabinetry_colour_record(record)
+
+    assert result["area"] == "BASE CABINETRY COLOUR"
+    assert result["specs"] == "Classic White\nMatt"
+    assert result["supplier"] == "Polytec"
+    assert result["notes"] == "INCLUDES SINGLE CABINET ON BAR BACK AREA"
+
+
 def test_missing_row_separator_gate_counts_only_non_empty_lines():
     assert _should_add_missing_row_separator_review_hint("A\n\nB", "spec a\n\nspec b") is False
+
+
+def test_missing_row_separator_gate_ignores_wrapped_base_cabinetry_colour_label():
+    assert _should_add_missing_row_separator_review_hint(
+        "BASE CABINETRY COLOUR\nINCLUDES SINGLE CABINET ON BAR\nBACK AREA",
+        "Polytec\nClassic White\nMatt",
+    ) is False
 
 
 def test_coalesce_single_area_multisupplier_specs_merges_soft_wrap_overflow():
@@ -103,3 +148,14 @@ def test_coalesce_single_area_multisupplier_specs_merges_soft_wrap_overflow():
     result = _coalesce_single_area_multisupplier_specs(record)
 
     assert result["specs"] == "2Omm Stone - 4030 Oyster - PR\n20mm Shadowline under Benchtop -Forage Smooth"
+
+
+def test_assign_word_to_column_keeps_area_overflow_gap_word():
+    template = [
+        ("area", 52, 200),
+        ("specs", 258, 464),
+        ("supplier", 722, 929),
+    ]
+    word = {"x0": 218.5, "x1": 238.8}
+
+    assert assign_word_to_column(word, template) == "area"

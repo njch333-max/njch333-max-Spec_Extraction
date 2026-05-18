@@ -15775,6 +15775,16 @@ def _imperial_extract_material_row_notes(
         resolved_description = normalize_space(
             re.sub(rf"(?i)(?:\s*-\s*|\s+){escaped_notes}$", "", resolved_description)
         ).strip(" -;,")
+        note_prefix_match = re.search(
+            r"(?i)(?:\s*-\s*|\s+)(?P<prefix>(?:INCL(?:UDES?|UDING)?|INCLUDING|NOTE)\b.+)$",
+            resolved_description,
+        )
+        if note_prefix_match:
+            note_prefix = normalize_space(note_prefix_match.group("prefix")).strip(" -|;,")
+            if len(note_prefix) >= 10 and resolved_notes.upper().startswith(note_prefix.upper()):
+                resolved_description = normalize_space(
+                    resolved_description[: note_prefix_match.start()]
+                ).strip(" -;,")
     return resolved_label, resolved_supplier, resolved_description, resolved_notes
 
 
