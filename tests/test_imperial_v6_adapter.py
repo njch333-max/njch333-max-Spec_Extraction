@@ -126,31 +126,6 @@ def test_rows_survive_finalize():
     assert len(finalized) > 0
 
 
-def test_finalize_does_not_copy_cabinetry_note_prefix_into_description():
-    import App.services.parsing as parsing
-
-    rows = [
-        {
-            "area_or_item": "BASE CABINETRY COLOUR",
-            "supplier": "Polytec",
-            "specs_or_description": "Classic White\nMatt",
-            "notes": "INCLUDES SINGLE CABINET ON BAR BACK AREA",
-            "tags": [],
-            "page_no": 2,
-            "row_order": 2,
-            "provenance": {"source_provider": "v6"},
-            "revalidation_status": "passed",
-        }
-    ]
-
-    finalized = parsing._imperial_finalize_material_rows_v6(rows)
-
-    assert finalized[0]["supplier"] == "Polytec"
-    assert finalized[0]["specs_or_description"] == "Classic White Matt"
-    assert finalized[0]["notes"] == "INCLUDES SINGLE CABINET ON BAR BACK AREA"
-    assert finalized[0]["tags"] == ["door_colours"]
-
-
 def test_tags_correct():
     """Verify tagger classifies v6 rows into expected categories.
 

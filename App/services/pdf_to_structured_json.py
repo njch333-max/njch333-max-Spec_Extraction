@@ -396,15 +396,6 @@ def assign_word_to_column(word, template, tol=10):
     for key, x_lo, x_hi in template:
         if x_lo - tol <= cx < x_hi + tol:
             return key
-    # Long AREA labels can visually overflow into the blank spacer before
-    # SPECS. Keep those gap words on AREA instead of dropping them.
-    area_range = next(((x_lo, x_hi) for key, x_lo, x_hi in template if key == "area"), None)
-    specs_range = next(((x_lo, x_hi) for key, x_lo, x_hi in template if key == "specs"), None)
-    if area_range and specs_range:
-        _, area_hi = area_range
-        specs_lo, _ = specs_range
-        if area_hi + tol <= cx < specs_lo - tol:
-            return "area"
     return None
 
 
@@ -444,57 +435,6 @@ def _review_hint_non_empty_line_count(value):
     return len(_non_empty_cell_lines(value))
 
 
-def _looks_like_wrapped_cabinetry_colour_label(area_lines):
-    if len(area_lines) < 2:
-        return False
-    normalized_lines = [re.sub(r"\s+", " ", line).strip().upper() for line in area_lines if line.strip()]
-    if len(normalized_lines) < 2:
-        return False
-    joined = " ".join(normalized_lines)
-    if "CABINETRY COLOUR" not in joined and "CABINETRY COLOR" not in joined:
-        return False
-    continuation_markers = (
-        "INCLUDES",
-        "INCLUDING",
-        "SINGLE CABINET",
-        "BAR BACK",
-        "BACK AREA",
-        "SPLIT CABINET",
-        "END PANEL",
-        "END PANELS",
-        "+",
-    )
-    return any(marker in joined for marker in continuation_markers)
-
-
-def _repair_wrapped_cabinetry_colour_record(record):
-    if not isinstance(record, dict):
-        return record
-    area_lines = _non_empty_cell_lines(record.get("area", ""))
-    if not _looks_like_wrapped_cabinetry_colour_label(area_lines):
-        return record
-    first_area = area_lines[0]
-    if not re.search(r"(?i)\bBASE\s+CABINETRY\s+COLOU?R\b", first_area):
-        return record
-    tail_note = " ".join(area_lines[1:]).strip()
-    if not re.search(r"(?i)\bINCLUDES?\b", tail_note) and "BACK AREA" not in tail_note.upper():
-        return record
-
-    updated = dict(record)
-    updated["area"] = first_area
-
-    if tail_note:
-        existing_notes = str(updated.get("notes", "") or "").strip()
-        updated["notes"] = f"{existing_notes}\n{tail_note}" if existing_notes else tail_note
-
-    specs_lines = _non_empty_cell_lines(updated.get("specs", ""))
-    supplier_lines = _non_empty_cell_lines(updated.get("supplier", ""))
-    if specs_lines and supplier_lines and specs_lines[0].upper() == supplier_lines[0].upper():
-        updated["specs"] = "\n".join(specs_lines[1:])
-
-    return updated
-
-
 def _coalesce_single_area_multisupplier_specs(record):
     if not isinstance(record, dict):
         return record
@@ -518,8 +458,6 @@ def _coalesce_single_area_multisupplier_specs(record):
 
 
 def _should_add_missing_row_separator_review_hint(area_text, specs_text):
-    if _looks_like_wrapped_cabinetry_colour_label(_non_empty_cell_lines(area_text)):
-        return False
     area_lines = _review_hint_non_empty_line_count(area_text)
     specs_lines = _review_hint_non_empty_line_count(specs_text)
     return area_lines >= 3 and specs_lines >= area_lines
@@ -532,8 +470,6 @@ def _split_review_hint_record(record, split_method):
 
     area_lines = _non_empty_cell_lines(record.get("area", ""))
     if len(area_lines) < 2:
-        return [record]
-    if _looks_like_wrapped_cabinetry_colour_label(area_lines):
         return [record]
     specs_lines = _non_empty_cell_lines(record.get("specs", ""))
     if len(specs_lines) != len(area_lines):
@@ -739,9 +675,6 @@ def extract_continuation_with_template(page, template, last_area, y_edges):
         elif "area" in rec:
             last_area = rec["area"]
 
-        rec = _repair_wrapped_cabinetry_colour_record(rec)
-        if "area" in rec:
-            last_area = rec["area"]
         rec = _coalesce_single_area_multisupplier_specs(rec)
         rec["_source"] = {
             "page": page.page_number,
@@ -902,9 +835,6 @@ def extract_pdf(pdf_path):
                             elif "area" in record:
                                 last_area = record["area"]
 
-                            record = _repair_wrapped_cabinetry_colour_record(record)
-                            if "area" in record:
-                                last_area = record["area"]
                             record = _coalesce_single_area_multisupplier_specs(record)
                             if _should_add_missing_row_separator_review_hint(record.get("area", ""), record.get("specs", "")):
                                 record["_review_hint"] = (
