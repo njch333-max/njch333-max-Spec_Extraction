@@ -71,7 +71,6 @@
 | 61 | Base/upper contamination, handle grouping, appliance loss, sinkware ownership | Raw-row boundary cleanup, handle family separation, appliance recovery, sinkware ownership fix | `2269` | `passed` |
 | 62 | Short-value termination, pantry/kitchen handle subitems, sinkware/appliance overlays | Strict Phase 3B QA verifies lighting raw preservation, KICKBOARDS spillover cleanup, `STD not Softclose`, Momo Graf handle notes, appliance page refs, and kitchen/laundry sinkware | `2260` | `passed` |
 | 67 | First-row header/meta bleed into `BENCHTOP`, supplier/notes column split, raw spelling/case preservation, appliances/sinkware row-first ownership | Hard `content_grid` boundary, cell-owned supplier/notes split, `IMAGE` ignored as content, summary pollution gate, row-first appliance capture | `2250` | `passed` |
-| 38 | Page 5 `DISHWASHER` and page 8 `TAPWARE (KITCHEN)` were present in source PDF but absent from v6 output on run 2369 | Section-heading / continuation recovery for non-room pages; retain source rows without changing Imperial primary `Tap` display policy | `2370` | `passed` |
 
 `tests/fixtures/imperial_37867_gold.json` remains the highest-priority Imperial structural regression fixture.
 
@@ -84,7 +83,6 @@
 - Phase 3B implementation now constrains `sinkware` taphole/note backfill by normalized fixture-base signature, clears sink-derived pseudo-`basin_info` on utility rooms, and cleans Imperial appliance layout cells before row-first extraction. Targeted live reruns passed on `67 / 64 / 62 / 61`; `job 67 / run 2250`, `job 64 / run 2251`, `job 62 / run 2260`, and `job 61 / run 2269` now also have strict source-PDF QA signoff on the Phase 3B path.
 - `sinkware / appliances` remain structurally weaker than `joinery/material`, but the latest Phase 3B strict signoff set no longer has an open `61` blocker.
 - Active live blocker cleared: `job 67 / run 2207` passed strict source-PDF QA after hard-boundary cleanup. Phase 1A grid-debug work is now the current structural focus unless a new live failure is reported.
-- Active live blocker cleared: `job 38 / run 2370 / build local-6b508c03` restored source-backed page 5 `DISHWASHER` and page 8 `TAPWARE (KITCHEN)` in the live historical Spec List and latest `spec-list.xlsx`.
 
 ## Last Verified Live Jobs
 - `job 52 / run 1972`: `passed`
@@ -114,8 +112,8 @@
 - `tests/fixtures/imperial_37867_gold.json` remains the highest-priority structural regression fixture.
 
 ## Next Actions
-- Primary live blocker: none after job 38 run 2370 restored page 5 `DISHWASHER` and page 8 `TAPWARE (KITCHEN)`.
-- Current structural target: move to the next reported grid/row blocker; known remaining job 38 issues are kitchen base-cabinetry continuation row assembly, handle display/grouping, and label/note clipping.
+- Primary live blocker: none after strict Phase 3B source-PDF QA on `job 67 / run 2250`, `job 64 / run 2251`, `job 62 / run 2260`, and `job 61 / run 2269`.
+- Current structural target: move to the next reported grid/row blocker, or continue Phase 1/2 structural hardening if no new live blocker is reported.
 - Target order:
   1. Phase 1C only if future overlays cannot explain a boundary; current live overlays are explainable
   2. For any new live defect, rerun the same acceptance loop: local tests, deploy, fresh target rerun, source-PDF field QA, then tracker update
@@ -134,7 +132,6 @@
 
 ## Change Log
 - `2026-04-12`: Tracker created. Current Imperial architecture baseline, phase plan, regression matrix, and live acceptance history were imported from the existing codebase and live job history.
-- `2026-05-18`: `job 38 / run 2369 / build local-b6eaa172` was promoted to the active Imperial v6 data-loss blocker. Source-PDF review found page 5 `DISHWASHER` and page 8 `TAPWARE (KITCHEN)` present in the PDF but absent from v6 output. Layer (a) extractor fix in `App/services/pdf_to_structured_json.py` passed local tests (1120 passed / 12 skipped), local job38 raw JSON showed `APPLIANCES` 6 items plus `SINKWARE & TAPWARE` 2 items, and production `job 38 / run 2370 / build local-6b508c03` verified both rows in the live historical Spec List and latest `spec-list.xlsx`.
 - `2026-04-12`: First tracked `job 62` cycle completed. Long label continuation for `PANTRY` was verified live on `run 2047 / build local-6b0bfd37`; `UPPER CABINETRY COLOUR INCLUDING TALL OPEN SHELVING` now holds as a single clean raw row with `[Polytec] - Black Wenge - Venette`. The next primary blocker remains short-value row termination (`KITCHEN / DRY BAR / LAUNDRY / WIR`), followed by handle-cell subitems, sinkware cluster-local assignment, and appliances row-first capture.
 - `2026-04-13`: `job 62` reached live signoff on `run 2060 / build local-2999aec8`. PDF QA is now `passed` with `33 pass / 22 na / 0 fail / 0 pending`. The extraction-side fixes verified in this cycle were pantry long-label continuation, pantry handle subitems, short-value termination improvements across kitchen/dry bar/laundry, sinkware kitchen/laundry separation, and restoring the current five-row appliance capture. The primary live blocker now moves to `job 61`.
 - `2026-04-14`: `job 50` reached strict field-by-field signoff on `run 2170 / build local-0697aa6e`. This cycle fixed the handle-summary fallback duplication, restored `Door Colours` summary fallback for safe cabinetry-colour rows, and forced a final Imperial room-field backfill pass after snapshot cleaning so kitchen colour groups and summary inputs align with cleaned `material_rows`. The next live blocker moves to `job 49`.
