@@ -571,7 +571,9 @@ def _review_sections_from_snapshot(
     )
     if imperial_material_mode:
         for room in rooms:
-            material_rows = _ordered_material_rows(room.get("v6_review_rows", [])) or _ordered_material_rows(room.get("material_rows", []))
+            material_rows = _ordered_imperial_review_material_rows(
+                room.get("v6_review_rows", [])
+            ) or _ordered_imperial_review_material_rows(room.get("material_rows", []))
             if not material_rows:
                 continue
             section = {
@@ -1005,6 +1007,34 @@ def _ordered_material_rows(value: Any) -> list[dict[str, Any]]:
     if not any(_safe_int(row.get("row_order")) is not None for row in rows):
         return rows
     return [row for _, row in sorted(enumerate(rows), key=lambda item: (_safe_int(item[1].get("row_order")) is None, _safe_int(item[1].get("row_order")) or 0, item[0]))]
+
+
+def _ordered_imperial_review_material_rows(value: Any) -> list[dict[str, Any]]:
+    rows = _mapping_rows(value)
+    if not rows:
+        return rows
+
+    def _visual_sort_key(index_row: tuple[int, dict[str, Any]]) -> tuple[int, float, float, int, int, int]:
+        index, row = index_row
+        page_no = _safe_int(row.get("page_no")) or _safe_int(row.get("page")) or 0
+        row_order = _safe_int(row.get("row_order")) or 0
+        provenance = row.get("provenance") if isinstance(row.get("provenance"), dict) else {}
+        visual_sort_key = provenance.get("visual_sort_key", []) if isinstance(provenance, dict) else []
+        if isinstance(visual_sort_key, list) and len(visual_sort_key) >= 4:
+            try:
+                return (
+                    page_no,
+                    float(visual_sort_key[0] or 0.0),
+                    float(visual_sort_key[1] or 0.0),
+                    int(visual_sort_key[2] or 0),
+                    int(visual_sort_key[3] or 0),
+                    index,
+                )
+            except (TypeError, ValueError):
+                pass
+        return (page_no, 1.0, float(row_order), row_order, 0, index)
+
+    return [row for _, row in sorted(enumerate(rows), key=_visual_sort_key)]
 
 
 def _room_label(room: dict[str, Any]) -> str:
