@@ -856,6 +856,109 @@ def _match_v6_review_row_for(material_item: dict[str, Any], v6_review_rows: list
     return None
 
 
+def _normalized_imperial_v6_review_key_value(value: Any) -> str:
+    return parsing.normalize_space(_display_value(value)).casefold()
+
+
+def _normalized_imperial_v6_review_int(value: Any) -> int | None:
+    try:
+        if value in {"", None}:
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _imperial_v6_review_row_identity_keys(row: dict[str, Any]) -> set[tuple[Any, ...]]:
+    area = _normalized_imperial_v6_review_key_value(row.get("area_or_item", ""))
+    if not area:
+        return set()
+
+    keys: set[tuple[Any, ...]] = set()
+    page_no = _normalized_imperial_v6_review_int(row.get("page_no"))
+    row_order = _normalized_imperial_v6_review_int(row.get("row_order"))
+    if page_no is not None and row_order is not None:
+        keys.add(("source", area, page_no, row_order))
+
+    provenance = row.get("provenance", {}) if isinstance(row.get("provenance", {}), dict) else {}
+    visual_sort_key = provenance.get("visual_sort_key", [])
+    if isinstance(visual_sort_key, list) and len(visual_sort_key) >= 4:
+        try:
+            keys.add(
+                (
+                    "visual",
+                    area,
+                    float(visual_sort_key[0] or 0.0),
+                    float(visual_sort_key[1] or 0.0),
+                    int(visual_sort_key[2] or 0),
+                    int(visual_sort_key[3] or 0),
+                )
+            )
+        except (TypeError, ValueError):
+            pass
+
+    supplier = _normalized_imperial_v6_review_key_value(row.get("supplier", ""))
+    specs = _normalized_imperial_v6_review_key_value(
+        row.get("specs_or_description", "")
+        or row.get("specs_description", "")
+        or row.get("description", "")
+        or row.get("value", "")
+    )
+    notes = _normalized_imperial_v6_review_key_value(row.get("notes", ""))
+    if supplier or specs or notes:
+        keys.add(("content", area, supplier, specs, notes))
+    return keys
+
+
+def _imperial_v6_review_row_is_handle_row(row: dict[str, Any]) -> bool:
+    if not isinstance(row, dict):
+        return False
+    area = parsing.normalize_space(_display_value(row.get("area_or_item", "")))
+    if not area:
+        return False
+    return _imperial_summary_bucket_key_for_item({"title": area, "tags": row.get("tags", []) or []}) == "handles"
+
+
+def _supplement_imperial_v6_handle_review_rows(
+    material_rows: list[dict[str, Any]],
+    v6_review_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not material_rows or not v6_review_rows:
+        return material_rows
+
+    existing_keys: set[tuple[Any, ...]] = set()
+    for item in material_rows:
+        if isinstance(item, dict):
+            existing_keys.update(_imperial_v6_review_row_identity_keys(item))
+
+    supplemented = list(material_rows)
+    for review_row in v6_review_rows:
+        if not _imperial_v6_review_row_is_handle_row(review_row):
+            continue
+        review_keys = _imperial_v6_review_row_identity_keys(review_row)
+        if not review_keys or review_keys & existing_keys:
+            continue
+
+        item = dict(review_row)
+        tags = [
+            _display_value(tag)
+            for tag in (review_row.get("tags", []) or [])
+            if _display_value(tag)
+        ]
+        if not any(tag.lower() == "handles" for tag in tags):
+            tags.append("handles")
+        item["tags"] = tags
+
+        provenance = item.get("provenance", {}) if isinstance(item.get("provenance", {}), dict) else {}
+        provenance = dict(provenance)
+        provenance["supplemented_from_v6_review_rows"] = True
+        item["provenance"] = provenance
+
+        supplemented.append(item)
+        existing_keys.update(review_keys)
+    return supplemented
+
+
 def _flatten_imperial_material_rows(room: dict[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     material_rows = room.get("material_rows", [])
@@ -885,6 +988,10 @@ def _flatten_imperial_material_rows(room: dict[str, Any]) -> list[dict[str, Any]
         )
     ordered_rows = sorted(
         [item for item in material_rows if isinstance(item, dict)],
+        key=_sort_key,
+    )
+    ordered_rows = sorted(
+        _supplement_imperial_v6_handle_review_rows(ordered_rows, v6_review_rows),
         key=_sort_key,
     )
     ordered_rows = _dedupe_v6_handle_subset_rows(ordered_rows)
