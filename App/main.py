@@ -937,6 +937,13 @@ def _imperial_v6_review_handle_display_groups(row: dict[str, Any]) -> list[dict[
     return [{"supplier": supplier, "lines": lines}]
 
 
+def _imperial_v6_review_handle_prefers_source_supplier_cell(row: dict[str, Any]) -> bool:
+    supplier = _display_value(row.get("supplier", ""))
+    if not supplier:
+        return False
+    return bool(re.search(r"(?i)\b(?:supplied\s+by\s+client|installed\s+by\s+imperial|by\s+client)\b", supplier))
+
+
 def _supplement_imperial_v6_handle_review_rows(
     material_rows: list[dict[str, Any]],
     v6_review_rows: list[dict[str, Any]],
@@ -1106,6 +1113,15 @@ def _flatten_imperial_material_rows(room: dict[str, Any]) -> list[dict[str, Any]
             for group in source_display_groups
             if group["supplier"] or group["lines"]
         ]
+        review_match = _match_v6_review_row_for(item, v6_review_rows) if v6_review_rows else None
+        if (
+            review_match
+            and _imperial_v6_review_row_is_handle_row(review_match)
+            and _imperial_v6_review_handle_prefers_source_supplier_cell(review_match)
+        ):
+            review_display_groups = _imperial_v6_review_handle_display_groups(review_match)
+            if review_display_groups:
+                source_display_groups = review_display_groups
         rendered_display_lines = [
             _display_value(line)
             for line in parsing._imperial_material_row_display_lines_for_view(item)
@@ -1115,10 +1131,8 @@ def _flatten_imperial_material_rows(room: dict[str, Any]) -> list[dict[str, Any]
         display_groups = source_display_groups if _imperial_material_row_is_v6_origin(item) else []
         display_value = "\n".join(display_lines) if display_lines else (_display_value(parsing._imperial_material_row_display_value_for_view(item)) or value)
         resolved_notes = notes
-        if not resolved_notes and v6_review_rows:
-            review_match = _match_v6_review_row_for(item, v6_review_rows)
-            if review_match:
-                resolved_notes = _display_value(review_match.get("notes", ""))
+        if not resolved_notes and review_match:
+            resolved_notes = _display_value(review_match.get("notes", ""))
         handle_fallback_sources = (
             _imperial_handle_summary_fallback_sources(item)
             if _imperial_summary_bucket_key_for_item(item) == "handles"

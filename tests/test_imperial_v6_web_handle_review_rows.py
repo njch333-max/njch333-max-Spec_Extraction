@@ -84,6 +84,17 @@ def test_flatten_imperial_material_rows_supplements_missing_v6_handle_review_row
         "LIP PULL HANDLES - DRAWERS",
         "FEATURE LIP PULL PANTRY HANDLES",
     ]
+    assert rows[0]["display_groups"] == [
+        {
+            "supplier": "SUPPLIED BY CLIENT\nINSTALLED BY IMPERIAL",
+            "lines": [
+                "ABI INTERIORS",
+                "Elsa Cabinetry Knob- brushed copper",
+                "(14494) for any of the other doors and the",
+                "gas strut oh doors.",
+            ],
+        }
+    ]
     assert rows[1]["notes"] == "Installed Horizontally"
     assert "Rappana" in rows[1]["display_value"]
     assert rows[1]["display_groups"] == [
