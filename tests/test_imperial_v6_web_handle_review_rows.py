@@ -86,6 +86,23 @@ def test_flatten_imperial_material_rows_supplements_missing_v6_handle_review_row
     ]
     assert rows[1]["notes"] == "Installed Horizontally"
     assert "Rappana" in rows[1]["display_value"]
+    assert rows[1]["display_groups"] == [
+        {
+            "supplier": "ABI INTERIORS\nSUPPLIED BY CLIENT\nINSTALLED BY IMPERIAL",
+            "lines": [
+                "ABI INTERIORS",
+                "Rappana",
+                "Cabinetry pull extended 100mm",
+                "brushed copper (10469)",
+            ],
+        }
+    ]
+    assert rows[2]["display_groups"] == [
+        {
+            "supplier": "ABI INTERIORS\nSUPPLIED BY CLIENT\nINSTALLED BY IMPERIAL",
+            "lines": ["2 X Rappana Cabinetry Pull Extended", "800mm - Brushed Copper"],
+        }
+    ]
     assert rows[2]["provenance"]["supplemented_from_v6_review_rows"] is True
 
 
@@ -115,4 +132,7 @@ def test_imperial_material_summary_uses_supplemented_v6_handle_review_rows() -> 
 
     assert "LIP PULL HANDLES - DRAWERS" in area_labels
     assert "FEATURE LIP PULL PANTRY HANDLES" in area_labels
-    assert any("Rappana" in entry.get("display_text", "") for entry in handle_entries)
+    assert any(
+        "Rappana" in " ".join(str(line) for line in entry.get("lines", []))
+        for entry in handle_entries
+    )

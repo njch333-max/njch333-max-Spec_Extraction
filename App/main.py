@@ -919,6 +919,24 @@ def _imperial_v6_review_row_is_handle_row(row: dict[str, Any]) -> bool:
     return _imperial_summary_bucket_key_for_item({"title": area, "tags": row.get("tags", []) or []}) == "handles"
 
 
+def _imperial_v6_review_handle_display_groups(row: dict[str, Any]) -> list[dict[str, Any]]:
+    supplier = _display_value(row.get("supplier", ""))
+    specs = _display_value(
+        row.get("specs_or_description", "")
+        or row.get("specs_description", "")
+        or row.get("description", "")
+        or row.get("value", "")
+    )
+    lines = [
+        parsing.normalize_space(line)
+        for line in specs.splitlines()
+        if parsing.normalize_space(line)
+    ]
+    if not supplier and not lines:
+        return []
+    return [{"supplier": supplier, "lines": lines}]
+
+
 def _supplement_imperial_v6_handle_review_rows(
     material_rows: list[dict[str, Any]],
     v6_review_rows: list[dict[str, Any]],
@@ -953,6 +971,10 @@ def _supplement_imperial_v6_handle_review_rows(
         provenance = dict(provenance)
         provenance["supplemented_from_v6_review_rows"] = True
         item["provenance"] = provenance
+        if not item.get("display_groups"):
+            display_groups = _imperial_v6_review_handle_display_groups(item)
+            if display_groups:
+                item["display_groups"] = display_groups
 
         supplemented.append(item)
         existing_keys.update(review_keys)
@@ -2102,6 +2124,7 @@ def _imperial_material_row_is_v6_origin(item: dict[str, Any]) -> bool:
         provenance.get("source_provider") == "v6"
         or provenance.get("source_extractor") == "pdf_to_structured_json_v6"
         or provenance.get("raw") == "v6_cell"
+        or bool(provenance.get("supplemented_from_v6_review_rows"))
     )
 
 
